@@ -130,7 +130,31 @@ public class CodedValueTests
 
         cv.SetAttribute("country", "US");
 
-        cv.Attributes.Should().ContainSingle(a => a.Key == "country" && a.Value == "US");
+        cv.Attributes.Should().ContainSingle(a =>
+            a.Key == "country" && a.Value == "US" &&
+            a.DataType == AttributeDataType.Text && a.SourceCode == null);
+    }
+
+    [TestMethod]
+    public void SetAttribute_WithDataTypeAndSourceCode_PersistsMetadata()
+    {
+        var cv = CodedValue.Create("ITEM", "Item", null, null, 0);
+
+        cv.SetAttribute("category", "A", AttributeDataType.CodedValue, "CATEGORIES");
+
+        var attr = cv.Attributes.Should().ContainSingle().Subject;
+        attr.DataType.Should().Be(AttributeDataType.CodedValue);
+        attr.SourceCode.Should().Be("CATEGORIES");
+    }
+
+    [TestMethod]
+    public void SetAttribute_TrimsSourceCode()
+    {
+        var cv = CodedValue.Create("ITEM", "Item", null, null, 0);
+
+        cv.SetAttribute("type", "X", AttributeDataType.CodedValue, "  TYPES  ");
+
+        cv.Attributes.Should().ContainSingle().Which.SourceCode.Should().Be("TYPES");
     }
 
     [TestMethod]

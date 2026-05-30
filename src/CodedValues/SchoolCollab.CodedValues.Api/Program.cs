@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Serilog;
 using SchoolCollab.CodedValues.Core;
+using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Commands.CreateCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.DisableCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.EnableCodedValue;
@@ -155,7 +156,7 @@ app.MapPut("/coded-values/{id:guid}/attributes/{key}", async (
 {
     try
     {
-        await handler.HandleAsync(new SetCodedValueAttribute(id, key, req.Value), ct);
+        await handler.HandleAsync(new SetCodedValueAttribute(id, key, req.Value, req.DataType, req.SourceCode), ct);
         return Results.NoContent();
     }
     catch (CodedValueNotFoundException)
@@ -192,7 +193,7 @@ app.MapDelete("/coded-values/{id:guid}/attributes/{key}", async (
 app.Run();
 
 internal record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
-internal record AttributeValueRequest(string Value);
+internal record AttributeValueRequest(string Value, AttributeDataType DataType = AttributeDataType.Text, string? SourceCode = null);
 
 // Makes Program accessible to WebApplicationFactory in integration tests
 public partial class Program { }

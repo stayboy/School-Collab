@@ -81,7 +81,11 @@ public sealed class CodedValue
         _domainEvents.Add(new CodedValueEnabledEvent(Id, Code));
     }
 
-    public void SetAttribute(string key, string value)
+    public void SetAttribute(
+        string key,
+        string value,
+        AttributeDataType dataType = AttributeDataType.Text,
+        string? sourceCode = null)
     {
         var normalizedKey = key.Trim();
         var existing = _attributes.SingleOrDefault(a => a.Key == normalizedKey);
@@ -90,7 +94,7 @@ public sealed class CodedValue
             _attributes.Remove(existing);
         }
 
-        _attributes.Add(new CodedValueAttribute(Id, normalizedKey, value.Trim()));
+        _attributes.Add(new CodedValueAttribute(Id, normalizedKey, value.Trim(), dataType, sourceCode?.Trim()));
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

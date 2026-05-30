@@ -65,5 +65,5 @@ public sealed class GetCodedValuesByParentHandler(CodedValuesDbContext db)
         cv.DisplayOrder,
         cv.CreatedAt,
         cv.UpdatedAt,
-        cv.Attributes.ToDictionary(a => a.Key, a => a.Value));
+        cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value, a.DataType, a.SourceCode)).ToArray());
 }

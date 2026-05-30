@@ -25,7 +25,40 @@ public class SetAttributeHandlerTests
 
         await handler.HandleAsync(new SetCodedValueAttribute(cv.Id, "country", "US"));
 
-        cv.Attributes.Should().ContainSingle(a => a.Key == "country" && a.Value == "US");
+        cv.Attributes.Should().ContainSingle(a =>
+            a.Key == "country" && a.Value == "US" &&
+            a.DataType == AttributeDataType.Text && a.SourceCode == null);
+        _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task SetAttribute_WithDataTypeAndSourceCode_PersistsMetadata()
+    {
+        var cv = CodedValue.Create("COUNTRY", "Country", null, null, 0);
+        _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
+        var handler = new SetCodedValueAttributeHandler(_repository.Object);
+
+        await handler.HandleAsync(new SetCodedValueAttribute(
+            cv.Id, "region", "NA", AttributeDataType.CodedValue, "REGIONS"));
+
+        cv.Attributes.Should().ContainSingle(a =>
+            a.Key == "region" && a.Value == "NA" &&
+            a.DataType == AttributeDataType.CodedValue && a.SourceCode == "REGIONS");
+        _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task SetAttribute_WithNumericDataType_PersistsDataType()
+    {
+        var cv = CodedValue.Create("SCORE", "Score", null, null, 0);
+        _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
+        var handler = new SetCodedValueAttributeHandler(_repository.Object);
+
+        await handler.HandleAsync(new SetCodedValueAttribute(
+            cv.Id, "min_value", "0", AttributeDataType.Integer));
+
+        cv.Attributes.Should().ContainSingle(a =>
+            a.Key == "min_value" && a.DataType == AttributeDataType.Integer && a.SourceCode == null);
         _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
     }
 

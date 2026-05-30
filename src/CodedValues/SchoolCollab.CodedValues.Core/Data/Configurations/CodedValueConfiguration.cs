@@ -65,6 +65,8 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
             attr.HasKey(a => new { a.CodedValueId, a.Key });
             attr.Property(a => a.Key).HasMaxLength(100).IsRequired();
             attr.Property(a => a.Value).HasMaxLength(500).IsRequired();
+            attr.Property(a => a.DataType).IsRequired().HasDefaultValue(Domain.AttributeDataType.Text);
+            attr.Property(a => a.SourceCode).HasMaxLength(100);
 
             attr.HasIndex(a => new { a.Key, a.Value })
                 .HasDatabaseName("ix_coded_value_attributes_key_value");

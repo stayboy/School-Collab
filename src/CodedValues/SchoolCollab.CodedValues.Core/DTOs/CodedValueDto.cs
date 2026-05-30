@@ -10,4 +10,4 @@ public record CodedValueDto(
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyDictionary<string, string> Attributes);
+    IReadOnlyCollection<CodedValueAttributeDto> Attributes);

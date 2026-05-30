@@ -345,6 +345,17 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                                 .HasColumnType("character varying(500)")
                                 .HasColumnName("value");
 
+                            b1.Property<int>("DataType")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("integer")
+                                .HasDefaultValue(0)
+                                .HasColumnName("data_type");
+
+                            b1.Property<string>("SourceCode")
+                                .HasMaxLength(100)
+                                .HasColumnType("character varying(100)")
+                                .HasColumnName("source_code");
+
                             b1.HasKey("CodedValueId", "Key")
                                 .HasName("pk_coded_value_attributes");
 

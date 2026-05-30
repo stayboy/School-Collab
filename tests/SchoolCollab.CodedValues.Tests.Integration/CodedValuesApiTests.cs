@@ -172,13 +172,13 @@ public class CodedValuesApiTests
         setResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         var withAttr = await _client.GetFromJsonAsync<CodedValueDto>($"/coded-values/{item.Id}");
-        withAttr!.Attributes.Should().ContainKey("country").WhoseValue.Should().Be("US");
+        withAttr!.Attributes.Should().ContainSingle(a => a.Key == "country" && a.Value == "US");
 
         var removeResp = await _client.DeleteAsync($"/coded-values/{item.Id}/attributes/country");
         removeResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         var withoutAttr = await _client.GetFromJsonAsync<CodedValueDto>($"/coded-values/{item.Id}");
-        withoutAttr!.Attributes.Should().NotContainKey("country");
+        withoutAttr!.Attributes.Should().NotContain(a => a.Key == "country");
     }
 
     [TestMethod]
