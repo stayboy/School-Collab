@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 using SchoolCollab.CodedValues.Core;
 using SchoolCollab.CodedValues.Core.Commands.CreateCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.DisableCodedValue;
@@ -36,6 +37,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapDefaultEndpoints();
+app.UseSerilogRequestLogging();
 
 app.MapGet("/coded-values", async (
     [FromServices] IQueryHandler<ListRootCodedValues, CodedValueDto[]> handler,
