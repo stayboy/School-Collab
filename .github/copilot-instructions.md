@@ -118,6 +118,138 @@ The pipeline is: **Serilog → OTLP gRPC → Aspire dashboard**.
 
 ---
 
+## Blazor component best practices
+
+### Render mode and pre-rendering
+
+All interactive pages use `@rendermode InteractiveServer`. In .NET 10, this pre-renders
+via SSR *then* re-renders once the SignalR circuit connects — meaning `OnInitializedAsync`
+runs **twice** and all API calls are made twice.
+
+**Always disable pre-rendering** on interactive pages to prevent duplicate API calls:
+
+```razor
+@* ✅ correct — no double execution *@
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
+
+@* ❌ wrong — causes OnInitializedAsync to run twice *@
+@rendermode InteractiveServer
+```
+
+For static display-only pages, use `@attribute [StreamRendering(true)]` instead — this
+sends the loading placeholder immediately over HTTP and streams real content when the data
+returns, giving the fastest perceived load without a SignalR circuit.
+
+### Parallel data loading
+
+Never `await` independent API calls sequentially. Use `Task.WhenAll` to fire them in
+parallel:
+
+```csharp
+// ❌ wrong — serial, pays full latency twice
+_parent   = await Api.GetByIdAsync(ParentId);
+_children = await Api.GetChildrenAsync(ParentId);
+
+// ✅ correct — parallel, pays latency once
+var parentTask   = Api.GetByIdAsync(ParentId);
+var childrenTask = Api.GetChildrenAsync(ParentId);
+await Task.WhenAll(parentTask, childrenTask);
+_parent   = parentTask.Result;
+_children = childrenTask.Result;
+```
+
+### Loading states
+
+Use `<FluentProgressRing />` consistently across **all** pages — never use bare
+`<p><em>Loading…</em></p>`. Every page must show a spinner while `OnInitializedAsync`
+is pending:
+
+```razor
+@if (_loading)
+{
+    <FluentProgressRing />
+}
+else if (_items is { Length: 0 })
+{
+    <FluentMessageBar Intent="MessageIntent.Info">No items yet.</FluentMessageBar>
+}
+```
+
+### Error boundaries
+
+Wrap the primary content of every page in `<ErrorBoundary>` so unhandled exceptions
+show a recovery UI instead of crashing the whole layout:
+
+```razor
+<ErrorBoundary>
+    <ChildContent>
+        @* main page content *@
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">
+            Something went wrong: @ex.Message
+        </FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+```
+
+### `@key` on dynamic lists
+
+Any `@foreach` that renders child components or elements **must** include `@key` so
+Blazor's diffing algorithm can reuse existing DOM nodes instead of re-creating them:
+
+```razor
+@* ✅ correct *@
+@foreach (var attr in context.Attributes)
+{
+    <FluentBadge @key="attr.Key">@attr.Key=@attr.Value</FluentBadge>
+}
+
+@* ❌ wrong — no @key, causes unnecessary DOM teardown *@
+@foreach (var attr in context.Attributes)
+{
+    <FluentBadge>@attr.Key=@attr.Value</FluentBadge>
+}
+```
+
+### Component parameters
+
+- Use `[Parameter, EditorRequired]` for required parameters — IDE warns if omitted.
+- Use `EventCallback<T>` (not `Action<T>`) for child-to-parent events — async-safe and
+  automatically calls `StateHasChanged`.
+- Implement `IAsyncDisposable` to clean up timers, subscriptions, and JS module references.
+
+### Consistent UI — FluentUI only
+
+Do **not** mix Bootstrap HTML elements with FluentUI. Replace every Bootstrap element:
+
+| Bootstrap | FluentUI replacement |
+|---|---|
+| `<input class="form-control">` | `<FluentTextField>` |
+| `<textarea class="form-control">` | `<FluentTextArea>` |
+| `<input type="number">` | `<FluentNumberField>` |
+| `<button class="btn btn-primary">` | `<FluentButton Appearance="Appearance.Accent">` |
+| `<button class="btn btn-secondary">` | `<FluentButton Appearance="Appearance.Outline">` |
+| `<div class="alert alert-danger">` | `<FluentMessageBar Intent="MessageIntent.Error">` |
+
+### ShouldRender optimisation
+
+Override `ShouldRender()` on components that receive frequent external events but only
+need to update their DOM when their own data changes:
+
+```csharp
+private bool _dataChanged;
+
+protected override bool ShouldRender()
+{
+    if (!_dataChanged) return false;
+    _dataChanged = false;
+    return true;
+}
+```
+
+---
+
 ## Target framework
 
 All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
