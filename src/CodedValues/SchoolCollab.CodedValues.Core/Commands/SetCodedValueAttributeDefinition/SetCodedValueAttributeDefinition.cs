@@ -10,4 +10,7 @@ public sealed record SetCodedValueAttributeDefinition(
     AttributeDataType DataType,
     string? SourceCode,
     bool IsRequired,
-    bool AllowMultiple = false) : ICommand;
+    bool AllowMultiple = false,
+    int? MinLength = null,
+    int? MaxLength = null,
+    string? RegexPattern = null) : ICommand;

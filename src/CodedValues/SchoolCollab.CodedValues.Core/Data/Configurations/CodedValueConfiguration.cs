@@ -82,6 +82,9 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
             def.Property(d => d.SourceCode).HasMaxLength(100);
             def.Property(d => d.IsRequired).IsRequired().HasDefaultValue(false);
             def.Property(d => d.AllowMultiple).IsRequired().HasDefaultValue(false);
+            def.Property(d => d.MinLength);
+            def.Property(d => d.MaxLength);
+            def.Property(d => d.RegexPattern).HasMaxLength(500);
 
             def.HasIndex(d => d.Key)
                 .HasDatabaseName("ix_coded_value_attribute_definitions_key");

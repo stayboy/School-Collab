@@ -72,6 +72,9 @@ public class SetAttributeHandlerTests
         def.SourceCode.Should().Be("HTYPES");
         def.IsRequired.Should().BeTrue();
         def.AllowMultiple.Should().BeFalse();
+        def.MinLength.Should().BeNull();
+        def.MaxLength.Should().BeNull();
+        def.RegexPattern.Should().BeNull();
         _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
     }
 

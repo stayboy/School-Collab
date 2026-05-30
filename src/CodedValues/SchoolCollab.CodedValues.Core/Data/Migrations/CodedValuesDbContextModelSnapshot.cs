@@ -398,6 +398,19 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                                 .HasDefaultValue(false)
                                 .HasColumnName("allow_multiple");
 
+                            b1.Property<int?>("MinLength")
+                                .HasColumnType("integer")
+                                .HasColumnName("min_length");
+
+                            b1.Property<int?>("MaxLength")
+                                .HasColumnType("integer")
+                                .HasColumnName("max_length");
+
+                            b1.Property<string>("RegexPattern")
+                                .HasMaxLength(500)
+                                .HasColumnType("character varying(500)")
+                                .HasColumnName("regex_pattern");
+
                             b1.HasKey("CodedValueId", "Key")
                                 .HasName("pk_coded_value_attribute_definitions");
 

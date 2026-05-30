@@ -23,4 +23,13 @@ public record CodedValueAttributeDefinitionDto(
     /// When true, the attribute value is expected to be an array (multi-select).
     /// When false, a single scalar value is expected.
     /// </summary>
-    bool AllowMultiple);
+    bool AllowMultiple,
+
+    /// <summary>Minimum character length constraint. Null means no minimum.</summary>
+    int? MinLength,
+
+    /// <summary>Maximum character length constraint. Null means no maximum.</summary>
+    int? MaxLength,
+
+    /// <summary>Regular expression the value must match. Null means no pattern constraint.</summary>
+    string? RegexPattern);

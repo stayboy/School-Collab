@@ -34,6 +34,19 @@ public sealed class CodedValueAttributeDefinition
     /// </summary>
     public bool AllowMultiple { get; private set; }
 
+    /// <summary>Minimum character length for the attribute value. Null means no minimum.</summary>
+    public int? MinLength { get; private set; }
+
+    /// <summary>Maximum character length for the attribute value. Null means no maximum.</summary>
+    public int? MaxLength { get; private set; }
+
+    /// <summary>
+    /// Optional regular expression the attribute value must match.
+    /// Null means no pattern constraint. UI components display this as
+    /// an inline format hint and validators enforce it before saving.
+    /// </summary>
+    public string? RegexPattern { get; private set; }
+
     private CodedValueAttributeDefinition() { }
 
     internal CodedValueAttributeDefinition(
@@ -43,7 +56,10 @@ public sealed class CodedValueAttributeDefinition
         string? sourceCode,
         bool isRequired,
         bool allowMultiple,
-        string? displayName)
+        string? displayName,
+        int? minLength,
+        int? maxLength,
+        string? regexPattern)
     {
         CodedValueId = codedValueId;
         Key = key;
@@ -52,5 +68,8 @@ public sealed class CodedValueAttributeDefinition
         IsRequired = isRequired;
         AllowMultiple = allowMultiple;
         DisplayName = displayName;
+        MinLength = minLength;
+        MaxLength = maxLength;
+        RegexPattern = regexPattern;
     }
 }

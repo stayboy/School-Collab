@@ -125,7 +125,10 @@ public sealed class CodedValue
         string? sourceCode = null,
         bool isRequired = false,
         bool allowMultiple = false,
-        string? displayName = null)
+        string? displayName = null,
+        int? minLength = null,
+        int? maxLength = null,
+        string? regexPattern = null)
     {
         var normalizedKey = key.Trim();
         var existing = _attributeDefinitions.SingleOrDefault(d => d.Key == normalizedKey);
@@ -135,7 +138,8 @@ public sealed class CodedValue
         }
 
         _attributeDefinitions.Add(new CodedValueAttributeDefinition(
-            Id, normalizedKey, dataType, sourceCode?.Trim(), isRequired, allowMultiple, displayName?.Trim()));
+            Id, normalizedKey, dataType, sourceCode?.Trim(), isRequired, allowMultiple,
+            displayName?.Trim(), minLength, maxLength, regexPattern?.Trim()));
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

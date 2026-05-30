@@ -201,7 +201,7 @@ app.MapPut("/coded-values/{id:guid}/attribute-definitions/{key}", async (
 {
     try
     {
-        await handler.HandleAsync(new SetCodedValueAttributeDefinition(id, key, req.DisplayName, req.DataType, req.SourceCode, req.IsRequired, req.AllowMultiple), ct);
+        await handler.HandleAsync(new SetCodedValueAttributeDefinition(id, key, req.DisplayName, req.DataType, req.SourceCode, req.IsRequired, req.AllowMultiple, req.MinLength, req.MaxLength, req.RegexPattern), ct);
         return Results.NoContent();
     }
     catch (CodedValueNotFoundException)
@@ -239,7 +239,7 @@ app.Run();
 
 internal record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
 internal record AttributeValueRequest(string Value);
-internal record AttributeDefinitionRequest(string? DisplayName, AttributeDataType DataType, string? SourceCode, bool IsRequired, bool AllowMultiple = false);
+internal record AttributeDefinitionRequest(string? DisplayName, AttributeDataType DataType, string? SourceCode, bool IsRequired, bool AllowMultiple = false, int? MinLength = null, int? MaxLength = null, string? RegexPattern = null);
 
 // Makes Program accessible to WebApplicationFactory in integration tests
 public partial class Program { }

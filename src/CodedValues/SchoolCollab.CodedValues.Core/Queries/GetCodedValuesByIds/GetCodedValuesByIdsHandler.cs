@@ -35,6 +35,6 @@ public sealed class GetCodedValuesByIdsHandler(CodedValuesDbContext db)
             cv.CreatedAt,
             cv.UpdatedAt,
             cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
-            cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple)).ToArray())).ToArray();
+            cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray())).ToArray();
     }
 }
