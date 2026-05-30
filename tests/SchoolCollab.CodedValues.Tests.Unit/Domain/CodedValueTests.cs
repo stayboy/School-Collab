@@ -130,31 +130,7 @@ public class CodedValueTests
 
         cv.SetAttribute("country", "US");
 
-        cv.Attributes.Should().ContainSingle(a =>
-            a.Key == "country" && a.Value == "US" &&
-            a.DataType == AttributeDataType.Text && a.SourceCode == null);
-    }
-
-    [TestMethod]
-    public void SetAttribute_WithDataTypeAndSourceCode_PersistsMetadata()
-    {
-        var cv = CodedValue.Create("ITEM", "Item", null, null, 0);
-
-        cv.SetAttribute("category", "A", AttributeDataType.CodedValue, "CATEGORIES");
-
-        var attr = cv.Attributes.Should().ContainSingle().Subject;
-        attr.DataType.Should().Be(AttributeDataType.CodedValue);
-        attr.SourceCode.Should().Be("CATEGORIES");
-    }
-
-    [TestMethod]
-    public void SetAttribute_TrimsSourceCode()
-    {
-        var cv = CodedValue.Create("ITEM", "Item", null, null, 0);
-
-        cv.SetAttribute("type", "X", AttributeDataType.CodedValue, "  TYPES  ");
-
-        cv.Attributes.Should().ContainSingle().Which.SourceCode.Should().Be("TYPES");
+        cv.Attributes.Should().ContainSingle(a => a.Key == "country" && a.Value == "US");
     }
 
     [TestMethod]
@@ -167,6 +143,53 @@ public class CodedValueTests
 
         cv.Attributes.Should().ContainSingle(a => a.Key == "country")
             .Which.Value.Should().Be("UK");
+    }
+
+    [TestMethod]
+    public void SetAttributeDefinition_AddsDefinitionWithMetadata()
+    {
+        var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
+
+        cv.SetAttributeDefinition("HTYPE", AttributeDataType.CodedValue, "HOSPITAL_TYPES", isRequired: true, displayName: "Hospital Type");
+
+        var def = cv.AttributeDefinitions.Should().ContainSingle().Subject;
+        def.Key.Should().Be("HTYPE");
+        def.DataType.Should().Be(AttributeDataType.CodedValue);
+        def.SourceCode.Should().Be("HOSPITAL_TYPES");
+        def.IsRequired.Should().BeTrue();
+        def.DisplayName.Should().Be("Hospital Type");
+    }
+
+    [TestMethod]
+    public void SetAttributeDefinition_OverwritesExistingKey()
+    {
+        var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
+        cv.SetAttributeDefinition("HTYPE", AttributeDataType.Text);
+
+        cv.SetAttributeDefinition("HTYPE", AttributeDataType.CodedValue, "HTYPES");
+
+        cv.AttributeDefinitions.Should().ContainSingle().Which.DataType.Should().Be(AttributeDataType.CodedValue);
+    }
+
+    [TestMethod]
+    public void RemoveAttributeDefinition_RemovesExistingKey()
+    {
+        var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
+        cv.SetAttributeDefinition("HTYPE", AttributeDataType.Text);
+
+        cv.RemoveAttributeDefinition("HTYPE");
+
+        cv.AttributeDefinitions.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void RemoveAttributeDefinition_NonExistentKey_DoesNotThrow()
+    {
+        var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
+
+        var act = () => cv.RemoveAttributeDefinition("nonexistent");
+
+        act.Should().NotThrow();
     }
 
     [TestMethod]

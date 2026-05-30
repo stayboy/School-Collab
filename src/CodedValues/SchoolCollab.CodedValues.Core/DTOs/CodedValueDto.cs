@@ -10,4 +10,6 @@ public record CodedValueDto(
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyCollection<CodedValueAttributeDto> Attributes);
+    IReadOnlyCollection<CodedValueAttributeDto> Attributes,
+    IReadOnlyCollection<CodedValueAttributeDefinitionDto> AttributeDefinitions);
+

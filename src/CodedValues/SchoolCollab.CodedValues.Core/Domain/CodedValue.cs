@@ -5,6 +5,7 @@ namespace SchoolCollab.CodedValues.Core.Domain;
 public sealed class CodedValue
 {
     private readonly List<CodedValueAttribute> _attributes = [];
+    private readonly List<CodedValueAttributeDefinition> _attributeDefinitions = [];
     private readonly List<IDomainEvent> _domainEvents = [];
 
     private CodedValue() { }
@@ -21,6 +22,14 @@ public sealed class CodedValue
     public DateTimeOffset UpdatedAt { get; private set; }
 
     public IReadOnlyCollection<CodedValueAttribute> Attributes => _attributes.AsReadOnly();
+
+    /// <summary>
+    /// Defines the attribute slots that children of this coded-value are expected to populate.
+    /// Each definition carries data-type and source-code for UI rendering and validation.
+    /// </summary>
+    public IReadOnlyCollection<CodedValueAttributeDefinition> AttributeDefinitions =>
+        _attributeDefinitions.AsReadOnly();
+
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
     public static CodedValue Create(
@@ -81,11 +90,7 @@ public sealed class CodedValue
         _domainEvents.Add(new CodedValueEnabledEvent(Id, Code));
     }
 
-    public void SetAttribute(
-        string key,
-        string value,
-        AttributeDataType dataType = AttributeDataType.Text,
-        string? sourceCode = null)
+    public void SetAttribute(string key, string value)
     {
         var normalizedKey = key.Trim();
         var existing = _attributes.SingleOrDefault(a => a.Key == normalizedKey);
@@ -94,7 +99,7 @@ public sealed class CodedValue
             _attributes.Remove(existing);
         }
 
-        _attributes.Add(new CodedValueAttribute(Id, normalizedKey, value.Trim(), dataType, sourceCode?.Trim()));
+        _attributes.Add(new CodedValueAttribute(Id, normalizedKey, value.Trim()));
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
@@ -110,5 +115,42 @@ public sealed class CodedValue
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Upserts an attribute definition describing what value children of this coded-value
+    /// should supply for the given key.
+    /// </summary>
+    public void SetAttributeDefinition(
+        string key,
+        AttributeDataType dataType = AttributeDataType.Text,
+        string? sourceCode = null,
+        bool isRequired = false,
+        string? displayName = null)
+    {
+        var normalizedKey = key.Trim();
+        var existing = _attributeDefinitions.SingleOrDefault(d => d.Key == normalizedKey);
+        if (existing is not null)
+        {
+            _attributeDefinitions.Remove(existing);
+        }
+
+        _attributeDefinitions.Add(new CodedValueAttributeDefinition(
+            Id, normalizedKey, dataType, sourceCode?.Trim(), isRequired, displayName?.Trim()));
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>Removes an attribute definition by key. Does not cascade to child attributes.</summary>
+    public void RemoveAttributeDefinition(string key)
+    {
+        var existing = _attributeDefinitions.SingleOrDefault(d => d.Key == key.Trim());
+        if (existing is null)
+        {
+            return;
+        }
+
+        _attributeDefinitions.Remove(existing);
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void ClearDomainEvents() => _domainEvents.Clear();
 }
+

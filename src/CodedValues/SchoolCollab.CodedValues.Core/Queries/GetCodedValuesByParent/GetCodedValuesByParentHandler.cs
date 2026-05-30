@@ -13,8 +13,7 @@ public sealed class GetCodedValuesByParentHandler(CodedValuesDbContext db)
         CancellationToken cancellationToken = default)
     {
         IQueryable<Domain.CodedValue> q = db.CodedValues
-            .AsNoTracking()
-            .Include(x => x.Attributes);
+            .AsNoTracking();
 
         if (!query.IncludeDisabled)
         {
@@ -65,5 +64,6 @@ public sealed class GetCodedValuesByParentHandler(CodedValuesDbContext db)
         cv.DisplayOrder,
         cv.CreatedAt,
         cv.UpdatedAt,
-        cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value, a.DataType, a.SourceCode)).ToArray());
+        cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
+        cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired)).ToArray());
 }

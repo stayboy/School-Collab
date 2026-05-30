@@ -7,6 +7,8 @@ using SchoolCollab.CodedValues.Core.Commands.DisableCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.EnableCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttribute;
 using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttribute;
+using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttributeDefinition;
+using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttributeDefinition;
 using SchoolCollab.CodedValues.Core.Commands.UpdateCodedValue;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data;
@@ -156,7 +158,7 @@ app.MapPut("/coded-values/{id:guid}/attributes/{key}", async (
 {
     try
     {
-        await handler.HandleAsync(new SetCodedValueAttribute(id, key, req.Value, req.DataType, req.SourceCode), ct);
+        await handler.HandleAsync(new SetCodedValueAttribute(id, key, req.Value), ct);
         return Results.NoContent();
     }
     catch (CodedValueNotFoundException)
@@ -190,10 +192,54 @@ app.MapDelete("/coded-values/{id:guid}/attributes/{key}", async (
     }
 });
 
+app.MapPut("/coded-values/{id:guid}/attribute-definitions/{key}", async (
+    Guid id,
+    string key,
+    [FromBody] AttributeDefinitionRequest req,
+    [FromServices] ICommandHandler<SetCodedValueAttributeDefinition> handler,
+    CancellationToken ct) =>
+{
+    try
+    {
+        await handler.HandleAsync(new SetCodedValueAttributeDefinition(id, key, req.DisplayName, req.DataType, req.SourceCode, req.IsRequired), ct);
+        return Results.NoContent();
+    }
+    catch (CodedValueNotFoundException)
+    {
+        return Results.NotFound();
+    }
+    catch (ConcurrencyException ex)
+    {
+        return Results.Conflict(new { ex.Message });
+    }
+});
+
+app.MapDelete("/coded-values/{id:guid}/attribute-definitions/{key}", async (
+    Guid id,
+    string key,
+    [FromServices] ICommandHandler<RemoveCodedValueAttributeDefinition> handler,
+    CancellationToken ct) =>
+{
+    try
+    {
+        await handler.HandleAsync(new RemoveCodedValueAttributeDefinition(id, key), ct);
+        return Results.NoContent();
+    }
+    catch (CodedValueNotFoundException)
+    {
+        return Results.NotFound();
+    }
+    catch (ConcurrencyException ex)
+    {
+        return Results.Conflict(new { ex.Message });
+    }
+});
+
 app.Run();
 
 internal record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
-internal record AttributeValueRequest(string Value, AttributeDataType DataType = AttributeDataType.Text, string? SourceCode = null);
+internal record AttributeValueRequest(string Value);
+internal record AttributeDefinitionRequest(string? DisplayName, AttributeDataType DataType, string? SourceCode, bool IsRequired);
 
 // Makes Program accessible to WebApplicationFactory in integration tests
 public partial class Program { }

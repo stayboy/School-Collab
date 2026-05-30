@@ -15,7 +15,6 @@ public sealed class GetCodedValueByIdHandler(CodedValuesDbContext db)
     {
         var cv = await db.CodedValues
             .AsNoTracking()
-            .Include(x => x.Attributes)
             .SingleOrDefaultAsync(x => x.Id == query.Id, cancellationToken)
             ?? throw new CodedValueNotFoundException(query.Id);
 
@@ -29,6 +28,7 @@ public sealed class GetCodedValueByIdHandler(CodedValuesDbContext db)
             cv.DisplayOrder,
             cv.CreatedAt,
             cv.UpdatedAt,
-            cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value, a.DataType, a.SourceCode)).ToArray());
+            cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
+            cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired)).ToArray());
     }
 }

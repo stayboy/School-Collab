@@ -14,7 +14,6 @@ public sealed class ListRootCodedValuesHandler(CodedValuesDbContext db)
     {
         var results = await db.CodedValues
             .AsNoTracking()
-            .Include(x => x.Attributes)
             .Where(x => x.ParentId == null)
             .OrderBy(x => x.DisplayOrder)
             .ThenBy(x => x.Name)
@@ -30,6 +29,7 @@ public sealed class ListRootCodedValuesHandler(CodedValuesDbContext db)
             cv.DisplayOrder,
             cv.CreatedAt,
             cv.UpdatedAt,
-            cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value, a.DataType, a.SourceCode)).ToArray())).ToArray();
+            cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
+            cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired)).ToArray())).ToArray();
     }
 }

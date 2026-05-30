@@ -56,7 +56,8 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
             .HasDatabaseName("ix_coded_values_parent_id");
 
         builder.Ignore(x => x.DomainEvents);
-        builder.Navigation(x => x.Attributes).UsePropertyAccessMode(PropertyAccessMode.Field);
+        builder.Navigation(x => x.Attributes).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
+        builder.Navigation(x => x.AttributeDefinitions).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
 
         builder.OwnsMany(x => x.Attributes, attr =>
         {
@@ -65,11 +66,24 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
             attr.HasKey(a => new { a.CodedValueId, a.Key });
             attr.Property(a => a.Key).HasMaxLength(100).IsRequired();
             attr.Property(a => a.Value).HasMaxLength(500).IsRequired();
-            attr.Property(a => a.DataType).IsRequired().HasDefaultValue(Domain.AttributeDataType.Text);
-            attr.Property(a => a.SourceCode).HasMaxLength(100);
 
             attr.HasIndex(a => new { a.Key, a.Value })
                 .HasDatabaseName("ix_coded_value_attributes_key_value");
+        });
+
+        builder.OwnsMany(x => x.AttributeDefinitions, def =>
+        {
+            def.ToTable("coded_value_attribute_definitions");
+            def.WithOwner().HasForeignKey(d => d.CodedValueId);
+            def.HasKey(d => new { d.CodedValueId, d.Key });
+            def.Property(d => d.Key).HasMaxLength(100).IsRequired();
+            def.Property(d => d.DisplayName).HasMaxLength(200);
+            def.Property(d => d.DataType).IsRequired().HasDefaultValue(Domain.AttributeDataType.Text);
+            def.Property(d => d.SourceCode).HasMaxLength(100);
+            def.Property(d => d.IsRequired).IsRequired().HasDefaultValue(false);
+
+            def.HasIndex(d => d.Key)
+                .HasDatabaseName("ix_coded_value_attribute_definitions_key");
         });
     }
 }

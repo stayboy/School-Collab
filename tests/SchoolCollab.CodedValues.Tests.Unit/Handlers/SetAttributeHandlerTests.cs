@@ -1,7 +1,9 @@
 using FluentAssertions;
 using Moq;
 using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttribute;
+using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttributeDefinition;
 using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttribute;
+using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttributeDefinition;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
@@ -25,40 +27,7 @@ public class SetAttributeHandlerTests
 
         await handler.HandleAsync(new SetCodedValueAttribute(cv.Id, "country", "US"));
 
-        cv.Attributes.Should().ContainSingle(a =>
-            a.Key == "country" && a.Value == "US" &&
-            a.DataType == AttributeDataType.Text && a.SourceCode == null);
-        _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
-    }
-
-    [TestMethod]
-    public async Task SetAttribute_WithDataTypeAndSourceCode_PersistsMetadata()
-    {
-        var cv = CodedValue.Create("COUNTRY", "Country", null, null, 0);
-        _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new SetCodedValueAttributeHandler(_repository.Object);
-
-        await handler.HandleAsync(new SetCodedValueAttribute(
-            cv.Id, "region", "NA", AttributeDataType.CodedValue, "REGIONS"));
-
-        cv.Attributes.Should().ContainSingle(a =>
-            a.Key == "region" && a.Value == "NA" &&
-            a.DataType == AttributeDataType.CodedValue && a.SourceCode == "REGIONS");
-        _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
-    }
-
-    [TestMethod]
-    public async Task SetAttribute_WithNumericDataType_PersistsDataType()
-    {
-        var cv = CodedValue.Create("SCORE", "Score", null, null, 0);
-        _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new SetCodedValueAttributeHandler(_repository.Object);
-
-        await handler.HandleAsync(new SetCodedValueAttribute(
-            cv.Id, "min_value", "0", AttributeDataType.Integer));
-
-        cv.Attributes.Should().ContainSingle(a =>
-            a.Key == "min_value" && a.DataType == AttributeDataType.Integer && a.SourceCode == null);
+        cv.Attributes.Should().ContainSingle(a => a.Key == "country" && a.Value == "US");
         _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
     }
 
@@ -86,4 +55,61 @@ public class SetAttributeHandlerTests
 
         await act.Should().ThrowAsync<CodedValueNotFoundException>();
     }
+
+    [TestMethod]
+    public async Task SetAttributeDefinition_AddsDefinitionAndUpdates()
+    {
+        var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
+        _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
+        var handler = new SetCodedValueAttributeDefinitionHandler(_repository.Object);
+
+        await handler.HandleAsync(new SetCodedValueAttributeDefinition(
+            cv.Id, "HTYPE", "Hospital Type", AttributeDataType.CodedValue, "HTYPES", true));
+
+        var def = cv.AttributeDefinitions.Should().ContainSingle().Subject;
+        def.Key.Should().Be("HTYPE");
+        def.DataType.Should().Be(AttributeDataType.CodedValue);
+        def.SourceCode.Should().Be("HTYPES");
+        def.IsRequired.Should().BeTrue();
+        _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task SetAttributeDefinition_WhenNotFound_ThrowsNotFoundException()
+    {
+        _repository.Setup(r => r.GetAsync(It.IsAny<Guid>(), default)).ReturnsAsync((CodedValue?)null);
+        var handler = new SetCodedValueAttributeDefinitionHandler(_repository.Object);
+
+        var act = async () => await handler.HandleAsync(
+            new SetCodedValueAttributeDefinition(Guid.NewGuid(), "KEY", null, AttributeDataType.Text, null, false));
+
+        await act.Should().ThrowAsync<CodedValueNotFoundException>();
+    }
+
+    [TestMethod]
+    public async Task RemoveAttributeDefinition_RemovesDefinitionAndUpdates()
+    {
+        var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
+        cv.SetAttributeDefinition("HTYPE", AttributeDataType.Text);
+        _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
+        var handler = new RemoveCodedValueAttributeDefinitionHandler(_repository.Object);
+
+        await handler.HandleAsync(new RemoveCodedValueAttributeDefinition(cv.Id, "HTYPE"));
+
+        cv.AttributeDefinitions.Should().BeEmpty();
+        _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task RemoveAttributeDefinition_WhenNotFound_ThrowsNotFoundException()
+    {
+        _repository.Setup(r => r.GetAsync(It.IsAny<Guid>(), default)).ReturnsAsync((CodedValue?)null);
+        var handler = new RemoveCodedValueAttributeDefinitionHandler(_repository.Object);
+
+        var act = async () => await handler.HandleAsync(
+            new RemoveCodedValueAttributeDefinition(Guid.NewGuid(), "KEY"));
+
+        await act.Should().ThrowAsync<CodedValueNotFoundException>();
+    }
 }
+

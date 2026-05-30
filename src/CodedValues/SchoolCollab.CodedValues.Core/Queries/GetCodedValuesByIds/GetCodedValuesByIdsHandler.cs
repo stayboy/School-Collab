@@ -19,7 +19,6 @@ public sealed class GetCodedValuesByIdsHandler(CodedValuesDbContext db)
 
         var results = await db.CodedValues
             .AsNoTracking()
-            .Include(x => x.Attributes)
             .Where(x => query.Ids.Contains(x.Id))
             .OrderBy(x => x.DisplayOrder)
             .ThenBy(x => x.Name)
@@ -35,7 +34,7 @@ public sealed class GetCodedValuesByIdsHandler(CodedValuesDbContext db)
             cv.DisplayOrder,
             cv.CreatedAt,
             cv.UpdatedAt,
-            cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value, a.DataType, a.SourceCode))
-                         .ToArray())).ToArray();
+            cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
+            cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired)).ToArray())).ToArray();
     }
 }

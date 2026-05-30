@@ -345,17 +345,6 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                                 .HasColumnType("character varying(500)")
                                 .HasColumnName("value");
 
-                            b1.Property<int>("DataType")
-                                .ValueGeneratedOnAdd()
-                                .HasColumnType("integer")
-                                .HasDefaultValue(0)
-                                .HasColumnName("data_type");
-
-                            b1.Property<string>("SourceCode")
-                                .HasMaxLength(100)
-                                .HasColumnType("character varying(100)")
-                                .HasColumnName("source_code");
-
                             b1.HasKey("CodedValueId", "Key")
                                 .HasName("pk_coded_value_attributes");
 
@@ -369,7 +358,55 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                                 .HasConstraintName("fk_coded_value_attributes_coded_values_coded_value_id");
                         });
 
+                    b.OwnsMany("SchoolCollab.CodedValues.Core.Domain.CodedValueAttributeDefinition", "AttributeDefinitions", b1 =>
+                        {
+                            b1.Property<Guid>("CodedValueId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("coded_value_id");
+
+                            b1.Property<string>("Key")
+                                .IsRequired()
+                                .HasMaxLength(100)
+                                .HasColumnType("character varying(100)")
+                                .HasColumnName("key");
+
+                            b1.Property<string>("DisplayName")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("display_name");
+
+                            b1.Property<int>("DataType")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("integer")
+                                .HasDefaultValue(0)
+                                .HasColumnName("data_type");
+
+                            b1.Property<string>("SourceCode")
+                                .HasMaxLength(100)
+                                .HasColumnType("character varying(100)")
+                                .HasColumnName("source_code");
+
+                            b1.Property<bool>("IsRequired")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("boolean")
+                                .HasDefaultValue(false)
+                                .HasColumnName("is_required");
+
+                            b1.HasKey("CodedValueId", "Key")
+                                .HasName("pk_coded_value_attribute_definitions");
+
+                            b1.HasIndex("Key")
+                                .HasDatabaseName("ix_coded_value_attribute_definitions_key");
+
+                            b1.ToTable("coded_value_attribute_definitions", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("CodedValueId")
+                                .HasConstraintName("fk_coded_value_attribute_definitions_coded_values_coded_value_id");
+                        });
+
                     b.Navigation("Attributes");
+                    b.Navigation("AttributeDefinitions");
                 });
 #pragma warning restore 612, 618
         }
