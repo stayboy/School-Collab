@@ -1,3 +1,4 @@
+using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.CodedValues.Admin.Components;
 using SchoolCollab.CodedValues.Admin.Services;
 
@@ -7,6 +8,8 @@ builder.AddServiceDefaults();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+builder.Services.AddFluentUIComponents();
 
 builder.Services.AddHttpClient<CodedValuesApiClient>(client =>
     client.BaseAddress = new Uri("https+http://coded-values-api"));
