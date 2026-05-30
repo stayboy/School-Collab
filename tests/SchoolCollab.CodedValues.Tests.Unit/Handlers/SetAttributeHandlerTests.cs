@@ -71,6 +71,7 @@ public class SetAttributeHandlerTests
         def.DataType.Should().Be(AttributeDataType.CodedValue);
         def.SourceCode.Should().Be("HTYPES");
         def.IsRequired.Should().BeTrue();
+        def.AllowMultiple.Should().BeFalse();
         _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
     }
 

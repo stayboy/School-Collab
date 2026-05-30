@@ -29,6 +29,6 @@ public sealed class GetCodedValueByIdHandler(CodedValuesDbContext db)
             cv.CreatedAt,
             cv.UpdatedAt,
             cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
-            cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired)).ToArray());
+            cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple)).ToArray());
     }
 }

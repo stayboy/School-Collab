@@ -124,6 +124,7 @@ public sealed class CodedValue
         AttributeDataType dataType = AttributeDataType.Text,
         string? sourceCode = null,
         bool isRequired = false,
+        bool allowMultiple = false,
         string? displayName = null)
     {
         var normalizedKey = key.Trim();
@@ -134,7 +135,7 @@ public sealed class CodedValue
         }
 
         _attributeDefinitions.Add(new CodedValueAttributeDefinition(
-            Id, normalizedKey, dataType, sourceCode?.Trim(), isRequired, displayName?.Trim()));
+            Id, normalizedKey, dataType, sourceCode?.Trim(), isRequired, allowMultiple, displayName?.Trim()));
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

@@ -12,7 +12,7 @@ public sealed class SetCodedValueAttributeDefinitionHandler(ICodedValueRepositor
         var codedValue = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new CodedValueNotFoundException(command.Id);
 
-        codedValue.SetAttributeDefinition(command.Key, command.DataType, command.SourceCode, command.IsRequired, command.DisplayName);
+        codedValue.SetAttributeDefinition(command.Key, command.DataType, command.SourceCode, command.IsRequired, command.AllowMultiple, command.DisplayName);
         await repository.UpdateAsync(codedValue, cancellationToken);
     }
 }

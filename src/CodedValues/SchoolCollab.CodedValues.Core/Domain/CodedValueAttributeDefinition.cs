@@ -26,6 +26,14 @@ public sealed class CodedValueAttributeDefinition
     /// <summary>When true, every child coded-value should supply a value for this attribute.</summary>
     public bool IsRequired { get; private set; }
 
+    /// <summary>
+    /// When true, the attribute value on a child coded-value is expected to be stored and
+    /// interpreted as an array (e.g. comma-separated or JSON array). When false, a single
+    /// scalar value is expected. UI components use this flag to render multi-select or
+    /// tag-style inputs instead of a single-value field.
+    /// </summary>
+    public bool AllowMultiple { get; private set; }
+
     private CodedValueAttributeDefinition() { }
 
     internal CodedValueAttributeDefinition(
@@ -34,6 +42,7 @@ public sealed class CodedValueAttributeDefinition
         AttributeDataType dataType,
         string? sourceCode,
         bool isRequired,
+        bool allowMultiple,
         string? displayName)
     {
         CodedValueId = codedValueId;
@@ -41,6 +50,7 @@ public sealed class CodedValueAttributeDefinition
         DataType = dataType;
         SourceCode = sourceCode;
         IsRequired = isRequired;
+        AllowMultiple = allowMultiple;
         DisplayName = displayName;
     }
 }

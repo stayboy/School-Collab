@@ -392,6 +392,12 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                                 .HasDefaultValue(false)
                                 .HasColumnName("is_required");
 
+                            b1.Property<bool>("AllowMultiple")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("boolean")
+                                .HasDefaultValue(false)
+                                .HasColumnName("allow_multiple");
+
                             b1.HasKey("CodedValueId", "Key")
                                 .HasName("pk_coded_value_attribute_definitions");
 

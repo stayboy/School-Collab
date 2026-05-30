@@ -17,4 +17,10 @@ public record CodedValueAttributeDefinitionDto(
     /// </summary>
     string? SourceCode,
 
-    bool IsRequired);
+    bool IsRequired,
+
+    /// <summary>
+    /// When true, the attribute value is expected to be an array (multi-select).
+    /// When false, a single scalar value is expected.
+    /// </summary>
+    bool AllowMultiple);
