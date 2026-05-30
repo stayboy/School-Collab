@@ -1,5 +1,4 @@
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
 using Serilog;
 using SchoolCollab.CodedValues.Core;
 using SchoolCollab.CodedValues.Core.Commands.CreateCodedValue;
@@ -24,12 +23,6 @@ builder.Services.AddCodedValuesCore(builder.Configuration);
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
-
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<CodedValuesDbContext>();
-    await db.Database.MigrateAsync();
-}
 
 if (app.Environment.IsDevelopment())
 {

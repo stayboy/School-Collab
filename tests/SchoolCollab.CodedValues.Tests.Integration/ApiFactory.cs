@@ -20,6 +20,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
+
+        // API no longer runs MigrateAsync at startup (that responsibility belongs to
+        // the dedicated MigrationService in Aspire). Test factory runs it here so
+        // integration tests always start against a current schema.
+        using var scope = Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CodedValuesDbContext>();
+        await db.Database.MigrateAsync();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
