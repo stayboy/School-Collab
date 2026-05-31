@@ -1,0 +1,8 @@
+Code,Name,Description,ParentCode,DisplayOrder
+GENDER,Gender,Biological or self-identified gender,,0
+GENDER_MALE,Male,,GENDER,1
+GENDER_FEMALE,Female,,GENDER,2
+GENDER_OTHER,Other,,GENDER,3
+STATUS,Status,Record lifecycle status,,0
+STATUS_ACTIVE,Active,,STATUS,1
+STATUS_INACTIVE,Inactive,,STATUS,2

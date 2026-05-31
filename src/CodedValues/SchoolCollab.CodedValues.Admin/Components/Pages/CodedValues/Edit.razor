@@ -1,0 +1,174 @@
+@page "/coded-values/{Id:guid}/edit"
+@using SchoolCollab.CodedValues.Admin.Services
+@inject CodedValuesApiClient Api
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Edit @_item?.Name</PageTitle>
+<h2>Edit: @_item?.Code</h2>
+
+@if (_loading)
+{
+    <p><em>Loading…</em></p>
+}
+else if (_item is not null)
+{
+    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="row g-3" style="max-width:600px">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="col-12">
+            <label class="form-label">Code</label>
+            <input class="form-control" value="@_item.Code" disabled />
+        </div>
+        <div class="col-12">
+            <label class="form-label">Name *</label>
+            <InputText class="form-control" @bind-Value="_model.Name" />
+        </div>
+        <div class="col-12">
+            <label class="form-label">Description</label>
+            <InputTextArea class="form-control" @bind-Value="_model.Description" rows="2" />
+        </div>
+        <div class="col-4">
+            <label class="form-label">Display Order</label>
+            <InputNumber class="form-control" @bind-Value="_model.DisplayOrder" />
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="col-12"><div class="alert alert-danger">@_error</div></div>
+        }
+
+        <div class="col-12">
+            <button type="submit" class="btn btn-primary" disabled="@_saving">
+                @(_saving ? "Saving…" : "Save")
+            </button>
+            <button type="button" class="btn btn-secondary ms-2" @onclick="Cancel">Cancel</button>
+        </div>
+    </EditForm>
+
+    <hr class="my-4" />
+    <h5>Attributes</h5>
+    @if (_item.Attributes.Count > 0)
+    {
+        <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1fr auto" TGridItem="KeyValuePair<string, string>" style="max-width:520px">
+            <PropertyColumn Property="@(a => a.Key)" />
+            <PropertyColumn Property="@(a => a.Value)" />
+            <TemplateColumn Title="">
+                <FluentButton Appearance="Appearance.Outline"
+                              OnClick="@(() => RemoveAttributeAsync(context.Key))">Remove</FluentButton>
+            </TemplateColumn>
+        </FluentDataGrid>
+    }
+
+    <div class="row g-2 mt-2" style="max-width:520px">
+        <div class="col-5"><FluentTextField @bind-Value="_attrKey" Placeholder="key" style="width:100%" /></div>
+        <div class="col-5"><FluentTextField @bind-Value="_attrValue" Placeholder="value" style="width:100%" /></div>
+        <div class="col-2">
+            <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync" style="width:100%">Add</FluentButton>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private CodedValueDto? _item;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _attrKey;
+    private string? _attrValue;
+    private readonly EditModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _item = await Api.GetByIdAsync(Id);
+            if (_item is not null)
+            {
+                _model.Name = _item.Name;
+                _model.Description = _item.Description;
+                _model.DisplayOrder = _item.DisplayOrder;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            await Api.UpdateAsync(Id, new UpdateCodedValueRequest(_model.Name!, _model.Description, _model.DisplayOrder));
+            Nav.NavigateTo(_item?.ParentId.HasValue == true
+                ? $"/coded-values/{_item.ParentId}/children"
+                : "/coded-values");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task AddAttributeAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_attrKey) || string.IsNullOrWhiteSpace(_attrValue))
+        {
+            return;
+        }
+
+        try
+        {
+            await Api.SetAttributeAsync(Id, _attrKey.Trim(), _attrValue.Trim());
+            _item = await Api.GetByIdAsync(Id);
+            _attrKey = _attrValue = null;
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task RemoveAttributeAsync(string key)
+    {
+        try
+        {
+            await Api.RemoveAttributeAsync(Id, key);
+            _item = await Api.GetByIdAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void Cancel() =>
+        Nav.NavigateTo(_item?.ParentId.HasValue == true
+            ? $"/coded-values/{_item.ParentId}/children"
+            : "/coded-values");
+
+    private sealed class EditModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+
+        public string? Description { get; set; }
+
+        public int DisplayOrder { get; set; }
+    }
+}

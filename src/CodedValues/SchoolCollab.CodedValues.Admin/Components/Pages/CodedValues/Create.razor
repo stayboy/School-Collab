@@ -1,0 +1,93 @@
+@page "/coded-values/new"
+@page "/coded-values/{ParentId:guid}/children/new"
+@using SchoolCollab.CodedValues.Admin.Services
+@inject CodedValuesApiClient Api
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>@(ParentId.HasValue ? "Add Child Value" : "New Category")</PageTitle>
+<h2>@(ParentId.HasValue ? "Add Child Value" : "New Coded Value Category")</h2>
+
+<EditForm Model="_model" OnValidSubmit="SubmitAsync" class="row g-3" style="max-width:600px">
+    <DataAnnotationsValidator />
+    <ValidationSummary />
+
+    <div class="col-12">
+        <label class="form-label">Code *</label>
+        <InputText class="form-control" @bind-Value="_model.Code" placeholder="e.g. GENDER" />
+    </div>
+    <div class="col-12">
+        <label class="form-label">Name *</label>
+        <InputText class="form-control" @bind-Value="_model.Name" />
+    </div>
+    <div class="col-12">
+        <label class="form-label">Description</label>
+        <InputTextArea class="form-control" @bind-Value="_model.Description" rows="2" />
+    </div>
+    <div class="col-4">
+        <label class="form-label">Display Order</label>
+        <InputNumber class="form-control" @bind-Value="_model.DisplayOrder" />
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="col-12"><div class="alert alert-danger">@_error</div></div>
+    }
+
+    <div class="col-12">
+        <button type="submit" class="btn btn-primary" disabled="@_saving">
+            @(_saving ? "Saving…" : "Save")
+        </button>
+        <button type="button" class="btn btn-secondary ms-2" @onclick="Cancel">Cancel</button>
+    </div>
+</EditForm>
+
+@code {
+    [Parameter] public Guid? ParentId { get; set; }
+
+    private readonly FormModel _model = new();
+    private bool _saving;
+    private string? _error;
+
+    private async Task SubmitAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            await Api.CreateAsync(new CreateCodedValueRequest(
+                _model.Code!,
+                _model.Name!,
+                _model.Description,
+                ParentId,
+                _model.DisplayOrder));
+
+            Nav.NavigateTo(ParentId.HasValue ? $"/coded-values/{ParentId}/children" : "/coded-values");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private void Cancel() =>
+        Nav.NavigateTo(ParentId.HasValue ? $"/coded-values/{ParentId}/children" : "/coded-values");
+
+    private sealed class FormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Code { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+
+        public string? Description { get; set; }
+
+        public int DisplayOrder { get; set; }
+    }
+}

@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Sdk Name="Aspire.AppHost.Sdk" Version="13.3.5" />
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>71bc1e6c-899e-4131-98f2-60199f7d3ba2</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.3.5" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.3.5" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.3.5" />
+    <PackageReference Include="Aspire.Hosting.Redis" Version="13.3.5" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Contracts\SchoolCollab.CodedValues.Contracts.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Core\SchoolCollab.CodedValues.Core.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Api\SchoolCollab.CodedValues.Api.csproj" />
+    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Admin\SchoolCollab.CodedValues.Admin.csproj" />
+    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.MigrationService\SchoolCollab.CodedValues.MigrationService.csproj" />
+  </ItemGroup>
+</Project>
