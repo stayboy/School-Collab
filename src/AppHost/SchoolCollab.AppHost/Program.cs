@@ -1,9 +1,13 @@
 var builder = DistributedApplication.CreateBuilder(args);
 
 var postgres = builder.AddPostgres("postgres")
+    .WithDataVolume()
+    .WithLifetime(ContainerLifetime.Persistent)
     .WithPgAdmin();
 
 var rabbit = builder.AddRabbitMQ("rabbitmq")
+    .WithDataVolume()
+    .WithLifetime(ContainerLifetime.Persistent)
     .WithManagementPlugin();
 
 var codedValuesDb = postgres.AddDatabase("coded-values-db");
