@@ -15,10 +15,14 @@ var codedValuesMigrator = builder.AddProject<Projects.SchoolCollab_CodedValues_M
     .WithReference(codedValuesDb)
     .WaitFor(codedValuesDb);
 
+var redis = builder.AddRedis("cache");
+
 var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("coded-values-api")
     .WithReference(codedValuesDb)
     .WithReference(rabbit)
+    .WithReference(redis)
     .WaitFor(rabbit)
+    .WaitFor(redis)
     .WaitForCompletion(codedValuesMigrator);
 
 builder.AddProject<Projects.SchoolCollab_CodedValues_Admin>("coded-values-admin")

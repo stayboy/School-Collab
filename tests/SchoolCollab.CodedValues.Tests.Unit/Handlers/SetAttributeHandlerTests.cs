@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Caching.Hybrid;
 using Moq;
 using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttribute;
 using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttributeDefinition;
@@ -14,16 +15,21 @@ namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 public class SetAttributeHandlerTests
 {
     private Mock<ICodedValueRepository> _repository = default!;
+    private Mock<HybridCache> _cache = default!;
 
     [TestInitialize]
-    public void Setup() => _repository = new Mock<ICodedValueRepository>();
+    public void Setup()
+    {
+        _repository = new Mock<ICodedValueRepository>();
+        _cache = new Mock<HybridCache>();
+    }
 
     [TestMethod]
     public async Task SetAttribute_AddsAttributeAndUpdates()
     {
         var cv = CodedValue.Create("STATE", "State", null, null, 0);
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new SetCodedValueAttributeHandler(_repository.Object);
+        var handler = new SetCodedValueAttributeHandler(_repository.Object, _cache.Object);
 
         await handler.HandleAsync(new SetCodedValueAttribute(cv.Id, "country", "US"));
 
@@ -37,7 +43,7 @@ public class SetAttributeHandlerTests
         var cv = CodedValue.Create("STATE", "State", null, null, 0);
         cv.SetAttribute("country", "US");
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new RemoveCodedValueAttributeHandler(_repository.Object);
+        var handler = new RemoveCodedValueAttributeHandler(_repository.Object, _cache.Object);
 
         await handler.HandleAsync(new RemoveCodedValueAttribute(cv.Id, "country"));
 
@@ -49,7 +55,7 @@ public class SetAttributeHandlerTests
     public async Task SetAttribute_WhenNotFound_ThrowsNotFoundException()
     {
         _repository.Setup(r => r.GetAsync(It.IsAny<Guid>(), default)).ReturnsAsync((CodedValue?)null);
-        var handler = new SetCodedValueAttributeHandler(_repository.Object);
+        var handler = new SetCodedValueAttributeHandler(_repository.Object, _cache.Object);
 
         var act = async () => await handler.HandleAsync(new SetCodedValueAttribute(Guid.NewGuid(), "k", "v"));
 
@@ -61,7 +67,7 @@ public class SetAttributeHandlerTests
     {
         var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new SetCodedValueAttributeDefinitionHandler(_repository.Object);
+        var handler = new SetCodedValueAttributeDefinitionHandler(_repository.Object, _cache.Object);
 
         await handler.HandleAsync(new SetCodedValueAttributeDefinition(
             cv.Id, "HTYPE", "Hospital Type", AttributeDataType.CodedValue, "HTYPES", true));
@@ -82,7 +88,7 @@ public class SetAttributeHandlerTests
     public async Task SetAttributeDefinition_WhenNotFound_ThrowsNotFoundException()
     {
         _repository.Setup(r => r.GetAsync(It.IsAny<Guid>(), default)).ReturnsAsync((CodedValue?)null);
-        var handler = new SetCodedValueAttributeDefinitionHandler(_repository.Object);
+        var handler = new SetCodedValueAttributeDefinitionHandler(_repository.Object, _cache.Object);
 
         var act = async () => await handler.HandleAsync(
             new SetCodedValueAttributeDefinition(Guid.NewGuid(), "KEY", null, AttributeDataType.Text, null, false));
@@ -96,7 +102,7 @@ public class SetAttributeHandlerTests
         var cv = CodedValue.Create("HSPTLS", "Hospitals", null, null, 0);
         cv.SetAttributeDefinition("HTYPE", AttributeDataType.Text);
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new RemoveCodedValueAttributeDefinitionHandler(_repository.Object);
+        var handler = new RemoveCodedValueAttributeDefinitionHandler(_repository.Object, _cache.Object);
 
         await handler.HandleAsync(new RemoveCodedValueAttributeDefinition(cv.Id, "HTYPE"));
 
@@ -108,7 +114,7 @@ public class SetAttributeHandlerTests
     public async Task RemoveAttributeDefinition_WhenNotFound_ThrowsNotFoundException()
     {
         _repository.Setup(r => r.GetAsync(It.IsAny<Guid>(), default)).ReturnsAsync((CodedValue?)null);
-        var handler = new RemoveCodedValueAttributeDefinitionHandler(_repository.Object);
+        var handler = new RemoveCodedValueAttributeDefinitionHandler(_repository.Object, _cache.Object);
 
         var act = async () => await handler.HandleAsync(
             new RemoveCodedValueAttributeDefinition(Guid.NewGuid(), "KEY"));
@@ -116,4 +122,3 @@ public class SetAttributeHandlerTests
         await act.Should().ThrowAsync<CodedValueNotFoundException>();
     }
 }
-

@@ -1,11 +1,13 @@
+using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
 
 namespace SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttribute;
 
-public sealed class SetCodedValueAttributeHandler(ICodedValueRepository repository)
-    : ICommandHandler<SetCodedValueAttribute>
+public sealed class SetCodedValueAttributeHandler(
+    ICodedValueRepository repository,
+    HybridCache cache) : ICommandHandler<SetCodedValueAttribute>
 {
     public async Task HandleAsync(SetCodedValueAttribute command, CancellationToken cancellationToken = default)
     {
@@ -14,5 +16,6 @@ public sealed class SetCodedValueAttributeHandler(ICodedValueRepository reposito
 
         codedValue.SetAttribute(command.Key, command.Value);
         await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
     }
 }

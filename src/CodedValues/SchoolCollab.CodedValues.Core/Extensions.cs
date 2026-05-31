@@ -1,5 +1,6 @@
 using MassTransit;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.CodedValues.Core.Data;
@@ -22,6 +23,15 @@ public static class Extensions
                 .UseSnakeCaseNamingConvention());
 
         services.AddScoped<ICodedValueRepository, CodedValueRepository>();
+
+        services.AddHybridCache(options =>
+        {
+            options.DefaultEntryOptions = new HybridCacheEntryOptions
+            {
+                Expiration = TimeSpan.FromMinutes(5),
+                LocalCacheExpiration = TimeSpan.FromMinutes(1)
+            };
+        });
 
         var assembly = typeof(Extensions).Assembly;
         services.Scan(scan => scan

@@ -1,4 +1,5 @@
 using MassTransit;
+using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.CodedValues.Contracts.Events;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
@@ -9,7 +10,8 @@ namespace SchoolCollab.CodedValues.Core.Commands.EnableCodedValue;
 
 public sealed class EnableCodedValueHandler(
     ICodedValueRepository repository,
-    IPublishEndpoint publishEndpoint) : ICommandHandler<EnableCodedValue>
+    IPublishEndpoint publishEndpoint,
+    HybridCache cache) : ICommandHandler<EnableCodedValue>
 {
     public async Task HandleAsync(EnableCodedValue command, CancellationToken cancellationToken = default)
     {
@@ -18,6 +20,7 @@ public sealed class EnableCodedValueHandler(
 
         codedValue.Enable();
         await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         foreach (var _ in codedValue.DomainEvents.OfType<CodedValueEnabledEvent>())
         {

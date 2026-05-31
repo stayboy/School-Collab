@@ -1,11 +1,13 @@
+using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
 
 namespace SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttribute;
 
-public sealed class RemoveCodedValueAttributeHandler(ICodedValueRepository repository)
-    : ICommandHandler<RemoveCodedValueAttribute>
+public sealed class RemoveCodedValueAttributeHandler(
+    ICodedValueRepository repository,
+    HybridCache cache) : ICommandHandler<RemoveCodedValueAttribute>
 {
     public async Task HandleAsync(RemoveCodedValueAttribute command, CancellationToken cancellationToken = default)
     {
@@ -14,5 +16,6 @@ public sealed class RemoveCodedValueAttributeHandler(ICodedValueRepository repos
 
         codedValue.RemoveAttribute(command.Key);
         await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
     }
 }

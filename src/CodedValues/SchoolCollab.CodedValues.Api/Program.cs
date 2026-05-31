@@ -22,6 +22,7 @@ using SchoolCollab.CodedValues.Core.Queries.ListRootCodedValues;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
+builder.AddRedisDistributedCache("cache");
 builder.Services.AddCodedValuesCore(builder.Configuration);
 builder.Services.AddOpenApi();
 
