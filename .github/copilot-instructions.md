@@ -250,6 +250,62 @@ protected override bool ShouldRender()
 
 ---
 
+## Entity Framework Core migrations
+
+**Any change to a domain entity, owned type, value object, or `IEntityTypeConfiguration` that affects the database schema must be accompanied by a new EF migration before the PR is merged.**
+
+### DbContexts in this repository
+
+| DbContext | Project | Migrations folder |
+|---|---|---|
+| `CodedValuesDbContext` | `src/CodedValues/SchoolCollab.CodedValues.Core` | `Data/Migrations/` |
+
+Each bounded context that owns a `DbContext` follows the same pattern.
+
+### Adding a migration
+
+Run from the **repository root**:
+
+```bash
+dotnet ef migrations add <MigrationName> \
+  --project src/CodedValues/SchoolCollab.CodedValues.Core \
+  --context CodedValuesDbContext
+```
+
+Use a descriptive PascalCase name that summarises the schema change, e.g.
+`AddAttributeDefinitionAllowMultiple`, `AddValidationFieldsToCodedValue`.
+
+`IDesignTimeDbContextFactory<T>` is already implemented in each Core project — no
+startup project or connection string flag is needed.
+
+### Removing the last migration (if not yet applied)
+
+```bash
+dotnet ef migrations remove \
+  --project src/CodedValues/SchoolCollab.CodedValues.Core \
+  --context CodedValuesDbContext
+```
+
+### Rules
+
+1. **Never modify an existing migration file** — always add a new one. Editing applied
+   migrations corrupts the migration history.
+
+2. **Always review the generated migration** before committing. EF sometimes drops and
+   recreates columns instead of altering them; rename operations require manual
+   `migrationBuilder.RenameColumn` / `RenameTable` calls.
+
+3. **Migrations live in the Core project**, not the API or MigrationService projects.
+   The `MigrationService` applies them at startup — it does not own them.
+
+4. **One migration per logical change** — do not batch unrelated model changes into a
+   single migration.
+
+5. **Verify the snapshot is updated** — `dotnet ef migrations add` regenerates
+   `<ContextName>ModelSnapshot.cs` automatically; commit it alongside the migration.
+
+---
+
 ## Target framework
 
 All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
