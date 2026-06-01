@@ -370,6 +370,52 @@ Never insert application seed data (users, test records) inside a schema migrati
 
 ---
 
+## Central Package Management (CPM)
+
+All NuGet package versions are managed centrally in **`Directory.Packages.props`** at the
+repository root. This prevents version drift across the 10-project solution.
+
+### How it works
+
+`Directory.Build.props` sets `<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>`.
+All `<PackageReference>` elements in `.csproj` files **must not** include a `Version`
+attribute — the version is resolved from `Directory.Packages.props`.
+
+### Adding a new package
+
+1. Add a `<PackageVersion>` entry in `Directory.Packages.props` under the appropriate
+   label group:
+   ```xml
+   <PackageVersion Include="My.New.Package" Version="1.2.3" />
+   ```
+
+2. Add `<PackageReference Include="My.New.Package" />` (no `Version`) in the target
+   `.csproj`.
+
+3. **Never** add `Version="..."` directly to a `<PackageReference>` — CPM will raise
+   NU1008 / NU1009 errors at build time if you do.
+
+### Updating a package version
+
+Change the version only in `Directory.Packages.props`. The update applies to every
+project that references it automatically.
+
+### Exceptions
+
+- `PrivateAssets="all"` (and other metadata attributes like `IncludeAssets`, `ExcludeAssets`)
+  **stay** in the `<PackageReference>` element inside the `.csproj` — they are not version
+  metadata and are not moved to `Directory.Packages.props`.
+  ```xml
+  <!-- csproj -->
+  <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+  ```
+
+- `<Sdk Name="..." Version="..." />` at the top of a `.csproj` (e.g. `Aspire.AppHost.Sdk`)
+  is an **MSBuild SDK reference**, not a NuGet package — CPM does not manage it, leave the
+  `Version` attribute in place.
+
+---
+
 ## Target framework
 
 All projects target **net10.0**. Do not downgrade to net9.0 or earlier.

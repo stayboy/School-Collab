@@ -8,10 +8,10 @@
     <UserSecretsId>71bc1e6c-899e-4131-98f2-60199f7d3ba2</UserSecretsId>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Aspire.Hosting.AppHost" Version="13.3.5" />
-    <PackageReference Include="Aspire.Hosting.PostgreSQL" Version="13.3.5" />
-    <PackageReference Include="Aspire.Hosting.RabbitMQ" Version="13.3.5" />
-    <PackageReference Include="Aspire.Hosting.Redis" Version="13.3.5" />
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <PackageReference Include="Aspire.Hosting.PostgreSQL" />
+    <PackageReference Include="Aspire.Hosting.RabbitMQ" />
+    <PackageReference Include="Aspire.Hosting.Redis" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Contracts\SchoolCollab.CodedValues.Contracts.csproj" IsAspireProjectResource="false" />
