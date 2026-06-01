@@ -1,11 +1,16 @@
 using System.Net;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.DependencyInjection;
+using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.DTOs;
 
 namespace SchoolCollab.CodedValues.Tests.Integration;
 
 [TestClass]
+[DoNotParallelize]
 public class CodedValuesApiTests
 {
     private static ApiFactory _factory = default!;
@@ -22,8 +27,23 @@ public class CodedValuesApiTests
     [ClassCleanup]
     public static async Task ClassCleanup()
     {
-        _client.Dispose();
-        await _factory.DisposeAsync();
+        _client?.Dispose();
+
+        if (_factory is not null)
+        {
+            await _factory.DisposeAsync();
+        }
+    }
+
+    [TestInitialize]
+    public async Task TestInitialize()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<CodedValuesDbContext>();
+        var cache = scope.ServiceProvider.GetRequiredService<HybridCache>();
+
+        await db.Database.ExecuteSqlRawAsync("TRUNCATE TABLE coded_values CASCADE;");
+        await cache.RemoveByTagAsync("coded-values");
     }
 
     [TestMethod]
@@ -43,7 +63,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task POST_CodedValues_DuplicateCode_ReturnsConflict()
     {
-        var code = $"DUP_{Guid.NewGuid():N}";
+        var code = $"DUP_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "First", DisplayOrder = 0 });
 
         var response = await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Second", DisplayOrder = 0 });
@@ -54,7 +74,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task GET_CodedValues_ReturnsRootValues()
     {
-        var code = $"ROOT_{Guid.NewGuid():N}";
+        var code = $"ROOT_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Root Value", DisplayOrder = 0 });
 
         var response = await _client.GetAsync("/coded-values");
@@ -68,7 +88,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task GET_CodedValuesById_ReturnsCorrectItem()
     {
-        var code = $"BYID_{Guid.NewGuid():N}";
+        var code = $"BYID_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "By Id Test", DisplayOrder = 0 });
         var roots = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
         var created = roots!.Single(x => x.Code == code);
@@ -91,12 +111,12 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task GET_ByParent_ReturnsChildrenOnly()
     {
-        var parentCode = $"PAR_{Guid.NewGuid():N}";
+        var parentCode = $"PAR_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = parentCode, Name = "Parent", DisplayOrder = 0 });
         var parent = (await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values"))!
             .Single(x => x.Code == parentCode);
 
-        var childCode = $"CHD_{Guid.NewGuid():N}";
+        var childCode = $"CHD_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = childCode, Name = "Child", ParentId = parent.Id, DisplayOrder = 0 });
 
         var response = await _client.GetAsync($"/coded-values/by-parent?parentId={parent.Id}");
@@ -109,12 +129,12 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task GET_ByParent_ByParentCode_ReturnsChildren()
     {
-        var parentCode = $"PARCODE_{Guid.NewGuid():N}"[..20];
+        var parentCode = $"PARCODE_{Guid.NewGuid():N}"[..20].ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = parentCode, Name = "Parent", DisplayOrder = 0 });
         var parent = (await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values"))!
             .Single(x => x.Code == parentCode);
 
-        var childCode = $"CHDCODE_{Guid.NewGuid():N}"[..20];
+        var childCode = $"CHDCODE_{Guid.NewGuid():N}"[..20].ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = childCode, Name = "Child", ParentId = parent.Id, DisplayOrder = 0 });
 
         var response = await _client.GetAsync($"/coded-values/by-parent?parentCode={parentCode}");
@@ -127,7 +147,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task PUT_CodedValues_UpdatesItem()
     {
-        var code = $"UPD_{Guid.NewGuid():N}";
+        var code = $"UPD_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Original", DisplayOrder = 0 });
         var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
         var item = items!.Single(x => x.Code == code);
@@ -142,7 +162,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task DisableAndEnable_ToggleIsDisabled()
     {
-        var code = $"DIS_{Guid.NewGuid():N}";
+        var code = $"DIS_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Disable Test", DisplayOrder = 0 });
         var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
         var item = items!.Single(x => x.Code == code);
@@ -163,7 +183,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task Attributes_SetAndRemove()
     {
-        var code = $"ATTR_{Guid.NewGuid():N}";
+        var code = $"ATTR_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Attr Test", DisplayOrder = 0 });
         var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
         var item = items!.Single(x => x.Code == code);
@@ -184,8 +204,8 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task GET_ByIds_ReturnsMixedDisabledState()
     {
-        var code1 = $"ID1_{Guid.NewGuid():N}";
-        var code2 = $"ID2_{Guid.NewGuid():N}";
+        var code1 = $"ID1_{Guid.NewGuid():N}".ToUpperInvariant();
+        var code2 = $"ID2_{Guid.NewGuid():N}".ToUpperInvariant();
         await _client.PostAsJsonAsync("/coded-values", new { Code = code1, Name = "Active Item", DisplayOrder = 0 });
         await _client.PostAsJsonAsync("/coded-values", new { Code = code2, Name = "Disabled Item", DisplayOrder = 0 });
 

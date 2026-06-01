@@ -41,6 +41,11 @@ public static class Extensions
             .WithTransientLifetime());
         services.Scan(scan => scan
             .FromAssemblies(assembly)
+            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.ICommandHandler<,>)), publicOnly: false)
+            .AsImplementedInterfaces()
+            .WithTransientLifetime());
+        services.Scan(scan => scan
+            .FromAssemblies(assembly)
             .AddClasses(classes => classes.AssignableTo(typeof(CQRS.IQueryHandler<,>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
