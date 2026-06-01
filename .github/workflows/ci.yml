@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Unit tests
+        run: >
+          dotnet test
+          --no-build
+          --configuration Release
+          --filter "FullyQualifiedName~Tests.Unit"
+          --logger "trx;LogFileName=unit-results.trx"
+          --results-directory ./test-results
+
+      - name: Integration tests
+        run: >
+          dotnet test
+          --no-build
+          --configuration Release
+          --filter "FullyQualifiedName~Tests.Integration"
+          --logger "trx;LogFileName=integration-results.trx"
+          --results-directory ./test-results
+        continue-on-error: false
+
+      - name: Publish test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ./test-results/*.trx
