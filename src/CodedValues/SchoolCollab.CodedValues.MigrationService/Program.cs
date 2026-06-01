@@ -15,7 +15,7 @@ builder.AddServiceDefaults();
 // Register only the DbContext; full AddCodedValuesCore also wires MassTransit
 // and CQRS handlers which are not needed in this short-lived process.
 var connectionString = builder.Configuration.GetConnectionString("coded-values-db")
-    ?? "Host=localhost;Port=5432;Database=schoolcollab_coded_values;Username=postgres;Password=postgres";
+    ?? throw new InvalidOperationException("Connection string 'coded-values-db' is not configured.");
 
 builder.Services.AddDbContext<CodedValuesDbContext>(opts =>
     opts.UseNpgsql(connectionString).UseSnakeCaseNamingConvention());

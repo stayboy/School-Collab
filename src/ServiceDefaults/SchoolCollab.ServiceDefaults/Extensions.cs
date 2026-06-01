@@ -130,7 +130,7 @@ public static class Extensions
 
         Log.Logger = logConfig.CreateLogger();
         builder.Logging.ClearProviders();
-        builder.Logging.AddSerilog(Log.Logger, dispose: true);
+        builder.Services.AddSerilog(Log.Logger, dispose: true);
 
         return builder;
     }

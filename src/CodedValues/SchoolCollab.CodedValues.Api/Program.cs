@@ -22,7 +22,19 @@ using SchoolCollab.CodedValues.Core.Queries.ListRootCodedValues;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
-builder.AddRedisDistributedCache("cache");
+
+var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
+    ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];
+
+if (string.IsNullOrWhiteSpace(cacheConnectionString))
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+else
+{
+    builder.AddRedisDistributedCache("cache");
+}
+
 builder.Services.AddCodedValuesCore(builder.Configuration);
 builder.Services.AddOpenApi();
 
@@ -67,7 +79,7 @@ app.MapGet("/coded-values/by-parent", async (
     [FromQuery] string? parentCode,
     [FromQuery] string? attributeKey,
     [FromQuery] string? attributeValue,
-    [FromQuery] bool includeDisabled,
+    [FromQuery] bool? includeDisabled,
     [FromServices] IQueryHandler<GetCodedValuesByParent, CodedValueDto[]> handler,
     CancellationToken ct) =>
 {
@@ -78,18 +90,18 @@ app.MapGet("/coded-values/by-parent", async (
     }
 
     return Results.Ok(await handler.HandleAsync(
-        new GetCodedValuesByParent(parentId, parentCode, filters, includeDisabled), ct));
+        new GetCodedValuesByParent(parentId, parentCode, filters, includeDisabled ?? false), ct));
 });
 
 app.MapPost("/coded-values", async (
     [FromBody] CreateCodedValue command,
-    [FromServices] ICommandHandler<CreateCodedValue> handler,
+    [FromServices] ICommandHandler<CreateCodedValue, Guid> handler,
     CancellationToken ct) =>
 {
     try
     {
-        await handler.HandleAsync(command, ct);
-        return Results.Created("/coded-values", null);
+        var id = await handler.HandleAsync(command, ct);
+        return Results.Created($"/coded-values/{id}", new { id });
     }
     catch (DuplicateCodeException ex)
     {

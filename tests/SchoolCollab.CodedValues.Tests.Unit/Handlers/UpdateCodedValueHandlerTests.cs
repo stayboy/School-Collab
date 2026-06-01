@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MassTransit;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Logging;
 using Moq;
 using SchoolCollab.CodedValues.Core.Commands.UpdateCodedValue;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
@@ -15,6 +16,7 @@ public class UpdateCodedValueHandlerTests
     private Mock<ICodedValueRepository> _repository = default!;
     private Mock<IPublishEndpoint> _publishEndpoint = default!;
     private Mock<HybridCache> _cache = default!;
+    private Mock<ILogger<UpdateCodedValueHandler>> _logger = default!;
     private UpdateCodedValueHandler _handler = default!;
 
     [TestInitialize]
@@ -23,7 +25,8 @@ public class UpdateCodedValueHandlerTests
         _repository = new Mock<ICodedValueRepository>();
         _publishEndpoint = new Mock<IPublishEndpoint>();
         _cache = new Mock<HybridCache>();
-        _handler = new UpdateCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object);
+        _logger = new Mock<ILogger<UpdateCodedValueHandler>>();
+        _handler = new UpdateCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object, _logger.Object);
     }
 
     [TestMethod]

@@ -41,7 +41,10 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
                     .UseSnakeCaseNamingConvention());
 
             var descriptors = services
-                .Where(d => d.ServiceType.FullName?.StartsWith("MassTransit") == true)
+                .Where(d =>
+                    d.ServiceType.FullName?.StartsWith("MassTransit", StringComparison.Ordinal) == true ||
+                    d.ImplementationType?.FullName?.StartsWith("MassTransit", StringComparison.Ordinal) == true ||
+                    d.ImplementationInstance?.GetType().FullName?.StartsWith("MassTransit", StringComparison.Ordinal) == true)
                 .ToList();
             foreach (var descriptor in descriptors)
             {
