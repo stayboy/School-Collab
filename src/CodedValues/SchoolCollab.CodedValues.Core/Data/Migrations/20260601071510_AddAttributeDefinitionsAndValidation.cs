@@ -1,3 +1,4 @@
+﻿using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5,21 +6,18 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace SchoolCollab.CodedValues.Core.Data.Migrations
 {
     /// <inheritdoc />
-    public partial class AddAttributeDefinitionsAndSimplifyAttributes : Migration
+    public partial class AddAttributeDefinitionsAndValidation : Migration
     {
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Remove DataType/SourceCode from instance-level attributes
-            migrationBuilder.DropColumn(
-                name: "data_type",
-                table: "coded_value_attributes");
+            migrationBuilder.AddColumn<string>(
+                name: "bus_name",
+                table: "outbox_state",
+                type: "character varying(256)",
+                maxLength: 256,
+                nullable: true);
 
-            migrationBuilder.DropColumn(
-                name: "source_code",
-                table: "coded_value_attributes");
-
-            // Create the new parent-level attribute definitions table
             migrationBuilder.CreateTable(
                 name: "coded_value_attribute_definitions",
                 columns: table => new
@@ -29,18 +27,27 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                     display_name = table.Column<string>(type: "character varying(200)", maxLength: 200, nullable: true),
                     data_type = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
                     source_code = table.Column<string>(type: "character varying(100)", maxLength: 100, nullable: true),
-                    is_required = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false)
+                    is_required = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    allow_multiple = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
+                    min_length = table.Column<int>(type: "integer", nullable: true),
+                    max_length = table.Column<int>(type: "integer", nullable: true),
+                    regex_pattern = table.Column<string>(type: "character varying(500)", maxLength: 500, nullable: true)
                 },
                 constraints: table =>
                 {
                     table.PrimaryKey("pk_coded_value_attribute_definitions", x => new { x.coded_value_id, x.key });
                     table.ForeignKey(
-                        name: "fk_coded_value_attribute_definitions_coded_values_coded_value_id",
+                        name: "fk_coded_value_attribute_definitions_coded_values_coded_value_",
                         column: x => x.coded_value_id,
                         principalTable: "coded_values",
                         principalColumn: "id",
                         onDelete: ReferentialAction.Cascade);
                 });
+
+            migrationBuilder.CreateIndex(
+                name: "ix_outbox_state_bus_name_created",
+                table: "outbox_state",
+                columns: new[] { "bus_name", "created" });
 
             migrationBuilder.CreateIndex(
                 name: "ix_coded_value_attribute_definitions_key",
@@ -51,21 +58,16 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.DropTable(name: "coded_value_attribute_definitions");
+            migrationBuilder.DropTable(
+                name: "coded_value_attribute_definitions");
 
-            migrationBuilder.AddColumn<int>(
-                name: "data_type",
-                table: "coded_value_attributes",
-                type: "integer",
-                nullable: false,
-                defaultValue: 0);
+            migrationBuilder.DropIndex(
+                name: "ix_outbox_state_bus_name_created",
+                table: "outbox_state");
 
-            migrationBuilder.AddColumn<string>(
-                name: "source_code",
-                table: "coded_value_attributes",
-                type: "character varying(100)",
-                maxLength: 100,
-                nullable: true);
+            migrationBuilder.DropColumn(
+                name: "bus_name",
+                table: "outbox_state");
         }
     }
 }

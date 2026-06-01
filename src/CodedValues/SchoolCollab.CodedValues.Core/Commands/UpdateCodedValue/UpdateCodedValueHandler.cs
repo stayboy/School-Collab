@@ -1,5 +1,6 @@
 using MassTransit;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Logging;
 using SchoolCollab.CodedValues.Contracts.Events;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
@@ -11,10 +12,13 @@ namespace SchoolCollab.CodedValues.Core.Commands.UpdateCodedValue;
 public sealed class UpdateCodedValueHandler(
     ICodedValueRepository repository,
     IPublishEndpoint publishEndpoint,
-    HybridCache cache) : ICommandHandler<UpdateCodedValue>
+    HybridCache cache,
+    ILogger<UpdateCodedValueHandler> logger) : ICommandHandler<UpdateCodedValue>
 {
     public async Task HandleAsync(UpdateCodedValue command, CancellationToken cancellationToken = default)
     {
+        logger.LogDebug("Handling UpdateCodedValue {Id}", command.Id);
+
         var codedValue = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new CodedValueNotFoundException(command.Id);
 
@@ -33,5 +37,7 @@ public sealed class UpdateCodedValueHandler(
         }
 
         codedValue.ClearDomainEvents();
+
+        logger.LogInformation("CodedValue {Id} updated", codedValue.Id);
     }
 }

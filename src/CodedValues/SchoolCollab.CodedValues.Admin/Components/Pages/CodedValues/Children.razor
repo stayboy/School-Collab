@@ -2,7 +2,8 @@
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
-@rendermode InteractiveServer
+@inject ILogger<Children> Logger
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 
 <PageTitle>Children of @_parent?.Name</PageTitle>
 
@@ -19,51 +20,58 @@
     + Add Child Value
 </FluentButton>
 
-@if (_loading)
-{
-    <FluentProgressRing />
-}
-else if (_children is { Length: 0 })
-{
-    <FluentMessageBar Intent="MessageIntent.Info">No child values yet.</FluentMessageBar>
-}
-else if (_children is not null)
-{
-    <FluentDataGrid Items="@_children.AsQueryable()" GridTemplateColumns="1fr 2fr 0.5fr 1fr 2fr 2fr" TGridItem="CodedValueDto">
-        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
-            <code>@context.Code</code>
-        </TemplateColumn>
-        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
-        <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
-        <TemplateColumn Title="Status">
-            @if (context.IsDisabled)
-            {
-                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-            }
-            else
-            {
-                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-            }
-        </TemplateColumn>
-        <TemplateColumn Title="Attributes">
-            @foreach (var attr in context.Attributes)
-            {
-                <FluentBadge Appearance="Appearance.Lightweight" class="me-1">@attr.Key=@attr.Value</FluentBadge>
-            }
-        </TemplateColumn>
-        <TemplateColumn Title="Actions">
-            <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo($"/coded-values/{context.Id}/edit"))">Edit</FluentButton>
-            @if (context.IsDisabled)
-            {
-                <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, false))" class="ms-1">Enable</FluentButton>
-            }
-            else
-            {
-                <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, true))" class="ms-1">Disable</FluentButton>
-            }
-        </TemplateColumn>
-    </FluentDataGrid>
-}
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (_children is { Length: 0 })
+        {
+            <FluentMessageBar Intent="MessageIntent.Info">No child values yet.</FluentMessageBar>
+        }
+        else if (_children is not null)
+        {
+            <FluentDataGrid Items="@_children.AsQueryable()" GridTemplateColumns="1fr 2fr 0.5fr 1fr 2fr 2fr" TGridItem="CodedValueDto">
+                <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
+                    <code>@context.Code</code>
+                </TemplateColumn>
+                <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
+                <TemplateColumn Title="Status">
+                    @if (context.IsDisabled)
+                    {
+                        <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+                    }
+                    else
+                    {
+                        <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                    }
+                </TemplateColumn>
+                <TemplateColumn Title="Attributes">
+                    @foreach (var attr in context.Attributes)
+                    {
+                        <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">@attr.Key=@attr.Value</FluentBadge>
+                    }
+                </TemplateColumn>
+                <TemplateColumn Title="Actions">
+                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo($"/coded-values/{context.Id}/edit"))">Edit</FluentButton>
+                    @if (context.IsDisabled)
+                    {
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, false))" class="ms-1">Enable</FluentButton>
+                    }
+                    else
+                    {
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, true))" class="ms-1">Disable</FluentButton>
+                    }
+                </TemplateColumn>
+            </FluentDataGrid>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
 
 @if (!string.IsNullOrEmpty(_error))
 {
@@ -83,13 +91,19 @@ else if (_children is not null)
 
     protected override async Task OnInitializedAsync()
     {
+        Logger.LogInformation("Loading children for parent {ParentId}", ParentId);
         try
         {
-            _parent = await Api.GetByIdAsync(ParentId);
-            _children = await Api.GetChildrenAsync(ParentId);
+            var parentTask = Api.GetByIdAsync(ParentId);
+            var childrenTask = Api.GetChildrenAsync(ParentId);
+            await Task.WhenAll(parentTask, childrenTask);
+            _parent = parentTask.Result;
+            _children = childrenTask.Result;
+            Logger.LogInformation("Loaded parent {ParentId} with {Count} children", ParentId, _children?.Length ?? 0);
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load children for parent {ParentId}", ParentId);
             _error = ex.Message;
         }
         finally
@@ -111,6 +125,7 @@ else if (_children is not null)
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
             _error = ex.Message;
         }
     }

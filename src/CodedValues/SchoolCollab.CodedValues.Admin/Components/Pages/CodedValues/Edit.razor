@@ -2,73 +2,69 @@
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
-@rendermode InteractiveServer
+@inject ILogger<Edit> Logger
+@rendermode @(new InteractiveServerRenderMode(prerender: false))
 
 <PageTitle>Edit @_item?.Name</PageTitle>
 <h2>Edit: @_item?.Code</h2>
 
-@if (_loading)
-{
-    <p><em>Loading…</em></p>
-}
-else if (_item is not null)
-{
-    <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="row g-3" style="max-width:600px">
-        <DataAnnotationsValidator />
-        <ValidationSummary />
-
-        <div class="col-12">
-            <label class="form-label">Code</label>
-            <input class="form-control" value="@_item.Code" disabled />
-        </div>
-        <div class="col-12">
-            <label class="form-label">Name *</label>
-            <InputText class="form-control" @bind-Value="_model.Name" />
-        </div>
-        <div class="col-12">
-            <label class="form-label">Description</label>
-            <InputTextArea class="form-control" @bind-Value="_model.Description" rows="2" />
-        </div>
-        <div class="col-4">
-            <label class="form-label">Display Order</label>
-            <InputNumber class="form-control" @bind-Value="_model.DisplayOrder" />
-        </div>
-
-        @if (!string.IsNullOrEmpty(_error))
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
         {
-            <div class="col-12"><div class="alert alert-danger">@_error</div></div>
+            <FluentProgressRing />
         }
+        else if (_item is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="SubmitAsync" style="max-width:600px">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
 
-        <div class="col-12">
-            <button type="submit" class="btn btn-primary" disabled="@_saving">
-                @(_saving ? "Saving…" : "Save")
-            </button>
-            <button type="button" class="btn btn-secondary ms-2" @onclick="Cancel">Cancel</button>
-        </div>
-    </EditForm>
+                <FluentTextField Value="@_item.Code" Disabled="true" Label="Code" style="width:100%" class="mb-3" />
+                <FluentTextField @bind-Value="_model.Name" Label="Name *" style="width:100%" class="mb-3" />
+                <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" style="width:100%" class="mb-3" />
+                <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" style="width:200px" class="mb-3" />
 
-    <hr class="my-4" />
-    <h5>Attributes</h5>
-    @if (_item.Attributes.Count > 0)
-    {
-        <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1fr auto" TGridItem="KeyValuePair<string, string>" style="max-width:520px">
-            <PropertyColumn Property="@(a => a.Key)" />
-            <PropertyColumn Property="@(a => a.Value)" />
-            <TemplateColumn Title="">
-                <FluentButton Appearance="Appearance.Outline"
-                              OnClick="@(() => RemoveAttributeAsync(context.Key))">Remove</FluentButton>
-            </TemplateColumn>
-        </FluentDataGrid>
-    }
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
+                }
 
-    <div class="row g-2 mt-2" style="max-width:520px">
-        <div class="col-5"><FluentTextField @bind-Value="_attrKey" Placeholder="key" style="width:100%" /></div>
-        <div class="col-5"><FluentTextField @bind-Value="_attrValue" Placeholder="value" style="width:100%" /></div>
-        <div class="col-2">
-            <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync" style="width:100%">Add</FluentButton>
-        </div>
-    </div>
-}
+                <div>
+                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                        @(_saving ? "Saving…" : "Save")
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="ms-2">Cancel</FluentButton>
+                </div>
+            </EditForm>
+
+            <hr class="my-4" />
+            <h5>Attributes</h5>
+            @if (_item.Attributes.Count > 0)
+            {
+                <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1fr auto" TGridItem="KeyValuePair<string, string>" style="max-width:520px">
+                    <PropertyColumn Property="@(a => a.Key)" />
+                    <PropertyColumn Property="@(a => a.Value)" />
+                    <TemplateColumn Title="">
+                        <FluentButton Appearance="Appearance.Outline"
+                                      OnClick="@(() => RemoveAttributeAsync(context.Key))">Remove</FluentButton>
+                    </TemplateColumn>
+                </FluentDataGrid>
+            }
+
+            <div class="row g-2 mt-2" style="max-width:520px">
+                <div class="col-5"><FluentTextField @bind-Value="_attrKey" Placeholder="key" style="width:100%" /></div>
+                <div class="col-5"><FluentTextField @bind-Value="_attrValue" Placeholder="value" style="width:100%" /></div>
+                <div class="col-2">
+                    <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync" style="width:100%">Add</FluentButton>
+                </div>
+            </div>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
 
 @code {
     [Parameter] public Guid Id { get; set; }
@@ -83,6 +79,7 @@ else if (_item is not null)
 
     protected override async Task OnInitializedAsync()
     {
+        Logger.LogInformation("Loading coded value {Id} for edit", Id);
         try
         {
             _item = await Api.GetByIdAsync(Id);
@@ -95,6 +92,7 @@ else if (_item is not null)
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to load coded value {Id}", Id);
             _error = ex.Message;
         }
         finally
@@ -110,6 +108,7 @@ else if (_item is not null)
 
         try
         {
+            Logger.LogInformation("User initiated update for coded value {Id}", Id);
             await Api.UpdateAsync(Id, new UpdateCodedValueRequest(_model.Name!, _model.Description, _model.DisplayOrder));
             Nav.NavigateTo(_item?.ParentId.HasValue == true
                 ? $"/coded-values/{_item.ParentId}/children"
@@ -117,6 +116,7 @@ else if (_item is not null)
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to save coded value {Id}", Id);
             _error = ex.Message;
         }
         finally
@@ -140,6 +140,7 @@ else if (_item is not null)
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to add attribute {Key} to coded value {Id}", _attrKey, Id);
             _error = ex.Message;
         }
     }
@@ -153,6 +154,7 @@ else if (_item is not null)
         }
         catch (Exception ex)
         {
+            Logger.LogError(ex, "Failed to remove attribute {Key} from coded value {Id}", key, Id);
             _error = ex.Message;
         }
     }

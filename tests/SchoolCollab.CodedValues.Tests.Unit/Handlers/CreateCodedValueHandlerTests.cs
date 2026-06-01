@@ -1,6 +1,7 @@
 using FluentAssertions;
 using MassTransit;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Logging;
 using Moq;
 using SchoolCollab.CodedValues.Core.Commands.CreateCodedValue;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
@@ -15,6 +16,7 @@ public class CreateCodedValueHandlerTests
     private Mock<ICodedValueRepository> _repository = default!;
     private Mock<IPublishEndpoint> _publishEndpoint = default!;
     private Mock<HybridCache> _cache = default!;
+    private Mock<ILogger<CreateCodedValueHandler>> _logger = default!;
     private CreateCodedValueHandler _handler = default!;
 
     [TestInitialize]
@@ -23,7 +25,8 @@ public class CreateCodedValueHandlerTests
         _repository = new Mock<ICodedValueRepository>();
         _publishEndpoint = new Mock<IPublishEndpoint>();
         _cache = new Mock<HybridCache>();
-        _handler = new CreateCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object);
+        _logger = new Mock<ILogger<CreateCodedValueHandler>>();
+        _handler = new CreateCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object, _logger.Object);
     }
 
     [TestMethod]

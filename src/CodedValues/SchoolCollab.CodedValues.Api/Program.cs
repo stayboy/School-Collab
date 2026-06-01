@@ -83,13 +83,13 @@ app.MapGet("/coded-values/by-parent", async (
 
 app.MapPost("/coded-values", async (
     [FromBody] CreateCodedValue command,
-    [FromServices] ICommandHandler<CreateCodedValue> handler,
+    [FromServices] ICommandHandler<CreateCodedValue, Guid> handler,
     CancellationToken ct) =>
 {
     try
     {
-        await handler.HandleAsync(command, ct);
-        return Results.Created("/coded-values", null);
+        var id = await handler.HandleAsync(command, ct);
+        return Results.Created($"/coded-values/{id}", new { id });
     }
     catch (DuplicateCodeException ex)
     {
