@@ -7,22 +7,35 @@ These instructions apply to every file in this repository.
 ## Skill discovery (read first)
 
 When you need a skill — for code review, PR description, testing, deployment,
-documentation, design review, etc. — **always start at
-[https://awesome-copilot.github.com/skills/](https://awesome-copilot.github.com/skills/)**.
+documentation, design review, etc. — **always start at one of these two
+canonical catalogs** before any other source:
 
-- The catalog is searchable; a machine-readable `llms.txt` is available at
-  [https://awesome-copilot.github.com/llms.txt](https://awesome-copilot.github.com/llms.txt)
-  for bulk skill discovery.
-- Skills live at `https://raw.githubusercontent.com/github/awesome-copilot/main/skills/<skill-name>/SKILL.md`
-  — fetch the raw `SKILL.md` to read or quote one.
-- If a suitable skill exists in the catalog, use it (or install it via
-  `copilot plugin install <skill>@awesome-copilot`) before falling back to ad-hoc
-  authoring or other registries.
-- Do **not** invent skills from third-party registries (e.g. `awesome-skills`,
-  `kevintsengtw/*`, etc.) without an explicit user request — the awesome-copilot
-  catalog is the single source of truth.
-- If the catalog has nothing relevant, say so explicitly, then propose a custom
-  approach. Do not silently swap in a different source.
+1. **[https://awesome-copilot.github.com/skills/](https://awesome-copilot.github.com/skills/)**
+   — community-curated Copilot skills (Skill `name`/description metadata, with a
+   machine-readable `llms.txt` at
+   [https://awesome-copilot.github.com/llms.txt](https://awesome-copilot.github.com/llms.txt)).
+   Skills live at
+   `https://raw.githubusercontent.com/github/awesome-copilot/main/skills/<skill-name>/SKILL.md`.
+2. **[https://github.com/microsoft/skills](https://github.com/microsoft/skills)**
+   — Microsoft-authored skills, MCP servers, and tools. Use this catalog when
+   looking for first-party Microsoft patterns (Aspire, Azure SDKs, .NET,
+   TypeScript/JS, etc.) or for the official Microsoft MCP / tool
+   implementations that ship alongside a service.
+
+Workflow:
+
+- Pick the catalog that best matches the source: **awesome-copilot** for
+  community/third-party patterns, **microsoft/skills** for first-party
+  Microsoft/Microsoft-owned tooling.
+- Search the chosen catalog (use `llms.txt` for awesome-copilot when doing bulk
+  discovery). For microsoft/skills, browse the repo's `skills/`, `mcp/`, and
+  `tools/` directories.
+- If a suitable skill exists, use it (or install it via the documented install
+  command) before falling back to ad-hoc authoring.
+- If the catalog has nothing relevant, say so explicitly, then propose a
+  custom approach. Do not silently swap in a different source (e.g.
+  `awesome-skills`, `kevintsengtw/*`, etc.) without an explicit user
+  request.
 
 ---
 
