@@ -4,7 +4,6 @@
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
 
 <PageTitle>@(ParentId.HasValue ? "Add Child Value" : "New Category")</PageTitle>
 <h2>@(ParentId.HasValue ? "Add Child Value" : "New Coded Value Category")</h2>

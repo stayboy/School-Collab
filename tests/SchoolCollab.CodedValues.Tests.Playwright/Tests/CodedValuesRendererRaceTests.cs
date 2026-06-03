@@ -10,17 +10,20 @@ namespace SchoolCollab.CodedValues.Tests.Playwright.Tests;
 /// Regression tests for the "The renderer does not have a component with ID N"
 /// error reported on the coded-values landing page.
 ///
-/// Theory:
-///   / and /coded-values use [StreamRendering(true)] and load data in
-///   OnInitializedAsync. If the user navigates away before the load completes,
-///   the streaming renderer is torn down. A late continuation that mutates
-///   component state (or calls StateHasChanged) on the disposed component
-///   throws ArgumentException: "The renderer does not have a component with
-///   ID {N}" from Renderer.GetRequiredComponentState.
+/// History:
+///   The landing page previously opted into [StreamRendering(true)] for fast
+///   first-paint. The streaming renderer is torn down as soon as the response
+///   body finishes flushing, so a late OnInitializedAsync continuation (or an
+///   optimistic-rollback StateHasChanged()) that ran after the user navigated
+///   away mutated a disposed component and threw
+///   "The renderer does not have a component with ID {N}" from
+///   Renderer.GetRequiredComponentState.
 ///
-///   The landing page guards the post-await body with a _disposed flag set
-///   in Dispose() — these tests slow the API with page.route() and race a
-///   second navigation to make the timing reproducible.
+///   The fix is to disable prerendering globally in App.razor — keeping the
+///   circuit attached to the component for its full lifetime — and to guard
+///   post-await state writes with a _disposed flag as defense in depth. These
+///   tests exercise the race by routing the API call with a delay and then
+///   navigating away before the load completes.
 /// </summary>
 [TestClass]
 public class CodedValuesRendererRaceTests : PageTest

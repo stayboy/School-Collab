@@ -157,23 +157,36 @@ The pipeline is: **Serilog → OTLP gRPC → Aspire dashboard**.
 
 ### Render mode and pre-rendering
 
-All interactive pages use `@rendermode InteractiveServer`. In .NET 10, this pre-renders
-via SSR *then* re-renders once the SignalR circuit connects — meaning `OnInitializedAsync`
-runs **twice** and all API calls are made twice.
-
-**Always disable pre-rendering** on interactive pages to prevent duplicate API calls:
+The render mode is set **once** for the entire app on `<Routes>` and `<HeadOutlet>` in
+`Components/App.razor`. Pages **must not** declare `@rendermode` themselves — they
+inherit the global default.
 
 ```razor
-@* ✅ correct — no double execution *@
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@* ✅ correct — declared once in App.razor, inherited by every page *@
+<HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+<Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
 
-@* ❌ wrong — causes OnInitializedAsync to run twice *@
+@* ❌ wrong — per-page rendermode drifts and re-enables prerendering *@
 @rendermode InteractiveServer
 ```
 
-For static display-only pages, use `@attribute [StreamRendering(true)]` instead — this
-sends the loading placeholder immediately over HTTP and streams real content when the data
-returns, giving the fastest perceived load without a SignalR circuit.
+The default for this project is **Interactive Server with pre-rendering disabled**:
+
+- **Pre-rendering is off at the app level** so `OnInitializedAsync` runs exactly once
+  (no duplicate API calls, no duplicate component-tree construction). In .NET 10,
+  `InteractiveServer` *with* prerendering would run `OnInitializedAsync` twice and
+  double every API call.
+- The list-bearing landing page therefore relies on `OnInitializedAsync` to populate
+  the first render directly, with `<FluentProgressRing />` as the loading state.
+
+If a single page genuinely needs a different mode (e.g. static SSR, or a child
+component that must opt out), declare `@rendermode` on **that page or instance
+only** and add a comment explaining why. The pre-render flag of a child is
+ignored when a parent already specifies a render mode, so app-wide changes
+must be made in `App.razor`.
+
+For the rationale (and the renderer race that was the original motivation), see
+the rule below and the "Landing-page performance pattern" block further down.
 
 ### Parallel data loading
 
@@ -289,15 +302,12 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
 **canonical example** for read-only public pages. Every new read-only list/detail page
 **must** follow the same pattern:
 
-1. **Stream-render, not InteractiveServer.** The list is the same for every visitor —
-   there is no per-user state, no form bindings, no event handlers that need a
-   SignalR circuit. Use:
-   ```razor
-   @attribute [StreamRendering(true)]
-   ```
-   First paint arrives in one network round-trip (HTML + data over a single response).
-   Reserve `@rendermode @(new InteractiveServerRenderMode(prerender: false))` for
-   pages that have form state (`Create.razor`, `Edit.razor`).
+1. **Interactive Server with pre-render disabled — the app's default.** The list page
+   has event handlers (`OnClick` for navigation, `OnToggleAsync` for Enable/Disable)
+   that require an interactive circuit. It inherits the global render mode from
+   `App.razor` and does **not** declare its own `@rendermode`. Do not add
+   `[StreamRendering(true)]` or a per-page `@rendermode` to list pages — see the
+   "Render mode and pre-rendering" rule above.
 
 2. **Optimistic UI mutations, not full re-fetch.** When a row action changes a single
    field (Enable/Disable, Toggle, Increment), mutate the in-memory DTO with `with`,
