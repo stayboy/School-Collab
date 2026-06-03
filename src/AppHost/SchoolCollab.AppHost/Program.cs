@@ -12,7 +12,14 @@ var postgres = builder.AddPostgres("postgres", password: pgPassword)
     .WithLifetime(ContainerLifetime.Persistent)
     .WithPgAdmin();
 
-var rabbit = builder.AddRabbitMQ("rabbitmq")
+// Pin the rabbitmq default user password so it stays stable across AppHost
+// sessions. Same rationale as the postgres password: Aspire regenerates
+// RABBITMQ_DEFAULT_PASS on every run, but the persisted data volume keeps
+// the `guest` user from the previous run, so the env-var-based bootstrap is
+// silently skipped and every PLAIN login fails with "invalid credentials".
+var rabbitPassword = builder.AddParameter("rabbitmq-password", secret: true);
+
+var rabbit = builder.AddRabbitMQ("rabbitmq", password: rabbitPassword)
     .WithDataVolume()
     .WithLifetime(ContainerLifetime.Persistent)
     .WithManagementPlugin();
