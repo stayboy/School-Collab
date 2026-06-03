@@ -4,6 +4,41 @@ These instructions apply to every file in this repository.
 
 ---
 
+## Skill discovery (read first)
+
+When you need a skill — for code review, PR description, testing, deployment,
+documentation, design review, etc. — **always start at one of these two
+canonical catalogs** before any other source:
+
+1. **[https://awesome-copilot.github.com/skills/](https://awesome-copilot.github.com/skills/)**
+   — community-curated Copilot skills (Skill `name`/description metadata, with a
+   machine-readable `llms.txt` at
+   [https://awesome-copilot.github.com/llms.txt](https://awesome-copilot.github.com/llms.txt)).
+   Skills live at
+   `https://raw.githubusercontent.com/github/awesome-copilot/main/skills/<skill-name>/SKILL.md`.
+2. **[https://github.com/microsoft/skills](https://github.com/microsoft/skills)**
+   — Microsoft-authored skills, MCP servers, and tools. Use this catalog when
+   looking for first-party Microsoft patterns (Aspire, Azure SDKs, .NET,
+   TypeScript/JS, etc.) or for the official Microsoft MCP / tool
+   implementations that ship alongside a service.
+
+Workflow:
+
+- Pick the catalog that best matches the source: **awesome-copilot** for
+  community/third-party patterns, **microsoft/skills** for first-party
+  Microsoft/Microsoft-owned tooling.
+- Search the chosen catalog (use `llms.txt` for awesome-copilot when doing bulk
+  discovery). For microsoft/skills, browse the repo's `skills/`, `mcp/`, and
+  `tools/` directories.
+- If a suitable skill exists, use it (or install it via the documented install
+  command) before falling back to ad-hoc authoring.
+- If the catalog has nothing relevant, say so explicitly, then propose a
+  custom approach. Do not silently swap in a different source (e.g.
+  `awesome-skills`, `kevintsengtw/*`, etc.) without an explicit user
+  request.
+
+---
+
 ## Logging
 
 All logging in this project flows through **Serilog** wired to **Aspire's OTLP pipeline**.
@@ -122,23 +157,36 @@ The pipeline is: **Serilog → OTLP gRPC → Aspire dashboard**.
 
 ### Render mode and pre-rendering
 
-All interactive pages use `@rendermode InteractiveServer`. In .NET 10, this pre-renders
-via SSR *then* re-renders once the SignalR circuit connects — meaning `OnInitializedAsync`
-runs **twice** and all API calls are made twice.
-
-**Always disable pre-rendering** on interactive pages to prevent duplicate API calls:
+The render mode is set **once** for the entire app on `<Routes>` and `<HeadOutlet>` in
+`Components/App.razor`. Pages **must not** declare `@rendermode` themselves — they
+inherit the global default.
 
 ```razor
-@* ✅ correct — no double execution *@
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@* ✅ correct — declared once in App.razor, inherited by every page *@
+<HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
+<Routes @rendermode="new InteractiveServerRenderMode(prerender: false)" />
 
-@* ❌ wrong — causes OnInitializedAsync to run twice *@
+@* ❌ wrong — per-page rendermode drifts and re-enables prerendering *@
 @rendermode InteractiveServer
 ```
 
-For static display-only pages, use `@attribute [StreamRendering(true)]` instead — this
-sends the loading placeholder immediately over HTTP and streams real content when the data
-returns, giving the fastest perceived load without a SignalR circuit.
+The default for this project is **Interactive Server with pre-rendering disabled**:
+
+- **Pre-rendering is off at the app level** so `OnInitializedAsync` runs exactly once
+  (no duplicate API calls, no duplicate component-tree construction). In .NET 10,
+  `InteractiveServer` *with* prerendering would run `OnInitializedAsync` twice and
+  double every API call.
+- The list-bearing landing page therefore relies on `OnInitializedAsync` to populate
+  the first render directly, with `<FluentProgressRing />` as the loading state.
+
+If a single page genuinely needs a different mode (e.g. static SSR, or a child
+component that must opt out), declare `@rendermode` on **that page or instance
+only** and add a comment explaining why. The pre-render flag of a child is
+ignored when a parent already specifies a render mode, so app-wide changes
+must be made in `App.razor`.
+
+For the rationale (and the renderer race that was the original motivation), see
+the rule below and the "Landing-page performance pattern" block further down.
 
 ### Parallel data loading
 
@@ -247,6 +295,116 @@ protected override bool ShouldRender()
     return true;
 }
 ```
+
+### Landing-page performance pattern
+
+The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is the
+**canonical example** for read-only public pages. Every new read-only list/detail page
+**must** follow the same pattern:
+
+1. **Interactive Server with pre-render disabled — the app's default.** The list page
+   has event handlers (`OnClick` for navigation, `OnToggleAsync` for Enable/Disable)
+   that require an interactive circuit. It inherits the global render mode from
+   `App.razor` and does **not** declare its own `@rendermode`. Do not add
+   `[StreamRendering(true)]` or a per-page `@rendermode` to list pages — see the
+   "Render mode and pre-rendering" rule above.
+
+2. **Optimistic UI mutations, not full re-fetch.** When a row action changes a single
+   field (Enable/Disable, Toggle, Increment), mutate the in-memory DTO with `with`,
+   call `StateHasChanged()`, dispatch the API call in the background, and roll back
+   on failure. **Never call `LoadAsync()` after a single-row mutation** — that
+   re-serialises the entire list and resets the user's sort/scroll state.
+   ```csharp
+   private async Task OnToggleAsync(Guid id, bool disable)
+   {
+       if (_items is null) return;
+       var idx = Array.FindIndex(_items, x => x.Id == id);
+       if (idx < 0) return;
+       var previous = _items[idx];
+       _items[idx] = previous with { IsDisabled = disable };
+       StateHasChanged();
+       try { await (disable ? Api.DisableAsync(id) : Api.EnableAsync(id)); }
+       catch (Exception ex)
+       {
+           Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
+           var i = Array.FindIndex(_items, x => x.Id == id);
+           if (i >= 0) _items[i] = previous;   // rollback
+           _error = ex.Message;
+           StateHasChanged();
+       }
+   }
+   ```
+
+3. **Always implement `IDisposable` and pass a `CancellationToken`.** Every page that
+   loads data in `OnInitializedAsync` must own a `CancellationTokenSource`, pass its
+   token into every `Api.*Async(ct)` call, and dispose the CTS in `Dispose()`. This
+   aborts the in-flight HTTP request when the user navigates away and prevents
+   setting state on an unmounted component.
+   ```csharp
+   @implements IDisposable
+
+   @code {
+       private CancellationTokenSource? _loadCts;
+       private volatile bool _disposed;
+
+       protected override async Task OnInitializedAsync()
+       {
+           _loadCts = new CancellationTokenSource();
+           try
+           {
+               _items = await Api.GetRootValuesAsync(_loadCts.Token);
+               if (_disposed) return;   // <-- ALWAYS guard post-await state writes
+               Logger.LogInformation("Loaded {Count}", _items?.Length ?? 0);
+           }
+           catch (OperationCanceledException) { /* user navigated away */ }
+           catch (Exception ex)
+           {
+               if (_disposed) return;   // <-- and again on the error path
+               _error = ex.Message;
+           }
+       }
+
+       public void Dispose()
+       {
+           _disposed = true;            // <-- set this FIRST so the continuation
+                                        //     sees it even if Cancel() races
+           _loadCts?.Cancel();
+           _loadCts?.Dispose();
+           _loadCts = null;
+       }
+   }
+   ```
+   **Why the `_disposed` guard matters:** even with the CTS, the awaited continuation
+   can still run after the renderer is torn down (e.g. the HTTP response has flushed
+   its placeholder and the streaming renderer was discarded). Setting `_disposed = true`
+   inside `Dispose()` and checking it *after every `await`* prevents mutating state on
+   a detached component, which would otherwise throw
+   `ArgumentException: "The renderer does not have a component with ID {N}"` from
+   `Renderer.GetRequiredComponentState`. The `_disposed` flag must be checked after
+   the `await` in `OnInitializedAsync` *and* before every `StateHasChanged()` in
+   event handlers that may still be in-flight (e.g. optimistic-toggle rollback).
+   See `CodedValuesRendererRaceTests` for a Playwright test that reliably reproduces
+   the race by slowing the API with `page.route()` and triggering a second
+   navigation.
+
+4. **Use the "items null" pattern for loading state**, not a `_loading` bool. The
+   streaming-rendering placeholder is shown automatically while `_items is null`.
+   The `else if (_items.Length == 0)` branch handles the empty case.
+   ```razor
+   @if (_items is null)         { <FluentProgressRing /> }
+   else if (_items.Length == 0) { <FluentMessageBar>No items yet.</FluentMessageBar> }
+   else                         { <FluentDataGrid ... /> }
+   ```
+
+5. **Keep the slim payload on the landing endpoint.** The landing page never renders
+   `Attributes` — don't transfer them. If the current DTO includes
+   `IReadOnlyCollection<CodedValueAttributeDto>`, add a `CodedValueSummaryDto`
+   projection to the API and a matching `GetRootSummariesAsync()` on the client.
+   (Pending implementation — tracked in `lp-slim-dto` todo.)
+
+6. **Reference implementation:** `src/CodedValues/SchoolCollab.CodedValues.Admin/Components/Pages/CodedValues/Index.razor`.
+   When you create a new read-only list page, copy that file and change only the
+   route, the title, the API call, and the columns.
 
 ---
 
