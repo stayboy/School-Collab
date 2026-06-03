@@ -4,6 +4,28 @@ These instructions apply to every file in this repository.
 
 ---
 
+## Skill discovery (read first)
+
+When you need a skill — for code review, PR description, testing, deployment,
+documentation, design review, etc. — **always start at
+[https://awesome-copilot.github.com/skills/](https://awesome-copilot.github.com/skills/)**.
+
+- The catalog is searchable; a machine-readable `llms.txt` is available at
+  [https://awesome-copilot.github.com/llms.txt](https://awesome-copilot.github.com/llms.txt)
+  for bulk skill discovery.
+- Skills live at `https://raw.githubusercontent.com/github/awesome-copilot/main/skills/<skill-name>/SKILL.md`
+  — fetch the raw `SKILL.md` to read or quote one.
+- If a suitable skill exists in the catalog, use it (or install it via
+  `copilot plugin install <skill>@awesome-copilot`) before falling back to ad-hoc
+  authoring or other registries.
+- Do **not** invent skills from third-party registries (e.g. `awesome-skills`,
+  `kevintsengtw/*`, etc.) without an explicit user request — the awesome-copilot
+  catalog is the single source of truth.
+- If the catalog has nothing relevant, say so explicitly, then propose a custom
+  approach. Do not silently swap in a different source.
+
+---
+
 ## Logging
 
 All logging in this project flows through **Serilog** wired to **Aspire's OTLP pipeline**.
@@ -247,6 +269,90 @@ protected override bool ShouldRender()
     return true;
 }
 ```
+
+### Landing-page performance pattern
+
+The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is the
+**canonical example** for read-only public pages. Every new read-only list/detail page
+**must** follow the same pattern:
+
+1. **Stream-render, not InteractiveServer.** The list is the same for every visitor —
+   there is no per-user state, no form bindings, no event handlers that need a
+   SignalR circuit. Use:
+   ```razor
+   @attribute [StreamRendering(true)]
+   ```
+   First paint arrives in one network round-trip (HTML + data over a single response).
+   Reserve `@rendermode @(new InteractiveServerRenderMode(prerender: false))` for
+   pages that have form state (`Create.razor`, `Edit.razor`).
+
+2. **Optimistic UI mutations, not full re-fetch.** When a row action changes a single
+   field (Enable/Disable, Toggle, Increment), mutate the in-memory DTO with `with`,
+   call `StateHasChanged()`, dispatch the API call in the background, and roll back
+   on failure. **Never call `LoadAsync()` after a single-row mutation** — that
+   re-serialises the entire list and resets the user's sort/scroll state.
+   ```csharp
+   private async Task OnToggleAsync(Guid id, bool disable)
+   {
+       if (_items is null) return;
+       var idx = Array.FindIndex(_items, x => x.Id == id);
+       if (idx < 0) return;
+       var previous = _items[idx];
+       _items[idx] = previous with { IsDisabled = disable };
+       StateHasChanged();
+       try { await (disable ? Api.DisableAsync(id) : Api.EnableAsync(id)); }
+       catch (Exception ex)
+       {
+           Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
+           var i = Array.FindIndex(_items, x => x.Id == id);
+           if (i >= 0) _items[i] = previous;   // rollback
+           _error = ex.Message;
+           StateHasChanged();
+       }
+   }
+   ```
+
+3. **Always implement `IDisposable` and pass a `CancellationToken`.** Every page that
+   loads data in `OnInitializedAsync` must own a `CancellationTokenSource`, pass its
+   token into every `Api.*Async(ct)` call, and dispose the CTS in `Dispose()`. This
+   aborts the in-flight HTTP request when the user navigates away and prevents
+   setting state on an unmounted component.
+   ```csharp
+   @implements IDisposable
+
+   @code {
+       private CancellationTokenSource? _loadCts;
+
+       protected override async Task OnInitializedAsync()
+       {
+           _loadCts = new CancellationTokenSource();
+           try { _items = await Api.GetRootValuesAsync(_loadCts.Token); }
+           catch (OperationCanceledException) { /* user navigated away */ }
+           catch (Exception ex) { _error = ex.Message; }
+       }
+
+       public void Dispose() { _loadCts?.Cancel(); _loadCts?.Dispose(); _loadCts = null; }
+   }
+   ```
+
+4. **Use the "items null" pattern for loading state**, not a `_loading` bool. The
+   streaming-rendering placeholder is shown automatically while `_items is null`.
+   The `else if (_items.Length == 0)` branch handles the empty case.
+   ```razor
+   @if (_items is null)         { <FluentProgressRing /> }
+   else if (_items.Length == 0) { <FluentMessageBar>No items yet.</FluentMessageBar> }
+   else                         { <FluentDataGrid ... /> }
+   ```
+
+5. **Keep the slim payload on the landing endpoint.** The landing page never renders
+   `Attributes` — don't transfer them. If the current DTO includes
+   `IReadOnlyCollection<CodedValueAttributeDto>`, add a `CodedValueSummaryDto`
+   projection to the API and a matching `GetRootSummariesAsync()` on the client.
+   (Pending implementation — tracked in `lp-slim-dto` todo.)
+
+6. **Reference implementation:** `src/CodedValues/SchoolCollab.CodedValues.Admin/Components/Pages/CodedValues/Index.razor`.
+   When you create a new read-only list page, copy that file and change only the
+   route, the title, the API call, and the columns.
 
 ---
 

@@ -1,9 +1,11 @@
+@page "/"
 @page "/coded-values"
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
-@rendermode @(new InteractiveServerRenderMode(prerender: false))
+@implements IDisposable
+@attribute [StreamRendering(true)]
 
 <PageTitle>Coded Values</PageTitle>
 
@@ -15,15 +17,15 @@
             + New Category
         </FluentButton>
 
-        @if (_loading)
+        @if (_items is null)
         {
             <FluentProgressRing />
         }
-        else if (_items is { Length: 0 })
+        else if (_items.Length == 0)
         {
             <FluentMessageBar Intent="MessageIntent.Info">No coded value categories yet.</FluentMessageBar>
         }
-        else if (_items is not null)
+        else
         {
             <FluentDataGrid Items="@_items.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 1fr 2fr" TGridItem="CodedValueDto">
                 <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
@@ -47,11 +49,11 @@
                     <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo($"/coded-values/{context.Id}/edit"))">Edit</FluentButton>
                     @if (context.IsDisabled)
                     {
-                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, false))" class="ms-1">Enable</FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="ms-1">Enable</FluentButton>
                     }
                     else
                     {
-                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, true))" class="ms-1">Disable</FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="ms-1">Disable</FluentButton>
                     }
                 </TemplateColumn>
             </FluentDataGrid>
@@ -69,54 +71,72 @@
 
 @code {
     private CodedValueDto[]? _items;
-    private bool _loading = true;
     private string? _error;
+    private CancellationTokenSource? _loadCts;
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);
 
     protected override async Task OnInitializedAsync()
     {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
         Logger.LogInformation("Loading coded values list");
-        await LoadAsync();
-    }
-
-    private async Task LoadAsync()
-    {
-        _loading = true;
-        _error = null;
-
         try
         {
-            _items = await Api.GetRootValuesAsync();
-            Logger.LogInformation("Loaded {Count} coded values", _items.Length);
+            _items = await Api.GetRootValuesAsync(token);
+            Logger.LogInformation("Loaded {Count} coded values", _items?.Length ?? 0);
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away — leave _items null, no UI update
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to load coded values");
             _error = ex.Message;
         }
-        finally
-        {
-            _loading = false;
-        }
     }
 
-    private async Task ToggleAsync(Guid id, bool disable)
+    /// <summary>
+    /// Optimistic toggle: flip the in-memory DTO, render immediately, dispatch the
+    /// API call in the background, and roll back on failure. Avoids a full re-fetch
+    /// of the root list for a one-bit change.
+    /// </summary>
+    private async Task OnToggleAsync(Guid id, bool disable)
     {
+        if (_items is null) return;
+        var idx = Array.FindIndex(_items, x => x.Id == id);
+        if (idx < 0) return;
+
+        var previous = _items[idx];
+        _items[idx] = previous with { IsDisabled = disable };
+        StateHasChanged();
+
         try
         {
-            if (disable)
-                await Api.DisableAsync(id);
-            else
-                await Api.EnableAsync(id);
-
-            await LoadAsync();
+            if (disable) await Api.DisableAsync(id);
+            else         await Api.EnableAsync(id);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
+            // rollback
+            if (_items is not null)
+            {
+                var i = Array.FindIndex(_items, x => x.Id == id);
+                if (i >= 0) _items[i] = previous;
+            }
             _error = ex.Message;
+            StateHasChanged();
         }
+    }
+
+    public void Dispose()
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
     }
 }

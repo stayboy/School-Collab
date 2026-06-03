@@ -18,12 +18,12 @@ public class CodedValuesAdminTests : PageTest
     };
 
     [TestMethod]
-    public async Task HomePage_LoadsWithTitle()
+    public async Task RootPage_LoadsCodedValuesIndex()
     {
         await Page.GotoAsync("/");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
-        var title = await Page.TitleAsync();
-        title.Should().NotBeNullOrEmpty();
+        await Expect(Page).ToHaveTitleAsync(new Regex("Coded Values", RegexOptions.IgnoreCase));
+        await Expect(Page.GetByRole(AriaRole.Heading, new() { Name = "Coded Values" })).ToBeVisibleAsync();
     }
 
     [TestMethod]
