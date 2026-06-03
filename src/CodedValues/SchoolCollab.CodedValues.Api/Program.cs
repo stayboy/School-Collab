@@ -22,6 +22,7 @@ using SchoolCollab.CodedValues.Core.Queries.ListRootCodedValues;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
+builder.AddRabbitMQClient("rabbitmq");
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
     ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];

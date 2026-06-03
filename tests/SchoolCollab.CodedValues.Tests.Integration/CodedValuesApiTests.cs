@@ -24,6 +24,7 @@ public class CodedValuesApiTests
         _client = _factory.CreateClient();
     }
 
+
     [ClassCleanup]
     public static async Task ClassCleanup()
     {

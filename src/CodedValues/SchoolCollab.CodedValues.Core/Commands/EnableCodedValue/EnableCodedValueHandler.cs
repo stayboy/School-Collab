@@ -1,16 +1,16 @@
-using MassTransit;
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.CodedValues.Contracts.Events;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain.Events;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
+using SchoolCollab.CodedValues.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Core.Commands.EnableCodedValue;
 
 public sealed class EnableCodedValueHandler(
     ICodedValueRepository repository,
-    IPublishEndpoint publishEndpoint,
+    IIntegrationEventPublisher publisher,
     HybridCache cache) : ICommandHandler<EnableCodedValue>
 {
     public async Task HandleAsync(EnableCodedValue command, CancellationToken cancellationToken = default)
@@ -24,7 +24,7 @@ public sealed class EnableCodedValueHandler(
 
         foreach (var _ in codedValue.DomainEvents.OfType<CodedValueEnabledEvent>())
         {
-            await publishEndpoint.Publish(
+            await publisher.EnqueueAsync(
                 new CodedValueEnabled(codedValue.Id, codedValue.Code, codedValue.UpdatedAt),
                 cancellationToken);
         }

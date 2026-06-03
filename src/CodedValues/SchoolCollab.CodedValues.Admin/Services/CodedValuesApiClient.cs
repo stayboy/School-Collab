@@ -1,5 +1,7 @@
 namespace SchoolCollab.CodedValues.Admin.Services;
 
+public record CodedValueAttributeDto(string Key, string Value);
+
 public record CodedValueDto(
     Guid Id,
     string Code,
@@ -10,7 +12,7 @@ public record CodedValueDto(
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    Dictionary<string, string> Attributes);
+    IReadOnlyCollection<CodedValueAttributeDto> Attributes);
 
 public record CreateCodedValueRequest(
     string Code,
