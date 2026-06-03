@@ -73,6 +73,7 @@
     private CodedValueDto[]? _items;
     private string? _error;
     private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);
@@ -86,6 +87,13 @@
         try
         {
             _items = await Api.GetRootValuesAsync(token);
+
+            // Guard: the streaming renderer may have been torn down while we
+            // were awaiting (page navigated away, response cancelled, etc.).
+            // Mutating state on a detached component throws
+            // "The renderer does not have a component with ID {N}."
+            if (_disposed) return;
+
             Logger.LogInformation("Loaded {Count} coded values", _items?.Length ?? 0);
         }
         catch (OperationCanceledException)
@@ -94,6 +102,7 @@
         }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to load coded values");
             _error = ex.Message;
         }
@@ -106,7 +115,7 @@
     /// </summary>
     private async Task OnToggleAsync(Guid id, bool disable)
     {
-        if (_items is null) return;
+        if (_disposed || _items is null) return;
         var idx = Array.FindIndex(_items, x => x.Id == id);
         if (idx < 0) return;
 
@@ -121,6 +130,7 @@
         }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
             // rollback
             if (_items is not null)
@@ -135,6 +145,7 @@
 
     public void Dispose()
     {
+        _disposed = true;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;

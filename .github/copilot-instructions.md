@@ -335,18 +335,47 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
 
    @code {
        private CancellationTokenSource? _loadCts;
+       private volatile bool _disposed;
 
        protected override async Task OnInitializedAsync()
        {
            _loadCts = new CancellationTokenSource();
-           try { _items = await Api.GetRootValuesAsync(_loadCts.Token); }
+           try
+           {
+               _items = await Api.GetRootValuesAsync(_loadCts.Token);
+               if (_disposed) return;   // <-- ALWAYS guard post-await state writes
+               Logger.LogInformation("Loaded {Count}", _items?.Length ?? 0);
+           }
            catch (OperationCanceledException) { /* user navigated away */ }
-           catch (Exception ex) { _error = ex.Message; }
+           catch (Exception ex)
+           {
+               if (_disposed) return;   // <-- and again on the error path
+               _error = ex.Message;
+           }
        }
 
-       public void Dispose() { _loadCts?.Cancel(); _loadCts?.Dispose(); _loadCts = null; }
+       public void Dispose()
+       {
+           _disposed = true;            // <-- set this FIRST so the continuation
+                                        //     sees it even if Cancel() races
+           _loadCts?.Cancel();
+           _loadCts?.Dispose();
+           _loadCts = null;
+       }
    }
    ```
+   **Why the `_disposed` guard matters:** even with the CTS, the awaited continuation
+   can still run after the renderer is torn down (e.g. the HTTP response has flushed
+   its placeholder and the streaming renderer was discarded). Setting `_disposed = true`
+   inside `Dispose()` and checking it *after every `await`* prevents mutating state on
+   a detached component, which would otherwise throw
+   `ArgumentException: "The renderer does not have a component with ID {N}"` from
+   `Renderer.GetRequiredComponentState`. The `_disposed` flag must be checked after
+   the `await` in `OnInitializedAsync` *and* before every `StateHasChanged()` in
+   event handlers that may still be in-flight (e.g. optimistic-toggle rollback).
+   See `CodedValuesRendererRaceTests` for a Playwright test that reliably reproduces
+   the race by slowing the API with `page.route()` and triggering a second
+   navigation.
 
 4. **Use the "items null" pattern for loading state**, not a `_loading` bool. The
    streaming-rendering placeholder is shown automatically while `_items is null`.
