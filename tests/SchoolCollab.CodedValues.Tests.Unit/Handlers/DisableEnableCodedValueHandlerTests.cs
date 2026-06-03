@@ -1,5 +1,4 @@
 using FluentAssertions;
-using MassTransit;
 using Microsoft.Extensions.Caching.Hybrid;
 using Moq;
 using SchoolCollab.CodedValues.Core.Commands.DisableCodedValue;
@@ -7,6 +6,7 @@ using SchoolCollab.CodedValues.Core.Commands.EnableCodedValue;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
+using SchoolCollab.CodedValues.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 
@@ -14,50 +14,50 @@ namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 public class DisableEnableCodedValueHandlerTests
 {
     private Mock<ICodedValueRepository> _repository = default!;
-    private Mock<IPublishEndpoint> _publishEndpoint = default!;
+    private Mock<IIntegrationEventPublisher> _publisher = default!;
     private Mock<HybridCache> _cache = default!;
 
     [TestInitialize]
     public void Setup()
     {
         _repository = new Mock<ICodedValueRepository>();
-        _publishEndpoint = new Mock<IPublishEndpoint>();
+        _publisher = new Mock<IIntegrationEventPublisher>();
         _cache = new Mock<HybridCache>();
     }
 
     [TestMethod]
-    public async Task DisableHandler_WhenFound_DisablesAndPublishes()
+    public async Task DisableHandler_WhenFound_DisablesAndEnqueues()
     {
         var cv = CodedValue.Create("GENDER", "Gender", null, null, 0);
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new DisableCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object);
+        var handler = new DisableCodedValueHandler(_repository.Object, _publisher.Object, _cache.Object);
 
         await handler.HandleAsync(new DisableCodedValue(cv.Id));
 
         cv.IsDisabled.Should().BeTrue();
         _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
-        _publishEndpoint.Verify(p => p.Publish(It.IsAny<SchoolCollab.CodedValues.Contracts.Events.CodedValueDisabled>(), default), Times.Once);
+        _publisher.Verify(p => p.EnqueueAsync(It.IsAny<SchoolCollab.CodedValues.Contracts.Events.CodedValueDisabled>(), default), Times.Once);
     }
 
     [TestMethod]
-    public async Task DisableHandler_WhenAlreadyDisabled_IsIdempotent_NoPublish()
+    public async Task DisableHandler_WhenAlreadyDisabled_IsIdempotent_NoEnqueue()
     {
         var cv = CodedValue.Create("GENDER", "Gender", null, null, 0);
         cv.Disable();
         cv.ClearDomainEvents();
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new DisableCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object);
+        var handler = new DisableCodedValueHandler(_repository.Object, _publisher.Object, _cache.Object);
 
         await handler.HandleAsync(new DisableCodedValue(cv.Id));
 
-        _publishEndpoint.Verify(p => p.Publish(It.IsAny<object>(), default), Times.Never);
+        _publisher.Verify(p => p.EnqueueAsync(It.IsAny<object>(), default), Times.Never);
     }
 
     [TestMethod]
     public async Task DisableHandler_WhenNotFound_ThrowsNotFoundException()
     {
         _repository.Setup(r => r.GetAsync(It.IsAny<Guid>(), default)).ReturnsAsync((CodedValue?)null);
-        var handler = new DisableCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object);
+        var handler = new DisableCodedValueHandler(_repository.Object, _publisher.Object, _cache.Object);
 
         var act = async () => await handler.HandleAsync(new DisableCodedValue(Guid.NewGuid()));
 
@@ -65,17 +65,17 @@ public class DisableEnableCodedValueHandlerTests
     }
 
     [TestMethod]
-    public async Task EnableHandler_WhenDisabled_EnablesAndPublishes()
+    public async Task EnableHandler_WhenDisabled_EnablesAndEnqueues()
     {
         var cv = CodedValue.Create("GENDER", "Gender", null, null, 0);
         cv.Disable();
         cv.ClearDomainEvents();
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new EnableCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object);
+        var handler = new EnableCodedValueHandler(_repository.Object, _publisher.Object, _cache.Object);
 
         await handler.HandleAsync(new EnableCodedValue(cv.Id));
 
         cv.IsDisabled.Should().BeFalse();
-        _publishEndpoint.Verify(p => p.Publish(It.IsAny<SchoolCollab.CodedValues.Contracts.Events.CodedValueEnabled>(), default), Times.Once);
+        _publisher.Verify(p => p.EnqueueAsync(It.IsAny<SchoolCollab.CodedValues.Contracts.Events.CodedValueEnabled>(), default), Times.Once);
     }
 }

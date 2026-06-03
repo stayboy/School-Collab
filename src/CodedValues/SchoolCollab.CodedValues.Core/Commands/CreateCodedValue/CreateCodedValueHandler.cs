@@ -1,4 +1,3 @@
-using MassTransit;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.CodedValues.Contracts.Events;
@@ -7,12 +6,13 @@ using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Domain.Events;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
+using SchoolCollab.CodedValues.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Core.Commands.CreateCodedValue;
 
 public sealed class CreateCodedValueHandler(
     ICodedValueRepository repository,
-    IPublishEndpoint publishEndpoint,
+    IIntegrationEventPublisher publisher,
     HybridCache cache,
     ILogger<CreateCodedValueHandler> logger) : ICommandHandler<CreateCodedValue, Guid>
 {
@@ -39,7 +39,7 @@ public sealed class CreateCodedValueHandler(
 
         foreach (var _ in codedValue.DomainEvents.OfType<CodedValueCreatedEvent>())
         {
-            await publishEndpoint.Publish(new CodedValueCreated(
+            await publisher.EnqueueAsync(new CodedValueCreated(
                 codedValue.Id,
                 codedValue.Code,
                 codedValue.Name,

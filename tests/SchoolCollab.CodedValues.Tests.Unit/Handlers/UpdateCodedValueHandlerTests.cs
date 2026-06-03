@@ -1,5 +1,4 @@
 using FluentAssertions;
-using MassTransit;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -7,6 +6,7 @@ using SchoolCollab.CodedValues.Core.Commands.UpdateCodedValue;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
+using SchoolCollab.CodedValues.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 
@@ -14,7 +14,7 @@ namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 public class UpdateCodedValueHandlerTests
 {
     private Mock<ICodedValueRepository> _repository = default!;
-    private Mock<IPublishEndpoint> _publishEndpoint = default!;
+    private Mock<IIntegrationEventPublisher> _publisher = default!;
     private Mock<HybridCache> _cache = default!;
     private Mock<ILogger<UpdateCodedValueHandler>> _logger = default!;
     private UpdateCodedValueHandler _handler = default!;
@@ -23,14 +23,14 @@ public class UpdateCodedValueHandlerTests
     public void Setup()
     {
         _repository = new Mock<ICodedValueRepository>();
-        _publishEndpoint = new Mock<IPublishEndpoint>();
+        _publisher = new Mock<IIntegrationEventPublisher>();
         _cache = new Mock<HybridCache>();
         _logger = new Mock<ILogger<UpdateCodedValueHandler>>();
-        _handler = new UpdateCodedValueHandler(_repository.Object, _publishEndpoint.Object, _cache.Object, _logger.Object);
+        _handler = new UpdateCodedValueHandler(_repository.Object, _publisher.Object, _cache.Object, _logger.Object);
     }
 
     [TestMethod]
-    public async Task HandleAsync_WhenFound_UpdatesAndPublishes()
+    public async Task HandleAsync_WhenFound_UpdatesAndEnqueues()
     {
         var cv = CodedValue.Create("GENDER", "Gender", null, null, 0);
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
@@ -38,7 +38,7 @@ public class UpdateCodedValueHandlerTests
         await _handler.HandleAsync(new UpdateCodedValue(cv.Id, "Gender Updated", "desc", 1));
 
         _repository.Verify(r => r.UpdateAsync(cv, default), Times.Once);
-        _publishEndpoint.Verify(p => p.Publish(It.IsAny<SchoolCollab.CodedValues.Contracts.Events.CodedValueUpdated>(), default), Times.Once);
+        _publisher.Verify(p => p.EnqueueAsync(It.IsAny<SchoolCollab.CodedValues.Contracts.Events.CodedValueUpdated>(), default), Times.Once);
     }
 
     [TestMethod]

@@ -1,10 +1,10 @@
-using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
+using SchoolCollab.CodedValues.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Core;
 
@@ -50,23 +50,8 @@ public static class Extensions
             .AsImplementedInterfaces()
             .WithTransientLifetime());
 
-        services.AddMassTransit(x =>
-        {
-            x.SetKebabCaseEndpointNameFormatter();
-
-            x.AddEntityFrameworkOutbox<CodedValuesDbContext>(o =>
-            {
-                o.UsePostgres();
-                o.UseBusOutbox();
-            });
-
-            x.UsingRabbitMq((ctx, cfg) =>
-            {
-                var host = configuration["RabbitMq:Host"] ?? "localhost";
-                cfg.Host(host);
-                cfg.ConfigureEndpoints(ctx);
-            });
-        });
+        services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
+        services.AddHostedService<OutboxDispatcher>();
 
         return services;
     }

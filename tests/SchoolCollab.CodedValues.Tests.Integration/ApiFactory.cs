@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.CodedValues.Core.Data;
 using Testcontainers.PostgreSql;
+using Testcontainers.RabbitMq;
 
 namespace SchoolCollab.CodedValues.Tests.Integration;
 
@@ -17,9 +18,14 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
         .WithPassword("test")
         .Build();
 
+    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
+        .WithImage("rabbitmq:4-management-alpine")
+        .Build();
+
     public async Task InitializeAsync()
     {
         await _postgres.StartAsync();
+        await _rabbit.StartAsync();
 
         // API no longer runs MigrateAsync at startup (that responsibility belongs to
         // the dedicated MigrationService in Aspire). Test factory runs it here so
@@ -27,6 +33,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
         using var scope = Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<CodedValuesDbContext>();
         await db.Database.MigrateAsync();
+    }
+
+    public new async ValueTask DisposeAsync()
+    {
+        await _postgres.DisposeAsync();
+        await _rabbit.DisposeAsync();
+        await base.DisposeAsync();
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -39,27 +52,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
             services.AddDbContext<CodedValuesDbContext>(opts =>
                 opts.UseNpgsql(_postgres.GetConnectionString())
                     .UseSnakeCaseNamingConvention());
-
-            var descriptors = services
-                .Where(d =>
-                    d.ServiceType.FullName?.StartsWith("MassTransit", StringComparison.Ordinal) == true ||
-                    d.ImplementationType?.FullName?.StartsWith("MassTransit", StringComparison.Ordinal) == true ||
-                    d.ImplementationInstance?.GetType().FullName?.StartsWith("MassTransit", StringComparison.Ordinal) == true)
-                .ToList();
-            foreach (var descriptor in descriptors)
-            {
-                services.Remove(descriptor);
-            }
-
-            services.AddSingleton<MassTransit.IPublishEndpoint, NoOpPublishEndpoint>();
         });
 
         builder.UseEnvironment("Testing");
-    }
-
-    public new async ValueTask DisposeAsync()
-    {
-        await _postgres.DisposeAsync();
-        await base.DisposeAsync();
+        builder.UseSetting("ConnectionStrings:rabbitmq", _rabbit.GetConnectionString());
     }
 }
