@@ -1,17 +1,27 @@
-<div class="top-row ps-3 navbar navbar-dark">
-    <div class="container-fluid">
-        <a class="navbar-brand" href="coded-values">SchoolCollab.CodedValues.Admin</a>
-    </div>
-</div>
+<FluentNavMenu Width="250"
+               Collapsible="true"
+               @bind-Expanded="Expanded"
+               Title="Main navigation">
+    <FluentNavLink Href="/"
+                   Match="NavLinkMatch.All">
+        Home
+    </FluentNavLink>
 
-<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+    <FluentNavGroup Title="Coded Values">
+        <FluentNavLink Href="/coded-values"
+                       Match="NavLinkMatch.Prefix">
+            All categories
+        </FluentNavLink>
+        <FluentNavLink Href="/coded-values/new">
+            New category
+        </FluentNavLink>
+        <FluentNavLink Href="/Error">
+            Error page
+        </FluentNavLink>
+    </FluentNavGroup>
+</FluentNavMenu>
 
-<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
-    <nav class="nav flex-column">
-        <div class="nav-item px-3">
-            <NavLink class="nav-link" href="coded-values" Match="NavLinkMatch.All">
-                <span class="bi bi-list-check-nav-menu" aria-hidden="true"></span> Coded Values
-            </NavLink>
-        </div>
-    </nav>
-</div>
+@code {
+    [Parameter] public bool Expanded { get; set; } = true;
+    [Parameter] public EventCallback<bool> ExpandedChanged { get; set; }
+}

@@ -1,29 +1,113 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
+@implements IDisposable
 
-<FluentDesignTheme StorageName="theme" />
+<FluentDesignTheme @bind-Mode="@_mode"
+                   @bind-OfficeColor="@_officeColor"
+                   StorageName="theme"
+                   OnLuminanceChanged="OnLuminanceChanged" />
+
 <FluentToastProvider />
 <FluentDialogProvider />
 <FluentMessageBarProvider />
 <FluentTooltipProvider />
+<FluentKeyCodeProvider />
 
-<div class="page">
-    <div class="sidebar">
-        <NavMenu />
-    </div>
+<FluentLayout>
+    <FluentHeader Height="50">
+        <FluentStack Orientation="Orientation.Horizontal"
+                     VerticalAlignment="VerticalAlignment.Center"
+                     HorizontalGap="12"
+                     Style="height:100%;padding-left:0.5rem;padding-right:1rem;">
+            <FluentButton Appearance="Appearance.Stealth"
+                          OnClick="ToggleMenu"
+                          Title="Toggle navigation"
+                          aria-label="Toggle navigation">
+                ☰
+            </FluentButton>
 
-    <main>
-        <div class="top-row px-4">
-            <a href="coded-values">Coded Values</a>
-        </div>
+            <span class="brand">School Collab</span>
+            <span class="brand-sep" aria-hidden="true">·</span>
+            <span class="brand-page">@(_pageTitle ?? "Coded Values")</span>
 
-        <article class="content px-4">
-            @Body
-        </article>
-    </main>
-</div>
+            <FluentSpacer />
+
+            <ThemeSwitcher @bind-Mode="@_mode"
+                           @bind-Accent="@_officeColor" />
+        </FluentStack>
+    </FluentHeader>
+
+    <FluentStack Orientation="Orientation.Horizontal"
+                 HorizontalGap="0"
+                 Style="height: calc(100vh - 50px); width: 100%;">
+
+        <NavMenu @bind-Expanded="@_menuExpanded" />
+
+        <FluentBodyContent Style="flex:1; min-width:0; overflow:auto;">
+            <article class="content">
+                @Body
+            </article>
+        </FluentBodyContent>
+    </FluentStack>
+</FluentLayout>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private bool _menuExpanded = true;
+    private DesignThemeModes _mode = DesignThemeModes.System;
+    private OfficeColor? _officeColor = OfficeColor.Teams;
+    private string? _pageTitle;
+    private string? _lastPath;
+
+    [Inject] private NavigationManager Nav { get; set; } = default!;
+    [Inject] private ILogger<MainLayout> Logger { get; set; } = default!;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        UpdatePageTitle(new Uri(Nav.Uri).AbsolutePath);
+        Logger.LogDebug("MainLayout initialised with menu expanded={MenuExpanded}", _menuExpanded);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => UpdatePageTitle(new Uri(e.Location).AbsolutePath);
+
+    private void UpdatePageTitle(string path)
+    {
+        if (string.Equals(path, _lastPath, StringComparison.OrdinalIgnoreCase)) return;
+        _lastPath = path;
+
+        _pageTitle = path switch
+        {
+            "/" or "/coded-values"                                  => "Coded Values",
+            var p when p.StartsWith("/coded-values/new", StringComparison.OrdinalIgnoreCase) => "New Category",
+            var p when p.EndsWith("/children/new", StringComparison.OrdinalIgnoreCase)     => "New Child",
+            var p when p.EndsWith("/children", StringComparison.OrdinalIgnoreCase)         => "Children",
+            var p when p.Contains("/edit", StringComparison.OrdinalIgnoreCase)            => "Edit Category",
+            "/Error"                                               => "Error",
+            _                                                      => null
+        };
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void ToggleMenu()
+    {
+        _menuExpanded = !_menuExpanded;
+        Logger.LogDebug("Sidebar toggled, expanded={MenuExpanded}", _menuExpanded);
+    }
+
+    private void OnLuminanceChanged(LuminanceChangedEventArgs args)
+    {
+        Logger.LogInformation("Theme luminance changed to {Mode}", args.Mode);
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}
