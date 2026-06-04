@@ -1,0 +1,10 @@
+{
+  "servers": {
+    "fluent-ui-blazor": {
+      "command": "dnx",
+      "args": [
+        "Microsoft.FluentUI.AspNetCore.McpServer@5.0.0-rc.3-26138.1"
+      ]
+    }
+  }
+}
