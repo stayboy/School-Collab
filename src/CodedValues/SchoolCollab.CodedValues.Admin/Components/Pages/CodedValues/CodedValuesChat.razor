@@ -31,33 +31,8 @@
                         <div style="white-space: pre-wrap; margin-top: 0.25rem;">@msg.Text</div>
                         @if (msg.ToolCalls is { Count: > 0 })
                         {
-                            <div style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
-                                @foreach (var tc in msg.ToolCalls)
-                                {
-                                    <div style="font-size: 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--neutral-fill-layer-rest, #f0f0f0); border-left: 3px solid var(--accent-fill-rest, #0078d4);">
-                                        @if (tc.Success is true)
-                                        {
-                                            <span style="color: var(--success, #107c10);">✅</span>
-                                        }
-                                        else if (tc.Success is false)
-                                        {
-                                            <span style="color: var(--error, #d13438);">❌</span>
-                                        }
-                                        else
-                                        {
-                                            <span>⏳</span>
-                                        }
-                                        <strong>@tc.FriendlyName</strong>
-                                        @if (!string.IsNullOrEmpty(tc.ArgsSummary))
-                                        {
-                                            <span style="color: var(--neutral-foreground-3, #616161);">(@tc.ArgsSummary)</span>
-                                        }
-                                        @if (!string.IsNullOrEmpty(tc.ResultSummary))
-                                        {
-                                            <br /><span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem;">@tc.ResultSummary</span>
-                                        }
-                                    </div>
-                                }
+                            <div style="margin-top: 0.35rem; font-size: 0.8rem; color: var(--neutral-foreground-3, #616161);">
+                                @GetToolCallSummary(msg.ToolCalls)
                             </div>
                         }
                     </div>
@@ -72,33 +47,9 @@
                         }
                         @if (_activeToolCalls is { Count: > 0 })
                         {
-                            <div style="margin-top: 0.25rem; display: flex; flex-direction: column; gap: 0.25rem;">
-                                @foreach (var tc in _activeToolCalls)
-                                {
-                                    <div style="font-size: 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--neutral-fill-layer-rest, #f0f0f0); border-left: 3px solid var(--accent-fill-rest, #0078d4);">
-                                        @if (tc.Success is true)
-                                        {
-                                            <span style="color: var(--success, #107c10);">✅</span>
-                                        }
-                                        else if (tc.Success is false)
-                                        {
-                                            <span style="color: var(--error, #d13438);">❌</span>
-                                        }
-                                        else
-                                        {
-                                            <FluentProgressRing style="width: 12px; height: 12px; vertical-align: middle; margin-right: 2px;" /><span> </span>
-                                        }
-                                        <strong>@tc.FriendlyName</strong>
-                                        @if (!string.IsNullOrEmpty(tc.ArgsSummary))
-                                        {
-                                            <span style="color: var(--neutral-foreground-3, #616161);">(@tc.ArgsSummary)</span>
-                                        }
-                                        @if (!string.IsNullOrEmpty(tc.ResultSummary))
-                                        {
-                                            <br /><span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem;">@tc.ResultSummary</span>
-                                        }
-                                    </div>
-                                }
+                            <div style="margin-top: 0.25rem; font-size: 0.8rem; color: var(--neutral-foreground-3, #616161); display: flex; align-items: center; gap: 0.35rem;">
+                                <FluentProgressRing style="width: 12px; height: 12px; vertical-align: middle;" />
+                                <span>Working…</span>
                             </div>
                         }
                         @if (string.IsNullOrEmpty(_streamingText) && (_activeToolCalls is null || _activeToolCalls.Count == 0))
@@ -363,5 +314,19 @@
         if (idx < 0) return null;
         var code = argsSummary[(idx + prefix.Length)..].Trim();
         return string.IsNullOrEmpty(code) ? null : code;
+    }
+
+    /// <summary>
+    /// Produces a compact one-line summary of tool calls for a completed message.
+    /// </summary>
+    private static string GetToolCallSummary(List<ToolCallDisplay> toolCalls)
+    {
+        if (toolCalls.Count == 0) return string.Empty;
+        var succeeded = toolCalls.Count(tc => tc.Success is true);
+        var failed = toolCalls.Count(tc => tc.Success is false);
+        var parts = new List<string>();
+        if (succeeded > 0) parts.Add($"✅ {succeeded} succeeded");
+        if (failed > 0) parts.Add($"❌ {failed} failed");
+        return parts.Count > 0 ? string.Join(" · ", parts) : $"⏳ {toolCalls.Count} tool call{(toolCalls.Count > 1 ? "s" : "")}";
     }
 }

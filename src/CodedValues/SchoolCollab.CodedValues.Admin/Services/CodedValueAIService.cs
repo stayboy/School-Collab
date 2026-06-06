@@ -360,10 +360,105 @@ public sealed class CodedValueAIService
         text = System.Text.RegularExpressions.Regex.Replace(text, @"<scratchpad>[\s\S]*?</scratchpad>", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
         text = System.Text.RegularExpressions.Regex.Replace(text, @"<reflection>[\s\S]*?</reflection>", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
+        // Remove function/tool definition JSON that local LLMs leak as text.
+        // Pattern 1: {"type": "function", ...} blocks (with balanced brace matching)
+        text = RemoveJsonBlocksContaining(text, "\"type\"\\s*:\\s*\"function\"");
+        // Pattern 2: {'type': 'function', ...} blocks
+        text = RemoveJsonBlocksContaining(text, "'type'\\s*:\\s*'function'");
+        // Pattern 3: {"function": {"name": "...", ...}} blocks
+        text = RemoveJsonBlocksContaining(text, "\"function\"\\s*:\\s*\\{");
+
+        // Remove tool invocation lines: function_name(arg1="value", ...)
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"^\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)\s*\(.*?\)\s*[;,]?\s*$",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        // Remove lines that are just tool names with arrows/prefixes
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"^\s*(?:→|->|≫|>>|▸|•)\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)\s*$",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        // Remove standalone known tool-name lines
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"^\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)\s*$",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
+
+        // Remove lines that are just 'name': 'tool_name' or "name": "tool_name"
+        text = System.Text.RegularExpressions.Regex.Replace(
+            text,
+            @"^\s*['""]name['""]\s*:\s*['""](list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)['""].*$",
+            string.Empty,
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
+
         // Collapse excessive blank lines
         text = System.Text.RegularExpressions.Regex.Replace(text, @"(\r?\n){3,}", "\n\n");
 
         return text.Trim();
+    }
+
+    /// <summary>
+    /// Removes JSON object blocks (balanced braces) that contain a specific pattern.
+    /// Handles nested braces correctly for multi-line JSON.
+    /// </summary>
+    private static string RemoveJsonBlocksContaining(string text, string innerPattern)
+    {
+        // Find all '{' positions and try to match balanced closing '}'
+        var result = new StringBuilder(text.Length);
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] == '{')
+            {
+                // Find the balanced closing brace
+                var depth = 1;
+                var j = i + 1;
+                var inString = false;
+                var escape = false;
+                while (j < text.Length && depth > 0)
+                {
+                    var c = text[j];
+                    if (escape)
+                    {
+                        escape = false;
+                    }
+                    else if (c == '\\' && inString)
+                    {
+                        escape = true;
+                    }
+                    else if (c == '"' && !escape)
+                    {
+                        inString = !inString;
+                    }
+                    else if (!inString)
+                    {
+                        if (c == '{') depth++;
+                        else if (c == '}') depth--;
+                    }
+                    j++;
+                }
+
+                if (depth == 0)
+                {
+                    // We have a balanced block from i to j
+                    var block = text[i..j];
+                    if (System.Text.RegularExpressions.Regex.IsMatch(block, innerPattern, System.Text.RegularExpressions.RegexOptions.IgnoreCase))
+                    {
+                        // Skip this entire block — it's a leaked function definition
+                        i = j;
+                        continue;
+                    }
+                }
+            }
+            result.Append(text[i]);
+            i++;
+        }
+        return result.ToString();
     }
     // --- Tool name and result formatting helpers ---
 
