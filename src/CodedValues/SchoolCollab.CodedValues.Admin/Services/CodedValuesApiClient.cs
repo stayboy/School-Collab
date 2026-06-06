@@ -2,17 +2,45 @@ namespace SchoolCollab.CodedValues.Admin.Services;
 
 public record CodedValueAttributeDto(string Key, string Value);
 
+public enum AttributeDataType
+{
+    Text = 0,
+    Integer = 1,
+    Decimal = 2,
+    Boolean = 3,
+    Date = 4,
+    DateTime = 5,
+    Time = 6,
+    CodedValue = 7
+}
+
+public record CodedValueAttributeDefinitionDto(
+    string Key,
+    string? DisplayName,
+    AttributeDataType DataType,
+    string? SourceCode,
+    bool IsRequired,
+    bool AllowMultiple,
+    int? MinLength,
+    int? MaxLength,
+    string? RegexPattern);
+
 public record CodedValueDto(
     Guid Id,
     string Code,
     string Name,
     string? Description,
     Guid? ParentId,
+    string? ParentCode,
     bool IsDisabled,
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyCollection<CodedValueAttributeDto> Attributes);
+    IReadOnlyCollection<CodedValueAttributeDto> Attributes,
+    IReadOnlyCollection<CodedValueAttributeDefinitionDto> AttributeDefinitions,
+    int ChildrenCount = 0,
+    bool IsDeleted = false,
+    DateTimeOffset? DeletedAt = null);
 
 public record CreateCodedValueRequest(
     string Code,
@@ -33,6 +61,9 @@ public sealed class CodedValuesApiClient(HttpClient http)
 
     public Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
         http.GetFromJsonAsync<CodedValueDto>($"/coded-values/{id}", ct);
+
+    public Task<CodedValueDto?> GetByCodeAsync(string code, CancellationToken ct = default) =>
+        http.GetFromJsonAsync<CodedValueDto>($"/coded-values/by-code/{Uri.EscapeDataString(code)}", ct);
 
     public async Task CreateAsync(CreateCodedValueRequest req, CancellationToken ct = default)
     {
@@ -60,4 +91,40 @@ public sealed class CodedValuesApiClient(HttpClient http)
 
     public async Task RemoveAttributeAsync(Guid id, string key, CancellationToken ct = default) =>
         (await http.DeleteAsync($"/coded-values/{id}/attributes/{key}", ct)).EnsureSuccessStatusCode();
+
+    public async Task SetAttributeDefinitionAsync(Guid id, string key, AttributeDefinitionRequest req, CancellationToken ct = default)
+    {
+        var response = await http.PutAsJsonAsync($"/coded-values/{id}/attribute-definitions/{key}", req, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task RemoveAttributeDefinitionAsync(Guid id, string key, CancellationToken ct = default) =>
+        (await http.DeleteAsync($"/coded-values/{id}/attribute-definitions/{key}", ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await http.DeleteAsync($"/coded-values/{id}", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var error = await response.Content.ReadAsStringAsync(ct);
+            throw new InvalidOperationException(error);
+        }
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task RecoverAsync(Guid id, CancellationToken ct = default) =>
+        (await http.PostAsync($"/coded-values/{id}/recover", null, ct)).EnsureSuccessStatusCode();
+
+    public Task<CodedValueDto[]?> GetDeletedAsync(CancellationToken ct = default) =>
+        http.GetFromJsonAsync<CodedValueDto[]>("/coded-values/deleted", ct);
 }
+
+public record AttributeDefinitionRequest(
+    string? DisplayName,
+    AttributeDataType DataType,
+    string? SourceCode,
+    bool IsRequired,
+    bool AllowMultiple = false,
+    int? MinLength = null,
+    int? MaxLength = null,
+    string? RegexPattern = null);

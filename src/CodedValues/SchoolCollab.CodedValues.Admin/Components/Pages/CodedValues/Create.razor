@@ -1,12 +1,12 @@
 @page "/coded-values/new"
-@page "/coded-values/{ParentId:guid}/children/new"
+@page "/coded-values/{ParentCode}/children/new"
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
 
-<PageTitle>@(ParentId.HasValue ? "Add Child Value" : "New Category")</PageTitle>
-<h2>@(ParentId.HasValue ? "Add Child Value" : "New Coded Value Category")</h2>
+<PageTitle>@(_parentCode != null ? "Add Child Value" : "New Category")</PageTitle>
+<h2>@(_parentCode != null ? "Add Child Value" : "New Coded Value Category")</h2>
 
 <ErrorBoundary>
     <ChildContent>
@@ -38,11 +38,34 @@
 </ErrorBoundary>
 
 @code {
-    [Parameter] public Guid? ParentId { get; set; }
+    [Parameter] public string? ParentCode { get; set; }
 
+    private Guid? _parentId;
+    private string? _parentCode;
     private readonly FormModel _model = new();
     private bool _saving;
     private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ParentCode != _parentCode)
+        {
+            _parentCode = ParentCode;
+            _parentId = null;
+            if (!string.IsNullOrEmpty(ParentCode))
+            {
+                try
+                {
+                    var parent = await Api.GetByCodeAsync(ParentCode);
+                    _parentId = parent?.Id;
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Failed to resolve parent for code {ParentCode}", ParentCode);
+                }
+            }
+        }
+    }
 
     private async Task SubmitAsync()
     {
@@ -56,10 +79,12 @@
                 _model.Code!,
                 _model.Name!,
                 _model.Description,
-                ParentId,
+                _parentId,
                 _model.DisplayOrder));
 
-            Nav.NavigateTo(ParentId.HasValue ? $"/coded-values/{ParentId}/children" : "/coded-values");
+            Nav.NavigateTo(_parentCode != null
+                ? $"/coded-values/{Uri.EscapeDataString(_parentCode)}/children"
+                : "/coded-values");
         }
         catch (Exception ex)
         {
@@ -73,7 +98,9 @@
     }
 
     private void Cancel() =>
-        Nav.NavigateTo(ParentId.HasValue ? $"/coded-values/{ParentId}/children" : "/coded-values");
+        Nav.NavigateTo(_parentCode != null
+            ? $"/coded-values/{Uri.EscapeDataString(_parentCode)}/children"
+            : "/coded-values");
 
     private sealed class FormModel
     {

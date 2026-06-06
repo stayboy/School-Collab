@@ -1,15 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
-using SchoolCollab.CodedValues.Core.Caching;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.CodedValues.Core.Domain.Exceptions;
 using SchoolCollab.CodedValues.Core.DTOs;
 
-namespace SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByIds;
+namespace SchoolCollab.CodedValues.Core.Queries.GetCodedValueByCode;
 
-public sealed class GetCodedValuesByIdsHandler(
+public sealed class GetCodedValueByCodeHandler(
     CodedValuesDbContext db,
-    HybridCache cache) : IQueryHandler<GetCodedValuesByIds, CodedValueDto[]>
+    HybridCache cache) : IQueryHandler<GetCodedValueByCode, CodedValueDto>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -17,38 +17,39 @@ public sealed class GetCodedValuesByIdsHandler(
         LocalCacheExpiration = TimeSpan.FromMinutes(1)
     };
 
-    public async Task<CodedValueDto[]> HandleAsync(
-        GetCodedValuesByIds query,
+    public async Task<CodedValueDto> HandleAsync(
+        GetCodedValueByCode query,
         CancellationToken cancellationToken = default)
     {
-        if (query.Ids.Length == 0)
-        {
-            return [];
-        }
-
-        var sortedIds = string.Join(",", query.Ids.OrderBy(id => id));
-        var cacheKey = $"coded-values:by-ids:{CacheKeyHelper.Hash(sortedIds)}";
+        var normalisedCode = query.Code.Trim().ToUpperInvariant();
 
         return await cache.GetOrCreateAsync(
-            cacheKey,
-            (db, query.Ids),
+            $"coded-value:code:{normalisedCode}",
+            (db, normalisedCode),
             static async (state, ct) =>
             {
-                var (db, ids) = state;
-                var results = await db.CodedValues
+                var (db, code) = state;
+                var cv = await db.CodedValues
                     .AsNoTracking()
-                    .Where(x => ids.Contains(x.Id))
-                    .OrderBy(x => x.DisplayOrder)
-                    .ThenBy(x => x.Name)
-                    .ToArrayAsync(ct);
+                    .Include(x => x.Attributes)
+                    .Include(x => x.AttributeDefinitions)
+                    .SingleOrDefaultAsync(x => x.Code == code, ct)
+                    ?? throw new CodedValueNotFoundException($"Code:{code}");
 
-                return results.Select(cv => new CodedValueDto(
+                string? parentCode = cv.ParentId.HasValue
+                    ? await db.CodedValues.AsNoTracking()
+                        .Where(x => x.Id == cv.ParentId.Value)
+                        .Select(x => x.Code)
+                        .SingleOrDefaultAsync(ct)
+                    : null;
+
+                return new CodedValueDto(
                     cv.Id,
                     cv.Code,
                     cv.Name,
                     cv.Description,
                     cv.ParentId,
-                    (string?)null,
+                    parentCode,
                     cv.IsDisabled,
                     cv.DisplayOrder,
                     cv.CreatedAt,
@@ -57,7 +58,7 @@ public sealed class GetCodedValuesByIdsHandler(
                     cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
                     0,
                     cv.IsDeleted,
-                    cv.DeletedAt)).ToArray();
+                    cv.DeletedAt);
             },
             CacheOptions,
             tags: ["coded-values"],

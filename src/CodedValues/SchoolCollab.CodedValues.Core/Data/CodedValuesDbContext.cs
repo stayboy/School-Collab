@@ -14,5 +14,7 @@ public sealed class CodedValuesDbContext(DbContextOptions<CodedValuesDbContext> 
     {
         base.OnModelCreating(modelBuilder);
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(CodedValuesDbContext).Assembly);
+
+        modelBuilder.Entity<CodedValue>().HasQueryFilter(cv => !cv.IsDeleted);
     }
 }

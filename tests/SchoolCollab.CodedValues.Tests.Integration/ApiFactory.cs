@@ -11,15 +11,13 @@ namespace SchoolCollab.CodedValues.Tests.Integration;
 
 public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposable
 {
-    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder()
-        .WithImage("postgres:16-alpine")
+    private readonly PostgreSqlContainer _postgres = new PostgreSqlBuilder("postgres:16-alpine")
         .WithDatabase("codedvalues_test")
         .WithUsername("test")
         .WithPassword("test")
         .Build();
 
-    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder()
-        .WithImage("rabbitmq:4-management-alpine")
+    private readonly RabbitMqContainer _rabbit = new RabbitMqBuilder("rabbitmq:4-management-alpine")
         .Build();
 
     public async Task InitializeAsync()

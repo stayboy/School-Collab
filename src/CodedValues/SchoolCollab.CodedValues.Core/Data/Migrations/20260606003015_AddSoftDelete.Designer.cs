@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.CodedValues.Core.Data;
@@ -11,9 +12,11 @@ using SchoolCollab.CodedValues.Core.Data;
 namespace SchoolCollab.CodedValues.Core.Data.Migrations
 {
     [DbContext(typeof(CodedValuesDbContext))]
-    partial class CodedValuesDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260606003015_AddSoftDelete")]
+    partial class AddSoftDelete
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -151,6 +154,36 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .HasConstraintName("fk_coded_values_coded_values_parent_id");
 
+                    b.OwnsMany("SchoolCollab.CodedValues.Core.Domain.CodedValueAttribute", "Attributes", b1 =>
+                        {
+                            b1.Property<Guid>("CodedValueId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("coded_value_id");
+
+                            b1.Property<string>("Key")
+                                .HasMaxLength(100)
+                                .HasColumnType("character varying(100)")
+                                .HasColumnName("key");
+
+                            b1.Property<string>("Value")
+                                .IsRequired()
+                                .HasMaxLength(500)
+                                .HasColumnType("character varying(500)")
+                                .HasColumnName("value");
+
+                            b1.HasKey("CodedValueId", "Key")
+                                .HasName("pk_coded_value_attributes");
+
+                            b1.HasIndex("Key", "Value")
+                                .HasDatabaseName("ix_coded_value_attributes_key_value");
+
+                            b1.ToTable("coded_value_attributes", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("CodedValueId")
+                                .HasConstraintName("fk_coded_value_attributes_coded_values_coded_value_id");
+                        });
+
                     b.OwnsMany("SchoolCollab.CodedValues.Core.Domain.CodedValueAttributeDefinition", "AttributeDefinitions", b1 =>
                         {
                             b1.Property<Guid>("CodedValueId")
@@ -214,36 +247,6 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                             b1.WithOwner()
                                 .HasForeignKey("CodedValueId")
                                 .HasConstraintName("fk_coded_value_attribute_definitions_coded_values_coded_value_");
-                        });
-
-                    b.OwnsMany("SchoolCollab.CodedValues.Core.Domain.CodedValueAttribute", "Attributes", b1 =>
-                        {
-                            b1.Property<Guid>("CodedValueId")
-                                .HasColumnType("uuid")
-                                .HasColumnName("coded_value_id");
-
-                            b1.Property<string>("Key")
-                                .HasMaxLength(100)
-                                .HasColumnType("character varying(100)")
-                                .HasColumnName("key");
-
-                            b1.Property<string>("Value")
-                                .IsRequired()
-                                .HasMaxLength(500)
-                                .HasColumnType("character varying(500)")
-                                .HasColumnName("value");
-
-                            b1.HasKey("CodedValueId", "Key")
-                                .HasName("pk_coded_value_attributes");
-
-                            b1.HasIndex("Key", "Value")
-                                .HasDatabaseName("ix_coded_value_attributes_key_value");
-
-                            b1.ToTable("coded_value_attributes", (string)null);
-
-                            b1.WithOwner()
-                                .HasForeignKey("CodedValueId")
-                                .HasConstraintName("fk_coded_value_attributes_coded_values_coded_value_id");
                         });
 
                     b.Navigation("AttributeDefinitions");

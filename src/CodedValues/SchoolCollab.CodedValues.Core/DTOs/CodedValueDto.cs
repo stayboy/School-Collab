@@ -6,10 +6,14 @@ public record CodedValueDto(
     string Name,
     string? Description,
     Guid? ParentId,
+    string? ParentCode,
     bool IsDisabled,
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     IReadOnlyCollection<CodedValueAttributeDto> Attributes,
-    IReadOnlyCollection<CodedValueAttributeDefinitionDto> AttributeDefinitions);
+    IReadOnlyCollection<CodedValueAttributeDefinitionDto> AttributeDefinitions,
+    int ChildrenCount = 0,
+    bool IsDeleted = false,
+    DateTimeOffset? DeletedAt = null);
 

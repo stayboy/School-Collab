@@ -34,6 +34,11 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
         builder.Property(x => x.IsDisabled)
             .HasDefaultValue(false);
 
+        builder.Property(x => x.IsDeleted)
+            .HasDefaultValue(false);
+
+        builder.Property(x => x.DeletedAt);
+
         builder.Property(x => x.CreatedAt)
             .IsRequired();
 

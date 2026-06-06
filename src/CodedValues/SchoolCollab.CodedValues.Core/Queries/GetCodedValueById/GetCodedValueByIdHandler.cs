@@ -32,18 +32,29 @@ public sealed class GetCodedValueByIdHandler(
                     .SingleOrDefaultAsync(x => x.Id == id, ct)
                     ?? throw new CodedValueNotFoundException(id);
 
+                string? parentCode = cv.ParentId.HasValue
+                    ? await db.CodedValues.AsNoTracking()
+                        .Where(x => x.Id == cv.ParentId.Value)
+                        .Select(x => x.Code)
+                        .SingleOrDefaultAsync(ct)
+                    : null;
+
                 return new CodedValueDto(
                     cv.Id,
                     cv.Code,
                     cv.Name,
                     cv.Description,
                     cv.ParentId,
+                    parentCode,
                     cv.IsDisabled,
                     cv.DisplayOrder,
                     cv.CreatedAt,
                     cv.UpdatedAt,
                     cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
-                    cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray());
+                    cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
+                    0,
+                    cv.IsDeleted,
+                    cv.DeletedAt);
             },
             CacheOptions,
             tags: ["coded-values"],
