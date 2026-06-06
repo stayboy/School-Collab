@@ -1,0 +1,214 @@
+@using Microsoft.Extensions.AI
+@using SchoolCollab.CodedValues.Admin.Services
+@implements IAsyncDisposable
+
+@inject CodedValueAIService AiService
+@inject CodedValuesApiClient Api
+@inject ILogger<CodedValuesChat> Logger
+
+<div class="chat-container" style="border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1); margin-top: 2rem; padding-top: 1rem;">
+    <h3 style="margin-bottom: 0.5rem;">✨ AI Assistant</h3>
+    <p style="color: var(--neutral-foreground-3, #616161); margin-bottom: 1rem; font-size: 0.875rem;">
+        Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
+        Try: "Create a Country coded value with code CNTRY" or "Add countries to CNTRY"
+    </p>
+
+    <ErrorBoundary>
+        <ChildContent>
+            <div class="chat-messages" style="max-height: 400px; overflow-y: auto; margin-bottom: 1rem; padding: 0.5rem;">
+                @foreach (var msg in _messages)
+                {
+                    <div class="chat-message @msg.Role.ToString().ToLowerInvariant()" style="margin-bottom: 0.75rem; @GetMessageStyle(msg.Role)">
+                        @if (msg.Role == ChatRole.User)
+                        {
+                            <strong>You:</strong>
+                        }
+                        else
+                        {
+                            <strong>AI:</strong>
+                        }
+                        <div style="white-space: pre-wrap; margin-top: 0.25rem;">@msg.Text</div>
+                    </div>
+                }
+                @if (_isStreaming)
+                {
+                    <div style="margin-bottom: 0.75rem;">
+                        <strong>AI:</strong>
+                        <div style="white-space: pre-wrap; margin-top: 0.25rem;">@_streamingText<FluentProgressRing style="width: 16px; height: 16px; vertical-align: middle; margin-left: 4px;" /></div>
+                    </div>
+                }
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+                <FluentSelect Items="@_models"
+                             @bind-SelectedOption="@_selectedModel"
+                             OptionText="@(m => $"{m!.Label} (w:{m!.Weight})")"
+                             OptionValue="@(m => m!.Value)"
+                             Style="min-width: 220px;"
+                             aria-label="AI model" />
+                <div style="flex: 1;">
+                    <FluentTextArea @ref="_inputRef"
+                                   @bind-Value="_inputText"
+                                   Placeholder="Ask me to create coded values..."
+                                   Style="width: 100%;"
+                                   Rows="2"
+                                   aria-label="Chat input"
+                                   OnKeyDown="HandleKeyDown" />
+                </div>
+                <FluentButton Appearance="Appearance.Accent"
+                             OnClick="SendAsync"
+                             Disabled="@_isStreaming"
+                             aria-label="Send message">
+                    ➤
+                </FluentButton>
+            </div>
+        </ChildContent>
+        <ErrorContent Context="ex">
+            <FluentMessageBar Intent="MessageIntent.Error">
+                Chat error: @ex.Message
+            </FluentMessageBar>
+        </ErrorContent>
+    </ErrorBoundary>
+</div>
+
+@code {
+    private record ChatMessageItem(ChatRole Role, string Text);
+
+    private readonly List<ChatMessageItem> _messages = [];
+    private string _inputText = string.Empty;
+    private bool _isStreaming;
+    private string _streamingText = string.Empty;
+    private FluentTextArea? _inputRef;
+    private CancellationTokenSource? _sendCts;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private record ModelOption(string Value, string Label, decimal Weight = 0m);
+
+    private static readonly ModelOption[] _fallbackModels =
+    [
+        new("llama3.1:8b", "Llama 3.1 8B", 1.0m),
+        new("llama3.2:3b", "Llama 3.2 3B", 0.4m),
+        new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m),
+        new("mistral:7b", "Mistral 7B", 0.9m),
+        new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m),
+        new("gemma2:9b", "Gemma 2 9B", 1.2m)
+    ];
+
+    private ModelOption[] _models = _fallbackModels;
+    private ModelOption _selectedModel = _fallbackModels[0];
+
+    private static string GetMessageStyle(ChatRole role) =>
+        role == ChatRole.User
+            ? "background: var(--neutral-fill-layer-rest, #f5f5f5); padding: 0.5rem 0.75rem; border-radius: 8px;"
+            : "padding: 0.5rem 0.75rem;";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        try
+        {
+            var parent = await Api.GetByCodeAsync("AI-MODELS", _loadCts.Token);
+            if (_disposed || parent is null) return;
+
+            var children = await Api.GetChildrenAsync(parent.Id, _loadCts.Token);
+            if (_disposed || children is null || children.Length == 0) return;
+
+            var models = children
+                .Where(c => !c.IsDisabled && c.Description is not null)
+                .OrderBy(c => c.Attributes.FirstOrDefault(a => a.Key == "weight") is { } wAttr
+                    ? decimal.TryParse(wAttr.Value, out var w) ? w : decimal.MaxValue
+                    : decimal.MaxValue)
+                .ThenBy(c => c.DisplayOrder)
+                .Select(c =>
+                {
+                    var weightAttr = c.Attributes.FirstOrDefault(a => a.Key == "weight");
+                    var weight = weightAttr is not null && decimal.TryParse(weightAttr.Value, out var w) ? w : 0m;
+                    return new ModelOption(c.Description!, c.Name, weight);
+                })
+                .ToArray();
+
+            if (models.Length > 0)
+            {
+                _models = models;
+                _selectedModel = models[0];
+                Logger.LogInformation("Loaded {Count} AI models from coded values", models.Length);
+            }
+        }
+        catch (OperationCanceledException) { /* user navigated away */ }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load AI models from API, using fallback list");
+        }
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _disposed) return;
+
+        var prompt = _inputText.Trim();
+        _inputText = string.Empty;
+        StateHasChanged();
+
+        _messages.Add(new(ChatRole.User, prompt));
+        _isStreaming = true;
+        _streamingText = string.Empty;
+        _sendCts?.Cancel();
+        _sendCts?.Dispose();
+        _sendCts = new CancellationTokenSource();
+
+        // Build conversation history for multi-turn context
+        var history = _messages
+            .Select(m => new ChatMessage(m.Role, m.Text))
+            .ToList();
+
+        try
+        {
+            await foreach (var chunk in AiService.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
+            {
+                if (_disposed) return;
+                _streamingText += chunk;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away or cancelled
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "AI chat error");
+            _streamingText = $"Error: {ex.Message}";
+        }
+
+        if (!_disposed && _streamingText.Length > 0)
+        {
+            _messages.Add(new(ChatRole.Assistant, _streamingText));
+        }
+
+        _streamingText = string.Empty;
+        _isStreaming = false;
+        if (!_disposed) StateHasChanged();
+    }
+
+    private async Task HandleKeyDown(FluentKeyCodeEventArgs e)
+    {
+        if (e.Key == KeyCode.Enter && !e.ShiftKey)
+        {
+            await SendAsync();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        _sendCts?.Cancel();
+        _sendCts?.Dispose();
+        _sendCts = null;
+    }
+}

@@ -1,0 +1,2 @@
+ParentCode,Key,DisplayName,DataType,SourceCode,IsRequired,AllowMultiple,MinLength,MaxLength,RegexPattern
+AI-MODELS,weight,Weight,2,,,False,False,,,
