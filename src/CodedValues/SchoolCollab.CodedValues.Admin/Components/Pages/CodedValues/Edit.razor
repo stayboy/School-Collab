@@ -1,8 +1,11 @@
-@page "/coded-values/{Id:guid}/edit"
+@page "/coded-values/{Code}/edit"
 @using SchoolCollab.CodedValues.Admin.Services
+@using Microsoft.FluentUI.AspNetCore.Components
 @inject CodedValuesApiClient Api
+@inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Edit> Logger
+@implements IDisposable
 
 <PageTitle>Edit @_item?.Name</PageTitle>
 <h2>Edit: @_item?.Code</h2>
@@ -37,27 +40,69 @@
                 </div>
             </EditForm>
 
-            <hr class="my-4" />
-            <h5>Attributes</h5>
-            @if (_item.Attributes.Count > 0)
+            @if (_item.ParentId is null)
             {
-                <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1fr auto" TGridItem="CodedValueAttributeDto" style="max-width:520px">
-                    <PropertyColumn Property="@(a => a.Key)" />
-                    <PropertyColumn Property="@(a => a.Value)" />
-                    <TemplateColumn Title="">
-                        <FluentButton Appearance="Appearance.Outline"
-                                      OnClick="@(() => RemoveAttributeAsync(context.Key))">Remove</FluentButton>
-                    </TemplateColumn>
-                </FluentDataGrid>
+                <hr class="my-4" />
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <h5 style="margin:0">Attribute Definitions</h5>
+                    <FluentButton Appearance="Appearance.Accent" OnClick="OpenAddDefinitionDialog">
+                        + Add Definition
+                    </FluentButton>
+                </div>
+                <p class="text-muted" style="font-size:0.85em">
+                    Define metadata that child values should supply. Children inherit these definitions as their attribute schema.
+                </p>
+
+                @if (_item.AttributeDefinitions.Count > 0)
+                {
+                    <FluentDataGrid Items="@_item.AttributeDefinitions.AsQueryable()"
+                                    GridTemplateColumns="1.2fr 1.5fr 1fr 1fr auto auto"
+                                    TGridItem="CodedValueAttributeDefinitionDto"
+                                    style="max-width:700px">
+                        <PropertyColumn Property="@(d => d.Key)" Title="Key" />
+                        <PropertyColumn Property="@(d => d.DisplayName)" Title="Display Name" />
+                        <TemplateColumn Title="Type">
+                            @FormatDataType(context.DataType)@(context.AllowMultiple ? " (multi)" : "")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Required">
+                            @(context.IsRequired ? "Yes" : "No")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Source">
+                            @context.SourceCode
+                        </TemplateColumn>
+                        <TemplateColumn Title="">
+                            <FluentAnchor Href="#" OnClick="@(() => EditDefinitionDialog(context))" class="link-action">Edit</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => RemoveDefinitionAsync(context.Key))" class="link-action ms-2">Remove</FluentAnchor>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                }
+                else
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info" class="mt-2">No attribute definitions yet. Click "+ Add Definition" to create one.</FluentMessageBar>
+                }
             }
 
-            <div class="row g-2 mt-2" style="max-width:520px">
-                <div class="col-5"><FluentTextField @bind-Value="_attrKey" Placeholder="key" style="width:100%" /></div>
-                <div class="col-5"><FluentTextField @bind-Value="_attrValue" Placeholder="value" style="width:100%" /></div>
-                <div class="col-2">
-                    <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync" style="width:100%">Add</FluentButton>
+            @if (_item.ParentId is not null)
+            {
+                <hr class="my-4" />
+                <h5>Attributes</h5>
+                @if (_item.Attributes.Count > 0)
+                {
+                    <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1fr auto" TGridItem="CodedValueAttributeDto" style="max-width:520px">
+                        <PropertyColumn Property="@(a => a.Key)" />
+                        <PropertyColumn Property="@(a => a.Value)" />
+                        <TemplateColumn Title="">
+                            <FluentAnchor Href="#" OnClick="@(() => RemoveAttributeAsync(context.Key))" class="link-action">Remove</FluentAnchor>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                }
+
+                <div style="display:flex; gap:8px; margin-top:8px; max-width:520px;">
+                    <FluentTextField @bind-Value="_attrKey" Placeholder="key" style="flex:1" />
+                    <FluentTextField @bind-Value="_attrValue" Placeholder="value" style="flex:1" />
+                    <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync">Add</FluentButton>
                 </div>
-            </div>
+            }
         }
     </ChildContent>
     <ErrorContent Context="ex">
@@ -66,7 +111,7 @@
 </ErrorBoundary>
 
 @code {
-    [Parameter] public Guid Id { get; set; }
+    [Parameter] public string? Code { get; set; }
 
     private CodedValueDto? _item;
     private bool _loading = true;
@@ -74,14 +119,135 @@
     private string? _error;
     private string? _attrKey;
     private string? _attrValue;
+    private string? _loadedCode;
     private readonly EditModel _model = new();
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private async Task OpenAddDefinitionDialog()
+    {
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
+        var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
+        var data = new AttributeDefinitionDialogData(Api, _item.Id, ParentValues: parentValues.Where(p => p.Id != _item.Id).ToArray());
+        var dialog = await DialogService.ShowDialogAsync<AttributeDefinitionDialog, AttributeDefinitionDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Add Attribute Definition",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "560px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is AttributeDefinitionResult defResult)
+        {
+            await SaveDefinitionFromResultAsync(defResult, ct);
+        }
+    }
+
+    private async Task EditDefinitionDialog(CodedValueAttributeDefinitionDto existing)
+    {
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
+        var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
+        var data = new AttributeDefinitionDialogData(Api, _item.Id, existing, ParentValues: parentValues.Where(p => p.Id != _item.Id).ToArray());
+        var dialog = await DialogService.ShowDialogAsync<AttributeDefinitionDialog, AttributeDefinitionDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Edit Attribute Definition",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "560px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is AttributeDefinitionResult defResult)
+        {
+            await SaveDefinitionFromResultAsync(defResult, ct);
+        }
+    }
+
+    private async Task SaveDefinitionFromResultAsync(AttributeDefinitionResult defResult, CancellationToken ct)
+    {
+        if (_item is null) return;
+        try
+        {
+            Logger.LogInformation("Saving attribute definition {Key} on coded value {Id}", defResult.Key, _item.Id);
+            var req = new AttributeDefinitionRequest(
+                defResult.DisplayName,
+                defResult.DataType,
+                defResult.SourceCode,
+                defResult.IsRequired,
+                defResult.AllowMultiple,
+                defResult.MinLength,
+                defResult.MaxLength,
+                defResult.RegexPattern);
+
+            await Api.SetAttributeDefinitionAsync(_item.Id, defResult.Key, req, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save attribute definition {Key} on coded value {Code}", defResult.Key, Code);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task RemoveDefinitionAsync(string key)
+    {
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
+        try
+        {
+            Logger.LogInformation("Removing attribute definition {Key} from coded value {Id}", key, _item.Id);
+            await Api.RemoveAttributeDefinitionAsync(_item.Id, key, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to remove attribute definition {Key} from coded value {Code}", key, Code);
+            _error = ex.Message;
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
-        Logger.LogInformation("Loading coded value {Id} for edit", Id);
+        _loadCts = new CancellationTokenSource();
+        await LoadItemAsync(_loadCts.Token);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Code != _loadedCode && !_disposed)
+        {
+            _loadCts?.Cancel();
+            _loadCts?.Dispose();
+            _loadCts = new CancellationTokenSource();
+            await LoadItemAsync(_loadCts.Token);
+        }
+    }
+
+    private async Task LoadItemAsync(CancellationToken ct)
+    {
+        _loading = true;
+        _error = null;
+        Logger.LogInformation("Loading coded value {Code} for edit", Code);
         try
         {
-            _item = await Api.GetByIdAsync(Id);
+            _item = await Api.GetByCodeAsync(Code!, ct);
+            _loadedCode = Code;
+            if (_disposed) return;
             if (_item is not null)
             {
                 _model.Name = _item.Name;
@@ -89,79 +255,117 @@
                 _model.DisplayOrder = _item.DisplayOrder;
             }
         }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to load coded value {Id}", Id);
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load coded value {Code}", Code);
             _error = ex.Message;
         }
         finally
         {
-            _loading = false;
+            if (!_disposed)
+            {
+                _loading = false;
+            }
         }
     }
 
     private async Task SubmitAsync()
     {
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
         _saving = true;
         _error = null;
 
         try
         {
-            Logger.LogInformation("User initiated update for coded value {Id}", Id);
-            await Api.UpdateAsync(Id, new UpdateCodedValueRequest(_model.Name!, _model.Description, _model.DisplayOrder));
-            Nav.NavigateTo(_item?.ParentId.HasValue == true
-                ? $"/coded-values/{_item.ParentId}/children"
+            Logger.LogInformation("User initiated update for coded value {Code}", Code);
+            await Api.UpdateAsync(_item.Id, new UpdateCodedValueRequest(_model.Name!, _model.Description, _model.DisplayOrder), ct);
+            Nav.NavigateTo(_item.ParentId.HasValue
+                ? $"/coded-values/{Uri.EscapeDataString(_item.ParentCode ?? Code!)}/children"
                 : "/coded-values");
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to save coded value {Id}", Id);
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save coded value {Code}", Code);
             _error = ex.Message;
         }
         finally
         {
-            _saving = false;
+            if (!_disposed) _saving = false;
         }
     }
 
     private async Task AddAttributeAsync()
     {
-        if (string.IsNullOrWhiteSpace(_attrKey) || string.IsNullOrWhiteSpace(_attrValue))
-        {
+        if (_item is null || string.IsNullOrWhiteSpace(_attrKey) || string.IsNullOrWhiteSpace(_attrValue) || _loadCts is null)
             return;
-        }
+        var ct = _loadCts.Token;
 
         try
         {
-            await Api.SetAttributeAsync(Id, _attrKey.Trim(), _attrValue.Trim());
-            _item = await Api.GetByIdAsync(Id);
+            await Api.SetAttributeAsync(_item.Id, _attrKey.Trim(), _attrValue.Trim(), ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
             _attrKey = _attrValue = null;
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to add attribute {Key} to coded value {Id}", _attrKey, Id);
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to add attribute {Key} to coded value {Code}", _attrKey, Code);
             _error = ex.Message;
         }
     }
 
     private async Task RemoveAttributeAsync(string key)
     {
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
         try
         {
-            await Api.RemoveAttributeAsync(Id, key);
-            _item = await Api.GetByIdAsync(Id);
+            await Api.RemoveAttributeAsync(_item.Id, key, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to remove attribute {Key} from coded value {Id}", key, Id);
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to remove attribute {Key} from coded value {Code}", key, Code);
             _error = ex.Message;
         }
     }
 
+    private static string FormatDataType(AttributeDataType dt) => dt switch
+    {
+        AttributeDataType.Text => "Text",
+        AttributeDataType.Integer => "Integer",
+        AttributeDataType.Decimal => "Decimal",
+        AttributeDataType.Boolean => "Boolean",
+        AttributeDataType.Date => "Date",
+        AttributeDataType.DateTime => "DateTime",
+        AttributeDataType.Time => "Time",
+        AttributeDataType.CodedValue => "CodedValue",
+        _ => dt.ToString()
+    };
+
     private void Cancel() =>
         Nav.NavigateTo(_item?.ParentId.HasValue == true
-            ? $"/coded-values/{_item.ParentId}/children"
+            ? $"/coded-values/{Uri.EscapeDataString(_item!.ParentCode ?? Code!)}/children"
             : "/coded-values");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
 
     private sealed class EditModel
     {

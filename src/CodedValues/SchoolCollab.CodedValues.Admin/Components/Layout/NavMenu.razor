@@ -1,27 +1,86 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.CodedValues.Admin.Services
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
 <FluentNavMenu Width="250"
-               Collapsible="true"
-               @bind-Expanded="Expanded"
                Title="Main navigation">
+
     <FluentNavLink Href="/"
-                   Match="NavLinkMatch.All">
+                  Icon="@(Icon.FromType<Icons.Regular.Size20.Home>())"
+                  Match="NavLinkMatch.All">
         Home
     </FluentNavLink>
 
-    <FluentNavGroup Title="Coded Values">
-        <FluentNavLink Href="/coded-values"
-                       Match="NavLinkMatch.Prefix">
-            All categories
-        </FluentNavLink>
-        <FluentNavLink Href="/coded-values/new">
-            New category
-        </FluentNavLink>
-        <FluentNavLink Href="/Error">
-            Error page
+    <FluentNavGroup Title="Coded Values"
+                   Expanded="true">
+        @if (Loading)
+        {
+            <FluentNavLink Href="#" Disabled="true">
+               <FluentProgressRing Style="width:16px;height:16px;" />
+            </FluentNavLink>
+        }
+        else if (ParentValues is { Length: > 0 })
+        {
+            foreach (var cv in ParentValues.Take(20))
+            {
+               <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
+                             Icon="@(Icon.FromType<Icons.Regular.Size20.Tag>())"
+                              Title="@cv.Code">
+                   @Truncate(TitleCase(cv.Code), 22)
+               </FluentNavLink>
+            }
+
+            if (ParentValues.Length > 20)
+            {
+               <FluentNavLink Href="/coded-values"
+                             Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowExportUp>())">
+                   <i>Show More …</i>
+               </FluentNavLink>
+            }
+        }
+        else
+        {
+            <FluentNavLink Href="/coded-values"
+                         Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+               All Categories
+            </FluentNavLink>
+        }
+
+        <FluentNavLink Href="/coded-values/new"
+                     Icon="@(Icon.FromType<Icons.Regular.Size20.AddCircle>())">
+            New Category
         </FluentNavLink>
     </FluentNavGroup>
 </FluentNavMenu>
 
 @code {
-    [Parameter] public bool Expanded { get; set; } = true;
-    [Parameter] public EventCallback<bool> ExpandedChanged { get; set; }
+    [Parameter] public CodedValueDto[]? ParentValues { get; set; }
+    [Parameter] public bool Loading { get; set; }
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : string.Concat(value.AsSpan(0, maxLength - 1), "…");
+
+    private static string TitleCase(string value)
+        => string.Create(value.Length, value, (span, src) =>
+        {
+            bool nextUpper = true;
+            for (var i = 0; i < src.Length; i++)
+            {
+                var c = src[i];
+                if (c is '_' or '-' or '.')
+                {
+                    span[i] = ' ';
+                    nextUpper = true;
+                }
+                else if (nextUpper)
+                {
+                    span[i] = char.ToUpperInvariant(c);
+                    nextUpper = false;
+                }
+                else
+                {
+                    span[i] = char.ToLowerInvariant(c);
+                }
+            }
+        });
 }

@@ -1,5 +1,7 @@
 @inherits LayoutComponentBase
+@using SchoolCollab.CodedValues.Admin.Services
 @implements IDisposable
+@inject CodedValuesApiClient Api
 
 <FluentDesignTheme @bind-Mode="@_mode"
                    @bind-OfficeColor="@_officeColor"
@@ -17,13 +19,7 @@
         <FluentStack Orientation="Orientation.Horizontal"
                      VerticalAlignment="VerticalAlignment.Center"
                      HorizontalGap="12"
-                     Style="height:100%;padding-left:0.5rem;padding-right:1rem;">
-            <FluentButton Appearance="Appearance.Stealth"
-                          OnClick="ToggleMenu"
-                          Title="Toggle navigation"
-                          aria-label="Toggle navigation">
-                ☰
-            </FluentButton>
+                     Style="height:100%;padding-left:1rem;padding-right:1rem;">
 
             <span class="brand">School Collab</span>
             <span class="brand-sep" aria-hidden="true">·</span>
@@ -40,7 +36,7 @@
                  HorizontalGap="0"
                  Style="height: calc(100vh - 50px); width: 100%;">
 
-        <NavMenu @bind-Expanded="@_menuExpanded" />
+        <NavMenu ParentValues="@_parentValues" Loading="@_loadingParents" />
 
         <FluentBodyContent Style="flex:1; min-width:0; overflow:auto;">
             <article class="content">
@@ -57,20 +53,34 @@
 </div>
 
 @code {
-    private bool _menuExpanded = true;
     private DesignThemeModes _mode = DesignThemeModes.System;
     private OfficeColor? _officeColor = OfficeColor.Teams;
     private string? _pageTitle;
     private string? _lastPath;
+    private CodedValueDto[]? _parentValues;
+    private bool _loadingParents = true;
 
     [Inject] private NavigationManager Nav { get; set; } = default!;
     [Inject] private ILogger<MainLayout> Logger { get; set; } = default!;
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         Nav.LocationChanged += OnLocationChanged;
         UpdatePageTitle(new Uri(Nav.Uri).AbsolutePath);
-        Logger.LogDebug("MainLayout initialised with menu expanded={MenuExpanded}", _menuExpanded);
+
+        try
+        {
+            _parentValues = await Api.GetRootValuesAsync();
+            Logger.LogInformation("Loaded {Count} parent coded values for sidebar", _parentValues?.Length ?? 0);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load parent coded values for sidebar");
+        }
+        finally
+        {
+            _loadingParents = false;
+        }
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
@@ -93,12 +103,6 @@
         };
 
         InvokeAsync(StateHasChanged);
-    }
-
-    private void ToggleMenu()
-    {
-        _menuExpanded = !_menuExpanded;
-        Logger.LogDebug("Sidebar toggled, expanded={MenuExpanded}", _menuExpanded);
     }
 
     private void OnLuminanceChanged(LuminanceChangedEventArgs args)

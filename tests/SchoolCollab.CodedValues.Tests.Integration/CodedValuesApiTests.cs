@@ -212,7 +212,7 @@ public class CodedValuesApiTests
 
         var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
         var item1 = items!.Single(x => x.Code == code1);
-        var item2 = items.Single(x => x.Code == code2);
+        var item2 = items!.Single(x => x.Code == code2);
 
         await _client.PostAsync($"/coded-values/{item2.Id}/disable", null);
 

@@ -5,16 +5,20 @@ using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Commands.CreateCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.DisableCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.EnableCodedValue;
+using SchoolCollab.CodedValues.Core.Commands.DeleteCodedValue;
+using SchoolCollab.CodedValues.Core.Commands.RecoverCodedValue;
 using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttribute;
 using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttribute;
 using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttributeDefinition;
 using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttributeDefinition;
 using SchoolCollab.CodedValues.Core.Commands.UpdateCodedValue;
 using SchoolCollab.CodedValues.Core.CQRS;
+using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
 using SchoolCollab.CodedValues.Core.DTOs;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValueById;
+using SchoolCollab.CodedValues.Core.Queries.GetCodedValueByCode;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByIds;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByParent;
 using SchoolCollab.CodedValues.Core.Queries.ListRootCodedValues;
@@ -69,6 +73,21 @@ app.MapGet("/coded-values/{id:guid}", async (
     }
 });
 
+app.MapGet("/coded-values/by-code/{code}", async (
+    string code,
+    [FromServices] IQueryHandler<GetCodedValueByCode, CodedValueDto> handler,
+    CancellationToken ct) =>
+{
+    try
+    {
+        return Results.Ok(await handler.HandleAsync(new GetCodedValueByCode(code), ct));
+    }
+    catch (CodedValueNotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
 app.MapGet("/coded-values/by-ids", async (
     [FromQuery] Guid[] ids,
     [FromServices] IQueryHandler<GetCodedValuesByIds, CodedValueDto[]> handler,
@@ -93,6 +112,51 @@ app.MapGet("/coded-values/by-parent", async (
     return Results.Ok(await handler.HandleAsync(
         new GetCodedValuesByParent(parentId, parentCode, filters, includeDisabled ?? false), ct));
 });
+
+app.MapDelete("/coded-values/{id:guid}", async (
+    Guid id,
+    [FromServices] ICommandHandler<DeleteCodedValue> handler,
+    CancellationToken ct) =>
+{
+    try
+    {
+        await handler.HandleAsync(new DeleteCodedValue(id), ct);
+        return Results.NoContent();
+    }
+    catch (CodedValueNotFoundException)
+    {
+        return Results.NotFound();
+    }
+    catch (CodedValueHasChildrenException ex)
+    {
+        return Results.Conflict(new { ex.Message });
+    }
+    catch (CodedValueReferencedException ex)
+    {
+        return Results.Conflict(new { ex.Message });
+    }
+});
+
+app.MapPost("/coded-values/{id:guid}/recover", async (
+    Guid id,
+    [FromServices] ICommandHandler<RecoverCodedValue> handler,
+    CancellationToken ct) =>
+{
+    try
+    {
+        await handler.HandleAsync(new RecoverCodedValue(id), ct);
+        return Results.NoContent();
+    }
+    catch (CodedValueNotFoundException)
+    {
+        return Results.NotFound();
+    }
+});
+
+app.MapGet("/coded-values/deleted", async (
+    [FromServices] ICodedValueRepository repository,
+    CancellationToken ct) =>
+    Results.Ok(await repository.ListDeletedAsync(ct)));
 
 app.MapPost("/coded-values", async (
     [FromBody] CreateCodedValue command,

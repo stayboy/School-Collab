@@ -88,10 +88,14 @@ public sealed class GetCodedValuesByParentHandler(
         cv.Name,
         cv.Description,
         cv.ParentId,
+        null,
         cv.IsDisabled,
         cv.DisplayOrder,
         cv.CreatedAt,
         cv.UpdatedAt,
         cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
-        cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray());
+        cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
+        0,
+        cv.IsDeleted,
+        cv.DeletedAt);
 }

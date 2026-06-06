@@ -1,8 +1,10 @@
-@page "/coded-values/{ParentId:guid}/children"
+@page "/coded-values/{ParentCode}/children"
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Children> Logger
+@inject IDialogService DialogService
+@implements IDisposable
 
 <PageTitle>Children of @_parent?.Name</PageTitle>
 
@@ -14,7 +16,7 @@
 <h2>@_parent?.Code — @_parent?.Name</h2>
 
 <FluentButton Appearance="Appearance.Accent"
-              OnClick='() => Nav.NavigateTo($"/coded-values/{ParentId}/children/new")'
+              OnClick='() => Nav.NavigateTo($"/coded-values/{Uri.EscapeDataString(ParentCode ?? "")}/children/new")'
               class="mb-3">
     + Add Child Value
 </FluentButton>
@@ -31,6 +33,30 @@
         }
         else if (_children is not null)
         {
+            @if (_parent?.AttributeDefinitions.Count > 0)
+            {
+                <div class="mb-3">
+                    <h6>Expected Attributes</h6>
+                    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                        @foreach (var def in _parent.AttributeDefinitions)
+                        {
+                            <FluentBadge @key="def.Key" Appearance="Appearance.Lightweight">
+                                @def.Key
+                                @if (!string.IsNullOrEmpty(def.DisplayName))
+                                {
+                                    <span class="text-muted">(@def.DisplayName)</span>
+                                }
+                                @if (def.IsRequired)
+                                {
+                                    <span style="color:var(--error)"> *</span>
+                                }
+                                <span class="text-muted" style="font-size:0.8em">:@FormatDataType(def.DataType)</span>
+                            </FluentBadge>
+                        }
+                    </div>
+                </div>
+            }
+
             <FluentDataGrid Items="@_children.AsQueryable()" GridTemplateColumns="1fr 2fr 0.5fr 1fr 2fr 2fr" TGridItem="CodedValueDto">
                 <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
                     <code>@context.Code</code>
@@ -50,19 +76,27 @@
                 <TemplateColumn Title="Attributes">
                     @foreach (var attr in context.Attributes)
                     {
-                        <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">@attr.Key=@attr.Value</FluentBadge>
+                        var def = _parent?.AttributeDefinitions.FirstOrDefault(d => d.Key == attr.Key);
+                        <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">
+                            @attr.Key=@attr.Value
+                            @if (def?.IsRequired == true)
+                            {
+                                <span style="color:var(--error)">*</span>
+                            }
+                        </FluentBadge>
                     }
                 </TemplateColumn>
                 <TemplateColumn Title="Actions">
-                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo($"/coded-values/{context.Id}/edit"))">Edit</FluentButton>
+                    <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="me-2 link-action">Edit</FluentAnchor>
                     @if (context.IsDisabled)
                     {
-                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, false))" class="ms-1">Enable</FluentButton>
+                        <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))" class="link-action">Enable</FluentAnchor>
                     }
                     else
                     {
-                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => ToggleAsync(context.Id, true))" class="ms-1">Disable</FluentButton>
+                        <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))" class="link-action">Disable</FluentAnchor>
                     }
+                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
                 </TemplateColumn>
             </FluentDataGrid>
         }
@@ -78,54 +112,158 @@
 }
 
 @code {
-    [Parameter] public Guid ParentId { get; set; }
+    [Parameter] public string? ParentCode { get; set; }
 
     private CodedValueDto? _parent;
     private CodedValueDto[]? _children;
     private bool _loading = true;
     private string? _error;
+    private string? _loadedParentCode;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);
 
     protected override async Task OnInitializedAsync()
     {
-        Logger.LogInformation("Loading children for parent {ParentId}", ParentId);
+        await LoadDataAsync();
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ParentCode != _loadedParentCode && !_disposed)
+        {
+            await LoadDataAsync();
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        _loading = true;
+        _error = null;
+        _parent = null;
+        _children = null;
+        StateHasChanged();
+
+        Logger.LogInformation("Loading children for parent {ParentCode}", ParentCode);
         try
         {
-            var parentTask = Api.GetByIdAsync(ParentId);
-            var childrenTask = Api.GetChildrenAsync(ParentId);
-            await Task.WhenAll(parentTask, childrenTask);
-            _parent = parentTask.Result;
-            _children = childrenTask.Result;
-            Logger.LogInformation("Loaded parent {ParentId} with {Count} children", ParentId, _children?.Length ?? 0);
+            _parent = await Api.GetByCodeAsync(ParentCode!, ct);
+            if (_parent is null)
+            {
+                _error = $"Coded value '{ParentCode}' not found.";
+                _loading = false;
+                return;
+            }
+            _children = await Api.GetChildrenAsync(_parent.Id, ct);
+            _loadedParentCode = ParentCode;
+            if (_disposed) return;
+            Logger.LogInformation("Loaded parent {ParentCode} with {Count} children", ParentCode, _children?.Length ?? 0);
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to load children for parent {ParentId}", ParentId);
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load children for parent {ParentCode}", ParentCode);
             _error = ex.Message;
         }
         finally
         {
-            _loading = false;
+            if (!_disposed)
+            {
+                _loading = false;
+                StateHasChanged();
+            }
         }
     }
 
     private async Task ToggleAsync(Guid id, bool disable)
     {
+        if (_children is null || _parent is null) return;
+        var idx = Array.FindIndex(_children, x => x.Id == id);
+        if (idx < 0) return;
+        var previous = _children[idx];
+        _children[idx] = previous with { IsDisabled = disable };
+        StateHasChanged();
+
         try
         {
             if (disable)
-                await Api.DisableAsync(id);
+                await Api.DisableAsync(id, _loadCts?.Token ?? CancellationToken.None);
             else
-                await Api.EnableAsync(id);
+                await Api.EnableAsync(id, _loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
+            var i = Array.FindIndex(_children, x => x.Id == id);
+            if (i >= 0) _children[i] = previous; // rollback
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
 
-            _children = await Api.GetChildrenAsync(ParentId);
+    private static string FormatDataType(AttributeDataType dt) => dt switch
+    {
+        AttributeDataType.Text => "Text",
+        AttributeDataType.Integer => "Integer",
+        AttributeDataType.Decimal => "Decimal",
+        AttributeDataType.Boolean => "Boolean",
+        AttributeDataType.Date => "Date",
+        AttributeDataType.DateTime => "DateTime",
+        AttributeDataType.Time => "Time",
+        AttributeDataType.CodedValue => "CodedValue",
+        _ => dt.ToString()
+    };
+
+    private async Task OnDeleteAsync(Guid id, string code)
+    {
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Are you sure you want to delete '{code}'? Items with children or SourceCode references cannot be deleted.",
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        try
+        {
+            await Api.DeleteAsync(id, _loadCts?.Token ?? CancellationToken.None);
+            if (_parent is not null && _children is not null)
+            {
+                _children = _children.Where(c => c.Id != id).ToArray();
+                StateHasChanged();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (InvalidOperationException ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete coded value {Id}", id);
             _error = ex.Message;
         }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
     }
 }

@@ -23,11 +23,17 @@ p, span, label, small, strong, em, code, pre {
     color: var(--neutral-foreground-1, inherit);
 }
 
-fluent-data-grid,
-fluent-data-grid-row,
-fluent-data-grid-cell {
-    color: var(--neutral-foreground-1, inherit);
-    background-color: transparent;
+fluent-data-grid {
+    --neutral-foreground-rest: var(--neutral-foreground-1);
+}
+
+fluent-data-grid::part(row) {
+    min-height: 44px;
+}
+
+fluent-data-grid::part(cell) {
+    padding-top: 6px;
+    padding-bottom: 6px;
 }
 
 fluent-nav-menu,
@@ -36,13 +42,17 @@ fluent-nav-group {
     color: var(--neutral-foreground-1, inherit);
 }
 
-a, .btn-link {
+a, .btn-link, fluent-anchor {
     color: var(--accent-fill-rest, #006bb7);
     text-decoration: none;
 }
 
-a:hover {
+a:hover, fluent-anchor:hover {
     text-decoration: underline;
+}
+
+.link-action {
+    cursor: pointer;
 }
 
 h1:focus {

@@ -1,12 +1,13 @@
 @page "/coded-values/new"
-@page "/coded-values/{ParentId:guid}/children/new"
+@page "/coded-values/{ParentCode}/children/new"
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
+@implements IDisposable
 
-<PageTitle>@(ParentId.HasValue ? "Add Child Value" : "New Category")</PageTitle>
-<h2>@(ParentId.HasValue ? "Add Child Value" : "New Coded Value Category")</h2>
+<PageTitle>@(_parentCode != null ? "Add Child Value" : "New Category")</PageTitle>
+<h2>@(_parentCode != null ? "Add Child Value" : "New Coded Value Category")</h2>
 
 <ErrorBoundary>
     <ChildContent>
@@ -38,16 +39,49 @@
 </ErrorBoundary>
 
 @code {
-    [Parameter] public Guid? ParentId { get; set; }
+    [Parameter] public string? ParentCode { get; set; }
 
+    private Guid? _parentId;
+    private string? _parentCode;
     private readonly FormModel _model = new();
     private bool _saving;
     private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (ParentCode != _parentCode)
+        {
+            _parentCode = ParentCode;
+            _parentId = null;
+            if (!string.IsNullOrEmpty(ParentCode))
+            {
+                _loadCts?.Cancel();
+                _loadCts?.Dispose();
+                _loadCts = new CancellationTokenSource();
+                var ct = _loadCts.Token;
+                try
+                {
+                    var parent = await Api.GetByCodeAsync(ParentCode, ct);
+                    if (_disposed) return;
+                    _parentId = parent?.Id;
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    if (_disposed) return;
+                    Logger.LogError(ex, "Failed to resolve parent for code {ParentCode}", ParentCode);
+                }
+            }
+        }
+    }
 
     private async Task SubmitAsync()
     {
         _saving = true;
         _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
 
         try
         {
@@ -56,24 +90,38 @@
                 _model.Code!,
                 _model.Name!,
                 _model.Description,
-                ParentId,
-                _model.DisplayOrder));
+                _parentId,
+                _model.DisplayOrder), ct);
 
-            Nav.NavigateTo(ParentId.HasValue ? $"/coded-values/{ParentId}/children" : "/coded-values");
+            Nav.NavigateTo(_parentCode != null
+                ? $"/coded-values/{Uri.EscapeDataString(_parentCode)}/children"
+                : "/coded-values");
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to save coded value {Code}", _model.Code);
             _error = ex.Message;
         }
         finally
         {
-            _saving = false;
+            if (!_disposed) _saving = false;
         }
     }
 
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+
     private void Cancel() =>
-        Nav.NavigateTo(ParentId.HasValue ? $"/coded-values/{ParentId}/children" : "/coded-values");
+        Nav.NavigateTo(_parentCode != null
+            ? $"/coded-values/{Uri.EscapeDataString(_parentCode)}/children"
+            : "/coded-values");
 
     private sealed class FormModel
     {

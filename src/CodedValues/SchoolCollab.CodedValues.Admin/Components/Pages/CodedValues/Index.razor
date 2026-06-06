@@ -4,17 +4,48 @@
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
+@inject IDialogService DialogService
 @implements IDisposable
 
 <PageTitle>Coded Values</PageTitle>
 
 <ErrorBoundary>
     <ChildContent>
-        <h1 class="mb-4">Coded Values</h1>
+        <div class="d-flex align-items-center mb-4 gap-3">
+            <h1 class="mb-0">Coded Values</h1>
+        </div>
 
-        <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")' class="mb-3">
-            + New Category
-        </FluentButton>
+        <div class="d-flex align-items-center mb-3 gap-3">
+            <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
+                + New Category
+            </FluentButton>
+            <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
+        </div>
+
+        @if (_showDeleted && _deletedItems is not null)
+        {
+            @if (_deletedItems.Length == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">No deleted coded values.</FluentMessageBar>
+            }
+            else
+            {
+                <h3>Deleted Values</h3>
+                <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" class="mb-4">
+                    <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
+                        <code>@context.Code</code>
+                    </TemplateColumn>
+                    <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                    <TemplateColumn Title="Deleted At">
+                        @(context.DeletedAt?.ToLocalTime().ToString("g") ?? "—")
+                    </TemplateColumn>
+                    <TemplateColumn Title="Actions">
+                        <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.Code))" class="link-action">Recover</FluentAnchor>
+                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="link-action ms-2">View</FluentAnchor>
+                    </TemplateColumn>
+                </FluentDataGrid>
+            }
+        }
 
         @if (_items is null)
         {
@@ -26,7 +57,7 @@
         }
         else
         {
-            <FluentDataGrid Items="@_items.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 1fr 2fr" TGridItem="CodedValueDto">
+            <FluentDataGrid Items="@_items.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 1fr 2fr 3fr" TGridItem="CodedValueDto">
                 <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
                     <code>@context.Code</code>
                 </TemplateColumn>
@@ -42,18 +73,29 @@
                     }
                 </TemplateColumn>
                 <TemplateColumn Title="Children">
-                    <FluentAnchor Href="@($"/coded-values/{context.Id}/children")">View children</FluentAnchor>
+                    <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
                 </TemplateColumn>
-                <TemplateColumn Title="Actions">
-                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo($"/coded-values/{context.Id}/edit"))">Edit</FluentButton>
-                    @if (context.IsDisabled)
+                <TemplateColumn Title="Definitions">
+                    @if (context.AttributeDefinitions.Count > 0)
                     {
-                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="ms-1">Enable</FluentButton>
+                        @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
                     }
                     else
                     {
-                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="ms-1">Disable</FluentButton>
+                        <span class="text-muted">—</span>
                     }
+                </TemplateColumn>
+                <TemplateColumn Title="Actions">
+                    <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
+                    @if (context.IsDisabled)
+                    {
+                        <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
+                    }
+                    else
+                    {
+                        <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
+                    }
+                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
                 </TemplateColumn>
             </FluentDataGrid>
         }
@@ -70,6 +112,8 @@
 
 @code {
     private CodedValueDto[]? _items;
+    private CodedValueDto[]? _deletedItems;
+    private bool _showDeleted;
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
@@ -87,17 +131,13 @@
         {
             _items = await Api.GetRootValuesAsync(token);
 
-            // Guard: the streaming renderer may have been torn down while we
-            // were awaiting (page navigated away, response cancelled, etc.).
-            // Mutating state on a detached component throws
-            // "The renderer does not have a component with ID {N}."
             if (_disposed) return;
 
             Logger.LogInformation("Loaded {Count} coded values", _items?.Length ?? 0);
         }
         catch (OperationCanceledException)
         {
-            // user navigated away — leave _items null, no UI update
+            // user navigated away
         }
         catch (Exception ex)
         {
@@ -107,10 +147,57 @@
         }
     }
 
+    private async Task OnShowDeletedChanged(bool isChecked)
+    {
+        _showDeleted = isChecked;
+        if (_showDeleted && _deletedItems is null)
+        {
+            try
+            {
+                _deletedItems = await Api.GetDeletedAsync();
+                if (_disposed) return;
+            }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to load deleted coded values");
+                _error = ex.Message;
+            }
+        }
+    }
+
+    private async Task OnRecoverAsync(Guid id, string code)
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Recover '{code}'? This will restore the item to the active list.",
+            "Recover",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        try
+        {
+            await Api.RecoverAsync(id);
+            if (_disposed) return;
+            // Remove from deleted list, re-fetch active list
+            _deletedItems = _deletedItems?.Where(x => x.Id != id).ToArray();
+            _items = await Api.GetRootValuesAsync();
+            if (_disposed) return;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to recover coded value {Id}", id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
     /// <summary>
     /// Optimistic toggle: flip the in-memory DTO, render immediately, dispatch the
-    /// API call in the background, and roll back on failure. Avoids a full re-fetch
-    /// of the root list for a one-bit change.
+    /// API call in the background, and roll back on failure.
     /// </summary>
     private async Task OnToggleAsync(Guid id, bool disable)
     {
@@ -131,12 +218,53 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
-            // rollback
             if (_items is not null)
             {
                 var i = Array.FindIndex(_items, x => x.Id == id);
                 if (i >= 0) _items[i] = previous;
             }
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnDeleteAsync(Guid id, string code)
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Are you sure you want to delete '{code}'? This will soft-delete the item. Items with children or SourceCode references cannot be deleted.",
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        try
+        {
+            await Api.DeleteAsync(id);
+            if (_disposed) return;
+            if (_items is not null)
+            {
+                _items = _items.Where(x => x.Id != id).ToArray();
+                StateHasChanged();
+            }
+            // If showing deleted, refresh the deleted list too
+            if (_showDeleted)
+            {
+                _deletedItems = await Api.GetDeletedAsync();
+                if (_disposed) return;
+                StateHasChanged();
+            }
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete coded value {Id}", id);
             _error = ex.Message;
             StateHasChanged();
         }

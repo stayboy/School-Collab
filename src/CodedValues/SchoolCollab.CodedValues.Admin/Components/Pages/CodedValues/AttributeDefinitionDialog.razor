@@ -1,0 +1,179 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.CodedValues.Admin.Services
+@implements IDialogContentComponent<AttributeDefinitionDialogData>
+
+<div style="padding:1.5rem;">
+    <EditForm Model="_model" OnValidSubmit="SaveAsync">
+        <DataAnnotationsValidator />
+
+        <ul style="list-style:none; padding:0; margin:0;">
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:700;" for="def-key">Key *</label>
+                <FluentTextField id="def-key" @bind-Value="_model.Key"
+                                 Placeholder="e.g. color"
+                                 Required
+                                 style="flex:1" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:700;" for="def-displayname">Display Name *</label>
+                <FluentTextField id="def-displayname" @bind-Value="_model.DisplayName"
+                                 Placeholder="e.g. Color"
+                                 style="flex:1" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:700;" for="def-datatype">Data Type *</label>
+                <FluentSelect id="def-datatype" TOption="DataTypeOption"
+                              Items="_dataTypes"
+                              OptionText="@(dt => dt.Label)"
+                              OptionValue="@(dt => ((int)dt.Value).ToString())"
+                              @bind-SelectedOption="_selectedDataType"
+                              style="flex:1" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:400;" for="def-sourcecode">Source Code</label>
+                <FluentSelect id="def-sourcecode" TOption="ParentCodedValueOption"
+                              Items="_parentCodedValues"
+                              OptionText="@(cv => cv.Code + " -- " + cv.Name)"
+                              OptionValue="@(cv => cv.Code)"
+                              @bind-SelectedOption="_selectedSourceCode"
+                              Placeholder="(none)"
+                              style="flex:1" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:400;">Required</label>
+                <FluentCheckbox @bind-Checked="_model.IsRequired" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:400;">Allow Multiple</label>
+                <FluentCheckbox @bind-Checked="_model.AllowMultiple" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:400;" for="def-minlen">Min Length</label>
+                <FluentNumberField id="def-minlen" @bind-Value="_model.MinLength" style="flex:1" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:400;" for="def-maxlen">Max Length</label>
+                <FluentNumberField id="def-maxlen" @bind-Value="_model.MaxLength" style="flex:1" />
+            </li>
+            <li style="display:flex; align-items:center; gap:8px; margin-bottom:12px;">
+                <label style="width:120px; text-align:right; font-weight:400;" for="def-regex">Regex Pattern</label>
+                <FluentTextField id="def-regex" @bind-Value="_model.RegexPattern" style="flex:1" />
+            </li>
+        </ul>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+        }
+
+        <div style="display:flex; gap:8px; margin-top:1.5rem; justify-content:flex-end;">
+            <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+            <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                @(_saving ? "Saving..." : "Save Definition")
+            </FluentButton>
+        </div>
+    </EditForm>
+</div>
+
+@code {
+    [Parameter] public AttributeDefinitionDialogData Content { get; set; } = default!;
+    [CascadingParameter] public FluentDialog Dialog { get; set; } = default!;
+
+    private AttributeDefinitionDialogData _data = default!;
+    private bool _saving;
+    private string? _error;
+
+    private DataTypeOption? _selectedDataType = new("Text", AttributeDataType.Text);
+    private ParentCodedValueOption? _selectedSourceCode;
+
+    private readonly DialogModel _model = new();
+
+    private readonly DataTypeOption[] _dataTypes =
+    [
+        new("Text", AttributeDataType.Text),
+        new("Integer", AttributeDataType.Integer),
+        new("Decimal", AttributeDataType.Decimal),
+        new("Boolean", AttributeDataType.Boolean),
+        new("Date", AttributeDataType.Date),
+        new("DateTime", AttributeDataType.DateTime),
+        new("Time", AttributeDataType.Time),
+        new("CodedValue", AttributeDataType.CodedValue),
+    ];
+
+    private IReadOnlyList<ParentCodedValueOption> _parentCodedValues = [];
+
+    protected override void OnInitialized()
+    {
+        _data = Content;
+        _parentCodedValues = (_data.ParentValues ?? [])
+            .Select(pv => new ParentCodedValueOption(pv.Id, pv.Code, pv.Name))
+            .ToList();
+
+        if (_data.ExistingDefinition is not null)
+        {
+            _model.Key = _data.ExistingDefinition.Key;
+            _model.DisplayName = _data.ExistingDefinition.DisplayName;
+            _model.IsRequired = _data.ExistingDefinition.IsRequired;
+            _model.AllowMultiple = _data.ExistingDefinition.AllowMultiple;
+            _model.MinLength = _data.ExistingDefinition.MinLength;
+            _model.MaxLength = _data.ExistingDefinition.MaxLength;
+            _model.RegexPattern = _data.ExistingDefinition.RegexPattern;
+            _selectedDataType = _dataTypes.FirstOrDefault(d => d.Value == _data.ExistingDefinition.DataType)
+                                ?? new("Text", AttributeDataType.Text);
+            _selectedSourceCode = _parentCodedValues.FirstOrDefault(p => p.Code == _data.ExistingDefinition.SourceCode);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_model.Key))
+        {
+            _error = "Key is required.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            var dataType = _selectedDataType?.Value ?? AttributeDataType.Text;
+            var sourceCode = _selectedSourceCode?.Code;
+            var result = new AttributeDefinitionResult(
+                _model.Key.Trim(),
+                _model.DisplayName,
+                dataType,
+                sourceCode,
+                _model.IsRequired,
+                _model.AllowMultiple,
+                _model.MinLength,
+                _model.MaxLength,
+                _model.RegexPattern);
+
+            await Dialog.CloseAsync(result);
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task CancelAsync() => await Dialog.CancelAsync();
+
+    private sealed class DialogModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Key { get; set; }
+
+        public string? DisplayName { get; set; }
+        public bool IsRequired { get; set; }
+        public bool AllowMultiple { get; set; }
+        public int? MinLength { get; set; }
+        public int? MaxLength { get; set; }
+        public string? RegexPattern { get; set; }
+    }
+}

@@ -16,6 +16,8 @@ public sealed class CodedValue
     public string? Description { get; private set; }
     public Guid? ParentId { get; private set; }
     public bool IsDisabled { get; private set; }
+    public bool IsDeleted { get; private set; }
+    public DateTimeOffset? DeletedAt { get; private set; }
     public int DisplayOrder { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -153,6 +155,30 @@ public sealed class CodedValue
         }
 
         _attributeDefinitions.Remove(existing);
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void Delete()
+    {
+        if (IsDeleted)
+        {
+            return;
+        }
+
+        IsDeleted = true;
+        DeletedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void Recover()
+    {
+        if (!IsDeleted)
+        {
+            return;
+        }
+
+        IsDeleted = false;
+        DeletedAt = null;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
