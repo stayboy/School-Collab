@@ -19,6 +19,11 @@ public sealed class RecoverCodedValueHandler(
             return;
         }
 
+        if (await repository.ExistsByCodeAsync(codedValue.Code, cancellationToken))
+        {
+            throw new DuplicateCodeException(codedValue.Code);
+        }
+
         codedValue.Recover();
         await repository.UpdateAsync(codedValue, cancellationToken);
         await cache.RemoveByTagAsync("coded-values", cancellationToken);

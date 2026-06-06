@@ -19,7 +19,8 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
 
         builder.HasIndex(x => x.Code)
             .IsUnique()
-            .HasDatabaseName("ix_coded_values_code");
+            .HasDatabaseName("ix_coded_values_code")
+            .HasFilter("is_deleted = false");
 
         builder.Property(x => x.Name)
             .IsRequired()

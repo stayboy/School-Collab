@@ -188,20 +188,29 @@
 
     private async Task ToggleAsync(Guid id, bool disable)
     {
+        if (_children is null || _parent is null) return;
+        var idx = Array.FindIndex(_children, x => x.Id == id);
+        if (idx < 0) return;
+        var previous = _children[idx];
+        _children[idx] = previous with { IsDisabled = disable };
+        StateHasChanged();
+
         try
         {
             if (disable)
-                await Api.DisableAsync(id);
+                await Api.DisableAsync(id, _loadCts?.Token ?? CancellationToken.None);
             else
-                await Api.EnableAsync(id);
-
-            if (_parent is not null)
-                _children = await Api.GetChildrenAsync(_parent.Id);
+                await Api.EnableAsync(id, _loadCts?.Token ?? CancellationToken.None);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to toggle coded value {Id}", id);
+            var i = Array.FindIndex(_children, x => x.Id == id);
+            if (i >= 0) _children[i] = previous; // rollback
             _error = ex.Message;
+            StateHasChanged();
         }
     }
 
@@ -229,16 +238,22 @@
 
         try
         {
-            await Api.DeleteAsync(id);
-            if (_parent is not null)
-                _children = await Api.GetChildrenAsync(_parent.Id);
+            await Api.DeleteAsync(id, _loadCts?.Token ?? CancellationToken.None);
+            if (_parent is not null && _children is not null)
+            {
+                _children = _children.Where(c => c.Id != id).ToArray();
+                StateHasChanged();
+            }
         }
+        catch (OperationCanceledException) { }
         catch (InvalidOperationException ex)
         {
+            if (_disposed) return;
             _error = ex.Message;
         }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to delete coded value {Id}", id);
             _error = ex.Message;
         }

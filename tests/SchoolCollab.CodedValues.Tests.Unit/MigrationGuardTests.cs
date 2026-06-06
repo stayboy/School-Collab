@@ -9,9 +9,13 @@ public class MigrationGuardTests
     [TestMethod]
     public void NoUncommittedModelChanges()
     {
+        // Must match DesignTimeCodedValuesDbContextFactory configuration exactly,
+        // including UseSnakeCaseNamingConvention(), otherwise HasPendingModelChanges()
+        // will report false positives due to annotation differences.
         using var context = new CodedValuesDbContext(
             new DbContextOptionsBuilder<CodedValuesDbContext>()
-                .UseNpgsql("Host=localhost;Database=guard") // DSN irrelevant — snapshot-only check
+                .UseNpgsql("Host=localhost;Database=guard")
+                .UseSnakeCaseNamingConvention()
                 .Options);
 
         Assert.IsFalse(

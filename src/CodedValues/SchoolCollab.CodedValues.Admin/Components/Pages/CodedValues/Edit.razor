@@ -5,6 +5,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Edit> Logger
+@implements IDisposable
 
 <PageTitle>Edit @_item?.Name</PageTitle>
 <h2>Edit: @_item?.Code</h2>
@@ -120,11 +121,14 @@
     private string? _attrValue;
     private string? _loadedCode;
     private readonly EditModel _model = new();
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
 
     private async Task OpenAddDefinitionDialog()
     {
-        if (_item is null) return;
-        var parentValues = await Api.GetRootValuesAsync() ?? Array.Empty<CodedValueDto>();
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
+        var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
         var data = new AttributeDefinitionDialogData(Api, _item.Id, ParentValues: parentValues.Where(p => p.Id != _item.Id).ToArray());
         var dialog = await DialogService.ShowDialogAsync<AttributeDefinitionDialog, AttributeDefinitionDialogData>(
             data,
@@ -140,14 +144,15 @@
         var result = await dialog.Result;
         if (!result.Cancelled && result.Data is AttributeDefinitionResult defResult)
         {
-            await SaveDefinitionFromResult(defResult);
+            await SaveDefinitionFromResultAsync(defResult, ct);
         }
     }
 
     private async Task EditDefinitionDialog(CodedValueAttributeDefinitionDto existing)
     {
-        if (_item is null) return;
-        var parentValues = await Api.GetRootValuesAsync() ?? Array.Empty<CodedValueDto>();
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
+        var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
         var data = new AttributeDefinitionDialogData(Api, _item.Id, existing, ParentValues: parentValues.Where(p => p.Id != _item.Id).ToArray());
         var dialog = await DialogService.ShowDialogAsync<AttributeDefinitionDialog, AttributeDefinitionDialogData>(
             data,
@@ -163,11 +168,11 @@
         var result = await dialog.Result;
         if (!result.Cancelled && result.Data is AttributeDefinitionResult defResult)
         {
-            await SaveDefinitionFromResult(defResult);
+            await SaveDefinitionFromResultAsync(defResult, ct);
         }
     }
 
-    private async Task SaveDefinitionFromResult(AttributeDefinitionResult defResult)
+    private async Task SaveDefinitionFromResultAsync(AttributeDefinitionResult defResult, CancellationToken ct)
     {
         if (_item is null) return;
         try
@@ -183,12 +188,14 @@
                 defResult.MaxLength,
                 defResult.RegexPattern);
 
-            await Api.SetAttributeDefinitionAsync(_item.Id, defResult.Key, req);
-            _item = await Api.GetByCodeAsync(Code!);
+            await Api.SetAttributeDefinitionAsync(_item.Id, defResult.Key, req, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
             StateHasChanged();
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to save attribute definition {Key} on coded value {Code}", defResult.Key, Code);
             _error = ex.Message;
         }
@@ -196,16 +203,19 @@
 
     private async Task RemoveDefinitionAsync(string key)
     {
-        if (_item is null) return;
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
         try
         {
             Logger.LogInformation("Removing attribute definition {Key} from coded value {Id}", key, _item.Id);
-            await Api.RemoveAttributeDefinitionAsync(_item.Id, key);
-            _item = await Api.GetByCodeAsync(Code!);
+            await Api.RemoveAttributeDefinitionAsync(_item.Id, key, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
             StateHasChanged();
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to remove attribute definition {Key} from coded value {Code}", key, Code);
             _error = ex.Message;
         }
@@ -213,26 +223,31 @@
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadItemAsync();
+        _loadCts = new CancellationTokenSource();
+        await LoadItemAsync(_loadCts.Token);
     }
 
     protected override async Task OnParametersSetAsync()
     {
-        if (Code != _loadedCode)
+        if (Code != _loadedCode && !_disposed)
         {
-            await LoadItemAsync();
+            _loadCts?.Cancel();
+            _loadCts?.Dispose();
+            _loadCts = new CancellationTokenSource();
+            await LoadItemAsync(_loadCts.Token);
         }
     }
 
-    private async Task LoadItemAsync()
+    private async Task LoadItemAsync(CancellationToken ct)
     {
         _loading = true;
         _error = null;
         Logger.LogInformation("Loading coded value {Code} for edit", Code);
         try
         {
-            _item = await Api.GetByCodeAsync(Code!);
+            _item = await Api.GetByCodeAsync(Code!, ct);
             _loadedCode = Code;
+            if (_disposed) return;
             if (_item is not null)
             {
                 _model.Name = _item.Name;
@@ -240,55 +255,69 @@
                 _model.DisplayOrder = _item.DisplayOrder;
             }
         }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to load coded value {Code}", Code);
             _error = ex.Message;
         }
         finally
         {
-            _loading = false;
+            if (!_disposed)
+            {
+                _loading = false;
+            }
         }
     }
 
     private async Task SubmitAsync()
     {
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
         _saving = true;
         _error = null;
 
         try
         {
-            if (_item is null) return;
             Logger.LogInformation("User initiated update for coded value {Code}", Code);
-            await Api.UpdateAsync(_item.Id, new UpdateCodedValueRequest(_model.Name!, _model.Description, _model.DisplayOrder));
+            await Api.UpdateAsync(_item.Id, new UpdateCodedValueRequest(_model.Name!, _model.Description, _model.DisplayOrder), ct);
             Nav.NavigateTo(_item.ParentId.HasValue
                 ? $"/coded-values/{Uri.EscapeDataString(_item.ParentCode ?? Code!)}/children"
                 : "/coded-values");
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to save coded value {Code}", Code);
             _error = ex.Message;
         }
         finally
         {
-            _saving = false;
+            if (!_disposed) _saving = false;
         }
     }
 
     private async Task AddAttributeAsync()
     {
-        if (_item is null || string.IsNullOrWhiteSpace(_attrKey) || string.IsNullOrWhiteSpace(_attrValue))
+        if (_item is null || string.IsNullOrWhiteSpace(_attrKey) || string.IsNullOrWhiteSpace(_attrValue) || _loadCts is null)
             return;
+        var ct = _loadCts.Token;
 
         try
         {
-            await Api.SetAttributeAsync(_item.Id, _attrKey.Trim(), _attrValue.Trim());
-            _item = await Api.GetByCodeAsync(Code!);
+            await Api.SetAttributeAsync(_item.Id, _attrKey.Trim(), _attrValue.Trim(), ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
             _attrKey = _attrValue = null;
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to add attribute {Key} to coded value {Code}", _attrKey, Code);
             _error = ex.Message;
         }
@@ -296,14 +325,17 @@
 
     private async Task RemoveAttributeAsync(string key)
     {
-        if (_item is null) return;
+        if (_item is null || _loadCts is null) return;
+        var ct = _loadCts.Token;
         try
         {
-            await Api.RemoveAttributeAsync(_item.Id, key);
-            _item = await Api.GetByCodeAsync(Code!);
+            await Api.RemoveAttributeAsync(_item.Id, key, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to remove attribute {Key} from coded value {Code}", key, Code);
             _error = ex.Message;
         }
@@ -326,6 +358,14 @@
         Nav.NavigateTo(_item?.ParentId.HasValue == true
             ? $"/coded-values/{Uri.EscapeDataString(_item!.ParentCode ?? Code!)}/children"
             : "/coded-values");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
 
     private sealed class EditModel
     {
