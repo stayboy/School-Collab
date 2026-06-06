@@ -1,6 +1,7 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.AI;
 
 namespace SchoolCollab.CodedValues.Admin.Services;
@@ -15,14 +16,30 @@ public sealed class CodedValueAIService
     private readonly IChatClient _chatClient;
     private readonly CodedValuesApiClient _api;
     private readonly ILogger<CodedValueAIService> _logger;
+    private readonly IHostEnvironment _hostEnv;
 
     private readonly List<AITool> _tools;
 
-    public CodedValueAIService(IChatClient chatClient, CodedValuesApiClient api, ILogger<CodedValueAIService> logger)
+    // System prompt loaded dynamically from wwwroot/ai-system-prompt.md
+    private string? _cachedSystemPrompt;
+    private DateTime _systemPromptLastWrite;
+
+    private static readonly Dictionary<string, string> FriendlyToolNames = new()
+    {
+        ["list_coded_value_categories"] = "List Categories",
+        ["get_coded_value_by_code"] = "Get By Code",
+        ["create_coded_value"] = "Create Value",
+        ["create_bulk_values"] = "Create Bulk Values",
+        ["set_attribute_definition"] = "Define Attribute",
+        ["set_attribute"] = "Set Attribute"
+    };
+
+    public CodedValueAIService(IChatClient chatClient, CodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv)
     {
         _chatClient = chatClient;
         _api = api;
         _logger = logger;
+        _hostEnv = hostEnv;
 
         _tools =
         [
@@ -35,89 +52,414 @@ public sealed class CodedValueAIService
         ];
     }
 
-    private const string SystemPrompt = """
+    /// <summary>
+    /// Loads the system prompt from wwwroot/ai-system-prompt.md, with caching and auto-reload on file change.
+    /// </summary>
+    private string GetSystemPrompt()
+    {
+        var promptFile = Path.Combine(_hostEnv.ContentRootPath, "wwwroot", "ai-system-prompt.md");
+
+        try
+        {
+            var lastWrite = System.IO.File.GetLastWriteTimeUtc(promptFile);
+            if (_cachedSystemPrompt is not null && lastWrite == _systemPromptLastWrite)
+                return _cachedSystemPrompt;
+
+            _cachedSystemPrompt = System.IO.File.ReadAllText(promptFile);
+            _systemPromptLastWrite = lastWrite;
+            _logger.LogInformation("Loaded system prompt from {Path} ({Length} chars)", promptFile, _cachedSystemPrompt.Length);
+            return _cachedSystemPrompt;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to read system prompt from {Path}, using cached version", promptFile);
+            return _cachedSystemPrompt ?? FallbackSystemPrompt;
+        }
+    }
+
+    private const string FallbackSystemPrompt = """
         You are a helpful assistant for managing coded values in a school collaboration system.
         Coded values are hierarchical lookup tables. Each has a unique code, a name, and an optional description.
         Parents define categories; children are the actual values.
 
-        ## REQUIRED WORKFLOW — follow these steps in order:
+        ## Critical rules for responses
+        1. Never list or describe tool/function calls in your text response. Just use the tools silently and present results.
+        2. Never output raw JSON or technical data structures. Always use human-readable format.
+        3. Always present coded-value data as a Markdown table before creating anything.
+        4. After a tool succeeds, describe the outcome in plain English.
 
-        ### Step 1: Ask for the parent code (REQUIRED)
-        Before creating any coded value, you MUST ask the user which parent category to use:
-        - If they specify one (e.g., "add to CNTRY"), use it.
-        - If they say "create a new one", ask for the code and name for the parent.
-        - Use list_coded_value_categories or get_coded_value_by_code to check if it exists.
-        NEVER create a coded value without first confirming the parent code.
-
-        ### Step 2: Ask for code and description (REQUIRED)
-        For each coded value (parent or child), you MUST ask for:
-        - **Code**: Short uppercase identifier (e.g., "US", "CNTRY")
-        - **Description**: A brief description or machine-readable value
-        These are required. Do not proceed without them.
-
-        ### Step 3: Ask about attributes (OPTIONAL)
-        After collecting code and description, ask: "Would you like to add any attribute values for these coded values?"
-        If they say yes, ask which attributes they want to set.
-        If they say no, skip to Step 4.
-
-        ### Step 4: Define attribute definitions on the PARENT (if attributes are needed)
-        If the user wants attributes on children, check if the parent already has those attribute definitions.
-        Use get_coded_value_by_code to inspect the parent's attributeDefinitions.
-        If a definition doesn't exist, call set_attribute_definition on the PARENT code.
-        When inferring the data type from the user's description:
-        - Numbers, prices, weights → Decimal (2)
-        - Whole numbers → Integer (1)
-        - True/false flags → Boolean (3)
-        - Dates → Date (4)
-        - Times → Time (6)
-        - References to another coded value category → CodedValue (7), and set sourceCode to that category's code
-        - Anything else → Text (0) (DEFAULT)
-        Default to Text (0) when uncertain.
-
-        ### Step 5: Create coded values and set attributes
-        Create the parent (if new) and children.
-        If attributes are needed, call set_attribute on each child with the value.
-
-        ## Important rules:
-        - Attribute definitions live on PARENTS. Attribute values live on CHILDREN.
-        - A definition must exist on the parent before values can be set on children.
-        - Always confirm what you're going to create before making API calls.
-        - Report results clearly after each operation.
+        ## Workflow
+        1. Identify the parent coded value from the user's request. If ambiguous, ask. If not found, create it.
+        2. Present proposed values as a Markdown table. Ask: "Shall I create these coded values?"
+        3. When user confirms, create values using the bulk creation tool.
+        4. Confirm creation in plain English.
         """;
 
     /// <summary>
-    /// Sends conversation history to the AI and returns the response as a stream of text chunks.
-    /// The AI can call the registered tools to create/list coded values.
+    /// Sends conversation history to the AI and yields structured updates (text chunks,
+    /// tool-call progress, errors). Handles multi-turn tool-call loops.
+    /// Text from tool-call rounds is collected for message history but NOT streamed to UI —
+    /// only the final round's text is yielded, preventing function-call JSON leakage.
     /// </summary>
-    public async IAsyncEnumerable<string> ChatAsync(
+    public async IAsyncEnumerable<ChatUpdate> ChatAsync(
         IReadOnlyList<ChatMessage> history,
         string? model = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         _logger.LogInformation("Processing AI chat with {Count} history messages", history.Count);
 
-        var messages = new List<ChatMessage> { new(ChatRole.System, SystemPrompt) };
+        var systemPrompt = GetSystemPrompt();
+        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(history);
 
         var options = model is not null
             ? new ChatOptions { Tools = _tools, ModelId = model }
             : new ChatOptions { Tools = _tools };
 
-        var result = _chatClient.GetStreamingResponseAsync(messages, options, ct);
+        var totalToolCalls = 0;
+        const int maxToolCallRounds = 10;
 
-        var fullResponse = new StringBuilder();
-        await foreach (var chunk in result.WithCancellation(ct))
+        while (totalToolCalls < maxToolCallRounds)
         {
-            if (chunk.Text is not null)
+            var roundText = new StringBuilder();
+            var toolCallsByCallId = new Dictionary<string, (string Name, string? Args)>();
+
+            await foreach (var chunk in _chatClient.GetStreamingResponseAsync(messages, options, ct).WithCancellation(ct))
             {
-                fullResponse.Append(chunk.Text);
-                yield return chunk.Text;
+                // Collect function call content from streaming updates
+                if (chunk.Contents is not null)
+                {
+                    foreach (var content in chunk.Contents)
+                    {
+                        if (content is FunctionCallContent fc && fc.Name is not null)
+                        {
+                            var callId = fc.CallId ?? Guid.NewGuid().ToString();
+                            if (!toolCallsByCallId.ContainsKey(callId))
+                            {
+                                var args = fc.Arguments is not null
+                                    ? JsonSerializer.Serialize(fc.Arguments)
+                                    : null;
+                                toolCallsByCallId[callId] = (fc.Name, args);
+
+                                var friendlyName = GetFriendlyToolName(fc.Name);
+                                var argsSummary = FormatArgsSummary(fc.Name, args);
+                                yield return new ChatUpdate.ToolCallStart(callId, friendlyName, argsSummary);
+                            }
+                        }
+                    }
+                }
+
+                // Collect text for message history (always), but do NOT stream to UI during tool-call rounds
+                if (chunk.Text is not null)
+                    roundText.Append(chunk.Text);
+            }
+
+            // Build assistant message with text + function call content items
+            var assistantContents = new List<AIContent>();
+            if (roundText.Length > 0)
+                assistantContents.Add(new TextContent(roundText.ToString()));
+            foreach (var (callId, (name, args)) in toolCallsByCallId)
+            {
+                var arguments = ParseArgumentsDictionary(args);
+                assistantContents.Add(new FunctionCallContent(callId, name, arguments));
+            }
+            if (assistantContents.Count > 0)
+                messages.Add(new ChatMessage(ChatRole.Assistant, assistantContents));
+
+            if (toolCallsByCallId.Count == 0)
+            {
+                // Final round — no more tool calls. Stream the clean text to UI.
+                var finalText = CleanModelText(roundText.ToString());
+                if (!string.IsNullOrEmpty(finalText))
+                    yield return new ChatUpdate.TextChunk(finalText);
+
+                break;
+            }
+
+            totalToolCalls += toolCallsByCallId.Count;
+
+            // Dispatch each tool call and add results
+            foreach (var (callId, (name, args)) in toolCallsByCallId)
+            {
+                var result = await DispatchToolCallAsync(name, args, ct);
+                messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
+
+                var friendlyName = GetFriendlyToolName(name);
+                var resultSummary = FormatResultSummary(name, result);
+                var success = !result.StartsWith("Error", StringComparison.OrdinalIgnoreCase);
+                yield return new ChatUpdate.ToolCallEnd(callId, friendlyName, resultSummary, success);
             }
         }
 
-        _logger.LogInformation("AI chat completed with {Length} chars", fullResponse.Length);
+        if (totalToolCalls >= maxToolCallRounds)
+        {
+            _logger.LogWarning("Reached max tool-call rounds ({Max}), stopping", maxToolCallRounds);
+            yield return new ChatUpdate.Error($"Reached maximum tool-call limit ({maxToolCallRounds}). Please continue your request.");
+        }
+
+        _logger.LogInformation("AI chat completed with {ToolCalls} tool calls", totalToolCalls);
     }
 
+    private static IDictionary<string, object?> ParseArgumentsDictionary(string? args)
+    {
+        var arguments = new Dictionary<string, object?>();
+        if (string.IsNullOrEmpty(args)) return arguments;
+        try
+        {
+            var parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args);
+            if (parsed is not null)
+            {
+                foreach (var kvp in parsed)
+                {
+                    arguments[kvp.Key] = kvp.Value.ValueKind switch
+                    {
+                        JsonValueKind.String => kvp.Value.GetString(),
+                        JsonValueKind.Number => kvp.Value.GetDouble(),
+                        JsonValueKind.True => true,
+                        JsonValueKind.False => false,
+                        JsonValueKind.Null => null,
+                        _ => kvp.Value.GetRawText()
+                    };
+                }
+            }
+        }
+        catch { /* ignore parse errors, partial args ok */ }
+        return arguments;
+    }
+    private async Task<string> DispatchToolCallAsync(string toolName, string? arguments, CancellationToken ct)
+    {
+        _logger.LogDebug("Dispatching tool call: {ToolName}", toolName);
+        try
+        {
+            var result = toolName switch
+            {
+                "list_coded_value_categories" => await ListCategoriesAsync(ct),
+                "get_coded_value_by_code" => await DispatchGetByCodeAsync(arguments, ct),
+                "create_coded_value" => await DispatchCreateCodedValueAsync(arguments, ct),
+                "create_bulk_values" => await DispatchCreateBulkValuesAsync(arguments, ct),
+                "set_attribute_definition" => await DispatchSetAttributeDefinitionAsync(arguments, ct),
+                "set_attribute" => await DispatchSetAttributeAsync(arguments, ct),
+                _ => $"Unknown tool: {toolName}"
+            };
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Tool call {ToolName} failed", toolName);
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    // --- Dispatch helpers that parse JSON arguments ---
+
+    private async Task<string> DispatchGetByCodeAsync(string? args, CancellationToken ct)
+    {
+        var code = ExtractStringArg(args, "code");
+        return code is null ? "Error: missing 'code' argument" : await GetByCodeAsync(code, ct);
+    }
+
+    private async Task<string> DispatchCreateCodedValueAsync(string? args, CancellationToken ct)
+    {
+        var code = ExtractStringArg(args, "code") ?? "";
+        var name = ExtractStringArg(args, "name") ?? "";
+        var description = ExtractStringArg(args, "description");
+        return await CreateCodedValueAsync(code, name, description, ct);
+    }
+
+    private async Task<string> DispatchCreateBulkValuesAsync(string? args, CancellationToken ct)
+    {
+        var parentCode = ExtractStringArg(args, "parentCode") ?? "";
+        var children = ExtractChildrenArg(args);
+        return await CreateBulkValuesAsync(parentCode, children, ct);
+    }
+
+    private async Task<string> DispatchSetAttributeDefinitionAsync(string? args, CancellationToken ct)
+    {
+        var parentCode = ExtractStringArg(args, "parentCode") ?? "";
+        var key = ExtractStringArg(args, "key") ?? "";
+        var displayName = ExtractStringArg(args, "displayName");
+        var dataType = ExtractIntArg(args, "dataType") ?? 0;
+        var sourceCode = ExtractStringArg(args, "sourceCode");
+        var isRequired = ExtractBoolArg(args, "isRequired") ?? false;
+        var allowMultiple = ExtractBoolArg(args, "allowMultiple") ?? false;
+        return await SetAttributeDefinitionAsync(parentCode, key, displayName, dataType, sourceCode, isRequired, allowMultiple, ct);
+    }
+
+    private async Task<string> DispatchSetAttributeAsync(string? args, CancellationToken ct)
+    {
+        var code = ExtractStringArg(args, "code") ?? "";
+        var key = ExtractStringArg(args, "key") ?? "";
+        var value = ExtractStringArg(args, "value") ?? "";
+        return await SetAttributeAsync(code, key, value, ct);
+    }
+
+    private static string? ExtractStringArg(string? args, string name)
+    {
+        if (string.IsNullOrEmpty(args)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            if (doc.RootElement.TryGetProperty(name, out var el))
+                return el.ValueKind == JsonValueKind.String ? el.GetString() : el.GetRawText();
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private static int? ExtractIntArg(string? args, string name)
+    {
+        if (string.IsNullOrEmpty(args)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            if (doc.RootElement.TryGetProperty(name, out var el))
+                return el.ValueKind == JsonValueKind.Number ? el.GetInt32() : null;
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private static bool? ExtractBoolArg(string? args, string name)
+    {
+        if (string.IsNullOrEmpty(args)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            if (doc.RootElement.TryGetProperty(name, out var el))
+                return el.ValueKind == JsonValueKind.True ? true : el.ValueKind == JsonValueKind.False ? false : null;
+            return null;
+        }
+        catch { return null; }
+    }
+
+    private static BulkChildItem[] ExtractChildrenArg(string? args)
+    {
+        if (string.IsNullOrEmpty(args)) return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            if (!doc.RootElement.TryGetProperty("children", out var arr) || arr.ValueKind != JsonValueKind.Array)
+                return [];
+            return arr.EnumerateArray().Select(el => new BulkChildItem(
+                el.TryGetProperty("code", out var c) ? c.GetString() ?? "" : "",
+                el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+                el.TryGetProperty("description", out var d) ? d.GetString() : null
+            )).ToArray();
+        }
+        catch { return []; }
+    }
+    // --- Text cleaning ---
+
+    private static string CleanModelText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return string.Empty;
+
+        // Remove model-internal thinking/scratchpad tags
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"<thinking>[\s\S]*?</thinking>", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"<scratchpad>[\s\S]*?</scratchpad>", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"<reflection>[\s\S]*?</reflection>", string.Empty, System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // Collapse excessive blank lines
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"(\r?\n){3,}", "\n\n");
+
+        return text.Trim();
+    }
+    // --- Tool name and result formatting helpers ---
+
+    private static string GetFriendlyToolName(string toolName) =>
+        FriendlyToolNames.TryGetValue(toolName, out var friendly) ? friendly : toolName;
+
+    private static string FormatArgsSummary(string toolName, string? args)
+    {
+        if (string.IsNullOrEmpty(args)) return string.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(args);
+            var root = doc.RootElement;
+            return toolName switch
+            {
+                "list_coded_value_categories" => string.Empty,
+                "get_coded_value_by_code" => $"code: {ArgDisplay(root, "code")}",
+                "create_coded_value" => $"{ArgDisplay(root, "code")}: {ArgDisplay(root, "name")}",
+                "create_bulk_values" => $"parent: {ArgDisplay(root, "parentCode")}",
+                "set_attribute_definition" => $"{ArgDisplay(root, "parentCode")}/{ArgDisplay(root, "key")}",
+                "set_attribute" => $"{ArgDisplay(root, "code")}.{ArgDisplay(root, "key")} = {ArgDisplay(root, "value")}",
+                _ => string.Join(", ", root.EnumerateObject().Select(p => p.Name))
+            };
+        }
+        catch { return string.Empty; }
+    }
+
+    private static string ArgDisplay(JsonElement root, string key)
+    {
+        if (!root.TryGetProperty(key, out var el) || el.ValueKind == JsonValueKind.Null) return "?";
+        return el.ValueKind switch
+        {
+            JsonValueKind.String => el.GetString() ?? "",
+            JsonValueKind.Number => el.ToString(),
+            JsonValueKind.True => "true",
+            JsonValueKind.False => "false",
+            _ => el.ToString()
+        };
+    }
+
+    private static string FormatResultSummary(string toolName, string result)
+    {
+        if (string.IsNullOrEmpty(result))
+            return string.Empty;
+
+        if (result.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+            return TruncateResult(result, 200);
+
+        return toolName switch
+        {
+            "list_coded_value_categories" => FormatListResult(result),
+            "get_coded_value_by_code" => FormatGetByCodeResult(result),
+            "create_coded_value" => TruncateResult(result, 150),
+            "create_bulk_values" => FormatBulkResult(result),
+            "set_attribute_definition" => TruncateResult(result, 150),
+            "set_attribute" => TruncateResult(result, 150),
+            _ => TruncateResult(result, 150)
+        };
+    }
+
+    private static string FormatListResult(string result)
+    {
+        if (result == "No coded value categories found.")
+            return result;
+        var lines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        var count = lines.Length;
+        return count <= 3 ? result : $"{count} categories found";
+    }
+
+    private static string FormatGetByCodeResult(string result)
+    {
+        if (result.StartsWith("Coded value with code"))
+            return TruncateResult(result, 150);
+        var lines = result.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+        return lines.Length <= 4 ? result : TruncateResult(result, 150);
+    }
+
+    private static string FormatBulkResult(string result)
+    {
+        var successCount = result.Count(c => c == '✓');
+        var failCount = result.Count(c => c == '✗');
+        if (successCount + failCount == 0)
+            return TruncateResult(result, 150);
+        return failCount == 0
+            ? $"{successCount} values created"
+            : $"{successCount} created, {failCount} failed";
+    }
+
+    private static string TruncateResult(string result, int maxLength)
+    {
+        if (result.Length <= maxLength) return result;
+        var firstLine = result.Split('\n')[0];
+        return firstLine.Length <= maxLength
+            ? firstLine + "…"
+            : firstLine[..maxLength] + "…";
+    }
     // --- AI Tool Functions ---
 
     [Description("Lists all root-level coded value categories")]
@@ -158,20 +500,17 @@ public sealed class CodedValueAIService
         [Description("Unique uppercase code, e.g. CNTRY")] string code,
         [Description("Display name, e.g. Countries")] string name,
         [Description("Optional description")] string? description = null,
-        [Description("Optional parent ID for creating a child value")] Guid? parentId = null,
-        [Description("Optional display order")] int displayOrder = 0,
         CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: creating coded value {Code}", code);
 
-        // Check for duplicate code first
         var existing = await _api.GetByCodeAsync(code, ct);
         if (existing is not null)
             return $"A coded value with code '{code}' already exists: {existing.Name} (Id: {existing.Id}). Use a different code or get_coded_value_by_code to inspect it.";
 
         try
         {
-            await _api.CreateAsync(new CreateCodedValueRequest(code, name, description, parentId, displayOrder), ct);
+            await _api.CreateAsync(new CreateCodedValueRequest(code, name, description, null), ct);
             return $"Created coded value: Code={code}, Name={name}";
         }
         catch (HttpRequestException ex)
@@ -184,7 +523,7 @@ public sealed class CodedValueAIService
     [Description("Creates multiple child values under a parent coded value")]
     private async Task<string> CreateBulkValuesAsync(
         [Description("The code of the parent category, e.g. CNTRY")] string parentCode,
-        [Description("Array of child items to create, each with code and name")] BulkChildItem[] children,
+        BulkChildItem[] children,
         CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: creating {Count} bulk values under parent {ParentCode}", children.Length, parentCode);
@@ -199,7 +538,7 @@ public sealed class CodedValueAIService
             try
             {
                 await _api.CreateAsync(new CreateCodedValueRequest(
-                    child.Code, child.Name, child.Description, parent.Id, child.DisplayOrder), ct);
+                    child.Code, child.Name, child.Description, parent.Id), ct);
                 results.Add($"✓ {child.Code}: {child.Name}");
             }
             catch (HttpRequestException ex)
@@ -215,13 +554,13 @@ public sealed class CodedValueAIService
 
     [Description("Defines an attribute on a PARENT coded value so children can set values for it")]
     private async Task<string> SetAttributeDefinitionAsync(
-        [Description("The code of the PARENT coded value to define the attribute on, e.g. AI-MODELS")] string parentCode,
-        [Description("Unique key for the attribute, e.g. 'weight' or 'color'")] string key,
-        [Description("Human-readable label, e.g. 'Weight' or 'Color'")] string? displayName = null,
-        [Description("Data type: 0=Text, 1=Integer, 2=Decimal, 3=Boolean, 4=Date, 5=DateTime, 6=Time, 7=CodedValue. Default is 0 (Text).")] int dataType = 0,
-        [Description("If dataType=7 (CodedValue), the code of another parent to use as dropdown values")] string? sourceCode = null,
-        [Description("Whether children must set this attribute")] bool isRequired = false,
-        [Description("Whether children can have multiple values for this attribute")] bool allowMultiple = false,
+        string parentCode,
+        string key,
+        string? displayName = null,
+        int dataType = 0,
+        string? sourceCode = null,
+        bool isRequired = false,
+        bool allowMultiple = false,
         CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: setting attribute definition '{Key}' on parent {ParentCode}", key, parentCode);
@@ -230,7 +569,6 @@ public sealed class CodedValueAIService
         if (parent is null)
             return $"Parent coded value '{parentCode}' not found. Create it first.";
 
-        // Check if definition already exists
         var existing = parent.AttributeDefinitions.FirstOrDefault(d => d.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
             return $"Attribute definition '{key}' already exists on '{parentCode}' with DataType={existing.DataType}.";
@@ -245,9 +583,9 @@ public sealed class CodedValueAIService
 
     [Description("Sets an attribute value on a coded value. The definition must exist on its parent.")]
     private async Task<string> SetAttributeAsync(
-        [Description("The code of the coded value to set the attribute on")] string code,
-        [Description("The attribute key that matches a definition on the parent")] string key,
-        [Description("The value as a string")] string value,
+        string code,
+        string key,
+        string value,
         CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: setting attribute '{Key}' = '{Value}' on {Code}", key, value, code);
@@ -256,7 +594,6 @@ public sealed class CodedValueAIService
         if (item is null)
             return $"Coded value '{code}' not found.";
 
-        // Verify the parent has the definition
         if (item.ParentId is null)
             return $"'{code}' is a root/parent coded value. Attributes are set on children, not parents. " +
                    "Use set_attribute_definition to define metadata on parents instead.";
@@ -276,11 +613,17 @@ public sealed class CodedValueAIService
     }
 }
 
-/// <summary>
-/// A child item for bulk creation.
-/// </summary>
+// --- Chat update types for streaming UI updates ---
+
+public abstract record ChatUpdate
+{
+    public sealed record TextChunk(string Text) : ChatUpdate;
+    public sealed record ToolCallStart(string CallId, string FriendlyName, string ArgsSummary) : ChatUpdate;
+    public sealed record ToolCallEnd(string CallId, string FriendlyName, string? ResultSummary, bool Success) : ChatUpdate;
+    public sealed record Error(string Message) : ChatUpdate;
+}
+
 public record BulkChildItem(
     [Description("Short uppercase code for the child value, e.g. US")] string Code,
     [Description("Display name, e.g. United States")] string Name,
-    [Description("Optional description")] string? Description = null,
-    [Description("Optional display order")] int DisplayOrder = 0);
+    [Description("Optional description")] string? Description = null);

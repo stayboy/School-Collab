@@ -5,6 +5,7 @@
 @inject CodedValueAIService AiService
 @inject CodedValuesApiClient Api
 @inject ILogger<CodedValuesChat> Logger
+@inject NavigationManager Nav
 
 <div class="chat-container" style="border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1); margin-top: 2rem; padding-top: 1rem;">
     <h3 style="margin-bottom: 0.5rem;">✨ AI Assistant</h3>
@@ -28,39 +29,120 @@
                             <strong>AI:</strong>
                         }
                         <div style="white-space: pre-wrap; margin-top: 0.25rem;">@msg.Text</div>
+                        @if (msg.ToolCalls is { Count: > 0 })
+                        {
+                            <div style="margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.25rem;">
+                                @foreach (var tc in msg.ToolCalls)
+                                {
+                                    <div style="font-size: 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--neutral-fill-layer-rest, #f0f0f0); border-left: 3px solid var(--accent-fill-rest, #0078d4);">
+                                        @if (tc.Success is true)
+                                        {
+                                            <span style="color: var(--success, #107c10);">✅</span>
+                                        }
+                                        else if (tc.Success is false)
+                                        {
+                                            <span style="color: var(--error, #d13438);">❌</span>
+                                        }
+                                        else
+                                        {
+                                            <span>⏳</span>
+                                        }
+                                        <strong>@tc.FriendlyName</strong>
+                                        @if (!string.IsNullOrEmpty(tc.ArgsSummary))
+                                        {
+                                            <span style="color: var(--neutral-foreground-3, #616161);">(@tc.ArgsSummary)</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(tc.ResultSummary))
+                                        {
+                                            <br /><span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem;">@tc.ResultSummary</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
                     </div>
                 }
                 @if (_isStreaming)
                 {
                     <div style="margin-bottom: 0.75rem;">
                         <strong>AI:</strong>
-                        <div style="white-space: pre-wrap; margin-top: 0.25rem;">@_streamingText<FluentProgressRing style="width: 16px; height: 16px; vertical-align: middle; margin-left: 4px;" /></div>
+                        @if (!string.IsNullOrEmpty(_streamingText))
+                        {
+                            <div style="white-space: pre-wrap; margin-top: 0.25rem;">@_streamingText</div>
+                        }
+                        @if (_activeToolCalls is { Count: > 0 })
+                        {
+                            <div style="margin-top: 0.25rem; display: flex; flex-direction: column; gap: 0.25rem;">
+                                @foreach (var tc in _activeToolCalls)
+                                {
+                                    <div style="font-size: 0.8rem; padding: 0.35rem 0.6rem; border-radius: 6px; background: var(--neutral-fill-layer-rest, #f0f0f0); border-left: 3px solid var(--accent-fill-rest, #0078d4);">
+                                        @if (tc.Success is true)
+                                        {
+                                            <span style="color: var(--success, #107c10);">✅</span>
+                                        }
+                                        else if (tc.Success is false)
+                                        {
+                                            <span style="color: var(--error, #d13438);">❌</span>
+                                        }
+                                        else
+                                        {
+                                            <FluentProgressRing style="width: 12px; height: 12px; vertical-align: middle; margin-right: 2px;" /><span> </span>
+                                        }
+                                        <strong>@tc.FriendlyName</strong>
+                                        @if (!string.IsNullOrEmpty(tc.ArgsSummary))
+                                        {
+                                            <span style="color: var(--neutral-foreground-3, #616161);">(@tc.ArgsSummary)</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(tc.ResultSummary))
+                                        {
+                                            <br /><span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem;">@tc.ResultSummary</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (string.IsNullOrEmpty(_streamingText) && (_activeToolCalls is null || _activeToolCalls.Count == 0))
+                        {
+                            <FluentProgressRing style="width: 16px; height: 16px; vertical-align: middle; margin-left: 4px;" />
+                        }
                     </div>
                 }
             </div>
 
-            <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
-                <FluentSelect Items="@_models"
-                             @bind-SelectedOption="@_selectedModel"
-                             OptionText="@(m => $"{m!.Label} (w:{m!.Weight})")"
-                             OptionValue="@(m => m!.Value)"
-                             Style="min-width: 220px;"
-                             aria-label="AI model" />
-                <div style="flex: 1;">
-                    <FluentTextArea @ref="_inputRef"
-                                   @bind-Value="_inputText"
-                                   Placeholder="Ask me to create coded values..."
-                                   Style="width: 100%;"
-                                   Rows="2"
-                                   aria-label="Chat input"
-                                   OnKeyDown="HandleKeyDown" />
-                </div>
-                <FluentButton Appearance="Appearance.Accent"
-                             OnClick="SendAsync"
-                             Disabled="@_isStreaming"
-                             aria-label="Send message">
-                    ➤
-                </FluentButton>
+            <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem;">
+                <li>
+                    <FluentSelect Items="@_models"
+                                 @bind-SelectedOption="@_selectedModel"
+                                 OptionText="@(m => $"{m!.Label} (w:{m!.Weight}, {(m!.Cloud ? "☁️ cloud" : "🖥️ local")})")"
+                                 OptionValue="@(m => m!.Value)"
+                                 Style="width: 100%; max-width: 520px;"
+                                 aria-label="AI model" />
+                </li>
+                <li>
+                    <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
+                        <div style="flex: 1;">
+                            <FluentTextArea @ref="_inputRef"
+                                           @bind-Value="_inputText"
+                                           Placeholder="Ask me to create coded values..."
+                                           Style="width: 100%;"
+                                           Rows="2"
+                                           aria-label="Chat input"
+                                           OnKeyDown="HandleKeyDown" />
+                        </div>
+                        <FluentButton Appearance="Appearance.Accent"
+                                     OnClick="SendAsync"
+                                     Disabled="@_isStreaming"
+                                     aria-label="Send message">
+                            ➤
+                        </FluentButton>
+                    </div>
+                </li>
+            </ul>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem;">
+                <span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem; font-family: monospace;">Model: @_selectedModel.Value</span>
+                <FluentAnchor Href="/ai-system-prompt.md" Target="_blank" appearance="Appearance.Hypertext">
+                    Edit system prompt
+                </FluentAnchor>
             </div>
         </ChildContent>
         <ErrorContent Context="ex">
@@ -72,27 +154,30 @@
 </div>
 
 @code {
-    private record ChatMessageItem(ChatRole Role, string Text);
+    private record ToolCallDisplay(string CallId, string FriendlyName, string ArgsSummary, string? ResultSummary = null, bool? Success = null);
+
+    private record ChatMessageItem(ChatRole Role, string Text, List<ToolCallDisplay>? ToolCalls = null);
 
     private readonly List<ChatMessageItem> _messages = [];
     private string _inputText = string.Empty;
     private bool _isStreaming;
     private string _streamingText = string.Empty;
+    private List<ToolCallDisplay>? _activeToolCalls;
     private FluentTextArea? _inputRef;
     private CancellationTokenSource? _sendCts;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    private record ModelOption(string Value, string Label, decimal Weight = 0m);
+    private record ModelOption(string Value, string Label, decimal Weight = 0m, bool Cloud = false);
 
     private static readonly ModelOption[] _fallbackModels =
     [
-        new("llama3.1:8b", "Llama 3.1 8B", 1.0m),
-        new("llama3.2:3b", "Llama 3.2 3B", 0.4m),
-        new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m),
-        new("mistral:7b", "Mistral 7B", 0.9m),
-        new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m),
-        new("gemma2:9b", "Gemma 2 9B", 1.2m)
+        new("llama3.1:8b", "Llama 3.1 8B", 1.0m, false),
+        new("llama3.2:3b", "Llama 3.2 3B", 0.4m, false),
+        new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m, false),
+        new("mistral:7b", "Mistral 7B", 0.9m, false),
+        new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m, false),
+        new("gemma2:9b", "Gemma 2 9B", 1.2m, false)
     ];
 
     private ModelOption[] _models = _fallbackModels;
@@ -115,7 +200,7 @@
             if (_disposed || children is null || children.Length == 0) return;
 
             var models = children
-                .Where(c => !c.IsDisabled && c.Description is not null)
+                .Where(c => !c.IsDisabled && !c.IsDeleted && c.Description is not null)
                 .OrderBy(c => c.Attributes.FirstOrDefault(a => a.Key == "weight") is { } wAttr
                     ? decimal.TryParse(wAttr.Value, out var w) ? w : decimal.MaxValue
                     : decimal.MaxValue)
@@ -124,7 +209,21 @@
                 {
                     var weightAttr = c.Attributes.FirstOrDefault(a => a.Key == "weight");
                     var weight = weightAttr is not null && decimal.TryParse(weightAttr.Value, out var w) ? w : 0m;
-                    return new ModelOption(c.Description!, c.Name, weight);
+                    var cloudAttr = c.Attributes.FirstOrDefault(a => a.Key == "cloud");
+                    var cloud = cloudAttr is not null && bool.TryParse(cloudAttr.Value, out var b) && b;
+                    // Prefer modelName attribute (use as-is, includes :cloud suffix if needed)
+                    // Fall back to Description + :cloud suffix for cloud models
+                    var modelNameAttr = c.Attributes.FirstOrDefault(a => a.Key == "modelName");
+                    string ollamaTag;
+                    if (modelNameAttr is not null && !string.IsNullOrWhiteSpace(modelNameAttr.Value))
+                    {
+                        ollamaTag = modelNameAttr.Value;
+                    }
+                    else
+                    {
+                        ollamaTag = cloud && !c.Description!.EndsWith(":cloud") ? $"{c.Description}:cloud" : c.Description!;
+                    }
+                    return new ModelOption(ollamaTag, c.Name, weight, cloud);
                 })
                 .ToArray();
 
@@ -154,6 +253,7 @@
         _messages.Add(new(ChatRole.User, prompt));
         _isStreaming = true;
         _streamingText = string.Empty;
+        _activeToolCalls = null;
         _sendCts?.Cancel();
         _sendCts?.Dispose();
         _sendCts = new CancellationTokenSource();
@@ -163,12 +263,39 @@
             .Select(m => new ChatMessage(m.Role, m.Text))
             .ToList();
 
+        var toolCalls = new List<ToolCallDisplay>();
+
         try
         {
-            await foreach (var chunk in AiService.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
+            await foreach (var update in AiService.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
             {
                 if (_disposed) return;
-                _streamingText += chunk;
+
+                switch (update)
+                {
+                    case ChatUpdate.TextChunk tc:
+                        _streamingText += tc.Text;
+                        break;
+
+                    case ChatUpdate.ToolCallStart tcs:
+                        toolCalls.Add(new(tcs.CallId, tcs.FriendlyName, tcs.ArgsSummary));
+                        _activeToolCalls = new List<ToolCallDisplay>(toolCalls);
+                        break;
+
+                    case ChatUpdate.ToolCallEnd tce:
+                        var idx = toolCalls.FindIndex(tc => tc.CallId == tce.CallId);
+                        if (idx >= 0)
+                            toolCalls[idx] = toolCalls[idx] with { ResultSummary = tce.ResultSummary, Success = tce.Success };
+                        else
+                            toolCalls.Add(new(tce.CallId, tce.FriendlyName, "", tce.ResultSummary, tce.Success));
+                        _activeToolCalls = new List<ToolCallDisplay>(toolCalls);
+                        break;
+
+                    case ChatUpdate.Error err:
+                        _streamingText += $"\n⚠️ {err.Message}";
+                        break;
+                }
+
                 await InvokeAsync(StateHasChanged);
             }
         }
@@ -183,12 +310,25 @@
             _streamingText = $"Error: {ex.Message}";
         }
 
-        if (!_disposed && _streamingText.Length > 0)
+        if (!_disposed)
         {
-            _messages.Add(new(ChatRole.Assistant, _streamingText));
+            _messages.Add(new(ChatRole.Assistant, _streamingText, toolCalls.Count > 0 ? toolCalls : null));
+
+            // Navigate to children page after successful bulk creation
+            var bulkCall = toolCalls.FirstOrDefault(tc =>
+                tc.FriendlyName == "Create Bulk Values" && tc.Success == true);
+            if (bulkCall is not null)
+            {
+                var parentCode = ExtractParentCode(bulkCall.ArgsSummary);
+                if (parentCode is not null)
+                {
+                    Nav.NavigateTo($"/coded-values/{Uri.EscapeDataString(parentCode)}/children");
+                }
+            }
         }
 
         _streamingText = string.Empty;
+        _activeToolCalls = null;
         _isStreaming = false;
         if (!_disposed) StateHasChanged();
     }
@@ -210,5 +350,18 @@
         _sendCts?.Cancel();
         _sendCts?.Dispose();
         _sendCts = null;
+    }
+
+    /// <summary>
+    /// Extracts the parent code from a bulk-create args summary like "parent: CNTRY".
+    /// </summary>
+    private static string? ExtractParentCode(string? argsSummary)
+    {
+        if (string.IsNullOrWhiteSpace(argsSummary)) return null;
+        var prefix = "parent: ";
+        var idx = argsSummary.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx < 0) return null;
+        var code = argsSummary[(idx + prefix.Length)..].Trim();
+        return string.IsNullOrEmpty(code) ? null : code;
     }
 }
