@@ -575,4 +575,258 @@ public class AiTextCleanerTests
         AiTextCleaner.RemoveJsonBlocksContaining(input, "\"type\"\\s*:\\s*\"function\"")
             .Should().Be("before  after");
     }
+
+    // =====================================================================
+    // Full scenario: "Add hospital coded values with parent code HSPTL"
+    // Tests that the AI response produces a clean list of hospitals
+    // =====================================================================
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_ResponseAsHospitalList()
+    {
+        // Model returns a clean bulleted list after tool execution — no leaking
+        var input = """
+            I've added the following hospital values under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            - CH: Children's Hospital
+            - MH: Memorial Hospital
+
+            All 4 values are now available.
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().Contain("Children's Hospital");
+        result.Should().Contain("Memorial Hospital");
+        result.Should().Contain("All 4 values are now available");
+        result.Should().NotContain("<thinking>");
+        result.Should().NotContain("\"code\"");
+        result.Should().NotContain("\"id\"");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_ThinkingTagsStripped()
+    {
+        // Model leaks <thinking> before the list
+        var input = """
+            <thinking>The user wants hospitals under HSPTL. I'll use create_bulk_values.</thinking>
+            I've added the following hospital values under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            - CH: Children's Hospital
+
+            All 3 values are now available.
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().Contain("Children's Hospital");
+        result.Should().NotContain("<thinking>");
+        result.Should().NotContain("create_bulk_values");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_FunctionDefJsonStripped()
+    {
+        // Model leaks function-definition JSON before the readable list
+        var input = """
+            {"type": "function", "name": "create_bulk_values", "parameters": {"parentCode": "HSPTL", "items": [{"code": "GH", "name": "General Hospital"}]}}
+            I've added the hospital values under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            - CH: Children's Hospital
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().Contain("Children's Hospital");
+        result.Should().NotContain("\"type\"");
+        result.Should().NotContain("\"function\"");
+        result.Should().NotContain("create_bulk_values");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_JsonDataObjectsStripped()
+    {
+        // Model leaks data JSON objects alongside the human-readable list
+        var input = """
+            {"id": "h1", "code": "GH", "parentId": "HSPTL", "description": "General Hospital"}
+            {"id": "h2", "code": "UH", "parentId": "HSPTL", "description": "University Hospital"}
+            {"id": "h3", "code": "CH", "parentId": "HSPTL", "description": "Children's Hospital"}
+            I've created 3 hospital values under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            - CH: Children's Hospital
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().Contain("Children's Hospital");
+        result.Should().NotContain("\"id\"");
+        result.Should().NotContain("\"parentId\"");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_ToolCallSyntaxStripped()
+    {
+        // Model leaks raw function-call-as-text syntax
+        var input = """
+            create_bulk_values(parentCode="HSPTL", items=[{"code":"GH","name":"General Hospital"},{"code":"UH","name":"University Hospital"}]);
+            I've added 2 hospital values under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().NotContain("create_bulk_values");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_StandaloneToolNameLineStripped()
+    {
+        // Model emits a standalone tool name line before the response
+        var input = """
+            → create_bulk_values
+            Added hospital values under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().NotContain("create_bulk_values");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_NameValueToolNameLineStripped()
+    {
+        // Model leaks "name": "tool_name" line
+        var input = """
+            "name": "create_bulk_values"
+            Here are the hospital values I added under HSPTL:
+            - GH: General Hospital
+            - CH: Children's Hospital
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("Children's Hospital");
+        result.Should().NotContain("\"name\"");
+        result.Should().NotContain("create_bulk_values");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_KitchenSinkAllLeaked()
+    {
+        // Worst case: model leaks thinking tags, function def, data objects,
+        // tool name line, and empty JSON — but still has a valid readable list
+        var input = """
+            <thinking>User wants hospitals under HSPTL parent. I'll call create_bulk_values.</thinking>
+            {"type": "function", "name": "create_bulk_values", "parameters": {"parentCode": "HSPTL"}}
+            create_bulk_values
+            {"id": "h1", "code": "GH", "parentId": "HSPTL", "description": "General Hospital"}
+            {}
+            I've added the following hospital values under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            - CH: Children's Hospital
+            - MH: Memorial Hospital
+            All 4 values are now available.
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().Contain("Children's Hospital");
+        result.Should().Contain("Memorial Hospital");
+        result.Should().Contain("All 4 values are now available");
+        result.Should().NotContain("<thinking>");
+        result.Should().NotContain("\"type\"");
+        result.Should().NotContain("\"function\"");
+        result.Should().NotContain("create_bulk_values");
+        result.Should().NotContain("\"id\"");
+        result.Should().NotContain("{}");
+    }
+
+    [TestMethod]
+    public void CleanForHistory_HospitalBulkCreate_StripsToolNameFromProse()
+    {
+        // CleanForHistory is aggressive: even a line mentioning a tool name is removed
+        var input = """
+            I used create_bulk_values to add hospitals under HSPTL.
+            - GH: General Hospital
+            - UH: University Hospital
+            All 2 values are now available.
+            """;
+        var result = AiTextCleaner.CleanForHistory(input);
+        result.Should().NotContain("create_bulk_values");
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().Contain("All 2 values are now available");
+    }
+
+    [TestMethod]
+    public void CleanForHistory_HospitalBulkCreate_StripsToolNarration()
+    {
+        // CleanForHistory strips "I'll use the tool..." narration
+        var input = """
+            I'll use the tool to create hospital values under HSPTL.
+            - GH: General Hospital
+            - CH: Children's Hospital
+            """;
+        var result = AiTextCleaner.CleanForHistory(input);
+        result.Should().NotContain("I'll use the tool");
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("Children's Hospital");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_EmptyJsonObjectTagsRemoved()
+    {
+        // Regression: model output includes {} which showed as empty tags
+        var input = """
+            {}
+            Hospital values created under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().NotContain("{}");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_ArrayOfJsonDataStripped()
+    {
+        // Model leaks a JSON array of coded-value objects
+        var input = """Results: [{"id": "h1", "code": "GH", "description": "General Hospital"}, {"id": "h2", "code": "UH", "description": "University Hospital"}] Created 2 hospital values under HSPTL.""";
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("Created 2 hospital values under HSPTL");
+        result.Should().NotContain("\"id\"");
+        result.Should().NotContain("\"code\"");
+    }
+
+    [TestMethod]
+    public void CleanForDisplay_HospitalBulkCreate_MultilineJsonDataBlockStripped()
+    {
+        // Model leaks multi-line JSON data block before the readable summary
+        var input = """
+            Created:
+            {
+              "id": "h1",
+              "code": "GH",
+              "parentId": "HSPTL",
+              "description": "General Hospital"
+            }
+            Hospital values added under HSPTL:
+            - GH: General Hospital
+            - UH: University Hospital
+            """;
+        var result = AiTextCleaner.CleanForDisplay(input);
+        result.Should().Contain("General Hospital");
+        result.Should().Contain("University Hospital");
+        result.Should().NotContain("\"id\"");
+        result.Should().NotContain("\"parentId\"");
+    }
 }
