@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -158,48 +159,84 @@ public sealed class CodedValueAIService
             var roundText = new StringBuilder();
             var toolCallsByCallId = new Dictionary<string, (string Name, string? Args)>();
             var seenCallIds = new HashSet<string>();
+            // Collect ToolCallStart events to yield outside the try/catch (C# forbids yield in try with catch)
+            var pendingStarts = new List<ChatUpdate.ToolCallStart>();
+            bool streamCancelled = false;
 
-            await foreach (var chunk in chatClient.GetStreamingResponseAsync(messages, options, ct).WithCancellation(ct))
+            try
             {
-                // Collect function call content from streaming updates
-                // Accumulate: later chunks for the same call ID may have more complete arguments
-                if (chunk.Contents is not null)
+                await foreach (var chunk in chatClient.GetStreamingResponseAsync(messages, options, ct).WithCancellation(ct))
                 {
-                    foreach (var content in chunk.Contents)
+                    // Collect function call content from streaming updates
+                    // Accumulate: later chunks for the same call ID may have more complete arguments
+                    if (chunk.Contents is not null)
                     {
-                        if (content is FunctionCallContent fc && fc.Name is not null)
+                        foreach (var content in chunk.Contents)
                         {
-                            var callId = fc.CallId ?? Guid.NewGuid().ToString();
-                            var args = fc.Arguments is not null
-                                ? JsonSerializer.Serialize(fc.Arguments)
-                                : null;
+                            if (content is FunctionCallContent fc && fc.Name is not null)
+                            {
+                                var callId = fc.CallId ?? Guid.NewGuid().ToString();
+                                var args = fc.Arguments is not null
+                                    ? JsonSerializer.Serialize(fc.Arguments)
+                                    : null;
 
-                            if (toolCallsByCallId.TryGetValue(callId, out var existing))
-                            {
-                                // Preserve existing args if this chunk has none (streaming may send name-only deltas)
-                                var mergedArgs = args ?? existing.Args;
-                                toolCallsByCallId[callId] = (fc.Name, mergedArgs);
-                            }
-                            else
-                            {
-                                toolCallsByCallId[callId] = (fc.Name, args);
-                            }
+                                if (toolCallsByCallId.TryGetValue(callId, out var existing))
+                                {
+                                    // Preserve existing args if this chunk has none (streaming may send name-only deltas)
+                                    var mergedArgs = args ?? existing.Args;
+                                    toolCallsByCallId[callId] = (fc.Name, mergedArgs);
+                                }
+                                else
+                                {
+                                    toolCallsByCallId[callId] = (fc.Name, args);
+                                }
 
-                            // Yield ToolCallStart only once per call ID
-                            if (seenCallIds.Add(callId))
-                            {
-                                var friendlyName = GetFriendlyToolName(fc.Name);
-                                var argsSummary = FormatArgsSummary(fc.Name, args ?? toolCallsByCallId[callId].Args);
-                                yield return new ChatUpdate.ToolCallStart(callId, friendlyName, argsSummary);
+                                // Collect ToolCallStart to yield outside try/catch
+                                if (seenCallIds.Add(callId))
+                                {
+                                    var friendlyName = GetFriendlyToolName(fc.Name);
+                                    var argsSummary = FormatArgsSummary(fc.Name, args ?? toolCallsByCallId[callId].Args);
+                                    pendingStarts.Add(new ChatUpdate.ToolCallStart(callId, friendlyName, argsSummary));
+                                }
                             }
                         }
                     }
-                }
 
-                // Collect text for message history (always), but do NOT stream to UI during tool-call rounds
-                if (chunk.Text is not null)
-                    roundText.Append(chunk.Text);
+                    // Collect text for message history (always), but do NOT stream to UI during tool-call rounds
+                    if (chunk.Text is not null)
+                        roundText.Append(chunk.Text);
+                }
             }
+            catch (OperationCanceledException)
+            {
+                _logger.LogInformation("AI chat streaming canceled by user or system.");
+                streamCancelled = true;
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "I/O operation aborted during AI chat streaming. This usually indicates the connection was closed unexpectedly.");
+                streamCancelled = true;
+            }
+            catch (SocketException ex)
+            {
+                _logger.LogWarning(ex, "Socket error during AI chat streaming (SocketErrorCode={SocketErrorCode}). Treating as stream completion.", ex.SocketErrorCode);
+                streamCancelled = true;
+            }
+            catch (HttpRequestException) when (ct.IsCancellationRequested)
+            {
+                _logger.LogInformation("AI chat streaming cancelled (HttpRequestException during cancellation)");
+                streamCancelled = true;
+            }
+
+            // Yield any pending ToolCallStart events (must be outside try/catch for yield)
+            foreach (var start in pendingStarts)
+                yield return start;
+
+            if (streamCancelled)
+                yield break;
+
+            // Re-throw unexpected errors that were NOT caught above
+            // (The catch blocks above only handle cancellation, I/O, and socket errors)
 
             // Build assistant message with text + function call content items.
             // ALWAYS clean the round text before adding to history — even intermediate
