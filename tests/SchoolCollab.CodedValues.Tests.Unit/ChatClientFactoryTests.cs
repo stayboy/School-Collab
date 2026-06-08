@@ -8,7 +8,7 @@ using SchoolCollab.CodedValues.AI.Services;
 namespace SchoolCollab.CodedValues.Tests.Unit;
 
 /// <summary>
-/// Unit tests for <see cref="ChatClientFactory"/> provider-based routing logic.
+/// Unit tests for <see cref="ChatClientFactory"/> configuration-based provider routing.
 /// </summary>
 [TestClass]
 public class ChatClientFactoryTests
@@ -41,73 +41,37 @@ public class ChatClientFactoryTests
     }
 
     // =====================================================================
-    // GetClient — null or empty provider → default provider
+    // GetClient — returns the client for the configured default provider
     // =====================================================================
 
     [TestMethod]
-    public void GetClient_NullProvider_UsesDefaultOllama()
+    public void GetClient_DefaultOllama_ReturnsOllamaClient()
     {
         var factory = CreateFactory(defaultProvider: "ollama");
-        var result = factory.GetClient(null);
+        var result = factory.GetClient();
         result.Should().Be(_ollamaClient.Object);
     }
 
     [TestMethod]
-    public void GetClient_NullProvider_UsesDefaultOpenRouter()
+    public void GetClient_DefaultOpenRouter_ReturnsOpenRouterClient()
     {
         var factory = CreateFactory(defaultProvider: "openrouter");
-        var result = factory.GetClient(null);
-        result.Should().Be(_openRouterClient.Object);
-    }
-
-    [TestMethod]
-    public void GetClient_EmptyProvider_UsesDefault()
-    {
-        var factory = CreateFactory(defaultProvider: "ollama");
-        var result = factory.GetClient("");
-        result.Should().Be(_ollamaClient.Object);
-    }
-
-    [TestMethod]
-    public void GetClient_WhitespaceProvider_UsesDefault()
-    {
-        var factory = CreateFactory(defaultProvider: "ollama");
-        var result = factory.GetClient("   ");
-        result.Should().Be(_ollamaClient.Object);
-    }
-
-    // =====================================================================
-    // GetClient — explicit provider routing
-    // =====================================================================
-
-    [TestMethod]
-    public void GetClient_OllamaProvider_ReturnsOllamaClient()
-    {
-        var factory = CreateFactory();
-        var result = factory.GetClient("ollama");
-        result.Should().Be(_ollamaClient.Object);
-    }
-
-    [TestMethod]
-    public void GetClient_OpenRouterProvider_ReturnsOpenRouterClient()
-    {
-        var factory = CreateFactory();
-        var result = factory.GetClient("openrouter");
+        var result = factory.GetClient();
         result.Should().Be(_openRouterClient.Object);
     }
 
     // =====================================================================
-    // GetClient — case-insensitive provider matching
+    // GetClient — case-insensitive default provider resolution
     // =====================================================================
 
     [TestMethod]
     [DataRow("Ollama")]
     [DataRow("OLLAMA")]
     [DataRow("ollama")]
-    public void GetClient_OllamaProviderCaseInsensitive_ReturnsOllamaClient(string provider)
+    public void GetClient_DefaultOllamaCaseInsensitive_ReturnsOllamaClient(string provider)
     {
-        var factory = CreateFactory();
-        var result = factory.GetClient(provider);
+        var factory = CreateFactory(defaultProvider: provider);
+        var result = factory.GetClient();
         result.Should().Be(_ollamaClient.Object);
     }
 
@@ -115,28 +79,16 @@ public class ChatClientFactoryTests
     [DataRow("OpenRouter")]
     [DataRow("OPENROUTER")]
     [DataRow("openrouter")]
-    public void GetClient_OpenRouterProviderCaseInsensitive_ReturnsOpenRouterClient(string provider)
+    public void GetClient_DefaultOpenRouterCaseInsensitive_ReturnsOpenRouterClient(string provider)
     {
-        var factory = CreateFactory();
-        var result = factory.GetClient(provider);
+        var factory = CreateFactory(defaultProvider: provider);
+        var result = factory.GetClient();
         result.Should().Be(_openRouterClient.Object);
     }
 
     // =====================================================================
-    // GetClient — OpenRouter not configured (null)
+    // GetClient — OpenRouter not configured (null) → fallback to Ollama
     // =====================================================================
-
-    [TestMethod]
-    public void GetClient_OpenRouterProviderWithoutOpenRouterClient_FallsBackToOllama()
-    {
-        var factory = new ChatClientFactory(
-            _ollamaClient.Object,
-            openRouterClient: null,
-            defaultProvider: "ollama",
-            _logger.Object);
-        var result = factory.GetClient("openrouter");
-        result.Should().Be(_ollamaClient.Object);
-    }
 
     [TestMethod]
     public void GetClient_DefaultOpenRouterWithoutOpenRouterClient_FallsBackToOllama()
@@ -146,33 +98,24 @@ public class ChatClientFactoryTests
             openRouterClient: null,
             defaultProvider: "openrouter",
             _logger.Object);
-        // Default is openrouter but client is null → falls back to ollama
-        var result = factory.GetClient(null);
+        var result = factory.GetClient();
         result.Should().Be(_ollamaClient.Object);
     }
 
     // =====================================================================
-    // GetClient — unknown provider → fallback to Ollama
+    // GetClient — unknown default provider → falls back to Ollama
     // =====================================================================
 
     [TestMethod]
-    public void GetClient_UnknownProvider_FallsBackToOllama()
+    public void GetClient_UnknownDefaultProvider_FallsBackToOllama()
     {
-        var factory = CreateFactory();
-        var result = factory.GetClient("azure");
-        result.Should().Be(_ollamaClient.Object);
-    }
-
-    [TestMethod]
-    public void GetClient_GibberishProvider_FallsBackToOllama()
-    {
-        var factory = CreateFactory();
-        var result = factory.GetClient("xyz-not-a-provider");
+        var factory = CreateFactory(defaultProvider: "azure");
+        var result = factory.GetClient();
         result.Should().Be(_ollamaClient.Object);
     }
 
     // =====================================================================
-    // GetClient — well-known provider constants
+    // Provider constants
     // =====================================================================
 
     [TestMethod]
@@ -188,14 +131,14 @@ public class ChatClientFactoryTests
     }
 
     // =====================================================================
-    // GetClient — logging on fallback
+    // Logging on fallback
     // =====================================================================
 
     [TestMethod]
-    public void GetClient_UnknownProvider_LogsWarning()
+    public void GetClient_UnknownDefaultProvider_LogsWarning()
     {
-        var factory = CreateFactory();
-        factory.GetClient("unknown");
+        var factory = CreateFactory(defaultProvider: "unknown");
+        factory.GetClient();
         _logger.Verify(
             x => x.Log(
                 LogLevel.Warning,
@@ -207,14 +150,14 @@ public class ChatClientFactoryTests
     }
 
     [TestMethod]
-    public void GetClient_OpenRouterWithoutClient_LogsWarning()
+    public void GetClient_OpenRouterDefaultWithoutClient_LogsWarning()
     {
         var factory = new ChatClientFactory(
             _ollamaClient.Object,
             openRouterClient: null,
-            defaultProvider: "ollama",
+            defaultProvider: "openrouter",
             _logger.Object);
-        factory.GetClient("openrouter");
+        factory.GetClient();
         _logger.Verify(
             x => x.Log(
                 LogLevel.Warning,

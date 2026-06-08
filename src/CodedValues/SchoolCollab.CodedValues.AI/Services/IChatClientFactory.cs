@@ -3,16 +3,15 @@ using Microsoft.Extensions.AI;
 namespace SchoolCollab.CodedValues.AI.Services;
 
 /// <summary>
-/// Routes chat requests to the correct <see cref="IChatClient"/> based on the provider name.
-/// Supported providers: <c>"ollama"</c> (local) and <c>"openrouter"</c> (cloud).
+/// Routes chat requests to the correct <see cref="IChatClient"/> based on configuration.
+/// The default provider is set via <c>AI:DefaultProvider</c> configuration.
 /// </summary>
 public interface IChatClientFactory
 {
     /// <summary>
-    /// Returns the appropriate <see cref="IChatClient"/> for the given provider.
-    /// When <paramref name="provider"/> is null or empty, the default provider is used.
+    /// Returns the <see cref="IChatClient"/> for the configured default provider.
     /// </summary>
-    IChatClient GetClient(string? provider = null);
+    IChatClient GetClient();
 
     /// <summary>
     /// Returns the name of the default provider (e.g., "ollama" or "openrouter").

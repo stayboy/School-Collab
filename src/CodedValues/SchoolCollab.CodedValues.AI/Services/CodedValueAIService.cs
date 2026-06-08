@@ -137,12 +137,11 @@ public sealed class CodedValueAIService
     public async IAsyncEnumerable<ChatUpdate> ChatAsync(
         IReadOnlyList<ChatMessage> history,
         string? model = null,
-        string? provider = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        _logger.LogInformation("Processing AI chat with {Count} history messages, model {Model}, provider {Provider}", history.Count, model ?? "(default)", provider ?? "(default)");
+        _logger.LogInformation("Processing AI chat with {Count} history messages, model {Model}", history.Count, model ?? "(default)");
 
-        var chatClient = _chatClientFactory.GetClient(provider);
+        var chatClient = _chatClientFactory.GetClient();
 
         var systemPrompt = GetSystemPrompt();
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };

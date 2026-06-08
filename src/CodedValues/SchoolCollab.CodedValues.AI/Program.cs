@@ -97,7 +97,7 @@ app.MapPost("/api/ai/chat", async (HttpContext context, CodedValueAIService aiSe
             m.Text ?? string.Empty))
         .ToList();
 
-    await foreach (var update in aiService.ChatAsync(history, request.Model, request.Provider, context.RequestAborted))
+    await foreach (var update in aiService.ChatAsync(history, request.Model, context.RequestAborted))
     {
         var (eventType, payload) = update switch
         {

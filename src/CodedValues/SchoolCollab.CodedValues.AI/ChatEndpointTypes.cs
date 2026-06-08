@@ -6,7 +6,7 @@ public sealed class AiProgramMarker { }
 /// <summary>
 /// Request model for the chat endpoint.
 /// </summary>
-public record ChatRequest(List<ChatMessageRequest> Messages, string? Model = null, string? Provider = null);
+public record ChatRequest(List<ChatMessageRequest> Messages, string? Model = null);
 
 /// <summary>
 /// Individual message in a chat request.

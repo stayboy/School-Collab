@@ -3,8 +3,8 @@ using Microsoft.Extensions.AI;
 namespace SchoolCollab.CodedValues.AI.Services;
 
 /// <summary>
-/// Routes chat requests to the correct <see cref="IChatClient"/> based on the provider name.
-/// Supported providers: <c>"ollama"</c> (local) and <c>"openrouter"</c> (cloud).
+/// Routes chat requests to the correct <see cref="IChatClient"/> based on configuration.
+/// The default provider is set via <c>AI:DefaultProvider</c> configuration.
 /// </summary>
 public sealed class ChatClientFactory : IChatClientFactory
 {
@@ -15,8 +15,7 @@ public sealed class ChatClientFactory : IChatClientFactory
         public const string OpenRouter = "openrouter";
     }
 
-    private readonly IChatClient _ollamaClient;
-    private readonly IChatClient? _openRouterClient;
+    private readonly IChatClient _defaultClient;
     private readonly string _defaultProvider;
     private readonly ILogger<ChatClientFactory> _logger;
 
@@ -26,32 +25,27 @@ public sealed class ChatClientFactory : IChatClientFactory
         string defaultProvider,
         ILogger<ChatClientFactory> logger)
     {
-        _ollamaClient = ollamaClient;
-        _openRouterClient = openRouterClient;
         _defaultProvider = defaultProvider;
         _logger = logger;
+
+        _defaultClient = defaultProvider.ToLowerInvariant() switch
+        {
+            Providers.OpenRouter when openRouterClient is not null => openRouterClient,
+            Providers.OpenRouter => LogFallback(ollamaClient, "OpenRouter client not configured"),
+            Providers.Ollama => ollamaClient,
+            _ => LogFallback(ollamaClient, $"Unknown provider '{defaultProvider}'")
+        };
     }
 
     /// <inheritdoc />
     public string DefaultProvider => _defaultProvider;
 
     /// <inheritdoc />
-    public IChatClient GetClient(string? provider = null)
-    {
-        var resolvedProvider = string.IsNullOrWhiteSpace(provider) ? _defaultProvider : provider;
+    public IChatClient GetClient() => _defaultClient;
 
-        return resolvedProvider.ToLowerInvariant() switch
-        {
-            Providers.Ollama => _ollamaClient,
-            Providers.OpenRouter when _openRouterClient is not null => _openRouterClient,
-            Providers.OpenRouter => FallbackToOllama(provider!, "OpenRouter client not configured"),
-            _ => FallbackToOllama(provider!, "Unknown provider")
-        };
-    }
-
-    private IChatClient FallbackToOllama(string requestedProvider, string reason)
+    private IChatClient LogFallback(IChatClient fallbackClient, string reason)
     {
-        _logger.LogWarning("Falling back to Ollama: {Reason} (requested: {Provider})", reason, requestedProvider);
-        return _ollamaClient;
+        _logger.LogWarning("Falling back to Ollama: {Reason} (default was: {Provider})", reason, _defaultProvider);
+        return fallbackClient;
     }
 }
