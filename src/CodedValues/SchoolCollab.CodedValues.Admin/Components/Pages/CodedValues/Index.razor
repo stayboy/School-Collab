@@ -11,101 +11,112 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <div class="d-flex align-items-center mb-4 gap-3">
-            <h1 class="mb-0">Coded Values</h1>
-        </div>
+        <FluentStack Orientation="Orientation.Vertical" Style="height:100%; gap:0;">
+            @* -- Fixed header row -- *@
+            <div class="d-flex align-items-center gap-3" style="flex-shrink:0; padding-top:0.25rem; padding-bottom:0.75rem;">
+                <h1 class="mb-0">Coded Values</h1>
+            </div>
 
-        <div class="d-flex align-items-center mb-3 gap-3">
-            <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
-                + New Category
-            </FluentButton>
-            <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
-        </div>
+            @* -- Toolbar -- *@
+            <div class="d-flex align-items-center gap-3" style="flex-shrink:0; padding-bottom:0.75rem;">
+                <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
+                    + New Category
+                </FluentButton>
+                <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
+            </div>
 
-        @if (_showDeleted && _deletedItems is not null)
-        {
-            @if (_deletedItems.Length == 0)
+            @if (_showDeleted && _deletedItems is not null)
             {
-                <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">No deleted coded values.</FluentMessageBar>
+                @if (_deletedItems.Length == 0)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">No deleted coded values.</FluentMessageBar>
+                }
+                else
+                {
+                    <h3>Deleted Values</h3>
+                    <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" class="mb-4">
+                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
+                            <code>@context.Code</code>
+                        </TemplateColumn>
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <TemplateColumn Title="Deleted At">
+                            @(context.DeletedAt?.ToLocalTime().ToString("g") ?? "—")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Actions">
+                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.Code))" class="link-action">Recover</FluentAnchor>
+                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="link-action ms-2">View</FluentAnchor>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                }
+            }
+
+            @* -- Grid fills remaining vertical space -- *@
+            @if (_items is null)
+            {
+                <div style="flex:1; display:flex; align-items:center; justify-content:center;">
+                    <FluentProgressRing />
+                </div>
+            }
+            else if (_items.Length == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">No coded value categories yet.</FluentMessageBar>
             }
             else
             {
-                <h3>Deleted Values</h3>
-                <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" class="mb-4">
+                <FluentDataGrid Items="@_items.AsQueryable()"
+                                GridTemplateColumns="1fr 2fr 1fr 1fr 2fr 3fr"
+                                TGridItem="CodedValueDto"
+                                Style="flex:1; min-height:0; overflow:auto;">
                     <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
                         <code>@context.Code</code>
                     </TemplateColumn>
                     <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
-                    <TemplateColumn Title="Deleted At">
-                        @(context.DeletedAt?.ToLocalTime().ToString("g") ?? "—")
+                    <TemplateColumn Title="Status">
+                        @if (context.IsDisabled)
+                        {
+                            <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+                        }
+                        else
+                        {
+                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                        }
+                    </TemplateColumn>
+                    <TemplateColumn Title="Children">
+                        <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
+                    </TemplateColumn>
+                    <TemplateColumn Title="Definitions">
+                        @if (context.AttributeDefinitions.Count > 0)
+                        {
+                            @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
+                        }
+                        else
+                        {
+                            <span class="text-muted">—</span>
+                        }
                     </TemplateColumn>
                     <TemplateColumn Title="Actions">
-                        <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.Code))" class="link-action">Recover</FluentAnchor>
-                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="link-action ms-2">View</FluentAnchor>
+                        <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
+                        @if (context.IsDisabled)
+                        {
+                            <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
+                        }
+                        else
+                        {
+                            <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
+                        }
+                        <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
                     </TemplateColumn>
                 </FluentDataGrid>
             }
-        }
 
-        @if (_items is null)
-        {
-            <FluentProgressRing />
-        }
-        else if (_items.Length == 0)
-        {
-            <FluentMessageBar Intent="MessageIntent.Info">No coded value categories yet.</FluentMessageBar>
-        }
-        else
-        {
-            <FluentDataGrid Items="@_items.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 1fr 2fr 3fr" TGridItem="CodedValueDto">
-                <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
-                    <code>@context.Code</code>
-                </TemplateColumn>
-                <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
-                <TemplateColumn Title="Status">
-                    @if (context.IsDisabled)
-                    {
-                        <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-                    }
-                    else
-                    {
-                        <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                    }
-                </TemplateColumn>
-                <TemplateColumn Title="Children">
-                    <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
-                </TemplateColumn>
-                <TemplateColumn Title="Definitions">
-                    @if (context.AttributeDefinitions.Count > 0)
-                    {
-                        @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
-                    }
-                    else
-                    {
-                        <span class="text-muted">—</span>
-                    }
-                </TemplateColumn>
-                <TemplateColumn Title="Actions">
-                    <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
-                    @if (context.IsDisabled)
-                    {
-                        <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
-                    }
-                    else
-                    {
-                        <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
-                    }
-                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
-                </TemplateColumn>
-            </FluentDataGrid>
-        }
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+            }
 
-        @if (!string.IsNullOrEmpty(_error))
-        {
-            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
-        }
-
-        <CodedValuesChat />
+            @* -- Chat pinned to bottom -- *@
+            <CodedValuesChat />
+        </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
