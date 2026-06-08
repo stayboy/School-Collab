@@ -258,6 +258,14 @@
         {
             // user navigated away or cancelled
         }
+        catch (IOException) when (_sendCts?.Token.IsCancellationRequested == true)
+        {
+            // I/O aborted due to cancellation — not an error
+        }
+        catch (HttpRequestException) when (_sendCts?.Token.IsCancellationRequested == true)
+        {
+            // HttpClient wraps I/O errors in HttpRequestException during cancellation
+        }
         catch (Exception ex)
         {
             if (_disposed) return;

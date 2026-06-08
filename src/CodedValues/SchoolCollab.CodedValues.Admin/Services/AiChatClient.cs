@@ -1,3 +1,4 @@
+using System.IO;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -36,7 +37,30 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
                 m.Text)).ToList(),
             model);
 
-        var response = await http.PostAsJsonAsync("/api/ai/chat", request, ct);
+        HttpResponseMessage response;
+        try
+        {
+            // Use ResponseHeadersRead for SSE streaming — don't buffer the entire response body.
+            // Without this, HttpClient waits for the full response before returning,
+            // which defeats the purpose of streaming and causes IOException to surface
+            // at the POST call instead of during incremental stream reads.
+            using var httpRequest = new HttpRequestMessage(HttpMethod.Post, "/api/ai/chat")
+            {
+                Content = JsonContent.Create(request)
+            };
+            response = await http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, ct);
+        }
+        catch (IOException) when (ct.IsCancellationRequested)
+        {
+            logger.LogInformation("Chat request cancelled during POST (IOException)");
+            yield break;
+        }
+        catch (HttpRequestException) when (ct.IsCancellationRequested)
+        {
+            logger.LogInformation("Chat request cancelled during POST (HttpRequestException)");
+            yield break;
+        }
+
         response.EnsureSuccessStatusCode();
 
         if (response.Content.Headers.ContentType?.MediaType != "text/event-stream")
@@ -57,7 +81,23 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
         {
             ct.ThrowIfCancellationRequested();
 
-            var line = await reader.ReadLineAsync(ct);
+            string? line;
+            try
+            {
+                line = await reader.ReadLineAsync(ct);
+            }
+            catch (IOException ex)
+            {
+                // StreamReader throws IOException when the connection is lost mid-stream,
+                // including when CancellationToken fires (common when user navigates away).
+                // Treat as graceful stream completion rather than surfacing an error.
+                if (ct.IsCancellationRequested)
+                    logger.LogInformation("Chat stream aborted due to cancellation (IOException)");
+                else
+                    logger.LogWarning(ex, "Chat stream aborted due to I/O error");
+                break;
+            }
+
             if (line is null) break;
 
             if (string.IsNullOrEmpty(line))
