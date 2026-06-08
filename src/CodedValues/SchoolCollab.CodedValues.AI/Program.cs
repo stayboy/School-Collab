@@ -76,6 +76,12 @@ app.UseSerilogRequestLogging();
 
 app.MapDefaultEndpoints();
 
+// Configuration endpoint — returns the default AI provider name
+app.MapGet("/api/ai/config", (IChatClientFactory factory) =>
+{
+    return Results.Ok(new { defaultProvider = factory.DefaultProvider });
+});
+
 // SSE streaming chat endpoint
 app.MapPost("/api/ai/chat", async (HttpContext context, CodedValueAIService aiService) =>
 {

@@ -120,7 +120,7 @@ Then ask: **"Shall I create these coded values?"** and wait for the user's expli
 When the user gives affirmative confirmation (e.g., "yes", "go ahead", "create them",
 "do it"), immediately proceed with creation:
 - If the parent does not yet exist, create it first.
-- If any attribute definitions need to be set on the parent (e.g., weight, cloud, modelName), define them before creating children.
+- If any attribute definitions need to be set on the parent (e.g., weight, ollamaModelName, openrouterModelName), define them before creating children.
 - Create all children at once using the bulk creation capability.
 - Set any attribute values on children as needed.
 

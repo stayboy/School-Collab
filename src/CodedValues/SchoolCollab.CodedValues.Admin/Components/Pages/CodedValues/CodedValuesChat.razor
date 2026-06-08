@@ -91,7 +91,7 @@
                 </li>
             </ul>
             <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 0.25rem;">
-                <span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem; font-family: monospace;">Model: @_selectedModel.Value</span>
+                <span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem; font-family: monospace;">Model: @_selectedModel?.Value</span>
             </div>
         </ChildContent>
         <ErrorContent Context="ex">
@@ -135,8 +135,9 @@
         new("deepseek/deepseek-chat", "DeepSeek V3", 1.0m)
     ];
 
-    private ModelOption[] _models = _fallbackModels;
-    private ModelOption _selectedModel = _fallbackModels[0];
+    private ModelOption[] _models = [];
+    private ModelOption? _selectedModel;
+    private string _defaultProvider = "ollama";
 
     private static string GetMessageStyle(ChatRole role) =>
         role == ChatRole.User
@@ -148,14 +149,35 @@
         _loadCts = new CancellationTokenSource();
         try
         {
-            var parent = await Api.GetByCodeAsync("AI-MODELS", _loadCts.Token);
-            if (_disposed || parent is null) return;
+            // Fetch default provider and model list in parallel
+            var providerTask = AiChatClient.GetDefaultProviderAsync(_loadCts.Token);
+            var parentTask = Api.GetByCodeAsync("AI-MODELS", _loadCts.Token);
+            await Task.WhenAll(providerTask, parentTask);
+
+            if (_disposed) return;
+
+            _defaultProvider = await providerTask;
+            var parent = await parentTask;
+            if (parent is null)
+            {
+                ApplyFallbackModels();
+                return;
+            }
 
             var children = await Api.GetChildrenAsync(parent.Id, _loadCts.Token);
-            if (_disposed || children is null || children.Length == 0) return;
+            if (_disposed || children is null || children.Length == 0)
+            {
+                ApplyFallbackModels();
+                return;
+            }
+
+            // Determine the model-name attribute key based on the default provider
+            var modelNameKey = _defaultProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase)
+                ? "openrouterModelName"
+                : "ollamaModelName";
 
             var models = children
-                .Where(c => !c.IsDisabled && !c.IsDeleted && c.Description is not null)
+                .Where(c => !c.IsDisabled && !c.IsDeleted)
                 .OrderBy(c => c.Attributes.FirstOrDefault(a => a.Key == "weight") is { } wAttr
                     ? decimal.TryParse(wAttr.Value, out var w) ? w : decimal.MaxValue
                     : decimal.MaxValue)
@@ -164,9 +186,8 @@
                 {
                     var weightAttr = c.Attributes.FirstOrDefault(a => a.Key == "weight");
                     var weight = weightAttr is not null && decimal.TryParse(weightAttr.Value, out var w) ? w : 0m;
-                    // Use the provider-specific model name attribute based on the default provider config
-                    var modelName = c.Attributes.FirstOrDefault(a => a.Key == "ollamaModelName")?.Value
-                                     ?? c.Description!;
+                    var modelName = c.Attributes.FirstOrDefault(a => a.Key == modelNameKey)?.Value
+                                     ?? c.Name;
                     return new ModelOption(modelName, c.Name, weight);
                 })
                 .ToArray();
@@ -175,7 +196,12 @@
             {
                 _models = models;
                 _selectedModel = models[0];
-                Logger.LogInformation("Loaded {Count} AI models from coded values", models.Length);
+                Logger.LogInformation("Loaded {Count} AI models from coded values (provider: {Provider}, attribute: {Attr})",
+                    models.Length, _defaultProvider, modelNameKey);
+            }
+            else
+            {
+                ApplyFallbackModels();
             }
         }
         catch (OperationCanceledException) { /* user navigated away */ }
@@ -183,7 +209,14 @@
         {
             if (_disposed) return;
             Logger.LogWarning(ex, "Failed to load AI models from API, using fallback list");
+            ApplyFallbackModels();
         }
+    }
+
+    private void ApplyFallbackModels()
+    {
+        _models = _fallbackModels;
+        _selectedModel = _fallbackModels[0];
     }
 
     private async Task SendAsync()
@@ -211,7 +244,7 @@
 
         try
         {
-            await foreach (var update in AiChatClient.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
+            await foreach (var update in AiChatClient.ChatAsync(history, _selectedModel?.Value ?? _fallbackModels[0].Value, _sendCts.Token))
             {
                 if (_disposed) return;
 

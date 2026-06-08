@@ -22,6 +22,17 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     /// <summary>
+    /// Returns the default AI provider name from the AI API configuration.
+    /// </summary>
+    public async Task<string> GetDefaultProviderAsync(CancellationToken ct = default)
+    {
+        var result = await http.GetFromJsonAsync<DefaultProviderResponse>("/api/ai/config", ct);
+        return result?.DefaultProvider ?? "ollama";
+    }
+
+    private record DefaultProviderResponse(string DefaultProvider);
+
+    /// <summary>
     /// Sends conversation history to the AI API and yields structured updates.
     /// </summary>
     public async IAsyncEnumerable<ChatUpdate> ChatAsync(
