@@ -1,15 +1,15 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 
-namespace SchoolCollab.CodedValues.Admin.Services;
+namespace SchoolCollab.CodedValues.AI.Services;
 
 /// <summary>
 /// AI-powered service for populating coded values using natural language prompts.
 /// Uses Microsoft.Extensions.AI with function calling to let the AI model create
-/// and manage coded values through the existing API.
+/// and manage coded values through the Coded Values API.
 /// </summary>
 public sealed class CodedValueAIService
 {
@@ -20,7 +20,7 @@ public sealed class CodedValueAIService
 
     private readonly List<AITool> _tools;
 
-    // System prompt loaded dynamically from wwwroot/ai-system-prompt.md
+    // System prompt loaded dynamically from embedded resource
     private string? _cachedSystemPrompt;
     private DateTime _systemPromptLastWrite;
 
@@ -59,28 +59,54 @@ public sealed class CodedValueAIService
     }
 
     /// <summary>
-    /// Loads the system prompt from wwwroot/ai-system-prompt.md, with caching and auto-reload on file change.
+    /// Loads the system prompt from the embedded resource, with caching.
+    /// In Development, also checks for a file override in the Prompts folder.
     /// </summary>
     private string GetSystemPrompt()
     {
-        var promptFile = Path.Combine(_hostEnv.ContentRootPath, "wwwroot", "ai-system-prompt.md");
-
-        try
+        // In Development, allow file-based override for rapid iteration
+        if (_hostEnv.IsDevelopment())
         {
-            var lastWrite = System.IO.File.GetLastWriteTimeUtc(promptFile);
-            if (_cachedSystemPrompt is not null && lastWrite == _systemPromptLastWrite)
-                return _cachedSystemPrompt;
+            var promptFile = Path.Combine(AppContext.BaseDirectory, "Prompts", "ai-system-prompt.md");
+            if (File.Exists(promptFile))
+            {
+                try
+                {
+                    var lastWrite = File.GetLastWriteTimeUtc(promptFile);
+                    if (_cachedSystemPrompt is not null && lastWrite == _systemPromptLastWrite)
+                        return _cachedSystemPrompt;
 
-            _cachedSystemPrompt = System.IO.File.ReadAllText(promptFile);
-            _systemPromptLastWrite = lastWrite;
-            _logger.LogInformation("Loaded system prompt from {Path} ({Length} chars)", promptFile, _cachedSystemPrompt.Length);
+                    _cachedSystemPrompt = File.ReadAllText(promptFile);
+                    _systemPromptLastWrite = lastWrite;
+                    _logger.LogInformation("Loaded system prompt from file {Path} ({Length} chars)", promptFile, _cachedSystemPrompt.Length);
+                    return _cachedSystemPrompt;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Failed to read system prompt from {Path}, falling back to embedded resource", promptFile);
+                }
+            }
+        }
+
+        // Load from embedded resource
+        if (_cachedSystemPrompt is not null)
             return _cachedSystemPrompt;
-        }
-        catch (Exception ex)
+
+        var assembly = typeof(CodedValueAIService).Assembly;
+        var resourceName = assembly.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith("ai-system-prompt.md", StringComparison.OrdinalIgnoreCase));
+
+        if (resourceName is null)
         {
-            _logger.LogWarning(ex, "Failed to read system prompt from {Path}, using cached version", promptFile);
-            return _cachedSystemPrompt ?? FallbackSystemPrompt;
+            _logger.LogWarning("Embedded system prompt resource not found, using fallback");
+            return _cachedSystemPrompt = FallbackSystemPrompt;
         }
+
+        using var stream = assembly.GetManifestResourceStream(resourceName)!;
+        using var reader = new StreamReader(stream);
+        _cachedSystemPrompt = reader.ReadToEnd();
+        _logger.LogInformation("Loaded system prompt from embedded resource ({Length} chars)", _cachedSystemPrompt.Length);
+        return _cachedSystemPrompt;
     }
 
     private const string FallbackSystemPrompt = """
@@ -252,6 +278,7 @@ public sealed class CodedValueAIService
         catch { /* ignore parse errors, partial args ok */ }
         return arguments;
     }
+
     private async Task<string> DispatchToolCallAsync(string toolName, string? arguments, CancellationToken ct)
     {
         _logger.LogDebug("Dispatching tool call: {ToolName}", toolName);
@@ -401,6 +428,7 @@ public sealed class CodedValueAIService
         }
         catch { return []; }
     }
+
     // --- Tool name and result formatting helpers (text cleaning is in AiTextCleaner.cs) ---
 
     private static string CleanForHistory(string text) => AiTextCleaner.CleanForHistory(text);
@@ -505,6 +533,7 @@ public sealed class CodedValueAIService
             ? firstLine + "…"
             : firstLine[..maxLength] + "…";
     }
+
     // --- AI Tool Functions ---
 
     [Description("Lists all root-level coded value categories")]
@@ -727,19 +756,3 @@ public sealed class CodedValueAIService
         return $"Set attribute '{key}' = '{value}' on '{code}' (parent: {parent.Code}).";
     }
 }
-
-// --- Chat update types for streaming UI updates ---
-
-public abstract record ChatUpdate
-{
-    public sealed record TextChunk(string Text) : ChatUpdate;
-    public sealed record ToolCallStart(string CallId, string FriendlyName, string ArgsSummary) : ChatUpdate;
-    public sealed record ToolCallEnd(string CallId, string FriendlyName, string? ResultSummary, bool Success) : ChatUpdate;
-    public sealed record Error(string Message) : ChatUpdate;
-}
-
-public record BulkChildItem(
-    [Description("Short uppercase code for the child value, e.g. US")] string Code,
-    [Description("Display name, e.g. United States")] string Name,
-    [Description("Optional description")] string? Description = null,
-    [Description("Sort order starting from 1")] int DisplayOrder = 0);

@@ -1,7 +1,7 @@
 using System.Text;
 using System.Text.RegularExpressions;
 
-namespace SchoolCollab.CodedValues.Admin.Services;
+namespace SchoolCollab.CodedValues.AI.Services;
 
 /// <summary>
 /// Cleans AI model output text to remove leaked internal syntax (thinking tags,
@@ -34,8 +34,6 @@ internal static class AiTextCleaner
         text = CleanForDisplay(text);
 
         // Remove ANY line containing a known tool name anywhere on the line.
-        // In the history, tool names should never appear — the model should only
-        // invoke them via function calls, not mention them in text.
         text = Regex.Replace(
             text,
             $@"^.*\b{ToolNameRegexPattern}\b.*\r?\n?",
@@ -100,7 +98,6 @@ internal static class AiTextCleaner
         text = Regex.Replace(text, @"\{\s*\}", string.Empty);
 
         // Remove remaining raw JSON data blocks the model emits as text.
-        // Only strips objects containing coded-value-like keys (id, code, parentId, etc.)
         text = RemoveJsonBlocksContaining(text, @"""(?:id|code|parentId|description|displayOrder|isDisabled|isDeleted)""\s*:");
 
         // Normalize line endings to \n for consistent output
@@ -160,11 +157,9 @@ internal static class AiTextCleaner
 
                 if (depth == 0)
                 {
-                    // We have a balanced block from i to j
                     var block = text[i..j];
                     if (Regex.IsMatch(block, innerPattern, RegexOptions.IgnoreCase))
                     {
-                        // Skip this entire block — it's a leaked function definition or data object
                         i = j;
                         continue;
                     }

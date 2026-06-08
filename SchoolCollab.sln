@@ -33,6 +33,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.CodedValues.Te
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.CodedValues.MigrationService", "src\CodedValues\SchoolCollab.CodedValues.MigrationService\SchoolCollab.CodedValues.MigrationService.csproj", "{3D2DD975-FBDC-447A-B2A8-EBAF33EF0BB1}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.CodedValues.AI", "src\CodedValues\SchoolCollab.CodedValues.AI\SchoolCollab.CodedValues.AI.csproj", "{D4F339E4-0A59-4BE2-808A-8B86792BCA51}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -163,6 +165,18 @@ Global
 		{3D2DD975-FBDC-447A-B2A8-EBAF33EF0BB1}.Release|x64.Build.0 = Release|Any CPU
 		{3D2DD975-FBDC-447A-B2A8-EBAF33EF0BB1}.Release|x86.ActiveCfg = Release|Any CPU
 		{3D2DD975-FBDC-447A-B2A8-EBAF33EF0BB1}.Release|x86.Build.0 = Release|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Debug|x64.Build.0 = Debug|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Debug|x86.Build.0 = Debug|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Release|x64.ActiveCfg = Release|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Release|x64.Build.0 = Release|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Release|x86.ActiveCfg = Release|Any CPU
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -181,5 +195,6 @@ Global
 		{7C8573E5-CA9D-4EB8-A968-C3D3E07982EF} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{EC801DCC-6614-4EE7-AF3E-C6DA5ADD8793} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
 		{3D2DD975-FBDC-447A-B2A8-EBAF33EF0BB1} = {65A64EB8-2DAA-064D-1CCB-CB17F65620F3}
+		{D4F339E4-0A59-4BE2-808A-8B86792BCA51} = {65A64EB8-2DAA-064D-1CCB-CB17F65620F3}
 	EndGlobalSection
 EndGlobal

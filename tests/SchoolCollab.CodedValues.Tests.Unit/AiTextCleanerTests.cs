@@ -1,6 +1,6 @@
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.CodedValues.Admin.Services;
+using SchoolCollab.CodedValues.AI.Services;
 
 namespace SchoolCollab.CodedValues.Tests.Unit;
 

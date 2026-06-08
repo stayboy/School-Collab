@@ -1,8 +1,9 @@
 @using Microsoft.Extensions.AI
+@using SchoolCollab.CodedValues.AI
 @using SchoolCollab.CodedValues.Admin.Services
 @implements IAsyncDisposable
 
-@inject CodedValueAIService AiService
+@inject AiChatClient AiChatClient
 @inject CodedValuesApiClient Api
 @inject ILogger<CodedValuesChat> Logger
 @inject NavigationManager Nav
@@ -89,11 +90,8 @@
                     </div>
                 </li>
             </ul>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem;">
+            <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 0.25rem;">
                 <span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem; font-family: monospace;">Model: @_selectedModel.Value</span>
-                <FluentAnchor Href="/ai-system-prompt.md" Target="_blank" appearance="Appearance.Hypertext">
-                    Edit system prompt
-                </FluentAnchor>
             </div>
         </ChildContent>
         <ErrorContent Context="ex">
@@ -218,7 +216,7 @@
 
         try
         {
-            await foreach (var update in AiService.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
+            await foreach (var update in AiChatClient.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
             {
                 if (_disposed) return;
 
