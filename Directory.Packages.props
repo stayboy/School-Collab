@@ -49,6 +49,11 @@
     <PackageVersion Include="MSTest" Version="4.2.3" />
     <PackageVersion Include="Testcontainers.PostgreSql" Version="4.12.0" />
   </ItemGroup>
+  <ItemGroup Label="AI">
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.6.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.6.0" />
+    <PackageVersion Include="OpenAI" Version="2.10.0" />
+  </ItemGroup>
   <ItemGroup Label="Other">
     <PackageVersion Include="Scrutor" Version="7.0.0" />
   </ItemGroup>

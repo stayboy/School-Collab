@@ -1,11 +1,12 @@
+using System.Globalization;
 using System.Text;
+using SchoolCollab.CodedValues.Core.Domain;
 
 namespace SchoolCollab.CodedValues.MigrationService.Seeding;
 
 /// <summary>
-/// Reads coded value seed rows from a CSV file.
-/// Format: Code,Name,Description,ParentCode,DisplayOrder
-/// Supports quoted fields (RFC 4180). Codes are normalised to UPPER CASE.
+/// Reads seed rows from CSV files for coded values, attribute definitions, and attribute values.
+/// All formats support quoted fields (RFC 4180). Codes are normalised to UPPER CASE.
 /// </summary>
 public static class CsvSeedReader
 {
@@ -51,6 +52,80 @@ public static class CsvSeedReader
         if (duplicates.Count > 0)
             throw new InvalidOperationException(
                 $"Duplicate codes in seed file: {string.Join(", ", duplicates)}");
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Reads attribute definition seed rows from a CSV file.
+    /// Format: ParentCode,Key,DisplayName,DataType,SourceCode,IsRequired,AllowMultiple,MinLength,MaxLength,RegexPattern
+    /// DataType values: Text=0, Integer=1, Decimal=2, Boolean=3, Date=4, DateTime=5, Time=6, CodedValue=7
+    /// </summary>
+    public static IReadOnlyList<AttributeDefinitionSeedRow> ReadAttributeDefinitions(string filePath)
+    {
+        var lines = File.ReadAllLines(filePath);
+        var rows = new List<AttributeDefinitionSeedRow>(lines.Length);
+
+        for (var lineIndex = 1; lineIndex < lines.Length; lineIndex++)
+        {
+            var line = lines[lineIndex];
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            var fields = ParseLine(line);
+            if (fields.Length < 10)
+                throw new FormatException(
+                    $"Line {lineIndex + 1}: expected 10 fields (ParentCode,Key,DisplayName,DataType,SourceCode,IsRequired,AllowMultiple,MinLength,MaxLength,RegexPattern) but got {fields.Length}.");
+
+            var parentCode = fields[0].Trim().ToUpperInvariant();
+            var key = fields[1].Trim();
+            var displayName = string.IsNullOrWhiteSpace(fields[2]) ? null : fields[2].Trim();
+            var dataType = (AttributeDataType)int.Parse(fields[3].Trim(), CultureInfo.InvariantCulture);
+            var sourceCode = string.IsNullOrWhiteSpace(fields[4]) ? null : fields[4].Trim().ToUpperInvariant();
+            var isRequired = bool.TryParse(fields[5].Trim(), out var req) && req;
+            var allowMultiple = bool.TryParse(fields[6].Trim(), out var multi) && multi;
+            var minLength = string.IsNullOrWhiteSpace(fields[7]) ? (int?)null : int.Parse(fields[7].Trim(), CultureInfo.InvariantCulture);
+            var maxLength = string.IsNullOrWhiteSpace(fields[8]) ? (int?)null : int.Parse(fields[8].Trim(), CultureInfo.InvariantCulture);
+            var regexPattern = string.IsNullOrWhiteSpace(fields[9]) ? null : fields[9].Trim();
+
+            ValidateField(lineIndex + 1, "ParentCode", parentCode, MaxCodeLength, required: true);
+            ValidateField(lineIndex + 1, "Key", key, MaxCodeLength, required: true);
+
+            rows.Add(new AttributeDefinitionSeedRow(parentCode, key, displayName, dataType, sourceCode,
+                isRequired, allowMultiple, minLength, maxLength, regexPattern));
+        }
+
+        return rows;
+    }
+
+    /// <summary>
+    /// Reads attribute value seed rows from a CSV file.
+    /// Format: Code,Key,Value
+    /// Code is the coded value code (child), Key is the attribute key, Value is the attribute value.
+    /// </summary>
+    public static IReadOnlyList<AttributeSeedRow> ReadAttributes(string filePath)
+    {
+        var lines = File.ReadAllLines(filePath);
+        var rows = new List<AttributeSeedRow>(lines.Length);
+
+        for (var lineIndex = 1; lineIndex < lines.Length; lineIndex++)
+        {
+            var line = lines[lineIndex];
+            if (string.IsNullOrWhiteSpace(line)) continue;
+
+            var fields = ParseLine(line);
+            if (fields.Length < 3)
+                throw new FormatException(
+                    $"Line {lineIndex + 1}: expected 3 fields (Code,Key,Value) but got {fields.Length}.");
+
+            var code = fields[0].Trim().ToUpperInvariant();
+            var key = fields[1].Trim();
+            var value = fields[2].Trim();
+
+            ValidateField(lineIndex + 1, "Code", code, MaxCodeLength, required: true);
+            ValidateField(lineIndex + 1, "Key", key, MaxCodeLength, required: true);
+
+            rows.Add(new AttributeSeedRow(code, key, value));
+        }
 
         return rows;
     }

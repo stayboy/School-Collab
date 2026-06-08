@@ -7,11 +7,13 @@ using SchoolCollab.CodedValues.Core.Domain;
 namespace SchoolCollab.CodedValues.MigrationService.Seeding;
 
 /// <summary>
-/// Seeds coded values from a CSV file into the database.
-/// Idempotent: skips rows whose Code already exists.
+/// Seeds coded values, attribute definitions, and attribute values from CSV files into the database.
+/// Idempotent: skips rows whose Code already exists (for coded values) or whose
+/// key already exists on the target entity (for definitions and attributes).
 /// Handles arbitrary parent/child depth via iterative topological insertion.
-/// File path is read from Seeding:FilePath config key, falling back to seed.csv
-/// next to the executable.
+/// File paths are read from Seeding:FilePath, Seeding:AttributeDefinitionsFilePath,
+/// and Seeding:AttributeValuesFilePath config keys, falling back to seed.csv,
+/// seed-attribute-definitions.csv, and seed-attributes.csv next to the executable.
 /// </summary>
 public sealed class CodedValueSeeder(
     CodedValuesDbContext db,
@@ -19,6 +21,13 @@ public sealed class CodedValueSeeder(
     ILogger<CodedValueSeeder> logger)
 {
     public async Task SeedAsync(CancellationToken ct = default)
+    {
+        await SeedCodedValuesAsync(ct);
+        await SeedAttributeDefinitionsAsync(ct);
+        await SeedAttributeValuesAsync(ct);
+    }
+
+    private async Task SeedCodedValuesAsync(CancellationToken ct)
     {
         var seedFilePath = configuration["Seeding:FilePath"]
             ?? Path.Combine(AppContext.BaseDirectory, "seed.csv");
@@ -96,5 +105,97 @@ public sealed class CodedValueSeeder(
             await tx.RollbackAsync(ct);
             throw;
         }
+    }
+
+    private async Task SeedAttributeDefinitionsAsync(CancellationToken ct)
+    {
+        var filePath = configuration["Seeding:AttributeDefinitionsFilePath"]
+            ?? Path.Combine(AppContext.BaseDirectory, "seed-attribute-definitions.csv");
+
+        if (!File.Exists(filePath))
+        {
+            logger.LogDebug("Attribute definitions seed file not found at {Path}. Skipping", filePath);
+            return;
+        }
+
+        logger.LogInformation("Reading attribute definitions seed file {Path}", filePath);
+        var rows = CsvSeedReader.ReadAttributeDefinitions(filePath);
+        logger.LogDebug("Read {Count} attribute definition rows", rows.Count);
+
+        foreach (var row in rows)
+        {
+            var parent = await db.CodedValues
+                .FirstOrDefaultAsync(c => c.Code == row.ParentCode, ct);
+
+            if (parent is null)
+            {
+                logger.LogWarning("Parent coded value {Code} not found for attribute definition {Key}. Skipping",
+                    row.ParentCode, row.Key);
+                continue;
+            }
+
+            // Idempotent: skip if definition already exists
+            if (parent.AttributeDefinitions.Any(d => d.Key == row.Key))
+            {
+                logger.LogDebug("Attribute definition {Key} already exists on {Code}. Skipping",
+                    row.Key, row.ParentCode);
+                continue;
+            }
+
+            parent.SetAttributeDefinition(
+                row.Key, row.DataType, row.SourceCode, row.IsRequired, row.AllowMultiple,
+                row.DisplayName, row.MinLength, row.MaxLength, row.RegexPattern);
+
+            logger.LogDebug("Added attribute definition {Key} ({DataType}) on {Code}",
+                row.Key, row.DataType, row.ParentCode);
+        }
+
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Attribute definitions seeding complete");
+    }
+
+    private async Task SeedAttributeValuesAsync(CancellationToken ct)
+    {
+        var filePath = configuration["Seeding:AttributeValuesFilePath"]
+            ?? Path.Combine(AppContext.BaseDirectory, "seed-attributes.csv");
+
+        if (!File.Exists(filePath))
+        {
+            logger.LogDebug("Attribute values seed file not found at {Path}. Skipping", filePath);
+            return;
+        }
+
+        logger.LogInformation("Reading attribute values seed file {Path}", filePath);
+        var rows = CsvSeedReader.ReadAttributes(filePath);
+        logger.LogDebug("Read {Count} attribute value rows", rows.Count);
+
+        foreach (var row in rows)
+        {
+            var codedValue = await db.CodedValues
+                .FirstOrDefaultAsync(c => c.Code == row.Code, ct);
+
+            if (codedValue is null)
+            {
+                logger.LogWarning("Coded value {Code} not found for attribute {Key}. Skipping",
+                    row.Code, row.Key);
+                continue;
+            }
+
+            // Idempotent: skip if attribute already exists
+            if (codedValue.Attributes.Any(a => a.Key == row.Key))
+            {
+                logger.LogDebug("Attribute {Key} already exists on {Code}. Skipping",
+                    row.Key, row.Code);
+                continue;
+            }
+
+            codedValue.SetAttribute(row.Key, row.Value);
+
+            logger.LogDebug("Added attribute {Key}={Value} on {Code}",
+                row.Key, row.Value, row.Code);
+        }
+
+        await db.SaveChangesAsync(ct);
+        logger.LogInformation("Attribute values seeding complete");
     }
 }

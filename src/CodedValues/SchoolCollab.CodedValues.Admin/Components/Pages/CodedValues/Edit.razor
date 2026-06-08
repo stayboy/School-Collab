@@ -88,20 +88,91 @@
                 <h5>Attributes</h5>
                 @if (_item.Attributes.Count > 0)
                 {
-                    <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1fr auto" TGridItem="CodedValueAttributeDto" style="max-width:520px">
+                    <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1.5fr auto" TGridItem="CodedValueAttributeDto" style="max-width:580px">
                         <PropertyColumn Property="@(a => a.Key)" />
-                        <PropertyColumn Property="@(a => a.Value)" />
+                        <TemplateColumn Title="Value">
+                            @context.Value
+                        </TemplateColumn>
                         <TemplateColumn Title="">
-                            <FluentAnchor Href="#" OnClick="@(() => RemoveAttributeAsync(context.Key))" class="link-action">Remove</FluentAnchor>
+                            @if (_editingAttrKey == context.Key)
+                            {
+                                <FluentAnchor Href="#" OnClick="CancelAttributeEdit" class="link-action" style="font-size:0.85em">Cancel</FluentAnchor>
+                            }
+                            else
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => StartEditAttribute(context))" class="link-action">Edit</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => RemoveAttributeAsync(context.Key))" class="link-action ms-2">Remove</FluentAnchor>
+                            }
                         </TemplateColumn>
                     </FluentDataGrid>
                 }
 
-                <div style="display:flex; gap:8px; margin-top:8px; max-width:520px;">
-                    <FluentTextField @bind-Value="_attrKey" Placeholder="key" style="flex:1" />
-                    <FluentTextField @bind-Value="_attrValue" Placeholder="value" style="flex:1" />
-                    <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync">Add</FluentButton>
-                </div>
+                @if (_editingAttrKey is not null)
+                {
+                    var editDef = GetDefinitionForKey(_editingAttrKey);
+                    <div style="margin-top:8px; max-width:520px; display:flex; gap:8px; align-items:flex-start;">
+                        <FluentTextField Value="@_editingAttrKey" ReadOnly style="flex:1" aria-label="Attribute key" />
+                        @if (editDef?.DataType == AttributeDataType.Boolean)
+                        {
+                            <FluentSelect TOption="string"
+                                          Items="@_boolOptions"
+                                          @bind-SelectedOption="_editAttrValue"
+                                          OptionText="@(v => v)"
+                                          OptionValue="@(v => v)"
+                                          style="flex:1"
+                                          aria-label="Attribute value" />
+                        }
+                        else
+                        {
+                            <FluentTextField @bind-Value="_editAttrValue" style="flex:1" aria-label="Attribute value" />
+                        }
+                        <FluentButton Appearance="Appearance.Accent" OnClick="SaveAttributeEditAsync" Disabled="@_savingAttr">Save</FluentButton>
+                    </div>
+                }
+
+                @if (_parent is not null && AvailableDefinitions.Count > 0)
+                {
+                    <div style="margin-top:8px; max-width:520px;">
+                        <div style="display:flex; gap:8px; align-items:flex-start;">
+                            <FluentSelect TOption="CodedValueAttributeDefinitionDto"
+                                         Items="@AvailableDefinitions"
+                                         @bind-SelectedOption="_selectedAttrDef"
+                                         OptionText="@(d => $"{d.Key} ({d.DisplayName ?? d.Key}: {FormatDataType(d.DataType)})")"
+                                         OptionValue="@(d => d.Key)"
+                                         Placeholder="Select attribute…"
+                                         style="flex:1"
+                                         aria-label="Attribute key" />
+                            @if (_selectedAttrDef?.DataType == AttributeDataType.Boolean)
+                            {
+                                <FluentSelect TOption="string"
+                                              Items="@_boolOptions"
+                                              @bind-SelectedOption="_attrValue"
+                                              OptionText="@(v => v)"
+                                              OptionValue="@(v => v)"
+                                              Placeholder="Value"
+                                              style="flex:1"
+                                              aria-label="Attribute value" />
+                            }
+                            else
+                            {
+                                <FluentTextField @bind-Value="_attrValue" Placeholder="Value" style="flex:1" aria-label="Attribute value" />
+                            }
+                            <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync" Disabled="@(_selectedAttrDef is null)">Add</FluentButton>
+                        </div>
+                    </div>
+                }
+                else if (_parent is not null && AvailableDefinitions.Count == 0)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-2">
+                        All attribute definitions from @_parent.Code have been set.
+                    </FluentMessageBar>
+                }
+                else if (_parent is not null)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info" class="mt-2">
+                        No attribute definitions on parent. Define attributes on @_parent.Code first.
+                    </FluentMessageBar>
+                }
             }
         }
     </ChildContent>
@@ -114,12 +185,16 @@
     [Parameter] public string? Code { get; set; }
 
     private CodedValueDto? _item;
+    private CodedValueDto? _parent;
     private bool _loading = true;
     private bool _saving;
     private string? _error;
-    private string? _attrKey;
+    private CodedValueAttributeDefinitionDto? _selectedAttrDef;
     private string? _attrValue;
     private string? _loadedCode;
+    private string? _editingAttrKey;
+    private string? _editAttrValue;
+    private bool _savingAttr;
     private readonly EditModel _model = new();
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
@@ -242,6 +317,7 @@
     {
         _loading = true;
         _error = null;
+        _parent = null;
         Logger.LogInformation("Loading coded value {Code} for edit", Code);
         try
         {
@@ -253,6 +329,16 @@
                 _model.Name = _item.Name;
                 _model.Description = _item.Description;
                 _model.DisplayOrder = _item.DisplayOrder;
+
+                // Load parent for attribute definitions dropdown
+                if (_item.ParentId.HasValue && _item.ParentCode is not null)
+                {
+                    _parent = await Api.GetByCodeAsync(_item.ParentCode, ct);
+                    if (_disposed) return;
+                    // Pre-select first available definition not already set on the child
+                    _selectedAttrDef = _parent?.AttributeDefinitions
+                        .FirstOrDefault(d => !_item!.Attributes.Any(a => a.Key.Equals(d.Key, StringComparison.OrdinalIgnoreCase)));
+                }
             }
         }
         catch (OperationCanceledException)
@@ -302,23 +388,75 @@
         }
     }
 
-    private async Task AddAttributeAsync()
+    private static readonly string[] _boolOptions = ["True", "False"];
+
+    private CodedValueAttributeDefinitionDto? GetDefinitionForKey(string key) =>
+        _parent?.AttributeDefinitions.FirstOrDefault(d =>
+            d.Key.Equals(key, StringComparison.OrdinalIgnoreCase));
+
+    private void StartEditAttribute(CodedValueAttributeDto attr)
     {
-        if (_item is null || string.IsNullOrWhiteSpace(_attrKey) || string.IsNullOrWhiteSpace(_attrValue) || _loadCts is null)
+        _editingAttrKey = attr.Key;
+        _editAttrValue = attr.Value;
+        _error = null;
+    }
+
+    private void CancelAttributeEdit()
+    {
+        _editingAttrKey = null;
+        _editAttrValue = null;
+    }
+
+    private async Task SaveAttributeEditAsync()
+    {
+        if (_item is null || _editingAttrKey is null || string.IsNullOrWhiteSpace(_editAttrValue) || _loadCts is null)
             return;
         var ct = _loadCts.Token;
+        _savingAttr = true;
 
         try
         {
-            await Api.SetAttributeAsync(_item.Id, _attrKey.Trim(), _attrValue.Trim(), ct);
+            Logger.LogInformation("Updating attribute {Key} on coded value {Code}", _editingAttrKey, Code);
+            await Api.SetAttributeAsync(_item.Id, _editingAttrKey, _editAttrValue.Trim(), ct);
             _item = await Api.GetByCodeAsync(Code!, ct);
-            _attrKey = _attrValue = null;
+            if (_disposed) return;
+            _editingAttrKey = null;
+            _editAttrValue = null;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to add attribute {Key} to coded value {Code}", _attrKey, Code);
+            Logger.LogError(ex, "Failed to update attribute {Key} on coded value {Code}", _editingAttrKey, Code);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _savingAttr = false;
+        }
+    }
+
+    private async Task AddAttributeAsync()
+    {
+        if (_item is null || _selectedAttrDef is null || string.IsNullOrWhiteSpace(_attrValue) || _loadCts is null)
+            return;
+        var ct = _loadCts.Token;
+
+        try
+        {
+            await Api.SetAttributeAsync(_item.Id, _selectedAttrDef.Key.Trim(), _attrValue.Trim(), ct);
+            _item = await Api.GetByCodeAsync(Code!, ct);
+            if (_disposed) return;
+            // Reset selection — pick next available definition
+            _selectedAttrDef = _parent?.AttributeDefinitions
+                .FirstOrDefault(d => !_item!.Attributes.Any(a => a.Key.Equals(d.Key, StringComparison.OrdinalIgnoreCase)));
+            _attrValue = null;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to add attribute {Key} to coded value {Code}", _selectedAttrDef?.Key, Code);
             _error = ex.Message;
         }
     }
@@ -340,6 +478,11 @@
             _error = ex.Message;
         }
     }
+
+    private IReadOnlyList<CodedValueAttributeDefinitionDto> AvailableDefinitions =>
+        _parent?.AttributeDefinitions
+            .Where(d => !(_item?.Attributes.Any(a => a.Key.Equals(d.Key, StringComparison.OrdinalIgnoreCase)) ?? false))
+            .ToList() ?? [];
 
     private static string FormatDataType(AttributeDataType dt) => dt switch
     {
