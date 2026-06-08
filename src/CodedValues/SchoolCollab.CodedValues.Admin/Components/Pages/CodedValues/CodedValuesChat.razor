@@ -65,7 +65,7 @@
                 <li>
                     <FluentSelect Items="@_models"
                                  @bind-SelectedOption="@_selectedModel"
-                                 OptionText="@(m => $"{m!.Label} (w:{m!.Weight}, {(m!.Cloud ? "☁️ cloud" : "🖥️ local")})")"
+                                 OptionText="@(m => $"{m!.Label} (w:{m!.Weight}, {(m!.Provider == "openrouter" ? "☁️ cloud" : "🖥️ local")})")"
                                  OptionValue="@(m => m!.Value)"
                                  Style="width: 100%; max-width: 520px;"
                                  aria-label="AI model" />
@@ -117,22 +117,22 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    private record ModelOption(string Value, string Label, decimal Weight = 0m, bool Cloud = false);
+    private record ModelOption(string Value, string Label, string Provider, decimal Weight = 0m);
 
     private static readonly ModelOption[] _fallbackModels =
     [
-        new("llama3.1:8b", "Llama 3.1 8B", 1.0m, false),
-        new("llama3.2:3b", "Llama 3.2 3B", 0.4m, false),
-        new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m, false),
-        new("mistral:7b", "Mistral 7B", 0.9m, false),
-        new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m, false),
-        new("gemma2:9b", "Gemma 2 9B", 1.2m, false),
-        new("openai/gpt-4o-mini", "GPT-4o Mini", 1.5m, true),
-        new("openai/gpt-4o", "GPT-4o", 2.0m, true),
-        new("anthropic/claude-3.5-haiku", "Claude 3.5 Haiku", 1.5m, true),
-        new("anthropic/claude-sonnet-4", "Claude Sonnet 4", 2.5m, true),
-        new("google/gemini-2.0-flash-001", "Gemini 2.0 Flash", 1.3m, true),
-        new("deepseek/deepseek-chat", "DeepSeek V3", 1.0m, true)
+        new("llama3.1:8b", "Llama 3.1 8B", "ollama", 1.0m),
+        new("llama3.2:3b", "Llama 3.2 3B", "ollama", 0.4m),
+        new("phi3.5:3.8b", "Phi 3.5 3.8B", "ollama", 0.5m),
+        new("mistral:7b", "Mistral 7B", "ollama", 0.9m),
+        new("qwen2.5:7b", "Qwen 2.5 7B", "ollama", 0.9m),
+        new("gemma2:9b", "Gemma 2 9B", "ollama", 1.2m),
+        new("openai/gpt-4o-mini", "GPT-4o Mini", "openrouter", 1.5m),
+        new("openai/gpt-4o", "GPT-4o", "openrouter", 2.0m),
+        new("anthropic/claude-3.5-haiku", "Claude 3.5 Haiku", "openrouter", 1.5m),
+        new("anthropic/claude-sonnet-4", "Claude Sonnet 4", "openrouter", 2.5m),
+        new("google/gemini-2.0-flash-001", "Gemini 2.0 Flash", "openrouter", 1.3m),
+        new("deepseek/deepseek-chat", "DeepSeek V3", "openrouter", 1.0m)
     ];
 
     private ModelOption[] _models = _fallbackModels;
@@ -164,21 +164,17 @@
                 {
                     var weightAttr = c.Attributes.FirstOrDefault(a => a.Key == "weight");
                     var weight = weightAttr is not null && decimal.TryParse(weightAttr.Value, out var w) ? w : 0m;
-                    var cloudAttr = c.Attributes.FirstOrDefault(a => a.Key == "cloud");
-                    var cloud = cloudAttr is not null && bool.TryParse(cloudAttr.Value, out var b) && b;
-                    // Prefer modelName attribute (use as-is, includes :cloud suffix if needed)
-                    // Fall back to Description + :cloud suffix for cloud models
-                    var modelNameAttr = c.Attributes.FirstOrDefault(a => a.Key == "modelName");
-                    string ollamaTag;
-                    if (modelNameAttr is not null && !string.IsNullOrWhiteSpace(modelNameAttr.Value))
+                    var providerAttr = c.Attributes.FirstOrDefault(a => a.Key == "provider");
+                    var provider = providerAttr?.Value ?? "ollama";
+                    // Resolve model name from provider-specific attribute
+                    var modelName = provider.ToLowerInvariant() switch
                     {
-                        ollamaTag = modelNameAttr.Value;
-                    }
-                    else
-                    {
-                        ollamaTag = cloud && !c.Description!.EndsWith(":cloud") ? $"{c.Description}:cloud" : c.Description!;
-                    }
-                    return new ModelOption(ollamaTag, c.Name, weight, cloud);
+                        "openrouter" => c.Attributes.FirstOrDefault(a => a.Key == "openrouterModelName")?.Value,
+                        _ => c.Attributes.FirstOrDefault(a => a.Key == "ollamaModelName")?.Value
+                    };
+                    // Fall back to Description if provider-specific name is missing
+                    modelName ??= c.Description!;
+                    return new ModelOption(modelName, c.Name, provider, weight);
                 })
                 .ToArray();
 
@@ -222,7 +218,7 @@
 
         try
         {
-            await foreach (var update in AiChatClient.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
+            await foreach (var update in AiChatClient.ChatAsync(history, _selectedModel.Value, _selectedModel.Provider, _sendCts.Token))
             {
                 if (_disposed) return;
 

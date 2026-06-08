@@ -97,7 +97,7 @@ public class CodedValueAIServiceChatTests
 
         // Act
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, null, null, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -175,7 +175,7 @@ public class CodedValueAIServiceChatTests
         var history = new List<ChatMessage> { new(ChatRole.User, "show me categories") };
 
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, null, null, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -221,7 +221,7 @@ public class CodedValueAIServiceChatTests
         var history = new List<ChatMessage> { new(ChatRole.User, "show hospitals") };
 
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, null, null, CancellationToken.None))
         {
             updates.Add(update);
         }

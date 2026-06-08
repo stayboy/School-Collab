@@ -11,7 +11,7 @@ builder.AddServiceDefaults();
 var ollamaEndpoint = builder.Configuration["Ollama:Endpoint"] ?? "http://localhost:11434/v1";
 var ollamaModel = builder.Configuration["Ollama:Model"] ?? "llama3.1:8b";
 
-builder.Services.AddSingleton<IChatClient>(sp =>
+builder.Services.AddKeyedSingleton<IChatClient>("ollama", (sp, _) =>
 {
     var logger = sp.GetRequiredService<ILogger<AiProgramMarker>>();
     logger.LogInformation("Configuring local AI chat client with Ollama at {Endpoint}, model {Model}", ollamaEndpoint, ollamaModel);
@@ -28,14 +28,13 @@ var openRouterEndpoint = builder.Configuration["OpenRouter:Endpoint"] ?? "https:
 var openRouterApiKey = builder.Configuration["OpenRouter:ApiKey"];
 var openRouterDefaultModel = builder.Configuration["OpenRouter:DefaultModel"] ?? "openai/gpt-4o-mini";
 
-builder.Services.AddSingleton<IChatClient>(sp =>
+builder.Services.AddKeyedSingleton<IChatClient>("openrouter", (sp, _) =>
 {
     var logger = sp.GetRequiredService<ILogger<AiProgramMarker>>();
 
     if (string.IsNullOrWhiteSpace(openRouterApiKey))
     {
         logger.LogWarning("OpenRouter:ApiKey not configured — cloud models will be unavailable");
-        // Return a no-op client that throws on use; factory will skip it if no key is provided
         var fallbackOpenAiClient = new OpenAI.OpenAIClient(
             new System.ClientModel.ApiKeyCredential("unused"),
             new OpenAI.OpenAIClientOptions { Endpoint = new Uri(openRouterEndpoint) });
@@ -51,21 +50,18 @@ builder.Services.AddSingleton<IChatClient>(sp =>
     return openAiClient.GetChatClient(openRouterDefaultModel).AsIChatClient();
 });
 
-// ── ChatClientFactory: routes requests to Ollama or OpenRouter based on model name ──
-var cloudPrefixes = builder.Configuration.GetSection("OpenRouter:CloudModelPrefixes").Get<string[]>()
-    ?? ["openai/", "anthropic/", "google/", "meta-llama/", "mistralai/", "deepseek/"];
+// ── ChatClientFactory: routes requests by explicit provider name ──
+var defaultProvider = builder.Configuration["AI:DefaultProvider"] ?? "ollama";
 
 builder.Services.AddSingleton<IChatClientFactory>(sp =>
 {
-    var clients = sp.GetServices<IChatClient>().ToArray();
-    var localClient = clients[0];  // Ollama — registered first
-    var cloudClient = clients.Length > 1 ? clients[1] : null;  // OpenRouter — registered second
+    var ollamaClient = sp.GetRequiredKeyedService<IChatClient>("ollama");
+    var openRouterClient = sp.GetKeyedService<IChatClient>("openrouter");
     var logger = sp.GetRequiredService<ILogger<ChatClientFactory>>();
 
-    logger.LogInformation("ChatClientFactory initialised with {CloudPrefixCount} cloud prefixes: {Prefixes}",
-        cloudPrefixes.Length, string.Join(", ", cloudPrefixes));
+    logger.LogInformation("ChatClientFactory initialised — default provider: {DefaultProvider}", defaultProvider);
 
-    return new ChatClientFactory(localClient, cloudClient, cloudPrefixes, logger);
+    return new ChatClientFactory(ollamaClient, openRouterClient, defaultProvider, logger);
 });
 
 // HttpClient for calling the Coded Values API (service discovery)
@@ -101,7 +97,7 @@ app.MapPost("/api/ai/chat", async (HttpContext context, CodedValueAIService aiSe
             m.Text ?? string.Empty))
         .ToList();
 
-    await foreach (var update in aiService.ChatAsync(history, request.Model, context.RequestAborted))
+    await foreach (var update in aiService.ChatAsync(history, request.Model, request.Provider, context.RequestAborted))
     {
         var (eventType, payload) = update switch
         {

@@ -25,8 +25,8 @@
             {
                <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
                              Icon="@(Icon.FromType<Icons.Regular.Size20.Tag>())"
-                              Title="@cv.Code">
-                   @Truncate(TitleCase(cv.Code), 22)
+                             Title="@cv.Name">
+                   @Truncate(cv.Name, 22)
                </FluentNavLink>
             }
 
@@ -46,9 +46,11 @@
             </FluentNavLink>
         }
 
-        <FluentNavLink Href="/coded-values/new"
-                     Icon="@(Icon.FromType<Icons.Regular.Size20.AddCircle>())">
-            New Category
+        <hr style="border: 0; border-top: 1px solid var(--neutral-stroke-rest); margin: 12px 0; width: 100%;" />
+
+        <FluentNavLink Href="/coded-values"
+                     Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+            All Categories
         </FluentNavLink>
     </FluentNavGroup>
 </FluentNavMenu>

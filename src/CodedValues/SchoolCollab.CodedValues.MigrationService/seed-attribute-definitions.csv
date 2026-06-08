@@ -1,4 +1,5 @@
 ParentCode,Key,DisplayName,DataType,SourceCode,IsRequired,AllowMultiple,MinLength,MaxLength,RegexPattern
 AI-MODELS,weight,Weight,2,,False,False,,,
-AI-MODELS,cloud,Cloud,3,,False,False,,,
-AI-MODELS,modelName,Model Name,0,,False,False,,,
+AI-MODELS,provider,Provider,0,,False,False,,,
+AI-MODELS,ollamaModelName,Ollama Model Name,0,,False,False,,,
+AI-MODELS,openrouterModelName,OpenRouter Model Name,0,,False,False,,,

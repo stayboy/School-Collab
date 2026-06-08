@@ -257,7 +257,7 @@ public class AiChatClientSseParsingTests
         // that yields one SSE event then throws IOException.
         // The IOException catch in the stream-reading loop should handle this gracefully.
         var updates = new List<ChatUpdate>();
-        await foreach (var update in client.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in client.ChatAsync(history, null, null, CancellationToken.None))
         {
             updates.Add(update);
         }

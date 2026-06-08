@@ -8,200 +8,220 @@ using SchoolCollab.CodedValues.AI.Services;
 namespace SchoolCollab.CodedValues.Tests.Unit;
 
 /// <summary>
-/// Unit tests for <see cref="ChatClientFactory"/> routing logic.
+/// Unit tests for <see cref="ChatClientFactory"/> provider-based routing logic.
 /// </summary>
 [TestClass]
 public class ChatClientFactoryTests
 {
-    private readonly Mock<IChatClient> _localClient = new();
-    private readonly Mock<IChatClient> _cloudClient = new();
+    private readonly Mock<IChatClient> _ollamaClient = new();
+    private readonly Mock<IChatClient> _openRouterClient = new();
     private readonly Mock<ILogger<ChatClientFactory>> _logger = new();
 
-    private static readonly string[] DefaultPrefixes =
-        ["openai/", "anthropic/", "google/", "meta-llama/", "mistralai/", "deepseek/"];
-
     private ChatClientFactory CreateFactory(
-        IChatClient? local = null,
-        IChatClient? cloud = null,
-        string[]? prefixes = null)
+        IChatClient? ollama = null,
+        IChatClient? openRouter = null,
+        string defaultProvider = "ollama")
         => new(
-            local ?? _localClient.Object,
-            cloud ?? _cloudClient.Object,
-            prefixes ?? DefaultPrefixes,
+            ollama ?? _ollamaClient.Object,
+            openRouter ?? _openRouterClient.Object,
+            defaultProvider,
             _logger.Object);
 
     // =====================================================================
-    // GetClient — null or empty model → local
+    // DefaultProvider
     // =====================================================================
 
     [TestMethod]
-    public void GetClient_NullModel_ReturnsLocalClient()
+    [DataRow("ollama")]
+    [DataRow("openrouter")]
+    public void DefaultProvider_ReturnsConfiguredValue(string provider)
     {
-        var factory = CreateFactory();
+        var factory = CreateFactory(defaultProvider: provider);
+        factory.DefaultProvider.Should().Be(provider);
+    }
+
+    // =====================================================================
+    // GetClient — null or empty provider → default provider
+    // =====================================================================
+
+    [TestMethod]
+    public void GetClient_NullProvider_UsesDefaultOllama()
+    {
+        var factory = CreateFactory(defaultProvider: "ollama");
         var result = factory.GetClient(null);
-        result.Should().Be(_localClient.Object);
+        result.Should().Be(_ollamaClient.Object);
     }
 
     [TestMethod]
-    public void GetClient_EmptyStringModel_ReturnsLocalClient()
+    public void GetClient_NullProvider_UsesDefaultOpenRouter()
     {
-        var factory = CreateFactory();
+        var factory = CreateFactory(defaultProvider: "openrouter");
+        var result = factory.GetClient(null);
+        result.Should().Be(_openRouterClient.Object);
+    }
+
+    [TestMethod]
+    public void GetClient_EmptyProvider_UsesDefault()
+    {
+        var factory = CreateFactory(defaultProvider: "ollama");
         var result = factory.GetClient("");
-        result.Should().Be(_localClient.Object);
+        result.Should().Be(_ollamaClient.Object);
+    }
+
+    [TestMethod]
+    public void GetClient_WhitespaceProvider_UsesDefault()
+    {
+        var factory = CreateFactory(defaultProvider: "ollama");
+        var result = factory.GetClient("   ");
+        result.Should().Be(_ollamaClient.Object);
     }
 
     // =====================================================================
-    // GetClient — local model names → local
+    // GetClient — explicit provider routing
     // =====================================================================
 
     [TestMethod]
-    public void GetClient_LocalOllamaModel_ReturnsLocalClient()
+    public void GetClient_OllamaProvider_ReturnsOllamaClient()
     {
         var factory = CreateFactory();
-        var result = factory.GetClient("llama3.2");
-        result.Should().Be(_localClient.Object);
+        var result = factory.GetClient("ollama");
+        result.Should().Be(_ollamaClient.Object);
     }
 
     [TestMethod]
-    public void GetClient_LocalModelWithSimilarPrefix_ReturnsLocalClient()
-    {
-        // "deepseek-r1" is a local Ollama model name, should NOT match "deepseek/" prefix
-        var factory = CreateFactory();
-        var result = factory.GetClient("deepseek-r1");
-        result.Should().Be(_localClient.Object);
-    }
-
-    [TestMethod]
-    [DataRow("gpt-4o-mini")]
-    [DataRow("claude-3-haiku")]
-    [DataRow("phi3")]
-    public void GetClient_LocalModelNames_ReturnsLocalClient(string model)
+    public void GetClient_OpenRouterProvider_ReturnsOpenRouterClient()
     {
         var factory = CreateFactory();
-        var result = factory.GetClient(model);
-        result.Should().Be(_localClient.Object);
+        var result = factory.GetClient("openrouter");
+        result.Should().Be(_openRouterClient.Object);
     }
 
     // =====================================================================
-    // GetClient — cloud model names → cloud
+    // GetClient — case-insensitive provider matching
     // =====================================================================
 
     [TestMethod]
-    [DataRow("openai/gpt-4o-mini")]
-    [DataRow("openai/gpt-4o")]
-    [DataRow("anthropic/claude-3.5-haiku")]
-    [DataRow("anthropic/claude-sonnet-4")]
-    [DataRow("google/gemini-2.0-flash")]
-    [DataRow("meta-llama/llama-3.3-70b")]
-    [DataRow("mistralai/mistral-small")]
-    [DataRow("deepseek/deepseek-chat")]
-    public void GetClient_CloudModelNames_ReturnsCloudClient(string model)
+    [DataRow("Ollama")]
+    [DataRow("OLLAMA")]
+    [DataRow("ollama")]
+    public void GetClient_OllamaProviderCaseInsensitive_ReturnsOllamaClient(string provider)
     {
         var factory = CreateFactory();
-        var result = factory.GetClient(model);
-        result.Should().Be(_cloudClient.Object);
+        var result = factory.GetClient(provider);
+        result.Should().Be(_ollamaClient.Object);
     }
 
-    // =====================================================================
-    // GetClient — case-insensitive prefix matching
-    // =====================================================================
-
     [TestMethod]
-    public void GetClient_CloudPrefixCaseInsensitive_RoutesToCloud()
+    [DataRow("OpenRouter")]
+    [DataRow("OPENROUTER")]
+    [DataRow("openrouter")]
+    public void GetClient_OpenRouterProviderCaseInsensitive_ReturnsOpenRouterClient(string provider)
     {
         var factory = CreateFactory();
-        var result = factory.GetClient("OpenAI/gpt-4o-mini");
-        result.Should().Be(_cloudClient.Object);
-    }
-
-    [TestMethod]
-    public void GetClient_CloudPrefixMixedCase_RoutesToCloud()
-    {
-        var factory = CreateFactory();
-        var result = factory.GetClient("Anthropic/claude-3.5-haiku");
-        result.Should().Be(_cloudClient.Object);
+        var result = factory.GetClient(provider);
+        result.Should().Be(_openRouterClient.Object);
     }
 
     // =====================================================================
-    // GetClient — no cloud client configured
+    // GetClient — OpenRouter not configured (null)
     // =====================================================================
 
     [TestMethod]
-    public void GetClient_CloudModelWithoutCloudClient_FallsBackToLocal()
+    public void GetClient_OpenRouterProviderWithoutOpenRouterClient_FallsBackToOllama()
     {
         var factory = new ChatClientFactory(
-            _localClient.Object,
-            cloudClient: null,
-            DefaultPrefixes,
+            _ollamaClient.Object,
+            openRouterClient: null,
+            defaultProvider: "ollama",
             _logger.Object);
-        var result = factory.GetClient("openai/gpt-4o-mini");
-        result.Should().Be(_localClient.Object);
+        var result = factory.GetClient("openrouter");
+        result.Should().Be(_ollamaClient.Object);
     }
 
     [TestMethod]
-    public void GetClient_LocalModelWithoutCloudClient_ReturnsLocalClient()
+    public void GetClient_DefaultOpenRouterWithoutOpenRouterClient_FallsBackToOllama()
     {
         var factory = new ChatClientFactory(
-            _localClient.Object,
-            cloudClient: null,
-            DefaultPrefixes,
+            _ollamaClient.Object,
+            openRouterClient: null,
+            defaultProvider: "openrouter",
             _logger.Object);
-        var result = factory.GetClient("llama3.2");
-        result.Should().Be(_localClient.Object);
+        // Default is openrouter but client is null → falls back to ollama
+        var result = factory.GetClient(null);
+        result.Should().Be(_ollamaClient.Object);
     }
 
     // =====================================================================
-    // GetClient — custom prefix configuration
+    // GetClient — unknown provider → fallback to Ollama
     // =====================================================================
 
     [TestMethod]
-    public void GetClient_CustomPrefixes_RespectConfiguration()
+    public void GetClient_UnknownProvider_FallsBackToOllama()
     {
-        var factory = CreateFactory(prefixes: ["custom/", "my-"]);
-        var result = factory.GetClient("custom/model-x");
-        result.Should().Be(_cloudClient.Object);
-    }
-
-    [TestMethod]
-    public void GetClient_CustomPrefixes_NonMatchingModel_ReturnsLocal()
-    {
-        var factory = CreateFactory(prefixes: ["custom/", "my-"]);
-        var result = factory.GetClient("openai/gpt-4o-mini");
-        result.Should().Be(_localClient.Object);
-    }
-
-    // =====================================================================
-    // GetClient — empty prefixes collection
-    // =====================================================================
-
-    [TestMethod]
-    public void GetClient_EmptyPrefixes_AllModelsGoToLocal()
-    {
-        var factory = CreateFactory(prefixes: []);
-        // Even a model that looks like a cloud model goes to local
-        var result = factory.GetClient("openai/gpt-4o-mini");
-        result.Should().Be(_localClient.Object);
-    }
-
-    // =====================================================================
-    // IsCloudModel — boundary cases
-    // =====================================================================
-
-    [TestMethod]
-    public void GetClient_PrefixExactMatch_RoutesToCloud()
-    {
-        // Model name that is exactly the prefix (e.g., "openai/")
         var factory = CreateFactory();
-        var result = factory.GetClient("openai/");
-        result.Should().Be(_cloudClient.Object);
+        var result = factory.GetClient("azure");
+        result.Should().Be(_ollamaClient.Object);
     }
 
     [TestMethod]
-    public void GetClient_ModelNameStartsWithPrefixButNoSlash_RoutesLocal()
+    public void GetClient_GibberishProvider_FallsBackToOllama()
     {
-        // "openai-gpt4" does NOT match prefix "openai/" — no slash
         var factory = CreateFactory();
-        var result = factory.GetClient("openai-gpt4");
-        result.Should().Be(_localClient.Object);
+        var result = factory.GetClient("xyz-not-a-provider");
+        result.Should().Be(_ollamaClient.Object);
+    }
+
+    // =====================================================================
+    // GetClient — well-known provider constants
+    // =====================================================================
+
+    [TestMethod]
+    public void Providers_OllamaConstant_IsOllama()
+    {
+        ChatClientFactory.Providers.Ollama.Should().Be("ollama");
+    }
+
+    [TestMethod]
+    public void Providers_OpenRouterConstant_IsOpenRouter()
+    {
+        ChatClientFactory.Providers.OpenRouter.Should().Be("openrouter");
+    }
+
+    // =====================================================================
+    // GetClient — logging on fallback
+    // =====================================================================
+
+    [TestMethod]
+    public void GetClient_UnknownProvider_LogsWarning()
+    {
+        var factory = CreateFactory();
+        factory.GetClient("unknown");
+        _logger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("Falling back to Ollama")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [TestMethod]
+    public void GetClient_OpenRouterWithoutClient_LogsWarning()
+    {
+        var factory = new ChatClientFactory(
+            _ollamaClient.Object,
+            openRouterClient: null,
+            defaultProvider: "ollama",
+            _logger.Object);
+        factory.GetClient("openrouter");
+        _logger.Verify(
+            x => x.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((v, _) => v.ToString()!.Contains("Falling back to Ollama")),
+                null,
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 }

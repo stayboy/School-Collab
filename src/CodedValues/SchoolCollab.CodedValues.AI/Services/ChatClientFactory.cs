@@ -3,52 +3,55 @@ using Microsoft.Extensions.AI;
 namespace SchoolCollab.CodedValues.AI.Services;
 
 /// <summary>
-/// Routes chat requests to the correct <see cref="IChatClient"/> based on model name.
-/// Models matching a cloud prefix are routed to OpenRouter; all others go to Ollama.
+/// Routes chat requests to the correct <see cref="IChatClient"/> based on the provider name.
+/// Supported providers: <c>"ollama"</c> (local) and <c>"openrouter"</c> (cloud).
 /// </summary>
 public sealed class ChatClientFactory : IChatClientFactory
 {
-    private readonly IChatClient _localClient;
-    private readonly IChatClient? _cloudClient;
-    private readonly HashSet<string> _cloudPrefixes;
+    /// <summary>Well-known provider names.</summary>
+    public static class Providers
+    {
+        public const string Ollama = "ollama";
+        public const string OpenRouter = "openrouter";
+    }
+
+    private readonly IChatClient _ollamaClient;
+    private readonly IChatClient? _openRouterClient;
+    private readonly string _defaultProvider;
     private readonly ILogger<ChatClientFactory> _logger;
 
     public ChatClientFactory(
-        IChatClient localClient,
-        IChatClient? cloudClient,
-        IEnumerable<string> cloudPrefixes,
+        IChatClient ollamaClient,
+        IChatClient? openRouterClient,
+        string defaultProvider,
         ILogger<ChatClientFactory> logger)
     {
-        _localClient = localClient;
-        _cloudClient = cloudClient;
-        _cloudPrefixes = new HashSet<string>(cloudPrefixes, StringComparer.OrdinalIgnoreCase);
+        _ollamaClient = ollamaClient;
+        _openRouterClient = openRouterClient;
+        _defaultProvider = defaultProvider;
         _logger = logger;
     }
 
     /// <inheritdoc />
-    public IChatClient GetClient(string? model = null)
-    {
-        if (model is not null && _cloudClient is not null && IsCloudModel(model))
-        {
-            _logger.LogDebug("Routing model {Model} to cloud provider", model);
-            return _cloudClient;
-        }
+    public string DefaultProvider => _defaultProvider;
 
-        _logger.LogDebug("Routing model {Model} to local provider", model ?? "(default)");
-        return _localClient;
+    /// <inheritdoc />
+    public IChatClient GetClient(string? provider = null)
+    {
+        var resolvedProvider = string.IsNullOrWhiteSpace(provider) ? _defaultProvider : provider;
+
+        return resolvedProvider.ToLowerInvariant() switch
+        {
+            Providers.Ollama => _ollamaClient,
+            Providers.OpenRouter when _openRouterClient is not null => _openRouterClient,
+            Providers.OpenRouter => FallbackToOllama(provider!, "OpenRouter client not configured"),
+            _ => FallbackToOllama(provider!, "Unknown provider")
+        };
     }
 
-    /// <summary>
-    /// Determines whether a model name belongs to a cloud provider
-    /// by checking if it starts with any of the configured cloud prefixes.
-    /// </summary>
-    private bool IsCloudModel(string model)
+    private IChatClient FallbackToOllama(string requestedProvider, string reason)
     {
-        foreach (var prefix in _cloudPrefixes)
-        {
-            if (model.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-                return true;
-        }
-        return false;
+        _logger.LogWarning("Falling back to Ollama: {Reason} (requested: {Provider})", reason, requestedProvider);
+        return _ollamaClient;
     }
 }

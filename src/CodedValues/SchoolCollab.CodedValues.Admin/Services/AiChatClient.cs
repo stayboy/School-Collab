@@ -27,15 +27,17 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
     public async IAsyncEnumerable<ChatUpdate> ChatAsync(
         IReadOnlyList<ChatMessage> history,
         string? model = null,
+        string? provider = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        logger.LogInformation("Sending chat with {Count} messages to AI API", history.Count);
+        logger.LogInformation("Sending chat with {Count} messages to AI API (provider: {Provider})", history.Count, provider ?? "(default)");
 
         var request = new ChatRequest(
             history.Select(m => new ChatMessageRequest(
                 m.Role == ChatRole.User ? "user" : "assistant",
                 m.Text)).ToList(),
-            model);
+            model,
+            provider);
 
         HttpResponseMessage response;
         try
@@ -163,5 +165,5 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
 // These are the request DTOs sent TO the AI API.
 // They live here in the Admin project to avoid a circular dependency.
 // The AI project defines its own matching records for deserialization.
-public record ChatRequest(List<ChatMessageRequest> Messages, string? Model = null);
+public record ChatRequest(List<ChatMessageRequest> Messages, string? Model = null, string? Provider = null);
 public record ChatMessageRequest(string Role, string? Text);
