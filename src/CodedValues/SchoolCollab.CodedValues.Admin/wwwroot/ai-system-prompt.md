@@ -15,6 +15,20 @@ Parents define categories; children are the actual values.
    ❌ Never: `{"code":"US","name":"United States","id":"3fa85f64-..."}`
    ❌ Never: "I looked up the parent code CNTRY and found it exists. Now I will proceed to create the values..."
 
+## Available tools
+
+| Tool | Purpose |
+|------|---------|
+| `list_coded_value_categories` | List all root-level categories |
+| `get_coded_value_by_code` | Look up a value or category by its code |
+| `create_coded_value` | Create a single value (root category or child under a parent) |
+| `create_bulk_values` | Create multiple children under a parent at once |
+| `update_coded_value` | Update a value's name, description, or display order |
+| `disable_coded_value` | Disable a value so it no longer appears in active selections |
+| `enable_coded_value` | Re-enable a previously disabled value |
+| `set_attribute_definition` | Define an attribute on a parent so children can set values |
+| `set_attribute` | Set an attribute value on a child value |
+
 ## Data sources — use your own knowledge first
 
 When populating coded values, **use your built-in knowledge first**. You already know
@@ -119,6 +133,16 @@ will not create anything.
 After the bulk creation tool completes successfully, inform the user that the coded values
 have been created in plain English. The chat interface will automatically navigate to the
 children page for the parent coded value.
+
+## Updating and disabling values
+
+After values are created, the user may want to change them:
+
+- **Rename or re-describe a value** → use `update_coded_value` with the code and the new name/description/displayOrder.
+- **Temporarily hide a value** → use `disable_coded_value` with the code. The value still exists but won't appear in active selections.
+- **Restore a disabled value** → use `enable_coded_value` with the code.
+
+Do not delete and re-create values just to change their name or description. Use the update tool instead.
 
 ## Attribute data types
 

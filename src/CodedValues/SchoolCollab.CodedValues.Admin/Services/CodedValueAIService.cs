@@ -30,6 +30,9 @@ public sealed class CodedValueAIService
         ["get_coded_value_by_code"] = "Get By Code",
         ["create_coded_value"] = "Create Value",
         ["create_bulk_values"] = "Create Bulk Values",
+        ["update_coded_value"] = "Update Value",
+        ["disable_coded_value"] = "Disable Value",
+        ["enable_coded_value"] = "Enable Value",
         ["set_attribute_definition"] = "Define Attribute",
         ["set_attribute"] = "Set Attribute"
     };
@@ -45,8 +48,11 @@ public sealed class CodedValueAIService
         [
             AIFunctionFactory.Create(ListCategoriesAsync, "list_coded_value_categories", "Lists all root-level coded value categories. Returns an array of category objects with id, code, name, description, and children count."),
             AIFunctionFactory.Create(GetByCodeAsync, "get_coded_value_by_code", "Gets a coded value by its unique code. Returns the full coded value including its children, attribute definitions (on parents), and attributes (on children)."),
-            AIFunctionFactory.Create(CreateCodedValueAsync, "create_coded_value", "Creates a new coded value. Accepts code (unique identifier like CNTRY), name (display name like Countries), optional description, optional parentId for creating a child value, and optional displayOrder."),
-            AIFunctionFactory.Create(CreateBulkValuesAsync, "create_bulk_values", "Creates multiple child values under a parent coded value in one call. Accepts parentCode (the code of the parent category) and an array of child items, each with code and name. Optionally include description. Use this to populate a category with many values at once, e.g., countries under a Countries category."),
+            AIFunctionFactory.Create(CreateCodedValueAsync, "create_coded_value", "Creates a new coded value. Use parentCode to create a child under an existing parent, or omit it to create a root-level category. Accepts code, name, optional description, optional parentCode, and optional displayOrder."),
+            AIFunctionFactory.Create(CreateBulkValuesAsync, "create_bulk_values", "Creates multiple child values under a parent coded value in one call. Accepts parentCode (the code of the parent category) and an array of child items, each with code, name, optional description, and optional displayOrder. Use this to populate a category with many values at once, e.g., countries under a Countries category."),
+            AIFunctionFactory.Create(UpdateCodedValueAsync, "update_coded_value", "Updates an existing coded value's name, description, or display order. Accepts the code of the value to update and any of name, description, or displayOrder to change."),
+            AIFunctionFactory.Create(DisableCodedValueAsync, "disable_coded_value", "Disables a coded value so it no longer appears in active selections. Accepts the code of the value to disable."),
+            AIFunctionFactory.Create(EnableCodedValueAsync, "enable_coded_value", "Re-enables a previously disabled coded value. Accepts the code of the value to enable."),
             AIFunctionFactory.Create(SetAttributeDefinitionAsync, "set_attribute_definition", "Defines an attribute on a PARENT coded value. Attribute definitions describe what metadata children should have. Must be called on the parent before setting attribute values on children. Accepts: parentCode (the parent's code, e.g. AI-MODELS), key (attribute key like 'weight'), displayName (human-readable label), dataType (0=Text,1=Integer,2=Decimal,3=Boolean,4=Date,5=DateTime,6=Time,7=CodedValue), sourceCode (required only if dataType=7, references another parent code for dropdown values), isRequired, allowMultiple."),
             AIFunctionFactory.Create(SetAttributeAsync, "set_attribute", "Sets an attribute value on a coded value. The attribute definition with the same key must already exist on the PARENT of this coded value. Accepts: code (the coded value's code), key (attribute key that matches a definition on the parent), value (the value as a string).")
         ];
@@ -123,10 +129,12 @@ public sealed class CodedValueAIService
         {
             var roundText = new StringBuilder();
             var toolCallsByCallId = new Dictionary<string, (string Name, string? Args)>();
+            var seenCallIds = new HashSet<string>();
 
             await foreach (var chunk in _chatClient.GetStreamingResponseAsync(messages, options, ct).WithCancellation(ct))
             {
                 // Collect function call content from streaming updates
+                // Accumulate: later chunks for the same call ID may have more complete arguments
                 if (chunk.Contents is not null)
                 {
                     foreach (var content in chunk.Contents)
@@ -134,15 +142,26 @@ public sealed class CodedValueAIService
                         if (content is FunctionCallContent fc && fc.Name is not null)
                         {
                             var callId = fc.CallId ?? Guid.NewGuid().ToString();
-                            if (!toolCallsByCallId.ContainsKey(callId))
-                            {
-                                var args = fc.Arguments is not null
-                                    ? JsonSerializer.Serialize(fc.Arguments)
-                                    : null;
-                                toolCallsByCallId[callId] = (fc.Name, args);
+                            var args = fc.Arguments is not null
+                                ? JsonSerializer.Serialize(fc.Arguments)
+                                : null;
 
+                            if (toolCallsByCallId.TryGetValue(callId, out var existing))
+                            {
+                                // Preserve existing args if this chunk has none (streaming may send name-only deltas)
+                                var mergedArgs = args ?? existing.Args;
+                                toolCallsByCallId[callId] = (fc.Name, mergedArgs);
+                            }
+                            else
+                            {
+                                toolCallsByCallId[callId] = (fc.Name, args);
+                            }
+
+                            // Yield ToolCallStart only once per call ID
+                            if (seenCallIds.Add(callId))
+                            {
                                 var friendlyName = GetFriendlyToolName(fc.Name);
-                                var argsSummary = FormatArgsSummary(fc.Name, args);
+                                var argsSummary = FormatArgsSummary(fc.Name, args ?? toolCallsByCallId[callId].Args);
                                 yield return new ChatUpdate.ToolCallStart(callId, friendlyName, argsSummary);
                             }
                         }
@@ -237,6 +256,9 @@ public sealed class CodedValueAIService
                 "get_coded_value_by_code" => await DispatchGetByCodeAsync(arguments, ct),
                 "create_coded_value" => await DispatchCreateCodedValueAsync(arguments, ct),
                 "create_bulk_values" => await DispatchCreateBulkValuesAsync(arguments, ct),
+                "update_coded_value" => await DispatchUpdateCodedValueAsync(arguments, ct),
+                "disable_coded_value" => await DispatchDisableCodedValueAsync(arguments, ct),
+                "enable_coded_value" => await DispatchEnableCodedValueAsync(arguments, ct),
                 "set_attribute_definition" => await DispatchSetAttributeDefinitionAsync(arguments, ct),
                 "set_attribute" => await DispatchSetAttributeAsync(arguments, ct),
                 _ => $"Unknown tool: {toolName}"
@@ -263,7 +285,9 @@ public sealed class CodedValueAIService
         var code = ExtractStringArg(args, "code") ?? "";
         var name = ExtractStringArg(args, "name") ?? "";
         var description = ExtractStringArg(args, "description");
-        return await CreateCodedValueAsync(code, name, description, ct);
+        var parentCode = ExtractStringArg(args, "parentCode");
+        var displayOrder = ExtractIntArg(args, "displayOrder") ?? 0;
+        return await CreateCodedValueAsync(code, name, description, parentCode, displayOrder, ct);
     }
 
     private async Task<string> DispatchCreateBulkValuesAsync(string? args, CancellationToken ct)
@@ -291,6 +315,27 @@ public sealed class CodedValueAIService
         var key = ExtractStringArg(args, "key") ?? "";
         var value = ExtractStringArg(args, "value") ?? "";
         return await SetAttributeAsync(code, key, value, ct);
+    }
+
+    private async Task<string> DispatchUpdateCodedValueAsync(string? args, CancellationToken ct)
+    {
+        var code = ExtractStringArg(args, "code") ?? "";
+        var name = ExtractStringArg(args, "name");
+        var description = ExtractStringArg(args, "description");
+        var displayOrder = ExtractIntArg(args, "displayOrder");
+        return await UpdateCodedValueAsync(code, name, description, displayOrder, ct);
+    }
+
+    private async Task<string> DispatchDisableCodedValueAsync(string? args, CancellationToken ct)
+    {
+        var code = ExtractStringArg(args, "code") ?? "";
+        return await DisableCodedValueAsync(code, ct);
+    }
+
+    private async Task<string> DispatchEnableCodedValueAsync(string? args, CancellationToken ct)
+    {
+        var code = ExtractStringArg(args, "code") ?? "";
+        return await EnableCodedValueAsync(code, ct);
     }
 
     private static string? ExtractStringArg(string? args, string name)
@@ -343,7 +388,8 @@ public sealed class CodedValueAIService
             return arr.EnumerateArray().Select(el => new BulkChildItem(
                 el.TryGetProperty("code", out var c) ? c.GetString() ?? "" : "",
                 el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
-                el.TryGetProperty("description", out var d) ? d.GetString() : null
+                el.TryGetProperty("description", out var d) ? d.GetString() : null,
+                el.TryGetProperty("displayOrder", out var o) && o.ValueKind == JsonValueKind.Number ? o.GetInt32() : 0
             )).ToArray();
         }
         catch { return []; }
@@ -371,28 +417,28 @@ public sealed class CodedValueAIService
         // Remove tool invocation lines: function_name(arg1="value", ...)
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
-            @"^\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)\s*\(.*?\)\s*[;,]?\s*$",
+            @"^\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|update_coded_value|disable_coded_value|enable_coded_value|set_attribute_definition|set_attribute)\s*\(.*?\)\s*[;,]?\s*$",
             string.Empty,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
 
         // Remove lines that are just tool names with arrows/prefixes
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
-            @"^\s*(?:→|->|≫|>>|▸|•)\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)\s*$",
+            @"^\s*(?:→|->|≫|>>|▸|•)\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|update_coded_value|disable_coded_value|enable_coded_value|set_attribute_definition|set_attribute)\s*$",
             string.Empty,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
 
         // Remove standalone known tool-name lines
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
-            @"^\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)\s*$",
+            @"^\s*(list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|update_coded_value|disable_coded_value|enable_coded_value|set_attribute_definition|set_attribute)\s*$",
             string.Empty,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
 
         // Remove lines that are just 'name': 'tool_name' or "name": "tool_name"
         text = System.Text.RegularExpressions.Regex.Replace(
             text,
-            @"^\s*['""]name['""]\s*:\s*['""](list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|set_attribute_definition|set_attribute)['""].*$",
+            @"^\s*['""]name['""]\s*:\s*['""](list_coded_value_categories|get_coded_value_by_code|create_coded_value|create_bulk_values|update_coded_value|disable_coded_value|enable_coded_value|set_attribute_definition|set_attribute)['""].*$",
             string.Empty,
             System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Multiline);
 
@@ -478,6 +524,9 @@ public sealed class CodedValueAIService
                 "get_coded_value_by_code" => $"code: {ArgDisplay(root, "code")}",
                 "create_coded_value" => $"{ArgDisplay(root, "code")}: {ArgDisplay(root, "name")}",
                 "create_bulk_values" => $"parent: {ArgDisplay(root, "parentCode")}",
+                "update_coded_value" => $"{ArgDisplay(root, "code")}: {ArgDisplay(root, "name")}",
+                "disable_coded_value" => $"{ArgDisplay(root, "code")}",
+                "enable_coded_value" => $"{ArgDisplay(root, "code")}",
                 "set_attribute_definition" => $"{ArgDisplay(root, "parentCode")}/{ArgDisplay(root, "key")}",
                 "set_attribute" => $"{ArgDisplay(root, "code")}.{ArgDisplay(root, "key")} = {ArgDisplay(root, "value")}",
                 _ => string.Join(", ", root.EnumerateObject().Select(p => p.Name))
@@ -513,6 +562,9 @@ public sealed class CodedValueAIService
             "get_coded_value_by_code" => FormatGetByCodeResult(result),
             "create_coded_value" => TruncateResult(result, 150),
             "create_bulk_values" => FormatBulkResult(result),
+            "update_coded_value" => TruncateResult(result, 150),
+            "disable_coded_value" => TruncateResult(result, 150),
+            "enable_coded_value" => TruncateResult(result, 150),
             "set_attribute_definition" => TruncateResult(result, 150),
             "set_attribute" => TruncateResult(result, 150),
             _ => TruncateResult(result, 150)
@@ -590,11 +642,13 @@ public sealed class CodedValueAIService
         return result;
     }
 
-    [Description("Creates a new coded value")]
+    [Description("Creates a new coded value. Use parentCode to create a child under an existing parent, or omit it to create a root-level category.")]
     private async Task<string> CreateCodedValueAsync(
         [Description("Unique uppercase code, e.g. CNTRY")] string code,
         [Description("Display name, e.g. Countries")] string name,
         [Description("Optional description")] string? description = null,
+        [Description("Optional code of the parent category to create this value under, e.g. CNTRY")] string? parentCode = null,
+        [Description("Sort order for display, starting from 1")] int displayOrder = 0,
         CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: creating coded value {Code}", code);
@@ -603,10 +657,21 @@ public sealed class CodedValueAIService
         if (existing is not null)
             return $"A coded value with code '{code}' already exists: {existing.Name} (Id: {existing.Id}). Use a different code or get_coded_value_by_code to inspect it.";
 
+        Guid? parentId = null;
+        if (!string.IsNullOrEmpty(parentCode))
+        {
+            var parent = await _api.GetByCodeAsync(parentCode, ct);
+            if (parent is null)
+                return $"Parent coded value '{parentCode}' not found. Create it first or use a valid parent code.";
+            parentId = parent.Id;
+        }
+
         try
         {
-            await _api.CreateAsync(new CreateCodedValueRequest(code, name, description, null), ct);
-            return $"Created coded value: Code={code}, Name={name}";
+            await _api.CreateAsync(new CreateCodedValueRequest(code, name, description, parentId, displayOrder), ct);
+            return parentId.HasValue
+                ? $"Created child value: Code={code}, Name={name} under parent {parentCode}"
+                : $"Created root category: Code={code}, Name={name}";
         }
         catch (HttpRequestException ex)
         {
@@ -615,7 +680,7 @@ public sealed class CodedValueAIService
         }
     }
 
-    [Description("Creates multiple child values under a parent coded value")]
+    [Description("Creates multiple child values under a parent coded value in one call. Accepts parentCode (the code of the parent category) and an array of child items, each with code, name, optional description, and optional displayOrder. Use this to populate a category with many values at once, e.g., countries under a Countries category.")]
     private async Task<string> CreateBulkValuesAsync(
         [Description("The code of the parent category, e.g. CNTRY")] string parentCode,
         BulkChildItem[] children,
@@ -632,8 +697,9 @@ public sealed class CodedValueAIService
         {
             try
             {
+                var displayOrder = child.DisplayOrder > 0 ? child.DisplayOrder : results.Count + 1;
                 await _api.CreateAsync(new CreateCodedValueRequest(
-                    child.Code, child.Name, child.Description, parent.Id), ct);
+                    child.Code, child.Name, child.Description, parent.Id, displayOrder), ct);
                 results.Add($"✓ {child.Code}: {child.Name}");
             }
             catch (HttpRequestException ex)
@@ -674,6 +740,62 @@ public sealed class CodedValueAIService
 
         return $"Defined attribute '{key}' on parent '{parentCode}' — DataType={dt}, IsRequired={isRequired}, AllowMultiple={allowMultiple}. " +
                "Children can now set values for this attribute using set_attribute.";
+    }
+
+    [Description("Updates an existing coded value's name, description, or display order")]
+    private async Task<string> UpdateCodedValueAsync(
+        [Description("The unique code of the coded value to update")] string code,
+        [Description("New display name")] string? name = null,
+        [Description("New description")] string? description = null,
+        [Description("New display order position")] int? displayOrder = null,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug("AI tool: updating coded value {Code}", code);
+
+        var item = await _api.GetByCodeAsync(code, ct);
+        if (item is null)
+            return $"Coded value '{code}' not found.";
+
+        var newName = name ?? item.Name;
+        var newDesc = description ?? item.Description;
+        var newOrder = displayOrder ?? item.DisplayOrder;
+
+        await _api.UpdateAsync(item.Id, new UpdateCodedValueRequest(newName, newDesc, newOrder), ct);
+        return $"Updated '{code}': Name={newName}, DisplayOrder={newOrder}";
+    }
+
+    [Description("Disables a coded value so it no longer appears in active selections")]
+    private async Task<string> DisableCodedValueAsync(
+        [Description("The unique code of the coded value to disable")] string code,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug("AI tool: disabling coded value {Code}", code);
+
+        var item = await _api.GetByCodeAsync(code, ct);
+        if (item is null)
+            return $"Coded value '{code}' not found.";
+        if (item.IsDisabled)
+            return $"'{code}' is already disabled.";
+
+        await _api.DisableAsync(item.Id, ct);
+        return $"Disabled '{code} ({item.Name})'. It will no longer appear in active selections.";
+    }
+
+    [Description("Re-enables a previously disabled coded value")]
+    private async Task<string> EnableCodedValueAsync(
+        [Description("The unique code of the coded value to enable")] string code,
+        CancellationToken ct = default)
+    {
+        _logger.LogDebug("AI tool: enabling coded value {Code}", code);
+
+        var item = await _api.GetByCodeAsync(code, ct);
+        if (item is null)
+            return $"Coded value '{code}' not found.";
+        if (!item.IsDisabled)
+            return $"'{code}' is already enabled.";
+
+        await _api.EnableAsync(item.Id, ct);
+        return $"Enabled '{code} ({item.Name})'. It is now available in active selections.";
     }
 
     [Description("Sets an attribute value on a coded value. The definition must exist on its parent.")]
@@ -721,4 +843,5 @@ public abstract record ChatUpdate
 public record BulkChildItem(
     [Description("Short uppercase code for the child value, e.g. US")] string Code,
     [Description("Display name, e.g. United States")] string Name,
-    [Description("Optional description")] string? Description = null);
+    [Description("Optional description")] string? Description = null,
+    [Description("Sort order starting from 1")] int DisplayOrder = 0);
