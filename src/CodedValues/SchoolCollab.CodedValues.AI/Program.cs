@@ -69,7 +69,7 @@ builder.Services.AddSingleton<IChatClientFactory>(sp =>
 });
 
 // HttpClient for calling the Coded Values API (service discovery)
-builder.Services.AddHttpClient<CodedValuesApiClient>(client =>
+builder.Services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(client =>
     client.BaseAddress = new Uri("https+http://coded-values-api"));
 
 builder.Services.AddSingleton<CodedValueAIService>();

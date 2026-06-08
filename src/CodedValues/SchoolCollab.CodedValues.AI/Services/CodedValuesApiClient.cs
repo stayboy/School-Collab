@@ -62,10 +62,29 @@ public record AttributeDefinitionRequest(
     string? RegexPattern = null);
 
 /// <summary>
+/// Abstraction over the Coded Values REST API for testability.
+/// </summary>
+public interface ICodedValuesApiClient
+{
+    Task<CodedValueDto[]?> GetRootValuesAsync(CancellationToken ct = default);
+    Task<CodedValueDto[]?> GetChildrenAsync(Guid parentId, CancellationToken ct = default);
+    Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    Task<CodedValueDto?> GetByCodeAsync(string code, CancellationToken ct = default);
+    Task CreateAsync(CreateCodedValueRequest req, CancellationToken ct = default);
+    Task UpdateAsync(Guid id, UpdateCodedValueRequest req, CancellationToken ct = default);
+    Task DisableAsync(Guid id, CancellationToken ct = default);
+    Task EnableAsync(Guid id, CancellationToken ct = default);
+    Task SetAttributeAsync(Guid id, string key, string value, CancellationToken ct = default);
+    Task RemoveAttributeAsync(Guid id, string key, CancellationToken ct = default);
+    Task SetAttributeDefinitionAsync(Guid id, string key, AttributeDefinitionRequest req, CancellationToken ct = default);
+    Task RemoveAttributeDefinitionAsync(Guid id, string key, CancellationToken ct = default);
+}
+
+/// <summary>
 /// HTTP client for calling the Coded Values REST API.
 /// Uses Aspire service discovery for the base address.
 /// </summary>
-public sealed class CodedValuesApiClient(HttpClient http)
+public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClient
 {
     public Task<CodedValueDto[]?> GetRootValuesAsync(CancellationToken ct = default) =>
         http.GetFromJsonAsync<CodedValueDto[]>("/coded-values", ct);

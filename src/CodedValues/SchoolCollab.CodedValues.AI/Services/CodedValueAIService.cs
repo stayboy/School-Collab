@@ -14,7 +14,7 @@ namespace SchoolCollab.CodedValues.AI.Services;
 public sealed class CodedValueAIService
 {
     private readonly IChatClientFactory _chatClientFactory;
-    private readonly CodedValuesApiClient _api;
+    private readonly ICodedValuesApiClient _api;
     private readonly ILogger<CodedValueAIService> _logger;
     private readonly IHostEnvironment _hostEnv;
 
@@ -37,7 +37,7 @@ public sealed class CodedValueAIService
         ["set_attribute"] = "Set Attribute"
     };
 
-    public CodedValueAIService(IChatClientFactory chatClientFactory, CodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv)
+    public CodedValueAIService(IChatClientFactory chatClientFactory, ICodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv)
     {
         _chatClientFactory = chatClientFactory;
         _api = api;
