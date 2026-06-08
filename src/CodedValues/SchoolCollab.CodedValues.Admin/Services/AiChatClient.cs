@@ -13,6 +13,14 @@ namespace SchoolCollab.CodedValues.Admin.Services;
 public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
 {
     /// <summary>
+    /// JSON options matching the server's camelCase SSE payloads.
+    /// <see cref="System.Text.Json.JsonSerializerDefaults.Web"/> enables
+    /// <see cref="JsonSerializerOptions.PropertyNameCaseInsensitive"/> so
+    /// that <c>{"text":"..."}</c> matches <c>TextChunkPayload.Text</c>.
+    /// </summary>
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    /// <summary>
     /// Sends conversation history to the AI API and yields structured updates.
     /// </summary>
     public async IAsyncEnumerable<ChatUpdate> ChatAsync(
@@ -78,22 +86,22 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
         logger.LogInformation("Chat stream completed");
     }
 
-    private static ChatUpdate? ParseSseEvent(string? eventType, string data)
+    internal static ChatUpdate? ParseSseEvent(string? eventType, string data)
     {
         try
         {
             return eventType switch
             {
-                "TextChunk" => JsonSerializer.Deserialize<TextChunkPayload>(data) is { } tc
+                "TextChunk" => JsonSerializer.Deserialize<TextChunkPayload>(data, JsonOptions) is { } tc
                     ? new ChatUpdate.TextChunk(tc.Text ?? string.Empty)
                     : null,
-                "ToolCallStart" => JsonSerializer.Deserialize<ToolCallStartPayload>(data) is { } tcs
+                "ToolCallStart" => JsonSerializer.Deserialize<ToolCallStartPayload>(data, JsonOptions) is { } tcs
                     ? new ChatUpdate.ToolCallStart(tcs.CallId ?? "", tcs.FriendlyName ?? "", tcs.ArgsSummary ?? "")
                     : null,
-                "ToolCallEnd" => JsonSerializer.Deserialize<ToolCallEndPayload>(data) is { } tce
+                "ToolCallEnd" => JsonSerializer.Deserialize<ToolCallEndPayload>(data, JsonOptions) is { } tce
                     ? new ChatUpdate.ToolCallEnd(tce.CallId ?? "", tce.FriendlyName ?? "", tce.ResultSummary, tce.Success)
                     : null,
-                "Error" => JsonSerializer.Deserialize<ErrorPayload>(data) is { } err
+                "Error" => JsonSerializer.Deserialize<ErrorPayload>(data, JsonOptions) is { } err
                     ? new ChatUpdate.Error(err.Message ?? "Unknown error")
                     : null,
                 _ => null
@@ -106,10 +114,10 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
     }
 
     // SSE payload DTOs for deserialization
-    private record TextChunkPayload(string? Text);
-    private record ToolCallStartPayload(string? CallId, string? FriendlyName, string? ArgsSummary);
-    private record ToolCallEndPayload(string? CallId, string? FriendlyName, string? ResultSummary, bool Success);
-    private record ErrorPayload(string? Message);
+    internal record TextChunkPayload(string? Text);
+    internal record ToolCallStartPayload(string? CallId, string? FriendlyName, string? ArgsSummary);
+    internal record ToolCallEndPayload(string? CallId, string? FriendlyName, string? ResultSummary, bool Success);
+    internal record ErrorPayload(string? Message);
 }
 
 // These are the request DTOs sent TO the AI API.

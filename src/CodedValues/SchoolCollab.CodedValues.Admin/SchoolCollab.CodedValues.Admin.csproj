@@ -6,6 +6,9 @@
     <NoWarn>CS0436</NoWarn>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="SchoolCollab.CodedValues.Tests.Unit" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
   </ItemGroup>
