@@ -7,20 +7,65 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// Ollama IChatClient registration
+// ── Ollama (local) IChatClient registration ──
 var ollamaEndpoint = builder.Configuration["Ollama:Endpoint"] ?? "http://localhost:11434/v1";
 var ollamaModel = builder.Configuration["Ollama:Model"] ?? "llama3.1:8b";
 
 builder.Services.AddSingleton<IChatClient>(sp =>
 {
     var logger = sp.GetRequiredService<ILogger<AiProgramMarker>>();
-    logger.LogInformation("Configuring AI chat client with Ollama at {Endpoint}, model {Model}", ollamaEndpoint, ollamaModel);
+    logger.LogInformation("Configuring local AI chat client with Ollama at {Endpoint}, model {Model}", ollamaEndpoint, ollamaModel);
 
     var openAiClient = new OpenAI.OpenAIClient(
         new System.ClientModel.ApiKeyCredential("ollama"),
         new OpenAI.OpenAIClientOptions { Endpoint = new Uri(ollamaEndpoint) });
 
     return openAiClient.GetChatClient(ollamaModel).AsIChatClient();
+});
+
+// ── OpenRouter (cloud) IChatClient registration ──
+var openRouterEndpoint = builder.Configuration["OpenRouter:Endpoint"] ?? "https://openrouter.ai/api/v1";
+var openRouterApiKey = builder.Configuration["OpenRouter:ApiKey"];
+var openRouterDefaultModel = builder.Configuration["OpenRouter:DefaultModel"] ?? "openai/gpt-4o-mini";
+
+builder.Services.AddSingleton<IChatClient>(sp =>
+{
+    var logger = sp.GetRequiredService<ILogger<AiProgramMarker>>();
+
+    if (string.IsNullOrWhiteSpace(openRouterApiKey))
+    {
+        logger.LogWarning("OpenRouter:ApiKey not configured — cloud models will be unavailable");
+        // Return a no-op client that throws on use; factory will skip it if no key is provided
+        var fallbackOpenAiClient = new OpenAI.OpenAIClient(
+            new System.ClientModel.ApiKeyCredential("unused"),
+            new OpenAI.OpenAIClientOptions { Endpoint = new Uri(openRouterEndpoint) });
+        return fallbackOpenAiClient.GetChatClient(openRouterDefaultModel).AsIChatClient();
+    }
+
+    logger.LogInformation("Configuring cloud AI chat client with OpenRouter at {Endpoint}", openRouterEndpoint);
+
+    var openAiClient = new OpenAI.OpenAIClient(
+        new System.ClientModel.ApiKeyCredential(openRouterApiKey),
+        new OpenAI.OpenAIClientOptions { Endpoint = new Uri(openRouterEndpoint) });
+
+    return openAiClient.GetChatClient(openRouterDefaultModel).AsIChatClient();
+});
+
+// ── ChatClientFactory: routes requests to Ollama or OpenRouter based on model name ──
+var cloudPrefixes = builder.Configuration.GetSection("OpenRouter:CloudModelPrefixes").Get<string[]>()
+    ?? ["openai/", "anthropic/", "google/", "meta-llama/", "mistralai/", "deepseek/"];
+
+builder.Services.AddSingleton<IChatClientFactory>(sp =>
+{
+    var clients = sp.GetServices<IChatClient>().ToArray();
+    var localClient = clients[0];  // Ollama — registered first
+    var cloudClient = clients.Length > 1 ? clients[1] : null;  // OpenRouter — registered second
+    var logger = sp.GetRequiredService<ILogger<ChatClientFactory>>();
+
+    logger.LogInformation("ChatClientFactory initialised with {CloudPrefixCount} cloud prefixes: {Prefixes}",
+        cloudPrefixes.Length, string.Join(", ", cloudPrefixes));
+
+    return new ChatClientFactory(localClient, cloudClient, cloudPrefixes, logger);
 });
 
 // HttpClient for calling the Coded Values API (service discovery)

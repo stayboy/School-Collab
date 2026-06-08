@@ -584,3 +584,43 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
 - No MediatR — CQRS is implemented via `ICommandHandler<T>` / `IQueryHandler<T,R>` with
   Scrutor assembly scanning.
 - Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.
+
+## Unit tests for feature additions
+
+Every new feature, service, or behavioural class **must** include unit tests in
+`tests/SchoolCollab.CodedValues.Tests.Unit/`. Tests go in a file named after the class
+under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
+
+### Rules
+
+1. **Add tests alongside new code.** A PR that adds a new class with behavioural logic
+   (routing, validation, text cleaning, mapping, etc.) must also add a corresponding test
+   file or extend an existing one. Pure data-transfer objects (DTOs, records) and trivial
+   wrappers (delegates, thin extension methods) are exempt.
+
+2. **Test file naming.** `<ClassName>Tests.cs` — one test class per production class.
+   Keep tests in the root `SchoolCollab.CodedValues.Tests.Unit` namespace unless a
+   `Domain/` subfolder matches the production namespace.
+
+3. **Framework.** Use MSTest (`[TestClass]`/`[TestMethod]`), Moq for mocking, and
+   FluentAssertions for assertions. These packages are already referenced.
+
+4. **Coverage targets.** At minimum, test:
+   - **Happy path** — the primary use case works correctly.
+   - **Edge cases** — null/empty inputs, boundary values, case sensitivity.
+   - **Error/fallback paths** — what happens when a dependency is missing or returns
+     an unexpected result.
+   - **Routing/branching logic** — every `if`/`switch` branch must have at least one
+     test that exercises it (e.g. local vs cloud routing in `ChatClientFactory`).
+
+5. **Run tests before committing.** `dotnet test` must pass with 0 failures before a PR
+   is submitted. If existing tests break, fix them in the same commit.
+
+6. **Reference the production project.** The unit test project already references
+   `SchoolCollab.CodedValues.AI` and `SchoolCollab.CodedValues.Core` via
+   `<ProjectReference>`. Add a new reference only if the new production code lives in a
+   different project.
+
+7. **`InternalsVisibleTo`.** If the class under test is `internal`, ensure the production
+   project has `<InternalsVisibleTo Include="SchoolCollab.CodedValues.Tests.Unit" />` in
+   its `.csproj`.

@@ -13,7 +13,7 @@ namespace SchoolCollab.CodedValues.AI.Services;
 /// </summary>
 public sealed class CodedValueAIService
 {
-    private readonly IChatClient _chatClient;
+    private readonly IChatClientFactory _chatClientFactory;
     private readonly CodedValuesApiClient _api;
     private readonly ILogger<CodedValueAIService> _logger;
     private readonly IHostEnvironment _hostEnv;
@@ -37,9 +37,9 @@ public sealed class CodedValueAIService
         ["set_attribute"] = "Set Attribute"
     };
 
-    public CodedValueAIService(IChatClient chatClient, CodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv)
+    public CodedValueAIService(IChatClientFactory chatClientFactory, CodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv)
     {
-        _chatClient = chatClient;
+        _chatClientFactory = chatClientFactory;
         _api = api;
         _logger = logger;
         _hostEnv = hostEnv;
@@ -138,7 +138,9 @@ public sealed class CodedValueAIService
         string? model = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        _logger.LogInformation("Processing AI chat with {Count} history messages", history.Count);
+        _logger.LogInformation("Processing AI chat with {Count} history messages, model {Model}", history.Count, model ?? "(default)");
+
+        var chatClient = _chatClientFactory.GetClient(model);
 
         var systemPrompt = GetSystemPrompt();
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
@@ -157,7 +159,7 @@ public sealed class CodedValueAIService
             var toolCallsByCallId = new Dictionary<string, (string Name, string? Args)>();
             var seenCallIds = new HashSet<string>();
 
-            await foreach (var chunk in _chatClient.GetStreamingResponseAsync(messages, options, ct).WithCancellation(ct))
+            await foreach (var chunk in chatClient.GetStreamingResponseAsync(messages, options, ct).WithCancellation(ct))
             {
                 // Collect function call content from streaming updates
                 // Accumulate: later chunks for the same call ID may have more complete arguments

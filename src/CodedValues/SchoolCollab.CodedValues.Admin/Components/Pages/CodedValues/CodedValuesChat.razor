@@ -126,7 +126,13 @@
         new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m, false),
         new("mistral:7b", "Mistral 7B", 0.9m, false),
         new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m, false),
-        new("gemma2:9b", "Gemma 2 9B", 1.2m, false)
+        new("gemma2:9b", "Gemma 2 9B", 1.2m, false),
+        new("openai/gpt-4o-mini", "GPT-4o Mini", 1.5m, true),
+        new("openai/gpt-4o", "GPT-4o", 2.0m, true),
+        new("anthropic/claude-3.5-haiku", "Claude 3.5 Haiku", 1.5m, true),
+        new("anthropic/claude-sonnet-4", "Claude Sonnet 4", 2.5m, true),
+        new("google/gemini-2.0-flash-001", "Gemini 2.0 Flash", 1.3m, true),
+        new("deepseek/deepseek-chat", "DeepSeek V3", 1.0m, true)
     ];
 
     private ModelOption[] _models = _fallbackModels;
