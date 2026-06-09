@@ -624,3 +624,10 @@ under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
 7. **`InternalsVisibleTo`.** If the class under test is `internal`, ensure the production
    project has `<InternalsVisibleTo Include="SchoolCollab.CodedValues.Tests.Unit" />` in
    its `.csproj`.
+
+8. **HTTP 404 handling pattern.** When an API client method calls an endpoint that may
+   return 404 (e.g. "get by code" or "get by id"), the method must check
+   `response.StatusCode == HttpStatusCode.NotFound` and return `null` instead of
+   throwing `HttpRequestException`. Never use `GetFromJsonAsync<T>()` for endpoints
+   that can return 404 — it throws on non-success status codes. Use `GetAsync()` +
+   status check + `ReadFromJsonAsync<T>()` instead.
