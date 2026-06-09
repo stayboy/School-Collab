@@ -32,6 +32,12 @@ internal sealed class CodedValueRepository(CodedValuesDbContext db) : ICodedValu
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task AddRangeAsync(IEnumerable<CodedValue> codedValues, CancellationToken cancellationToken = default)
+    {
+        await db.CodedValues.AddRangeAsync(codedValues, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task UpdateAsync(CodedValue codedValue, CancellationToken cancellationToken = default)
     {
         try

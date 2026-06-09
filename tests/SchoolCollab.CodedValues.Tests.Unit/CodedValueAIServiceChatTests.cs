@@ -46,8 +46,8 @@ public class CodedValueAIServiceChatTests
         var mockApi = new Mock<ICodedValuesApiClient>();
         mockApi.Setup(a => a.GetByCodeAsync("HSPTL", It.IsAny<CancellationToken>()))
             .ReturnsAsync(parentHsptl);
-        mockApi.Setup(a => a.CreateAsync(It.IsAny<CreateCodedValueRequest>(), It.IsAny<CancellationToken>()))
-            .Returns(Task.CompletedTask);
+        mockApi.Setup(a => a.BulkCreateAsync(parentHsptl.Id, It.IsAny<IEnumerable<CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new BulkCreateResult(3, parentHsptl.Id));
 
         // Simulate a 3-round AI conversation:
         // Round 1: AI calls get_coded_value_by_code with code=HSPTL
@@ -133,8 +133,8 @@ public class CodedValueAIServiceChatTests
         // 5. Verify API was called correctly
         mockApi.Verify(a => a.GetByCodeAsync("HSPTL", It.IsAny<CancellationToken>()), Times.AtLeastOnce,
             "AI service should look up HSPTL parent code");
-        mockApi.Verify(a => a.CreateAsync(It.IsAny<CreateCodedValueRequest>(), It.IsAny<CancellationToken>()), Times.Exactly(3),
-            "3 hospital coded values should be created");
+        mockApi.Verify(a => a.BulkCreateAsync(parentHsptl.Id, It.IsAny<IEnumerable<CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()), Times.Once,
+            "bulk create should be called once with all children");
     }
 
     /// <summary>
@@ -232,6 +232,226 @@ public class CodedValueAIServiceChatTests
             "empty JSON objects must be stripped from final display text");
         textChunks[0].Text.Should().Contain("hospitals are listed",
             "legitimate text must be preserved after empty JSON is removed");
+    }
+
+    /// <summary>
+    /// Verifies that descriptions in bulk-create children are passed through
+    /// to the Coded Values API via CreateCodedValueRequest.
+    /// Regression test for "descriptions from AI prompts are not getting saved".
+    /// </summary>
+    [TestMethod]
+    public async Task ChatAsync_BulkCreateWithDescription_PassesDescriptionToApi()
+    {
+        // Arrange
+        var parentDiseases = new CodedValueDto(
+            Id: Guid.NewGuid(),
+            Code: "DISEASES",
+            Name: "Diseases",
+            Description: "Disease categories",
+            ParentId: null,
+            ParentCode: null,
+            IsDisabled: false,
+            DisplayOrder: 1,
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            Attributes: [],
+            AttributeDefinitions: [],
+            ChildrenCount: 0);
+
+        var capturedRequests = new List<CreateCodedValueRequest>();
+
+        var mockApi = new Mock<ICodedValuesApiClient>();
+        mockApi.Setup(a => a.GetByCodeAsync("DISEASES", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parentDiseases);
+        mockApi.Setup(a => a.BulkCreateAsync(parentDiseases.Id, It.IsAny<IEnumerable<CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, IEnumerable<CreateCodedValueRequest>, CancellationToken>((_, children, _) => capturedRequests.AddRange(children))
+            .ReturnsAsync(new BulkCreateResult(3, parentDiseases.Id));
+
+        // Simulate: AI calls get_coded_value_by_code, then create_bulk_values with descriptions
+        var round1Args = new Dictionary<string, object?> { ["code"] = "DISEASES" };
+        var round2Args = new Dictionary<string, object?>
+        {
+            ["parentCode"] = "DISEASES",
+            ["children"] = JsonSerializer.Deserialize<JsonElement>(
+                """[{"code":"MALARIA","name":"Malaria","description":"Mosquito-borne infectious disease","displayOrder":1},{"code":"TUBERCULOSIS","name":"Tuberculosis","description":"Bacterial infection affecting lungs","displayOrder":2},{"code":"DIABETES","name":"Diabetes","description":"Metabolic disorder with high blood sugar","displayOrder":3}]""")
+        };
+
+        var finalTextUpdate = new ChatResponseUpdate(ChatRole.Assistant,
+            "I've added 3 diseases under the DISEASES category.");
+        var chatClient = new MockChatClient(
+        [
+            new List<ChatResponseUpdate>
+            {
+                new(ChatRole.Assistant, [new FunctionCallContent("call_1", "get_coded_value_by_code", round1Args)])
+            },
+            new List<ChatResponseUpdate>
+            {
+                new(ChatRole.Assistant, [new FunctionCallContent("call_2", "create_bulk_values", round2Args)])
+            },
+            new List<ChatResponseUpdate> { finalTextUpdate }
+        ]);
+
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
+
+        var mockEnv = new Mock<IHostEnvironment>();
+        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
+
+        var service = new CodedValueAIService(
+            mockFactory.Object,
+            mockApi.Object,
+            new TestLogger<CodedValueAIService>(),
+            mockEnv.Object);
+
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, "Add diseases to code 'DISEASES' with description")
+        };
+
+        // Act
+        var updates = new List<ChatUpdate>();
+        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        {
+            updates.Add(update);
+        }
+
+        // Assert: descriptions must flow through to API calls
+        capturedRequests.Should().HaveCount(3, "3 disease coded values should be created");
+        capturedRequests[0].Code.Should().Be("MALARIA");
+        capturedRequests[0].Description.Should().Be("Mosquito-borne infectious disease",
+            "description from AI function call must be passed to the API");
+        capturedRequests[1].Code.Should().Be("TUBERCULOSIS");
+        capturedRequests[1].Description.Should().Be("Bacterial infection affecting lungs",
+            "description from AI function call must be passed to the API");
+        capturedRequests[2].Code.Should().Be("DIABETES");
+        capturedRequests[2].Description.Should().Be("Metabolic disorder with high blood sugar",
+            "description from AI function call must be passed to the API");
+
+        // No errors
+        updates.Should().NotContain(u => u is ChatUpdate.Error, "no errors should occur");
+    }
+
+    /// <summary>
+    /// Verifies that bulk-create without descriptions still works (null descriptions).
+    /// This ensures the pipeline doesn't crash when the model omits descriptions.
+    /// </summary>
+    [TestMethod]
+    public async Task ChatAsync_BulkCreateWithoutDescription_NullDescriptionsAccepted()
+    {
+        // Arrange
+        var parentDiseases = new CodedValueDto(
+            Id: Guid.NewGuid(),
+            Code: "DISEASES",
+            Name: "Diseases",
+            Description: "Disease categories",
+            ParentId: null,
+            ParentCode: null,
+            IsDisabled: false,
+            DisplayOrder: 1,
+            CreatedAt: DateTimeOffset.UtcNow,
+            UpdatedAt: DateTimeOffset.UtcNow,
+            Attributes: [],
+            AttributeDefinitions: [],
+            ChildrenCount: 0);
+
+        var capturedRequests = new List<CreateCodedValueRequest>();
+
+        var mockApi = new Mock<ICodedValuesApiClient>();
+        mockApi.Setup(a => a.GetByCodeAsync("DISEASES", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(parentDiseases);
+        mockApi.Setup(a => a.BulkCreateAsync(parentDiseases.Id, It.IsAny<IEnumerable<CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, IEnumerable<CreateCodedValueRequest>, CancellationToken>((_, children, _) => capturedRequests.AddRange(children))
+            .ReturnsAsync(new BulkCreateResult(2, parentDiseases.Id));
+
+        // Simulate: model creates children WITHOUT descriptions
+        var round1Args = new Dictionary<string, object?> { ["code"] = "DISEASES" };
+        var round2Args = new Dictionary<string, object?>
+        {
+            ["parentCode"] = "DISEASES",
+            ["children"] = JsonSerializer.Deserialize<JsonElement>(
+                """[{"code":"MALARIA","name":"Malaria","displayOrder":1},{"code":"TUBERCULOSIS","name":"Tuberculosis","displayOrder":2}]""")
+        };
+
+        var finalTextUpdate = new ChatResponseUpdate(ChatRole.Assistant,
+            "I've added 2 diseases under the DISEASES category.");
+        var chatClient = new MockChatClient(
+        [
+            new List<ChatResponseUpdate>
+            {
+                new(ChatRole.Assistant, [new FunctionCallContent("call_1", "get_coded_value_by_code", round1Args)])
+            },
+            new List<ChatResponseUpdate>
+            {
+                new(ChatRole.Assistant, [new FunctionCallContent("call_2", "create_bulk_values", round2Args)])
+            },
+            new List<ChatResponseUpdate> { finalTextUpdate }
+        ]);
+
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
+
+        var mockEnv = new Mock<IHostEnvironment>();
+        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
+
+        var service = new CodedValueAIService(
+            mockFactory.Object,
+            mockApi.Object,
+            new TestLogger<CodedValueAIService>(),
+            mockEnv.Object);
+
+        var history = new List<ChatMessage>
+        {
+            new(ChatRole.User, "Add diseases to code 'DISEASES'")
+        };
+
+        // Act
+        var updates = new List<ChatUpdate>();
+        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        {
+            updates.Add(update);
+        }
+
+        // Assert: pipeline should handle null descriptions gracefully
+        capturedRequests.Should().HaveCount(2);
+        capturedRequests[0].Code.Should().Be("MALARIA");
+        capturedRequests[0].Description.Should().BeNull("model omitted description — null is valid");
+        capturedRequests[1].Code.Should().Be("TUBERCULOSIS");
+        capturedRequests[1].Description.Should().BeNull("model omitted description — null is valid");
+
+        updates.Should().NotContain(u => u is ChatUpdate.Error, "no errors should occur");
+    }
+
+    /// <summary>
+    /// Verifies that JsonSerializer.Serialize correctly roundtrips function call arguments
+    /// containing nested JSON arrays with description fields. This tests the critical
+    /// serialization step at line 179-180 of CodedValueAIService.cs.
+    /// </summary>
+    [TestMethod]
+    public void JsonSerializer_SerializeFunctionCallArgs_RoundtripsChildrenWithDescription()
+    {
+        // Simulate what M.E.AI creates: IDictionary<string, object?> with JsonElement values
+        var args = new Dictionary<string, object?>
+        {
+            ["parentCode"] = "DISEASES",
+            ["children"] = JsonSerializer.Deserialize<JsonElement>(
+                """[{"code":"MALARIA","name":"Malaria","description":"Mosquito-borne infectious disease","displayOrder":1}]""")
+        };
+
+        // Act: serialize then re-parse (same flow as CodedValueAIService)
+        var json = JsonSerializer.Serialize(args);
+
+        // Assert: the children array must survive roundtrip with description intact
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.TryGetProperty("children", out var children).Should().BeTrue();
+        children.ValueKind.Should().Be(JsonValueKind.Array);
+        children.GetArrayLength().Should().Be(1);
+
+        var child = children[0];
+        child.TryGetProperty("code", out var code).Should().BeTrue();
+        code.GetString().Should().Be("MALARIA");
+        child.TryGetProperty("description", out var desc).Should().BeTrue();
+        desc.GetString().Should().Be("Mosquito-borne infectious disease",
+            "description must survive JsonSerializer.Serialize roundtrip");
     }
 
     // --- Helpers ---

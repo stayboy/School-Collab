@@ -49,6 +49,8 @@ public record CreateCodedValueRequest(
     Guid? ParentId,
     int DisplayOrder = 0);
 
+public record BulkCreateResult(int CreatedCount, Guid ParentId);
+
 public record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
 
 public record AttributeDefinitionRequest(
@@ -71,6 +73,7 @@ public interface ICodedValuesApiClient
     Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
     Task<CodedValueDto?> GetByCodeAsync(string code, CancellationToken ct = default);
     Task CreateAsync(CreateCodedValueRequest req, CancellationToken ct = default);
+    Task<BulkCreateResult> BulkCreateAsync(Guid parentId, IEnumerable<CreateCodedValueRequest> children, CancellationToken ct = default);
     Task UpdateAsync(Guid id, UpdateCodedValueRequest req, CancellationToken ct = default);
     Task DisableAsync(Guid id, CancellationToken ct = default);
     Task EnableAsync(Guid id, CancellationToken ct = default);
@@ -114,6 +117,15 @@ public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClien
     {
         var response = await http.PostAsJsonAsync("/coded-values", req, ct);
         response.EnsureSuccessStatusCode();
+    }
+
+    public async Task<BulkCreateResult> BulkCreateAsync(Guid parentId, IEnumerable<CreateCodedValueRequest> children, CancellationToken ct = default)
+    {
+        var body = new { ParentId = parentId, Children = children.ToList() };
+        var response = await http.PostAsJsonAsync("/coded-values/bulk", body, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<BulkCreateResult>(ct);
+        return result ?? new BulkCreateResult(0, parentId);
     }
 
     public async Task UpdateAsync(Guid id, UpdateCodedValueRequest req, CancellationToken ct = default)

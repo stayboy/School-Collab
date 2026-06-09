@@ -47,11 +47,11 @@ public sealed class CodedValueAIService
 
         _tools =
         [
-            AIFunctionFactory.Create(ListCategoriesAsync, "list_coded_value_categories", "Lists all root-level coded value categories. Returns an array of category objects with id, code, name, description, and children count."),
-            AIFunctionFactory.Create(GetByCodeAsync, "get_coded_value_by_code", "Gets a coded value by its unique code. Returns the full coded value including its children, attribute definitions (on parents), and attributes (on children)."),
+            AIFunctionFactory.Create(ListCategoriesAsync, "list_coded_value_categories", "Lists all root-level coded value categories with their code, name, children count, and description. Use this when the user refers to a category by name but not by code — find the matching code here, then use get_coded_value_by_code to retrieve full details."),
+            AIFunctionFactory.Create(GetByCodeAsync, "get_coded_value_by_code", "Gets a coded value by its unique code. Returns ALL current fields (name, description, display order, disabled status, attributes, and children with their details). Use this to look up a value before updating it so you know the current state of every field."),
             AIFunctionFactory.Create(CreateCodedValueAsync, "create_coded_value", "Creates a new coded value. Use parentCode to create a child under an existing parent, or omit it to create a root-level category. Accepts code, name, optional description, optional parentCode, and optional displayOrder."),
-            AIFunctionFactory.Create(CreateBulkValuesAsync, "create_bulk_values", "Creates multiple child values under a parent coded value in one call. Accepts parentCode (the code of the parent category) and an array of child items, each with code, name, optional description, and optional displayOrder. Use this to populate a category with many values at once, e.g., countries under a Countries category."),
-            AIFunctionFactory.Create(UpdateCodedValueAsync, "update_coded_value", "Updates an existing coded value's name, description, or display order. Accepts the code of the value to update and any of name, description, or displayOrder to change."),
+            AIFunctionFactory.Create(CreateBulkValuesAsync, "create_bulk_values", "Creates multiple child values under a parent coded value in one call. Accepts parentCode (the code of the parent category) and an array of child items, each with code, name, description (strongly recommended — provide a concise description for each child when one can be reasonably inferred), and optional displayOrder. Use this to populate a category with many values at once, e.g., countries under a Countries category."),
+            AIFunctionFactory.Create(UpdateCodedValueAsync, "update_coded_value", "Updates an existing coded value. Accepts the code of the value to update. Any fields you provide will be changed; fields you omit will keep their current values. Always call get_coded_value_by_code first to see the current state, then call this with only the fields you want to change."),
             AIFunctionFactory.Create(DisableCodedValueAsync, "disable_coded_value", "Disables a coded value so it no longer appears in active selections. Accepts the code of the value to disable."),
             AIFunctionFactory.Create(EnableCodedValueAsync, "enable_coded_value", "Re-enables a previously disabled coded value. Accepts the code of the value to enable."),
             AIFunctionFactory.Create(SetAttributeDefinitionAsync, "set_attribute_definition", "Defines an attribute on a PARENT coded value. Attribute definitions describe what metadata children should have. Must be called on the parent before setting attribute values on children. Accepts: parentCode (the parent's code, e.g. AI-MODELS), key (attribute key like 'weight'), displayName (human-readable label), dataType (0=Text,1=Integer,2=Decimal,3=Boolean,4=Date,5=DateTime,6=Time,7=CodedValue), sourceCode (required only if dataType=7, references another parent code for dropdown values), isRequired, allowMultiple."),
@@ -575,7 +575,7 @@ public sealed class CodedValueAIService
 
     // --- AI Tool Functions ---
 
-    [Description("Lists all root-level coded value categories")]
+    [Description("Lists all root-level coded value categories with their code, name, children count, and description. Use this to find the code for a category when the user provides only a name.")]
     private async Task<string> ListCategoriesAsync(CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: listing coded value categories");
@@ -587,7 +587,7 @@ public sealed class CodedValueAIService
             $"- Code: {i.Code}, Name: {i.Name}, Children: {i.ChildrenCount}, Description: {i.Description ?? "none"}"));
     }
 
-    [Description("Gets a coded value by its unique code")]
+    [Description("Gets a coded value by its unique code. Returns ALL current fields including name, description, display order, disabled status, and attributes. Use this to look up a value before updating it.")]
     private async Task<string> GetByCodeAsync(
         [Description("The unique code of the coded value, e.g. CNTRY")] string code,
         CancellationToken ct = default)
@@ -597,12 +597,32 @@ public sealed class CodedValueAIService
         if (item is null)
             return $"Coded value with code '{code}' not found.";
 
-        var result = $"Found: Code={item.Code}, Name={item.Name}, Id={item.Id}";
+        var result = $"Found: Code={item.Code}, Name={item.Name}, Id={item.Id}, " +
+                     $"Description={item.Description ?? "(none)"}, DisplayOrder={item.DisplayOrder}, IsDisabled={item.IsDisabled}";
+
+        if (item.AttributeDefinitions is { Count: > 0 })
+        {
+            result += $"\nAttributeDefinitions ({item.AttributeDefinitions.Count}):\n" +
+                      string.Join("\n", item.AttributeDefinitions.Select(d =>
+                          $"  - {d.Key}: DisplayName={d.DisplayName ?? d.Key}, DataType={d.DataType}, IsRequired={d.IsRequired}, AllowMultiple={d.AllowMultiple}"));
+        }
+
+        if (item.Attributes is { Count: > 0 })
+        {
+            result += $"\nAttributes ({item.Attributes.Count}):\n" +
+                      string.Join("\n", item.Attributes.Select(a =>
+                          $"  - {a.Key}={a.Value}"));
+        }
+
         if (item.ChildrenCount > 0)
         {
             var children = await _api.GetChildrenAsync(item.Id, ct);
             if (children is not null)
-                result += $"\nChildren ({children.Length}):\n" + string.Join("\n", children.Select(c => $"  - {c.Code}: {c.Name}"));
+            {
+                result += $"\nChildren ({children.Length}):\n" + string.Join("\n", children.Select(c =>
+                    $"  - {c.Code}: {c.Name}, Description={c.Description ?? "(none)"}, DisplayOrder={c.DisplayOrder}, IsDisabled={c.IsDisabled}" +
+                    (c.Attributes is { Count: > 0 } ? ", Attributes=[" + string.Join(", ", c.Attributes.Select(a => $"{a.Key}={a.Value}")) + "]" : "")));
+            }
         }
 
         return result;
@@ -658,25 +678,22 @@ public sealed class CodedValueAIService
         if (parent is null)
             return $"Parent coded value '{parentCode}' not found. Create it first with create_coded_value.";
 
-        var results = new List<string>();
-        foreach (var child in children)
+        try
         {
-            try
+            var requests = children.Select((child, i) =>
             {
-                var displayOrder = child.DisplayOrder > 0 ? child.DisplayOrder : results.Count + 1;
-                await _api.CreateAsync(new CreateCodedValueRequest(
-                    child.Code, child.Name, child.Description, parent.Id, displayOrder), ct);
-                results.Add($"✓ {child.Code}: {child.Name}");
-            }
-            catch (HttpRequestException ex)
-            {
-                _logger.LogError(ex, "Failed to create child value {Code} under {ParentCode}", child.Code, parentCode);
-                results.Add($"✗ {child.Code}: {child.Name} — {ex.Message}");
-            }
-        }
+                var displayOrder = child.DisplayOrder > 0 ? child.DisplayOrder : i + 1;
+                return new CreateCodedValueRequest(child.Code, child.Name, child.Description, parent.Id, displayOrder);
+            });
 
-        return $"Created {results.Count(r => r.StartsWith("✓"))} of {children.Length} values under '{parentCode} ({parent.Name})':\n" +
-               string.Join("\n", results);
+            var result = await _api.BulkCreateAsync(parent.Id, requests, ct);
+            return $"Created {result.CreatedCount} value{(result.CreatedCount == 1 ? "" : "s")} under '{parentCode} ({parent.Name})'.";
+        }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Failed to bulk create values under {ParentCode}", parentCode);
+            return $"Failed to create values under '{parentCode}': {ex.Message}";
+        }
     }
 
     [Description("Defines an attribute on a PARENT coded value so children can set values for it")]
@@ -708,12 +725,12 @@ public sealed class CodedValueAIService
                "Children can now set values for this attribute using set_attribute.";
     }
 
-    [Description("Updates an existing coded value's name, description, or display order")]
+    [Description("Updates an existing coded value. Only the fields you specify will be changed — any field left null keeps its current value. Always call get_coded_value_by_code first to see the current state before updating.")]
     private async Task<string> UpdateCodedValueAsync(
         [Description("The unique code of the coded value to update")] string code,
-        [Description("New display name")] string? name = null,
-        [Description("New description")] string? description = null,
-        [Description("New display order position")] int? displayOrder = null,
+        [Description("New display name. Leave null to keep the current name.")] string? name = null,
+        [Description("New description. Leave null to keep the current description.")] string? description = null,
+        [Description("New display order position. Leave null to keep the current order.")] int? displayOrder = null,
         CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: updating coded value {Code}", code);

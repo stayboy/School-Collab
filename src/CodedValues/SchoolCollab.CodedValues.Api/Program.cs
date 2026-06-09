@@ -162,6 +162,29 @@ app.MapPost("/coded-values", async (
     }
 });
 
+app.MapPost("/coded-values/bulk", async (
+    [FromBody] BulkCreateCodedValuesRequest req,
+    [FromServices] ICommandHandler<BulkCreateCodedValues> handler,
+    CancellationToken ct) =>
+{
+    try
+    {
+        var command = new BulkCreateCodedValues(
+            req.ParentId,
+            req.Children.Select(c => new BulkCreateChildItem(c.Code, c.Name, c.Description, c.DisplayOrder)).ToList());
+        await handler.HandleAsync(command, ct);
+        return Results.Ok(new { req.ParentId, CreatedCount = req.Children.Count });
+    }
+    catch (CodedValueNotFoundException)
+    {
+        return Results.NotFound(new { Message = $"Parent coded value with ID '{req.ParentId}' not found." });
+    }
+    catch (DuplicateCodeException ex)
+    {
+        return Results.Conflict(new { ex.Message });
+    }
+});
+
 app.MapPut("/coded-values/{id:guid}", async (
     Guid id,
     [FromBody] UpdateCodedValueRequest req,
@@ -306,6 +329,8 @@ app.Run();
 internal record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
 internal record AttributeValueRequest(string Value);
 internal record AttributeDefinitionRequest(string? DisplayName, AttributeDataType DataType, string? SourceCode, bool IsRequired, bool AllowMultiple = false, int? MinLength = null, int? MaxLength = null, string? RegexPattern = null);
+internal record BulkCreateCodedValuesRequest(Guid ParentId, List<BulkCreateChildRequest> Children);
+internal record BulkCreateChildRequest(string Code, string Name, string? Description, int DisplayOrder);
 
 // Makes Program accessible to WebApplicationFactory in integration tests
 public partial class Program { }
