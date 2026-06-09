@@ -3,13 +3,12 @@ using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.DTOs;
-using SchoolCollab.CodedValues.Core.Domain.Exceptions;
 
 namespace SchoolCollab.CodedValues.Core.Queries.GetCodedValueById;
 
 public sealed class GetCodedValueByIdHandler(
     CodedValuesDbContext db,
-    HybridCache cache) : IQueryHandler<GetCodedValueById, CodedValueDto>
+    HybridCache cache) : IQueryHandler<GetCodedValueById, CodedValueDto?>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -17,7 +16,7 @@ public sealed class GetCodedValueByIdHandler(
         LocalCacheExpiration = TimeSpan.FromMinutes(1)
     };
 
-    public async Task<CodedValueDto> HandleAsync(
+    public async Task<CodedValueDto?> HandleAsync(
         GetCodedValueById query,
         CancellationToken cancellationToken = default)
     {
@@ -29,8 +28,10 @@ public sealed class GetCodedValueByIdHandler(
                 var (db, id) = state;
                 var cv = await db.CodedValues
                     .AsNoTracking()
-                    .SingleOrDefaultAsync(x => x.Id == id, ct)
-                    ?? throw new CodedValueNotFoundException(id);
+                    .SingleOrDefaultAsync(x => x.Id == id, ct);
+
+                if (cv is null)
+                    return null;
 
                 string? parentCode = cv.ParentId.HasValue
                     ? await db.CodedValues.AsNoTracking()

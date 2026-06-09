@@ -1,3 +1,3 @@
 namespace SchoolCollab.CodedValues.Core.CQRS;
 
-public interface IQuery<TResult> where TResult : class { }
+public interface IQuery<TResult> where TResult : class? { }

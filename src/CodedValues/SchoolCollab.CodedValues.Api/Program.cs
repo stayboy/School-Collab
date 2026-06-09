@@ -60,32 +60,20 @@ app.MapGet("/coded-values", async (
 
 app.MapGet("/coded-values/{id:guid}", async (
     Guid id,
-    [FromServices] IQueryHandler<GetCodedValueById, CodedValueDto> handler,
+    [FromServices] IQueryHandler<GetCodedValueById, CodedValueDto?> handler,
     CancellationToken ct) =>
 {
-    try
-    {
-        return Results.Ok(await handler.HandleAsync(new GetCodedValueById(id), ct));
-    }
-    catch (CodedValueNotFoundException)
-    {
-        return Results.NotFound();
-    }
+    var result = await handler.HandleAsync(new GetCodedValueById(id), ct);
+    return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
 app.MapGet("/coded-values/by-code/{code}", async (
     string code,
-    [FromServices] IQueryHandler<GetCodedValueByCode, CodedValueDto> handler,
+    [FromServices] IQueryHandler<GetCodedValueByCode, CodedValueDto?> handler,
     CancellationToken ct) =>
 {
-    try
-    {
-        return Results.Ok(await handler.HandleAsync(new GetCodedValueByCode(code), ct));
-    }
-    catch (CodedValueNotFoundException)
-    {
-        return Results.NotFound();
-    }
+    var result = await handler.HandleAsync(new GetCodedValueByCode(code), ct);
+    return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
 app.MapGet("/coded-values/by-ids", async (
