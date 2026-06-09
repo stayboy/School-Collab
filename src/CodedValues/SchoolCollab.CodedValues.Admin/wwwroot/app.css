@@ -36,6 +36,74 @@ fluent-data-grid::part(cell) {
     padding-bottom: 6px;
 }
 
+/* ---- Sticky (frozen) columns via col-index attribute selectors ---- */
+/* col-index is set by FluentDataGrid JS on every <td> and <th> */
+.grid-sticky-cols td[col-index="1"],
+.grid-sticky-cols th[col-index="1"] {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background-color: var(--neutral-layer-1);
+}
+
+.grid-sticky-cols td[col-index="2"],
+.grid-sticky-cols th[col-index="2"] {
+    position: sticky;
+    left: 120px; /* must match Code column width in GridTemplateColumns */
+    z-index: 2;
+    background-color: var(--neutral-layer-1);
+}
+
+.grid-sticky-cols td[col-index="7"],
+.grid-sticky-cols th[col-index="7"] {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    background-color: var(--neutral-layer-1);
+}
+
+/* Row hover on sticky cells must match the row hover background */
+.grid-sticky-cols tr:hover td[col-index="1"],
+.grid-sticky-cols tr:hover td[col-index="2"],
+.grid-sticky-cols tr:hover td[col-index="7"] {
+    background-color: var(--neutral-layer-2);
+}
+
+/* Shadow edges to visually separate sticky from scrollable columns */
+.grid-sticky-cols td[col-index="2"]::after,
+.grid-sticky-cols th[col-index="2"]::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    right: -6px;
+    bottom: 0;
+    width: 6px;
+    background: linear-gradient(to right, rgba(0,0,0,0.06), transparent);
+    pointer-events: none;
+}
+
+.grid-sticky-cols td[col-index="7"]::before,
+.grid-sticky-cols th[col-index="7"]::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: -6px;
+    bottom: 0;
+    width: 6px;
+    background: linear-gradient(to left, rgba(0,0,0,0.06), transparent);
+    pointer-events: none;
+}
+
+/* Text wrapping for Description and other scrollable text columns */
+.grid-sticky-cols td[col-index="3"],
+.grid-sticky-cols td[col-index="6"] {
+    white-space: normal;
+    word-break: break-word;
+    overflow: visible;
+    text-overflow: clip;
+    align-content: start;
+}
+
 fluent-nav-menu,
 fluent-nav-link,
 fluent-nav-group {

@@ -60,11 +60,15 @@
                 }
 
                 <div style="flex:1; min-height:0; overflow:auto;">
-                    <FluentDataGrid Items="@_children.AsQueryable()" GridTemplateColumns="1fr 2fr 0.5fr 1fr 2fr 2fr" TGridItem="CodedValueDto">
-                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
+                    <FluentDataGrid Items="@_children.AsQueryable()"
+                                    GridTemplateColumns="120px 200px minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) 200px"
+                                    Class="grid-sticky-cols"
+                                    TGridItem="CodedValueDto">
+                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                             <code>@context.Code</code>
                         </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" Tooltip="true" />
+                        <PropertyColumn Property="@(x => x.Description)" Title="Description" Tooltip="true" />
                         <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
                         <TemplateColumn Title="Status">
                             @if (context.IsDisabled)
@@ -76,7 +80,7 @@
                                 <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
                             }
                         </TemplateColumn>
-                        <TemplateColumn Title="Attributes">
+                        <TemplateColumn Title="Attributes" TooltipText="@(x => string.Join(", ", x.Attributes.Select(a => $"{a.Key}={a.Value}")))">
                             @foreach (var attr in context.Attributes)
                             {
                                 var def = _parent?.AttributeDefinitions.FirstOrDefault(d => d.Key == attr.Key);

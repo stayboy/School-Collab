@@ -61,12 +61,14 @@
             {
                 <div style="flex:1; min-height:0; overflow:auto;">
                     <FluentDataGrid Items="@_items.AsQueryable()"
-                                    GridTemplateColumns="1fr 2fr 1fr 1fr 2fr 3fr"
+                                    GridTemplateColumns="120px 200px minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) 200px"
+                                    Class="grid-sticky-cols"
                                     TGridItem="CodedValueDto">
-                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
+                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                             <code>@context.Code</code>
                         </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" Tooltip="true" />
+                        <PropertyColumn Property="@(x => x.Description)" Title="Description" Tooltip="true" />
                         <TemplateColumn Title="Status">
                             @if (context.IsDisabled)
                             {
@@ -80,7 +82,7 @@
                         <TemplateColumn Title="Children">
                             <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
                         </TemplateColumn>
-                        <TemplateColumn Title="Definitions">
+                        <TemplateColumn Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
                             @if (context.AttributeDefinitions.Count > 0)
                             {
                                 @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
