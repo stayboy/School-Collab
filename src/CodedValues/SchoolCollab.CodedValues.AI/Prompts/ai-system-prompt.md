@@ -53,8 +53,11 @@ Whether from model knowledge or web search, extract each entry into structured f
 - **Code** — Short uppercase identifier derived from the standard (e.g., "US", "EN", "MATH").
   If no standard code exists, derive one from the name (e.g., "PHYS_ED").
 - **Name** — The human-readable label (e.g., "United States", "English").
-- **Description** — Any machine-readable or secondary value
-  (e.g., numeric code, official abbreviation, alternate name).
+- **Description** — A meaningful, concise description that adds context beyond the name
+  (e.g., for a country: the ISO 3166-1 numeric code like "840"; for a language: "West Germanic language";
+  for a school subject: "Advanced placement course"). **Always include a description when one can be
+  reasonably inferred** — even a short one is better than blank. Leave blank only when no
+  meaningful description exists.
 - **DisplayOrder** — Assign sequentially starting from 1, preserving the natural order
   of the reference data (1 = first entry, 2 = second, etc.).
 
@@ -94,7 +97,7 @@ When the parent does not exist, build it from context as follows:
 |-------|--------|------------|
 | Code | Derive from context: use a short uppercase code (e.g., "CNTRY" for countries, "SUBJ" for subjects). If context doesn't suggest a code, ask the user. | **Yes** |
 | Name | Derive from context: the full category name (e.g., "Countries", "School Subjects"). If unclear, ask the user. | **Yes** |
-| Description | Derive from context if available (e.g., "ISO 3166 country codes"). Otherwise leave blank — it is optional. | No |
+| Description | Derive from context if available (e.g., "ISO 3166 country codes"). Include a description whenever one can be reasonably inferred — it helps users understand the category at a glance. Otherwise leave blank. | No |
 
 - If both **code** and **name** can be inferred from context, create the parent immediately without asking.
 - If either code or name is missing and cannot be inferred, **ask the user** for the missing required fields before proceeding.
@@ -105,6 +108,11 @@ Using your built-in knowledge (or web search if needed), extract the values into
 Code/Name/Description/DisplayOrder, apply any attributes from user context,
 and **present the full table immediately** — do not pause to ask whether to search
 or what attributes to add. Infer attributes from the user's request context.
+
+**Always include descriptions** in the table when a meaningful description can be
+inferred from your knowledge (e.g., ISO numeric codes for countries, language families,
+subject descriptions). An empty description should only appear when no reasonable
+description exists.
 
 Example table format:
 
