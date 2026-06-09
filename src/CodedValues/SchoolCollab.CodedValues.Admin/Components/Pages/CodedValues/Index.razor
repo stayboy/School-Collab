@@ -9,22 +9,21 @@
 
 <PageTitle>Coded Values</PageTitle>
 
+<SectionContent Name="PageHeader">
+    <div style="display:flex; align-items:center; gap:0.75rem; padding-top:0.25rem; padding-bottom:0.75rem;">
+        <h1 style="margin:0;">Coded Values</h1>
+    </div>
+    <div style="display:flex; align-items:center; gap:0.75rem; padding-bottom:0.75rem;">
+        <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
+            + New Category
+        </FluentButton>
+        <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
+    </div>
+</SectionContent>
+
 <ErrorBoundary>
     <ChildContent>
         <FluentStack Orientation="Orientation.Vertical" Style="height:100%; gap:0;">
-            @* -- Fixed header row -- *@
-            <div class="d-flex align-items-center gap-3" style="flex-shrink:0; padding-top:0.25rem; padding-bottom:0.75rem;">
-                <h1 class="mb-0">Coded Values</h1>
-            </div>
-
-            @* -- Toolbar -- *@
-            <div class="d-flex align-items-center gap-3" style="flex-shrink:0; padding-bottom:0.75rem;">
-                <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
-                    + New Category
-                </FluentButton>
-                <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
-            </div>
-
             @if (_showDeleted && _deletedItems is not null)
             {
                 @if (_deletedItems.Length == 0)

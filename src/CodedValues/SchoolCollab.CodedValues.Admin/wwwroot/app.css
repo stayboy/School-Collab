@@ -83,6 +83,16 @@ h1:focus {
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
+    overflow: hidden;
+}
+
+.page-header {
+    flex-shrink: 0;
+}
+
+.page-body {
+    flex: 1;
+    min-height: 0;
     overflow: auto;
 }
 

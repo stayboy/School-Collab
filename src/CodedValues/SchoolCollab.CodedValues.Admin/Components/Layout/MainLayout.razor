@@ -40,7 +40,12 @@
 
         <FluentBodyContent Style="flex:1; min-width:0; overflow:hidden;">
             <article class="content">
-                @Body
+                <div class="page-header">
+                    <SectionOutlet Name="PageHeader" />
+                </div>
+                <div class="page-body">
+                    @Body
+                </div>
             </article>
         </FluentBodyContent>
     </FluentStack>
