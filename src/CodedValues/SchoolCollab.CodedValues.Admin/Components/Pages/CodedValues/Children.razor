@@ -8,22 +8,21 @@
 
 <PageTitle>Children of @_parent?.Name</PageTitle>
 
-<SectionContent Name="PageHeader">
-    <FluentBreadcrumb class="mb-3">
-        <FluentBreadcrumbItem Href="/coded-values">Categories</FluentBreadcrumbItem>
-        <FluentBreadcrumbItem>@_parent?.Name</FluentBreadcrumbItem>
-    </FluentBreadcrumb>
-    <h2>@_parent?.Code — @_parent?.Name</h2>
-    <FluentButton Appearance="Appearance.Accent"
-                  OnClick='() => Nav.NavigateTo($"/coded-values/{Uri.EscapeDataString(ParentCode ?? "")}/children/new")'
-                  class="mb-3">
-        + Add Child Value
-    </FluentButton>
-</SectionContent>
-
 <ErrorBoundary>
     <ChildContent>
         <div style="height:100%; display:flex; flex-direction:column;">
+            <div style="flex-shrink:0;">
+                <FluentBreadcrumb class="mb-3">
+                    <FluentBreadcrumbItem Href="/coded-values">Categories</FluentBreadcrumbItem>
+                    <FluentBreadcrumbItem>@_parent?.Name</FluentBreadcrumbItem>
+                </FluentBreadcrumb>
+                <h2>@_parent?.Code — @_parent?.Name</h2>
+                <FluentButton Appearance="Appearance.Accent"
+                              OnClick='() => Nav.NavigateTo($"/coded-values/{Uri.EscapeDataString(ParentCode ?? "")}/children/new")'
+                              class="mb-3">
+                    + Add Child Value
+                </FluentButton>
+            </div>
             @if (_loading)
             {
                 <div style="flex:1; display:flex; align-items:center; justify-content:center;">
