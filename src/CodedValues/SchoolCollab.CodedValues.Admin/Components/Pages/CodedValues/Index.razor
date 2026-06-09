@@ -59,50 +59,51 @@
             }
             else
             {
-                <FluentDataGrid Items="@_items.AsQueryable()"
-                                GridTemplateColumns="1fr 2fr 1fr 1fr 2fr 3fr"
-                                TGridItem="CodedValueDto"
-                                Style="flex:1; min-height:0; overflow:auto;">
-                    <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
-                        <code>@context.Code</code>
-                    </TemplateColumn>
-                    <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
-                    <TemplateColumn Title="Status">
-                        @if (context.IsDisabled)
-                        {
-                            <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-                        }
-                        else
-                        {
-                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn Title="Children">
-                        <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
-                    </TemplateColumn>
-                    <TemplateColumn Title="Definitions">
-                        @if (context.AttributeDefinitions.Count > 0)
-                        {
-                            @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
-                        }
-                        else
-                        {
-                            <span class="text-muted">—</span>
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn Title="Actions">
-                        <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
-                        @if (context.IsDisabled)
-                        {
-                            <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
-                        }
-                        else
-                        {
-                            <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
-                        }
-                        <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
-                    </TemplateColumn>
-                </FluentDataGrid>
+                <div style="flex:1; min-height:0; overflow:auto;">
+                    <FluentDataGrid Items="@_items.AsQueryable()"
+                                    GridTemplateColumns="1fr 2fr 1fr 1fr 2fr 3fr"
+                                    TGridItem="CodedValueDto">
+                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
+                            <code>@context.Code</code>
+                        </TemplateColumn>
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <TemplateColumn Title="Status">
+                            @if (context.IsDisabled)
+                            {
+                                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+                            }
+                            else
+                            {
+                                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                            }
+                        </TemplateColumn>
+                        <TemplateColumn Title="Children">
+                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Definitions">
+                            @if (context.AttributeDefinitions.Count > 0)
+                            {
+                                @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </TemplateColumn>
+                        <TemplateColumn Title="Actions">
+                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
+                            @if (context.IsDisabled)
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
+                            }
+                            else
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
+                            }
+                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                </div>
             }
 
             @if (!string.IsNullOrEmpty(_error))

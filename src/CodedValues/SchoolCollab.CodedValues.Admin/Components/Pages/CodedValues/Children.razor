@@ -59,49 +59,50 @@
                     </div>
                 }
 
-                <FluentDataGrid Items="@_children.AsQueryable()" GridTemplateColumns="1fr 2fr 0.5fr 1fr 2fr 2fr" TGridItem="CodedValueDto"
-                                Style="flex:1; min-height:0; overflow:auto;">
-                    <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
-                        <code>@context.Code</code>
-                    </TemplateColumn>
-                    <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
-                    <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
-                    <TemplateColumn Title="Status">
-                        @if (context.IsDisabled)
-                        {
-                            <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-                        }
-                        else
-                        {
-                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn Title="Attributes">
-                        @foreach (var attr in context.Attributes)
-                        {
-                            var def = _parent?.AttributeDefinitions.FirstOrDefault(d => d.Key == attr.Key);
-                            <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">
-                                @attr.Key=@attr.Value
-                                @if (def?.IsRequired == true)
-                                {
-                                    <span style="color:var(--error)">*</span>
-                                }
-                            </FluentBadge>
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn Title="Actions">
-                        <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="me-2 link-action">Edit</FluentAnchor>
-                        @if (context.IsDisabled)
-                        {
-                            <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))" class="link-action">Enable</FluentAnchor>
-                        }
-                        else
-                        {
-                            <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))" class="link-action">Disable</FluentAnchor>
-                        }
-                        <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
-                    </TemplateColumn>
-                </FluentDataGrid>
+                <div style="flex:1; min-height:0; overflow:auto;">
+                    <FluentDataGrid Items="@_children.AsQueryable()" GridTemplateColumns="1fr 2fr 0.5fr 1fr 2fr 2fr" TGridItem="CodedValueDto">
+                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
+                            <code>@context.Code</code>
+                        </TemplateColumn>
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
+                        <TemplateColumn Title="Status">
+                            @if (context.IsDisabled)
+                            {
+                                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+                            }
+                            else
+                            {
+                                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                            }
+                        </TemplateColumn>
+                        <TemplateColumn Title="Attributes">
+                            @foreach (var attr in context.Attributes)
+                            {
+                                var def = _parent?.AttributeDefinitions.FirstOrDefault(d => d.Key == attr.Key);
+                                <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">
+                                    @attr.Key=@attr.Value
+                                    @if (def?.IsRequired == true)
+                                    {
+                                        <span style="color:var(--error)">*</span>
+                                    }
+                                </FluentBadge>
+                            }
+                        </TemplateColumn>
+                        <TemplateColumn Title="Actions">
+                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="me-2 link-action">Edit</FluentAnchor>
+                            @if (context.IsDisabled)
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))" class="link-action">Enable</FluentAnchor>
+                            }
+                            else
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))" class="link-action">Disable</FluentAnchor>
+                            }
+                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                </div>
             }
 
             @if (!string.IsNullOrEmpty(_error))

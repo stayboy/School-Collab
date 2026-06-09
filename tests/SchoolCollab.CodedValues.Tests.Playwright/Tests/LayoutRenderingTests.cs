@@ -145,4 +145,54 @@ public class LayoutRenderingTests : PageTest
         await Expect(Page.GetByRole(AriaRole.Heading, new() { Level = 2 })).ToBeVisibleAsync();
         await Expect(Page.GetByLabel("Name")).ToBeVisibleAsync();
     }
+
+    [TestMethod]
+    public async Task IndexPage_GridRowsDoNotStretch()
+    {
+        await Page.GotoAsync("/coded-values");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var grid = Page.GetByRole(AriaRole.Grid);
+        await Expect(grid).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        // Each data row should have a reasonable height (not stretched to fill the grid)
+        // The min-height is 44px, stretched rows would be much taller
+        var rows = Page.Locator("fluent-data-grid tr[data-row-type='default'], fluent-data-grid tbody tr").Nth(1);
+        var rowBox = await rows.BoundingBoxAsync();
+        if (rowBox != null)
+        {
+            // A stretched row could be 200px+ tall; normal rows should be under 100px
+            rowBox.Height.Should().BeLessThan(100, "grid rows should not stretch to fill available space");
+        }
+    }
+
+    [TestMethod]
+    public async Task ChildrenPage_GridRowsDoNotStretch()
+    {
+        await Page.GotoAsync("/coded-values");
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        var genderRow = Page.GetByRole(AriaRole.Row).Filter(new() { HasText = "GENDER" });
+        await Expect(genderRow).ToBeVisibleAsync(new() { Timeout = 30_000 });
+
+        var childrenResponseTask = Page.WaitForResponseAsync(
+            resp => resp.Url.Contains("/coded-values/by-parent") && resp.Request.Method == "GET",
+            new() { Timeout = 30_000 });
+
+        await genderRow.GetByRole(AriaRole.Link, new() { Name = "View children" }).ClickAsync();
+        await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
+
+        await childrenResponseTask;
+
+        var grid = Page.GetByRole(AriaRole.Grid);
+        await Expect(grid).ToBeVisibleAsync();
+
+        // Each data row should have a reasonable height (not stretched)
+        var rows = Page.Locator("fluent-data-grid tr[data-row-type='default'], fluent-data-grid tbody tr").Nth(1);
+        var rowBox = await rows.BoundingBoxAsync();
+        if (rowBox != null)
+        {
+            rowBox.Height.Should().BeLessThan(100, "children grid rows should not stretch to fill available space");
+        }
+    }
 }
