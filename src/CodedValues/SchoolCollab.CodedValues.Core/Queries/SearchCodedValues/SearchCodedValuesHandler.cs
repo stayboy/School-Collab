@@ -59,14 +59,25 @@ public sealed class SearchCodedValuesHandler(
                     .ThenBy(x => x.Name)
                     .ToArrayAsync(ct);
 
-                return results.Select(ToDto).ToArray();
+                var resultIds = results.Select(r => r.Id).ToArray();
+
+                var childCounts = resultIds.Length == 0
+                    ? new Dictionary<Guid, int>()
+                    : await db.CodedValues
+                        .AsNoTracking()
+                        .Where(x => x.ParentId != null && resultIds.Contains(x.ParentId.Value))
+                        .GroupBy(x => x.ParentId!.Value)
+                        .Select(g => new { ParentId = g.Key, Count = g.Count() })
+                        .ToDictionaryAsync(x => x.ParentId, x => x.Count, ct);
+
+                return results.Select(cv => ToDto(cv, childCounts.GetValueOrDefault(cv.Id, 0))).ToArray();
             },
             CacheOptions,
             tags: ["coded-values"],
             cancellationToken: cancellationToken);
     }
 
-    private static CodedValueDto ToDto(Domain.CodedValue cv) => new(
+    private static CodedValueDto ToDto(Domain.CodedValue cv, int childrenCount) => new(
         cv.Id,
         cv.Code,
         cv.Name,
@@ -79,7 +90,7 @@ public sealed class SearchCodedValuesHandler(
         cv.UpdatedAt,
         cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
         cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
-        0,
+        childrenCount,
         cv.IsDeleted,
         cv.DeletedAt);
 }
