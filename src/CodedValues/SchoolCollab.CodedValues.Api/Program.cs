@@ -21,6 +21,7 @@ using SchoolCollab.CodedValues.Core.Queries.GetCodedValueById;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValueByCode;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByIds;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByParent;
+using SchoolCollab.CodedValues.Core.Queries.SearchCodedValues;
 using SchoolCollab.CodedValues.Core.Queries.ListRootCodedValues;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -52,6 +53,21 @@ if (app.Environment.IsDevelopment())
 
 app.MapDefaultEndpoints();
 app.UseSerilogRequestLogging();
+
+app.MapGet("/coded-values/search", async (
+    [FromQuery] string text,
+    [FromQuery] Guid? parentId,
+    [FromQuery] bool? includeDisabled,
+    [FromServices] IQueryHandler<SearchCodedValues, CodedValueDto[]> handler,
+    CancellationToken ct) =>
+{
+    if (string.IsNullOrWhiteSpace(text))
+        return Results.Ok(Array.Empty<CodedValueDto>());
+
+    var result = await handler.HandleAsync(
+        new SearchCodedValues(text, parentId, includeDisabled ?? false), ct);
+    return Results.Ok(result);
+});
 
 app.MapGet("/coded-values", async (
     [FromServices] IQueryHandler<ListRootCodedValues, CodedValueDto[]> handler,

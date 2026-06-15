@@ -11,15 +11,23 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <FluentStack Orientation="Orientation.Vertical" Style="height:100%; gap:0;">
-            <div style="flex-shrink:0; display:flex; align-items:center; gap:0.75rem; padding-top:0.25rem;">
-                <h1 style="margin:0;">Coded Values</h1>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">Coded Values</h1>
             </div>
-            <div style="flex-shrink:0; display:flex; align-items:center; gap:0.75rem; padding-bottom:0.75rem;">
+            <div class="action-bar">
                 <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
                     + New Category
                 </FluentButton>
                 <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
+                <div class="spacer"></div>
+                <FluentTextField Id="search-root"
+                                Placeholder="Search categories…"
+                                class="search-box"
+                                Immediate="true"
+                                ImmediateDelay="300"
+                                ValueChanged="@OnSearchValueChanged"
+                                OnClear="@(() => OnSearchClear())" />
             </div>
             @if (_showDeleted && _deletedItems is not null)
             {
@@ -30,7 +38,7 @@
                 else
                 {
                     <h3>Deleted Values</h3>
-                    <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" class="mb-4">
+                    <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" MultiLine="true" class="mb-4">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
                             <code>@context.Code</code>
                         </TemplateColumn>
@@ -47,9 +55,73 @@
             }
 
             @* -- Grid fills remaining vertical space -- *@
-            @if (_items is null)
+            @if (_isSearching && _searchResults is null)
             {
-                <div style="flex:1; display:flex; align-items:center; justify-content:center;">
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else if (!string.IsNullOrWhiteSpace(_searchText) && _searchResults is not null)
+            {
+                @* Search results view *@
+                if (_searchResults.Length == 0)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info">No categories match '@_searchText'.</FluentMessageBar>
+                }
+                else
+                {
+                    <div class="grid-container">
+                        <FluentDataGrid Items="@_searchResults.AsQueryable()"
+                                        GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                        MultiLine="true"
+                                        TGridItem="CodedValueDto">
+                            <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
+                                <code>@context.Code</code>
+                            </TemplateColumn>
+                                <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                                <PropertyColumn Property="@(x => x.Description)" Title="Description" />
+                            <TemplateColumn Title="Status">
+                                @if (context.IsDisabled)
+                                {
+                                    <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+                                }
+                                else
+                                {
+                                    <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                                }
+                            </TemplateColumn>
+                            <TemplateColumn Title="Children">
+                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
+                            </TemplateColumn>
+                            <TemplateColumn Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
+                                @if (context.AttributeDefinitions.Count > 0)
+                                {
+                                    @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </TemplateColumn>
+                            <TemplateColumn Title="Actions">
+                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
+                                @if (context.IsDisabled)
+                                {
+                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
+                                }
+                                else
+                                {
+                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
+                                }
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                            </TemplateColumn>
+                        </FluentDataGrid>
+                    </div>
+                }
+            }
+            else if (_items is null)
+            {
+                <div class="spinner-container">
                     <FluentProgressRing />
                 </div>
             }
@@ -59,16 +131,16 @@
             }
             else
             {
-                <div style="flex:1; min-height:0; overflow:auto;">
+                <div class="grid-container">
                     <FluentDataGrid Items="@_items.AsQueryable()"
-                                    GridTemplateColumns="120px 200px minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) 200px"
-                                    Class="grid-sticky-cols"
+                                   GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                    MultiLine="true"
                                     TGridItem="CodedValueDto">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                             <code>@context.Code</code>
                         </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" Tooltip="true" />
-                        <PropertyColumn Property="@(x => x.Description)" Title="Description" Tooltip="true" />
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.Description)" Title="Description" />
                         <TemplateColumn Title="Status">
                             @if (context.IsDisabled)
                             {
@@ -102,7 +174,7 @@
                             {
                                 <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
                             }
-                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
                 </div>
@@ -129,6 +201,12 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+
+    // Search state
+    private string _searchText = string.Empty;
+    private CodedValueDto[]? _searchResults;
+    private bool _isSearching;
+    private CancellationTokenSource? _searchCts;
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);
@@ -282,11 +360,63 @@
         }
     }
 
+    private async Task OnSearchValueChanged(string? text)
+    {
+        _searchText = text?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            _searchResults = null;
+            _isSearching = false;
+            StateHasChanged();
+            return;
+        }
+
+        // Cancel previous in-flight search request
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+
+        _isSearching = true;
+        try
+        {
+            _searchResults = await Api.SearchAsync(_searchText, parentId: null, includeDisabled: _showDeleted, ct);
+            if (_disposed) return;
+            _isSearching = false;
+            Logger.LogInformation("Search returned {Count} results for '{SearchText}'", _searchResults.Length, _searchText);
+        }
+        catch (OperationCanceledException)
+        {
+            // previous search cancelled — new one already started
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Search failed for '{SearchText}'", _searchText);
+            _error = ex.Message;
+            _isSearching = false;
+        }
+
+        StateHasChanged();
+    }
+
+    private void OnSearchClear()
+    {
+        _searchText = string.Empty;
+        _searchResults = null;
+        _isSearching = false;
+        _searchCts?.Cancel();
+        StateHasChanged();
+    }
+
     public void Dispose()
     {
         _disposed = true;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
     }
 }

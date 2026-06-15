@@ -19,7 +19,7 @@
         <FluentStack Orientation="Orientation.Horizontal"
                      VerticalAlignment="VerticalAlignment.Center"
                      HorizontalGap="12"
-                     Style="height:100%;padding-left:1rem;padding-right:1rem;">
+                     class="layout-header-stack">
 
             <span class="brand">School Collab</span>
             <span class="brand-sep" aria-hidden="true">·</span>
@@ -34,11 +34,11 @@
 
     <FluentStack Orientation="Orientation.Horizontal"
                  HorizontalGap="0"
-                 Style="height: calc(100vh - 50px); width: 100%;">
+                 class="layout-body">
 
         <NavMenu ParentValues="@_parentValues" Loading="@_loadingParents" />
 
-        <FluentBodyContent Style="flex:1; min-width:0; overflow:hidden;">
+        <FluentBodyContent class="layout-content">
             <article class="content">
                 @Body
             </article>

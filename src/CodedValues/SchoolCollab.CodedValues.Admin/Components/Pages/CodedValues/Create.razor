@@ -11,14 +11,14 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <EditForm Model="_model" OnValidSubmit="SubmitAsync" style="max-width:600px">
+        <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="form-container">
             <DataAnnotationsValidator />
             <ValidationSummary />
 
-            <FluentTextField @bind-Value="_model.Code" Label="Code *" Placeholder="e.g. GENDER" style="width:100%" class="mb-3" />
-            <FluentTextField @bind-Value="_model.Name" Label="Name *" style="width:100%" class="mb-3" />
-            <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" style="width:100%" class="mb-3" />
-            <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" style="width:200px" class="mb-3" />
+            <FluentTextField @bind-Value="_model.Code" Label="Code *" Placeholder="e.g. GENDER" class="full-width mb-3" />
+            <FluentTextField @bind-Value="_model.Name" Label="Name *" class="full-width mb-3" />
+            <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" class="full-width mb-3" />
+            <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="narrow-field mb-3" />
 
             @if (!string.IsNullOrEmpty(_error))
             {

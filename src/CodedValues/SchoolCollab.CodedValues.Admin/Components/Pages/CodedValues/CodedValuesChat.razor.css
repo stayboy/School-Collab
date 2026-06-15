@@ -1,0 +1,123 @@
+/* Chat container */
+.chat-container {
+    border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1);
+    padding-top: 0.75rem;
+    flex-shrink: 0;
+}
+
+.chat-heading {
+    margin-bottom: 0.5rem;
+}
+
+.chat-intro {
+    color: var(--neutral-foreground-3, #616161);
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+}
+
+/* Message area */
+.chat-messages {
+    max-height: 400px;
+    overflow-y: auto;
+    margin-bottom: 1rem;
+    padding: 0.5rem;
+}
+
+.chat-message {
+    margin-bottom: 0.75rem;
+}
+
+.message-user {
+    background: var(--neutral-fill-layer-rest, #f5f5f5);
+    padding: 0.5rem 0.75rem;
+    border-radius: 8px;
+}
+
+.message-assistant {
+    padding: 0.5rem 0.75rem;
+}
+
+.message-text {
+    white-space: pre-wrap;
+    margin-top: 0.25rem;
+}
+
+/* Tool call summaries */
+.tool-call-summary {
+    margin-top: 0.35rem;
+    font-size: 0.8rem;
+    color: var(--neutral-foreground-3, #616161);
+}
+
+::deep .tool-call-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+/* Streaming section */
+.streaming-text {
+    white-space: pre-wrap;
+    margin-top: 0.25rem;
+}
+
+.streaming-container {
+    margin-bottom: 0.75rem;
+}
+
+/* Progress rings */
+::deep .progress-ring-small {
+    width: 12px;
+    height: 12px;
+    vertical-align: middle;
+}
+
+::deep .progress-ring-medium {
+    width: 16px;
+    height: 16px;
+    vertical-align: middle;
+    margin-left: 4px;
+}
+
+/* Input area */
+.input-area {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.input-row {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-start;
+}
+
+.input-field-wrapper {
+    flex: 1;
+}
+
+::deep .model-label {
+    width: 100%;
+    max-width: 520px;
+}
+
+::deep .full-width {
+    width: 100%;
+}
+
+/* Model info */
+.model-info {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    margin-top: 0.25rem;
+}
+
+.model-label-text {
+    color: var(--neutral-foreground-3, #616161);
+    font-size: 0.75rem;
+    font-family: monospace;
+}

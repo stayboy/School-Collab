@@ -8,19 +8,19 @@
 @inject ILogger<CodedValuesChat> Logger
 @inject NavigationManager Nav
 
-<div class="chat-container" style="border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1); padding-top: 0.75rem; flex-shrink:0;">
-    <h3 style="margin-bottom: 0.5rem;">✨ AI Assistant</h3>
-    <p style="color: var(--neutral-foreground-3, #616161); margin-bottom: 1rem; font-size: 0.875rem;">
+<div class="chat-container">
+    <h3 class="chat-heading">✨ AI Assistant</h3>
+    <p class="chat-intro">
         Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
         Try: "Create a Country coded value with code CNTRY" or "Add countries to CNTRY"
     </p>
 
     <ErrorBoundary>
         <ChildContent>
-            <div class="chat-messages" style="max-height: 400px; overflow-y: auto; margin-bottom: 1rem; padding: 0.5rem;">
+            <div class="chat-messages">
                 @foreach (var msg in _messages)
                 {
-                    <div class="chat-message @msg.Role.ToString().ToLowerInvariant()" style="margin-bottom: 0.75rem; @GetMessageStyle(msg.Role)">
+                    <div class="chat-message @GetMessageClass(msg.Role)">
                         @if (msg.Role == ChatRole.User)
                         {
                             <strong>You:</strong>
@@ -29,10 +29,10 @@
                         {
                             <strong>AI:</strong>
                         }
-                        <div style="white-space: pre-wrap; margin-top: 0.25rem;">@msg.Text</div>
+                        <div class="message-text">@msg.Text</div>
                         @if (msg.ToolCalls is { Count: > 0 })
                         {
-                            <div style="margin-top: 0.35rem; font-size: 0.8rem; color: var(--neutral-foreground-3, #616161);">
+                            <div class="tool-call-summary">
                                 @GetToolCallSummary(msg.ToolCalls)
                             </div>
                         }
@@ -40,43 +40,43 @@
                 }
                 @if (_isStreaming)
                 {
-                    <div style="margin-bottom: 0.75rem;">
+                    <div class="chat-message streaming-container">
                         <strong>AI:</strong>
                         @if (!string.IsNullOrEmpty(_streamingText))
                         {
-                            <div style="white-space: pre-wrap; margin-top: 0.25rem;">@_streamingText</div>
+                            <div class="streaming-text">@_streamingText</div>
                         }
                         @if (_activeToolCalls is { Count: > 0 })
                         {
-                            <div style="margin-top: 0.25rem; font-size: 0.8rem; color: var(--neutral-foreground-3, #616161); display: flex; align-items: center; gap: 0.35rem;">
-                                <FluentProgressRing style="width: 12px; height: 12px; vertical-align: middle;" />
+                            <div class="tool-call-summary tool-call-progress">
+                                <FluentProgressRing class="progress-ring-small" />
                                 <span>Working…</span>
                             </div>
                         }
                         @if (string.IsNullOrEmpty(_streamingText) && (_activeToolCalls is null || _activeToolCalls.Count == 0))
                         {
-                            <FluentProgressRing style="width: 16px; height: 16px; vertical-align: middle; margin-left: 4px;" />
+                            <FluentProgressRing class="progress-ring-small" />
                         }
                     </div>
                 }
             </div>
 
-            <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem;">
+            <ul class="input-area">
                 <li>
                     <FluentSelect Items="@_models"
                                  @bind-SelectedOption="@_selectedModel"
                                  OptionText="@(m => $"{m!.Label} (w:{m!.Weight})")"
                                  OptionValue="@(m => m!.Value)"
-                                 Style="width: 100%; max-width: 520px;"
+                                 class="model-label"
                                  aria-label="AI model" />
                 </li>
                 <li>
-                    <div style="display: flex; gap: 0.5rem; align-items: flex-start;">
-                        <div style="flex: 1;">
+                    <div class="input-row">
+                        <div class="input-field-wrapper">
                             <FluentTextArea @ref="_inputRef"
                                            @bind-Value="_inputText"
                                            Placeholder="Ask me to create coded values..."
-                                           Style="width: 100%;"
+                                           class="full-width"
                                            Rows="2"
                                            aria-label="Chat input"
                                            OnKeyDown="HandleKeyDown" />
@@ -90,8 +90,8 @@
                     </div>
                 </li>
             </ul>
-            <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 0.25rem;">
-                <span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem; font-family: monospace;">Model: @_selectedModel?.Value</span>
+            <div class="model-info">
+                <span class="model-label-text">Model: @_selectedModel?.Value</span>
             </div>
         </ChildContent>
         <ErrorContent Context="ex">
@@ -139,10 +139,8 @@
     private ModelOption? _selectedModel;
     private string _defaultProvider = "ollama";
 
-    private static string GetMessageStyle(ChatRole role) =>
-        role == ChatRole.User
-            ? "background: var(--neutral-fill-layer-rest, #f5f5f5); padding: 0.5rem 0.75rem; border-radius: 8px;"
-            : "padding: 0.5rem 0.75rem;";
+    private static string GetMessageClass(ChatRole role) =>
+        role == ChatRole.User ? "message-user" : "message-assistant";
 
     protected override async Task OnInitializedAsync()
     {

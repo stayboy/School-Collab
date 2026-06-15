@@ -18,14 +18,14 @@
         }
         else if (_item is not null)
         {
-            <EditForm Model="_model" OnValidSubmit="SubmitAsync" style="max-width:600px">
+            <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="form-container">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
 
-                <FluentTextField Value="@_item.Code" Disabled="true" Label="Code" style="width:100%" class="mb-3" />
-                <FluentTextField @bind-Value="_model.Name" Label="Name *" style="width:100%" class="mb-3" />
-                <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" style="width:100%" class="mb-3" />
-                <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" style="width:200px" class="mb-3" />
+                <FluentTextField Value="@_item.Code" Disabled="true" Label="Code" class="full-width mb-3" />
+                <FluentTextField @bind-Value="_model.Name" Label="Name *" class="full-width mb-3" />
+                <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" class="full-width mb-3" />
+                <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="narrow-field mb-3" />
 
                 @if (!string.IsNullOrEmpty(_error))
                 {
@@ -43,13 +43,13 @@
             @if (_item.ParentId is null)
             {
                 <hr class="my-4" />
-                <div style="display:flex; justify-content:space-between; align-items:center;">
-                    <h5 style="margin:0">Attribute Definitions</h5>
+                <div class="section-header">
+                    <h5 class="section-title">Attribute Definitions</h5>
                     <FluentButton Appearance="Appearance.Accent" OnClick="OpenAddDefinitionDialog">
                         + Add Definition
                     </FluentButton>
                 </div>
-                <p class="text-muted" style="font-size:0.85em">
+                <p class="section-note">
                     Define metadata that child values should supply. Children inherit these definitions as their attribute schema.
                 </p>
 
@@ -58,7 +58,7 @@
                     <FluentDataGrid Items="@_item.AttributeDefinitions.AsQueryable()"
                                     GridTemplateColumns="1.2fr 1.5fr 1fr 1fr auto auto"
                                     TGridItem="CodedValueAttributeDefinitionDto"
-                                    style="max-width:700px">
+                                    class="attr-grid">
                         <PropertyColumn Property="@(d => d.Key)" Title="Key" />
                         <PropertyColumn Property="@(d => d.DisplayName)" Title="Display Name" />
                         <TemplateColumn Title="Type">
@@ -88,7 +88,7 @@
                 <h5>Attributes</h5>
                 @if (_item.Attributes.Count > 0)
                 {
-                    <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1.5fr auto" TGridItem="CodedValueAttributeDto" style="max-width:580px">
+                    <FluentDataGrid Items="@_item.Attributes.AsQueryable()" GridTemplateColumns="1fr 1.5fr auto" TGridItem="CodedValueAttributeDto" class="attr-grid">
                         <PropertyColumn Property="@(a => a.Key)" />
                         <TemplateColumn Title="Value">
                             @context.Value
@@ -96,7 +96,7 @@
                         <TemplateColumn Title="">
                             @if (_editingAttrKey == context.Key)
                             {
-                                <FluentAnchor Href="#" OnClick="CancelAttributeEdit" class="link-action" style="font-size:0.85em">Cancel</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="CancelAttributeEdit" class="link-action cancel-link">Cancel</FluentAnchor>
                             }
                             else
                             {
@@ -110,37 +110,39 @@
                 @if (_editingAttrKey is not null)
                 {
                     var editDef = GetDefinitionForKey(_editingAttrKey);
-                    <div style="margin-top:8px; max-width:520px; display:flex; gap:8px; align-items:flex-start;">
-                        <FluentTextField Value="@_editingAttrKey" ReadOnly style="flex:1" aria-label="Attribute key" />
-                        @if (editDef?.DataType == AttributeDataType.Boolean)
-                        {
-                            <FluentSelect TOption="string"
-                                          Items="@_boolOptions"
-                                          @bind-SelectedOption="_editAttrValue"
-                                          OptionText="@(v => v)"
-                                          OptionValue="@(v => v)"
-                                          style="flex:1"
-                                          aria-label="Attribute value" />
-                        }
-                        else
-                        {
-                            <FluentTextField @bind-Value="_editAttrValue" style="flex:1" aria-label="Attribute value" />
-                        }
-                        <FluentButton Appearance="Appearance.Accent" OnClick="SaveAttributeEditAsync" Disabled="@_savingAttr">Save</FluentButton>
+                    <div class="attr-form-narrow">
+                        <div class="attr-row">
+                            <FluentTextField Value="@_editingAttrKey" ReadOnly class="flex-field" aria-label="Attribute key" />
+                            @if (editDef?.DataType == AttributeDataType.Boolean)
+                            {
+                                <FluentSelect TOption="string"
+                                              Items="@_boolOptions"
+                                              @bind-SelectedOption="_editAttrValue"
+                                              OptionText="@(v => v)"
+                                              OptionValue="@(v => v)"
+                                              class="flex-field"
+                                              aria-label="Attribute value" />
+                            }
+                            else
+                            {
+                                <FluentTextField @bind-Value="_editAttrValue" class="flex-field" aria-label="Attribute value" />
+                            }
+                            <FluentButton Appearance="Appearance.Accent" OnClick="SaveAttributeEditAsync" Disabled="@_savingAttr">Save</FluentButton>
+                        </div>
                     </div>
                 }
 
                 @if (_parent is not null && AvailableDefinitions.Count > 0)
                 {
-                    <div style="margin-top:8px; max-width:520px;">
-                        <div style="display:flex; gap:8px; align-items:flex-start;">
+                    <div class="attr-form-narrow">
+                        <div class="attr-row">
                             <FluentSelect TOption="CodedValueAttributeDefinitionDto"
                                          Items="@AvailableDefinitions"
                                          @bind-SelectedOption="_selectedAttrDef"
                                          OptionText="@(d => $"{d.Key} ({d.DisplayName ?? d.Key}: {FormatDataType(d.DataType)})")"
                                          OptionValue="@(d => d.Key)"
                                          Placeholder="Select attribute…"
-                                         style="flex:1"
+                                         class="flex-field"
                                          aria-label="Attribute key" />
                             @if (_selectedAttrDef?.DataType == AttributeDataType.Boolean)
                             {
@@ -150,12 +152,12 @@
                                               OptionText="@(v => v)"
                                               OptionValue="@(v => v)"
                                               Placeholder="Value"
-                                              style="flex:1"
+                                              class="flex-field"
                                               aria-label="Attribute value" />
                             }
                             else
                             {
-                                <FluentTextField @bind-Value="_attrValue" Placeholder="Value" style="flex:1" aria-label="Attribute value" />
+                                <FluentTextField @bind-Value="_attrValue" Placeholder="Value" class="flex-field" aria-label="Attribute value" />
                             }
                             <FluentButton Appearance="Appearance.Outline" OnClick="AddAttributeAsync" Disabled="@(_selectedAttrDef is null)">Add</FluentButton>
                         </div>
