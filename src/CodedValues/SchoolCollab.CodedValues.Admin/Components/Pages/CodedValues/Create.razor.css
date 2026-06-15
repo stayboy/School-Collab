@@ -1,0 +1,12 @@
+/* Form layout */
+.form-container {
+    max-width: 600px;
+}
+
+.full-width {
+    width: 100%;
+}
+
+.narrow-field {
+    width: 200px;
+}

@@ -10,23 +10,23 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <div style="height:100%; display:flex; flex-direction:column;">
-            <div style="flex-shrink:0; display:flex; align-items:center; gap:0.75rem; padding-bottom:0.75rem;">
-                <FluentBreadcrumb class="mb-0" style="margin:0;">
+        <div class="page-container">
+            <div class="breadcrumb-row">
+                <FluentBreadcrumb class="breadcrumb">
                     <FluentBreadcrumbItem Href="/coded-values">Categories</FluentBreadcrumbItem>
                     <FluentBreadcrumbItem>@_parent?.Name</FluentBreadcrumbItem>
                 </FluentBreadcrumb>
             </div>
-            <div style="flex-shrink:0; display:flex; align-items:center; gap:0.75rem; padding-bottom:0.75rem;">
-                <h2 style="margin:0;">@_parent?.Code — @_parent?.Name</h2>
+            <div class="action-bar">
+                <h2 class="page-title">@_parent?.Code — @_parent?.Name</h2>
                 <FluentButton Appearance="Appearance.Accent"
                               OnClick='() => Nav.NavigateTo($"/coded-values/{Uri.EscapeDataString(ParentCode ?? "")}/children/new")'>
                     + Add Child Value
                 </FluentButton>
-                <div style="flex-grow:1;"></div>
+                <div class="spacer"></div>
                 <FluentTextField Id="search-children"
                                 Placeholder="Search children…"
-                                Style="width:260px;"
+                                class="search-box"
                                 Immediate="true"
                                 ImmediateDelay="300"
                                 ValueChanged="@OnSearchValueChanged"
@@ -34,7 +34,7 @@
             </div>
             @if (_isSearching && _searchResults is null)
             {
-                <div style="flex:1; display:flex; align-items:center; justify-content:center;">
+                <div class="spinner-container">
                     <FluentProgressRing />
                 </div>
             }
@@ -46,7 +46,7 @@
                 }
                 else
                 {
-                    <div style="flex:1; min-height:0; overflow:auto; width:100%;">
+                    <div class="grid-container">
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
                                         GridTemplateColumns="120px 200px minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) 200px"
                                         Class="grid-sticky-cols"
@@ -85,7 +85,7 @@
                                 {
                                     <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))" class="link-action">Disable</FluentAnchor>
                                 }
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
                             </TemplateColumn>
                         </FluentDataGrid>
                     </div>
@@ -93,7 +93,7 @@
             }
             else if (_loading)
             {
-                <div style="flex:1; display:flex; align-items:center; justify-content:center;">
+                <div class="spinner-container">
                     <FluentProgressRing />
                 </div>
             }
@@ -107,7 +107,7 @@
                 {
                     <div class="mb-3">
                         <h6>Expected Attributes</h6>
-                        <div style="display:flex; flex-wrap:wrap; gap:6px;">
+                        <div class="attr-list">
                             @foreach (var def in _parent.AttributeDefinitions)
                             {
                                 <FluentBadge @key="def.Key" Appearance="Appearance.Lightweight">
@@ -118,16 +118,16 @@
                                     }
                                     @if (def.IsRequired)
                                     {
-                                        <span style="color:var(--error)"> *</span>
+                                        <span class="required-marker"> *</span>
                                     }
-                                    <span class="text-muted" style="font-size:0.8em">:@FormatDataType(def.DataType)</span>
+                                    <span class="data-type">:@FormatDataType(def.DataType)</span>
                                 </FluentBadge>
                             }
                         </div>
                     </div>
                 }
 
-                <div style="flex:1; min-height:0; overflow:auto; width:100%;">
+                <div class="grid-container">
                     <FluentDataGrid Items="@_children.AsQueryable()"
                                     GridTemplateColumns="120px 200px minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) 200px"
                                     Class="grid-sticky-cols"
@@ -156,7 +156,7 @@
                                     @attr.Key=@attr.Value
                                     @if (def?.IsRequired == true)
                                     {
-                                        <span style="color:var(--error)">*</span>
+                                        <span class="required-marker">*</span>
                                     }
                                 </FluentBadge>
                             }
@@ -171,7 +171,7 @@
                             {
                                 <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))" class="link-action">Disable</FluentAnchor>
                             }
-                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action ms-2" style="color: var(--error)">Delete</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
                 </div>

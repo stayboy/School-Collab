@@ -585,6 +585,97 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
   Scrutor assembly scanning.
 - Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.
 
+## CSS and styling
+
+### Rule: Prefer Blazor CSS isolation over global CSS
+
+Every Razor component (pages, layouts, dialogs) **must** have a companion `.razor.css`
+file for component-scoped styles. Never add page-specific styles to `wwwroot/app.css`.
+
+```
+Components/Pages/CodedValues/Index.razor      ← markup
+Components/Pages/CodedValues/Index.razor.css  ← scoped styles
+```
+
+**Why?** Blazor CSS isolation generates unique scope identifiers (e.g. `b-xyz`) so
+styles in `Index.razor.css` only apply to `Index.razor` — no class-name collisions,
+no specificity wars, and no dead CSS when a page is removed.
+
+### Rule: Prefer CSS classes over inline `style`
+
+Never use `style="…"` on HTML elements in `.razor` files. Extract the styles into
+a named class in the component's `.razor.css` file:
+
+```razor
+@* ❌ wrong *@
+<div style="flex:1; min-height:0; overflow:auto;">
+
+@* ✅ correct *@
+<div class="grid-container">
+```
+
+```css
+/* In Component.razor.css */
+.grid-container {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+```
+
+The only exceptions are truly one-off dynamic values computed in C# (e.g. a
+`width` or `color` derived from data) — even then, prefer a CSS custom property
+set via `style="--my-value: @value"` and reference it in the isolated CSS.
+
+### Rule: `::deep` for child-component and web-component selectors
+
+Blazor CSS isolation scopes selectors to the *component's own* elements. To target
+elements rendered by child components (including FluentUI web components like
+`<fluent-data-grid>`), use `::deep`:
+
+```css
+/* In Index.razor.css — targets cells inside FluentDataGrid */
+::deep .grid-sticky-cols td[col-index="1"] {
+    position: sticky;
+    left: 0;
+}
+```
+
+Without `::deep`, the scope attribute would be placed on the `td` itself, which
+doesn't exist in the component's direct markup.
+
+### Rule: Global styles in `wwwroot/app.css`
+
+Only add styles to `wwwroot/app.css` when they are truly application-wide:
+
+| Keep in `app.css` (global) | Move to `.razor.css` (isolated) |
+|---|---|
+| `html, body` resets | Page layout (flex containers, grid wrappers) |
+| Theme / colour variables | Toolbar actions, button bars |
+| `fluent-data-grid` global parts | Spinner / loading containers |
+| `.grid-sticky-cols` (shared grid pattern) | Form field layouts |
+| `.link-action`, `.brand*` | Dialog / chat bubble styles |
+| Responsive breakpoints for `.brand*` | Any style used by exactly one component |
+
+If a style is used by two or more components, consider whether it should be a
+shared CSS class in `app.css` (e.g. utility classes) or duplicated in each
+isolated file (preferred if the styles may diverge).
+
+### Rule: FluentUI components — use component parameters, not CSS
+
+Prefer FluentUI's built-in parameters over custom CSS for spacing, alignment, and
+layout on `<Fluent*>` components:
+
+| Instead of | Use |
+|---|---|
+| `style="width:100%"` on `<FluentTextField>` | `Style="width:100%"` parameter (still inline) or a class in isolated CSS |
+| `style="margin:0"` on `<h1>` | A class like `.page-title { margin: 0; }` in isolated CSS |
+
+When FluentUI provides a parameter (e.g. `Appearance`, `Gap`, `Orientation`), use
+it instead of replicating the same effect in CSS.
+
+---
+
 ## Unit tests for feature additions
 
 Every new feature, service, or behavioural class **must** include unit tests in

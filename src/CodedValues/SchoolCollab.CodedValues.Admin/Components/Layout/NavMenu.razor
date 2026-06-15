@@ -16,7 +16,7 @@
         @if (Loading)
         {
             <FluentNavLink Href="#" Disabled="true">
-               <FluentProgressRing Style="width:16px;height:16px;" />
+               <FluentProgressRing class="progress-ring-small" />
             </FluentNavLink>
         }
         else if (ParentValues is { Length: > 0 })
@@ -46,7 +46,7 @@
             </FluentNavLink>
         }
 
-        <hr style="border: 0; border-top: 1px solid var(--neutral-stroke-rest); margin: 12px 0; width: 100%;" />
+        <hr class="nav-separator" />
 
         <FluentNavLink Href="/coded-values"
                      Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
