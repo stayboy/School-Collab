@@ -38,7 +38,7 @@
                 else
                 {
                     <h3>Deleted Values</h3>
-                    <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" class="mb-4">
+                    <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" MultiLine="true" class="mb-4">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
                             <code>@context.Code</code>
                         </TemplateColumn>
@@ -72,7 +72,8 @@
                 {
                     <div class="grid-container">
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
-                                        GridTemplateColumns="120px 200px minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) 200px"
+                                        GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                        MultiLine="true"
                                         Class="grid-sticky-cols"
                                         TGridItem="CodedValueDto">
                             <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
@@ -133,7 +134,8 @@
             {
                 <div class="grid-container">
                     <FluentDataGrid Items="@_items.AsQueryable()"
-                                    GridTemplateColumns="120px 200px minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) 200px"
+                                   GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                    MultiLine="true"
                                     Class="grid-sticky-cols"
                                     TGridItem="CodedValueDto">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">

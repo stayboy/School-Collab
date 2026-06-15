@@ -28,13 +28,16 @@ fluent-data-grid {
     width: 100%;
 }
 
-fluent-data-grid::part(row) {
-    min-height: 44px;
+/* MultiLine grid: ensure cells wrap text and rows auto-size */
+.grid-sticky-cols td,
+.grid-sticky-cols th {
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: break-word;
 }
 
-fluent-data-grid::part(cell) {
-    padding-top: 6px;
-    padding-bottom: 6px;
+.grid-sticky-cols th {
+    white-space: nowrap;
 }
 
 /* ---- Sticky (frozen) columns via col-index attribute selectors ---- */
@@ -61,6 +64,7 @@ fluent-data-grid::part(cell) {
     right: 0;
     z-index: 2;
     background-color: var(--neutral-layer-1);
+    white-space: nowrap;
 }
 
 /* Row hover on sticky cells must match the row hover background */
@@ -95,13 +99,9 @@ fluent-data-grid::part(cell) {
     pointer-events: none;
 }
 
-/* Text wrapping for Description and other scrollable text columns */
+/* Vertical alignment for content-heavy text columns */
 .grid-sticky-cols td[col-index="3"],
 .grid-sticky-cols td[col-index="6"] {
-    white-space: normal;
-    word-break: break-word;
-    overflow: visible;
-    text-overflow: clip;
     align-content: start;
 }
 
