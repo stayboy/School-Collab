@@ -53,6 +53,17 @@ public record UpdateCodedValueRequest(string Name, string? Description, int Disp
 
 public sealed class CodedValuesApiClient(HttpClient http)
 {
+    public async Task<CodedValueDto[]> SearchAsync(string text, Guid? parentId = null, bool includeDisabled = false, CancellationToken ct = default)
+    {
+        var url = $"/coded-values/search?text={Uri.EscapeDataString(text)}";
+        if (parentId.HasValue)
+            url += $"&parentId={parentId.Value}";
+        if (includeDisabled)
+            url += "&includeDisabled=true";
+        var result = await http.GetFromJsonAsync<CodedValueDto[]>(url, ct);
+        return result ?? [];
+    }
+
     public Task<CodedValueDto[]?> GetRootValuesAsync(CancellationToken ct = default) =>
         http.GetFromJsonAsync<CodedValueDto[]>("/coded-values", ct);
 
