@@ -163,7 +163,7 @@
         Logger.LogInformation("Loading children for parent {ParentCode}", ParentCode);
         try
         {
-            _parent = await Api.GetByCodeAsync(ParentCode!, ct);
+            _parent = await Api.GetByCodeAsync(ParentCode!, ct: ct);
             if (_parent is null)
             {
                 _error = $"Coded value '{ParentCode}' not found.";

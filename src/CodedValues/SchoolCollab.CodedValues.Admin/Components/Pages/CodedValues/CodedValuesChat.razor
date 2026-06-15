@@ -151,7 +151,7 @@
         {
             // Fetch default provider and model list in parallel
             var providerTask = AiChatClient.GetDefaultProviderAsync(_loadCts.Token);
-            var parentTask = Api.GetByCodeAsync("AI-MODELS", _loadCts.Token);
+            var parentTask = Api.GetByCodeAsync("AI-MODELS", ct: _loadCts.Token);
             await Task.WhenAll(providerTask, parentTask);
 
             if (_disposed) return;

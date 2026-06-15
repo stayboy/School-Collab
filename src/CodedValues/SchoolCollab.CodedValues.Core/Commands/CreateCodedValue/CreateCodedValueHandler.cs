@@ -22,9 +22,9 @@ public sealed class CreateCodedValueHandler(
 
         var code = command.Code.Trim().ToUpperInvariant();
 
-        if (await repository.ExistsByCodeAsync(code, cancellationToken))
+        if (await repository.ExistsByCodeInParentAsync(code, command.ParentId, cancellationToken))
         {
-            throw new DuplicateCodeException(code);
+            throw new DuplicateCodeException(code, command.ParentId);
         }
 
         var codedValue = CodedValue.Create(

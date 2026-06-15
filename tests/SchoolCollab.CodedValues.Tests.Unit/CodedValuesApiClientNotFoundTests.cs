@@ -56,7 +56,7 @@ public class CodedValuesApiClientNotFoundTests
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         var client = new AdminApi(http);
 
-        var result = await client.GetByCodeAsync("NOTEXIST", CancellationToken.None);
+        var result = await client.GetByCodeAsync("NOTEXIST", ct: CancellationToken.None);
 
         result.Should().BeNull("404 should return null, not throw");
         handler.Requests.Should().ContainSingle(r => r.RequestUri!.PathAndQuery == "/coded-values/by-code/NOTEXIST");
@@ -71,7 +71,7 @@ public class CodedValuesApiClientNotFoundTests
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         var client = new AdminApi(http);
 
-        var result = await client.GetByCodeAsync("TEST", CancellationToken.None);
+        var result = await client.GetByCodeAsync("TEST", ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Code.Should().Be("TEST");
@@ -111,7 +111,7 @@ public class CodedValuesApiClientNotFoundTests
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         var client = new AdminApi(http);
 
-        var act = () => client.GetByCodeAsync("TEST", CancellationToken.None);
+        var act = () => client.GetByCodeAsync("TEST", ct: CancellationToken.None);
 
         await act.Should().ThrowAsync<HttpRequestException>("500 should still throw");
     }
@@ -125,7 +125,7 @@ public class CodedValuesApiClientNotFoundTests
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         var client = new AiApi(http);
 
-        var result = await client.GetByCodeAsync("NOTEXIST", CancellationToken.None);
+        var result = await client.GetByCodeAsync("NOTEXIST", ct: CancellationToken.None);
 
         result.Should().BeNull("404 should return null, not throw");
     }
@@ -139,7 +139,7 @@ public class CodedValuesApiClientNotFoundTests
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         var client = new AiApi(http);
 
-        var result = await client.GetByCodeAsync("TEST", CancellationToken.None);
+        var result = await client.GetByCodeAsync("TEST", ct: CancellationToken.None);
 
         result.Should().NotBeNull();
         result!.Code.Should().Be("TEST");
@@ -179,7 +179,7 @@ public class CodedValuesApiClientNotFoundTests
         var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         var client = new AiApi(http);
 
-        var act = () => client.GetByCodeAsync("TEST", CancellationToken.None);
+        var act = () => client.GetByCodeAsync("TEST", ct: CancellationToken.None);
 
         await act.Should().ThrowAsync<HttpRequestException>("500 should still throw");
     }

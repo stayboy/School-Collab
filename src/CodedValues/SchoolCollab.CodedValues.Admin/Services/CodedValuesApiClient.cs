@@ -68,9 +68,12 @@ public sealed class CodedValuesApiClient(HttpClient http)
         return await response.Content.ReadFromJsonAsync<CodedValueDto>(ct);
     }
 
-    public async Task<CodedValueDto?> GetByCodeAsync(string code, CancellationToken ct = default)
+    public async Task<CodedValueDto?> GetByCodeAsync(string code, Guid? parentId = null, CancellationToken ct = default)
     {
-        var response = await http.GetAsync($"/coded-values/by-code/{Uri.EscapeDataString(code)}", ct);
+        var url = parentId.HasValue
+            ? $"/coded-values/by-code/{Uri.EscapeDataString(code)}?parentId={parentId.Value}"
+            : $"/coded-values/by-code/{Uri.EscapeDataString(code)}";
+        var response = await http.GetAsync(url, ct);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             return null;
         response.EnsureSuccessStatusCode();

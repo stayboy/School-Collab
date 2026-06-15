@@ -17,10 +17,12 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
             .IsRequired()
             .HasMaxLength(100);
 
+        // Unique index on (ParentId, Code) is created via raw SQL in the migration
+        // because EF Core cannot express COALESCE(ParentId, sentinel) for NULL handling.
+        // Root values (ParentId IS NULL) share a synthetic sentinel so their codes
+        // remain unique among other roots, while child codes are scoped to their parent.
         builder.HasIndex(x => x.Code)
-            .IsUnique()
-            .HasDatabaseName("ix_coded_values_code")
-            .HasFilter("is_deleted = false");
+            .HasDatabaseName("ix_coded_values_code");
 
         builder.Property(x => x.Name)
             .IsRequired()

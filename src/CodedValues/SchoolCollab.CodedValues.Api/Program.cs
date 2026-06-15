@@ -69,10 +69,11 @@ app.MapGet("/coded-values/{id:guid}", async (
 
 app.MapGet("/coded-values/by-code/{code}", async (
     string code,
+    [FromQuery] Guid? parentId,
     [FromServices] IQueryHandler<GetCodedValueByCode, CodedValueDto?> handler,
     CancellationToken ct) =>
 {
-    var result = await handler.HandleAsync(new GetCodedValueByCode(code), ct);
+    var result = await handler.HandleAsync(new GetCodedValueByCode(code, parentId), ct);
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
@@ -164,7 +165,7 @@ app.MapPost("/coded-values", async (
 
 app.MapPost("/coded-values/bulk", async (
     [FromBody] BulkCreateCodedValuesRequest req,
-    [FromServices] ICommandHandler<BulkCreateCodedValues> handler,
+    [FromServices] ICommandHandler<BulkCreateCodedValues, BulkCreateResult> handler,
     CancellationToken ct) =>
 {
     try
@@ -172,8 +173,8 @@ app.MapPost("/coded-values/bulk", async (
         var command = new BulkCreateCodedValues(
             req.ParentId,
             req.Children.Select(c => new BulkCreateChildItem(c.Code, c.Name, c.Description, c.DisplayOrder)).ToList());
-        await handler.HandleAsync(command, ct);
-        return Results.Ok(new { req.ParentId, CreatedCount = req.Children.Count });
+        var result = await handler.HandleAsync(command, ct);
+        return Results.Ok(new { result.ParentId, result.CreatedCount, result.SkippedCodes });
     }
     catch (CodedValueNotFoundException)
     {
@@ -181,6 +182,7 @@ app.MapPost("/coded-values/bulk", async (
     }
     catch (DuplicateCodeException ex)
     {
+        // Only thrown for intra-batch duplicates
         return Results.Conflict(new { ex.Message });
     }
 });

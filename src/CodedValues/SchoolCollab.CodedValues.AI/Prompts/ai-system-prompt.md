@@ -177,7 +177,7 @@ When the user specifies the changes:
 - **Change description** → use `update_coded_value` with the code and the new description.
 - **Reorder** → use `update_coded_value` with the code and the new displayOrder.
 - **Change multiple fields at once** → pass all changed fields in a single `update_coded_value` call. The tool preserves any fields you don't specify.
-- **Update children** → call `get_coded_value_by_code` for the parent, then `update_coded_value` for each child that needs changing.
+- **Update children** → call `get_coded_value_by_code` for the parent, then `update_coded_value` for each child that needs changing. **When updating a parent's description, also update each child's description if the user's request covers the whole category** (e.g., "update descriptions for PKTYPES" means update the parent AND all its children).
 
 ### Step 4: Confirm the update
 

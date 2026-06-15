@@ -63,7 +63,7 @@
                 var ct = _loadCts.Token;
                 try
                 {
-                    var parent = await Api.GetByCodeAsync(ParentCode, ct);
+                    var parent = await Api.GetByCodeAsync(ParentCode, ct: ct);
                     if (_disposed) return;
                     _parentId = parent?.Id;
                 }

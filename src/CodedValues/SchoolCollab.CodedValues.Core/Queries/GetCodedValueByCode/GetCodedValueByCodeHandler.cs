@@ -21,18 +21,27 @@ public sealed class GetCodedValueByCodeHandler(
         CancellationToken cancellationToken = default)
     {
         var normalisedCode = query.Code.Trim().ToUpperInvariant();
+        var cacheKey = query.ParentId.HasValue
+            ? $"coded-value:code:{normalisedCode}:parent:{query.ParentId.Value}"
+            : $"coded-value:code:{normalisedCode}";
 
         return await cache.GetOrCreateAsync(
-            $"coded-value:code:{normalisedCode}",
-            (db, normalisedCode),
+            cacheKey,
+            (db, normalisedCode, query.ParentId),
             static async (state, ct) =>
             {
-                var (db, code) = state;
-                var cv = await db.CodedValues
-                    .AsNoTracking()
-                    .Include(x => x.Attributes)
-                    .Include(x => x.AttributeDefinitions)
-                    .SingleOrDefaultAsync(x => x.Code == code, ct);
+                var (db, code, parentId) = state;
+                var cv = parentId.HasValue
+                    ? await db.CodedValues
+                        .AsNoTracking()
+                        .Include(x => x.Attributes)
+                        .Include(x => x.AttributeDefinitions)
+                        .FirstOrDefaultAsync(x => x.Code == code && x.ParentId == parentId, ct)
+                    : await db.CodedValues
+                        .AsNoTracking()
+                        .Include(x => x.Attributes)
+                        .Include(x => x.AttributeDefinitions)
+                        .FirstOrDefaultAsync(x => x.Code == code, ct);
 
                 if (cv is null)
                     return null;

@@ -264,7 +264,7 @@
                 defResult.RegexPattern);
 
             await Api.SetAttributeDefinitionAsync(_item.Id, defResult.Key, req, ct);
-            _item = await Api.GetByCodeAsync(Code!, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct: ct);
             StateHasChanged();
         }
         catch (OperationCanceledException) { }
@@ -284,7 +284,7 @@
         {
             Logger.LogInformation("Removing attribute definition {Key} from coded value {Id}", key, _item.Id);
             await Api.RemoveAttributeDefinitionAsync(_item.Id, key, ct);
-            _item = await Api.GetByCodeAsync(Code!, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct: ct);
             StateHasChanged();
         }
         catch (OperationCanceledException) { }
@@ -321,7 +321,7 @@
         Logger.LogInformation("Loading coded value {Code} for edit", Code);
         try
         {
-            _item = await Api.GetByCodeAsync(Code!, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct: ct);
             _loadedCode = Code;
             if (_disposed) return;
             if (_item is not null)
@@ -333,7 +333,7 @@
                 // Load parent for attribute definitions dropdown
                 if (_item.ParentId.HasValue && _item.ParentCode is not null)
                 {
-                    _parent = await Api.GetByCodeAsync(_item.ParentCode, ct);
+                    _parent = await Api.GetByCodeAsync(_item.ParentCode, ct: ct);
                     if (_disposed) return;
                     // Pre-select first available definition not already set on the child
                     _selectedAttrDef = _parent?.AttributeDefinitions
@@ -418,7 +418,7 @@
         {
             Logger.LogInformation("Updating attribute {Key} on coded value {Code}", _editingAttrKey, Code);
             await Api.SetAttributeAsync(_item.Id, _editingAttrKey, _editAttrValue.Trim(), ct);
-            _item = await Api.GetByCodeAsync(Code!, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct: ct);
             if (_disposed) return;
             _editingAttrKey = null;
             _editAttrValue = null;
@@ -445,7 +445,7 @@
         try
         {
             await Api.SetAttributeAsync(_item.Id, _selectedAttrDef.Key.Trim(), _attrValue.Trim(), ct);
-            _item = await Api.GetByCodeAsync(Code!, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct: ct);
             if (_disposed) return;
             // Reset selection — pick next available definition
             _selectedAttrDef = _parent?.AttributeDefinitions
@@ -468,7 +468,7 @@
         try
         {
             await Api.RemoveAttributeAsync(_item.Id, key, ct);
-            _item = await Api.GetByCodeAsync(Code!, ct);
+            _item = await Api.GetByCodeAsync(Code!, ct: ct);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)

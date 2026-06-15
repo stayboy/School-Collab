@@ -593,7 +593,7 @@ public sealed class CodedValueAIService
         CancellationToken ct = default)
     {
         _logger.LogDebug("AI tool: getting coded value by code {Code}", code);
-        var item = await _api.GetByCodeAsync(code, ct);
+        var item = await _api.GetByCodeAsync(code, ct: ct);
         if (item is null)
             return $"Coded value with code '{code}' not found.";
 
@@ -639,25 +639,25 @@ public sealed class CodedValueAIService
     {
         _logger.LogDebug("AI tool: creating coded value {Code}", code);
 
-        var existing = await _api.GetByCodeAsync(code, ct);
-        if (existing is not null)
-            return $"A coded value with code '{code}' already exists: {existing.Name} (Id: {existing.Id}). Use a different code or get_coded_value_by_code to inspect it.";
-
         Guid? parentId = null;
         if (!string.IsNullOrEmpty(parentCode))
         {
-            var parent = await _api.GetByCodeAsync(parentCode, ct);
+            var parent = await _api.GetByCodeAsync(parentCode, ct: ct);
             if (parent is null)
                 return $"Parent coded value '{parentCode}' not found. Create it first or use a valid parent code.";
             parentId = parent.Id;
         }
 
+        var existing = await _api.GetByCodeAsync(code, parentId, ct);
+        if (existing is not null)
+            return $"A coded value with code '{code}' already exists: {existing.Name} (Id: {existing.Id}). Use a different code or get_coded_value_by_code to inspect it.";
+
         try
         {
             await _api.CreateAsync(new CreateCodedValueRequest(code, name, description, parentId, displayOrder), ct);
             return parentId.HasValue
-                ? $"Created child value: Code={code}, Name={name} under parent {parentCode}"
-                : $"Created root category: Code={code}, Name={name}";
+                ? $"Created child value: Code={code}, Name={name}, Description={description ?? "(none)"} under parent {parentCode}"
+                : $"Created root category: Code={code}, Name={name}, Description={description ?? "(none)"}";
         }
         catch (HttpRequestException ex)
         {
@@ -674,7 +674,7 @@ public sealed class CodedValueAIService
     {
         _logger.LogDebug("AI tool: creating {Count} bulk values under parent {ParentCode}", children.Length, parentCode);
 
-        var parent = await _api.GetByCodeAsync(parentCode, ct);
+        var parent = await _api.GetByCodeAsync(parentCode, ct: ct);
         if (parent is null)
             return $"Parent coded value '{parentCode}' not found. Create it first with create_coded_value.";
 
@@ -687,7 +687,12 @@ public sealed class CodedValueAIService
             });
 
             var result = await _api.BulkCreateAsync(parent.Id, requests, ct);
-            return $"Created {result.CreatedCount} value{(result.CreatedCount == 1 ? "" : "s")} under '{parentCode} ({parent.Name})'.";
+            var skippedInfo = result.SkippedCodes.Count > 0
+                ? $" Skipped existing codes: {string.Join(", ", result.SkippedCodes)}."
+                : "";
+            var childDescs = string.Join(", ", children.Select(c =>
+                string.IsNullOrEmpty(c.Description) ? $"{c.Code}" : $"{c.Code}: {c.Description}"));
+            return $"Created {result.CreatedCount} value{(result.CreatedCount == 1 ? "" : "s")} under '{parentCode} ({parent.Name})'.{skippedInfo} Descriptions: {childDescs}";
         }
         catch (HttpRequestException ex)
         {
@@ -709,7 +714,7 @@ public sealed class CodedValueAIService
     {
         _logger.LogDebug("AI tool: setting attribute definition '{Key}' on parent {ParentCode}", key, parentCode);
 
-        var parent = await _api.GetByCodeAsync(parentCode, ct);
+        var parent = await _api.GetByCodeAsync(parentCode, ct: ct);
         if (parent is null)
             return $"Parent coded value '{parentCode}' not found. Create it first.";
 
@@ -735,7 +740,7 @@ public sealed class CodedValueAIService
     {
         _logger.LogDebug("AI tool: updating coded value {Code}", code);
 
-        var item = await _api.GetByCodeAsync(code, ct);
+        var item = await _api.GetByCodeAsync(code, ct: ct);
         if (item is null)
             return $"Coded value '{code}' not found.";
 
@@ -744,7 +749,7 @@ public sealed class CodedValueAIService
         var newOrder = displayOrder ?? item.DisplayOrder;
 
         await _api.UpdateAsync(item.Id, new UpdateCodedValueRequest(newName, newDesc, newOrder), ct);
-        return $"Updated '{code}': Name={newName}, DisplayOrder={newOrder}";
+        return $"Updated '{code}': Name={newName}, Description={newDesc ?? "(none)"}, DisplayOrder={newOrder}";
     }
 
     [Description("Disables a coded value so it no longer appears in active selections")]
@@ -754,7 +759,7 @@ public sealed class CodedValueAIService
     {
         _logger.LogDebug("AI tool: disabling coded value {Code}", code);
 
-        var item = await _api.GetByCodeAsync(code, ct);
+        var item = await _api.GetByCodeAsync(code, ct: ct);
         if (item is null)
             return $"Coded value '{code}' not found.";
         if (item.IsDisabled)
@@ -771,7 +776,7 @@ public sealed class CodedValueAIService
     {
         _logger.LogDebug("AI tool: enabling coded value {Code}", code);
 
-        var item = await _api.GetByCodeAsync(code, ct);
+        var item = await _api.GetByCodeAsync(code, ct: ct);
         if (item is null)
             return $"Coded value '{code}' not found.";
         if (!item.IsDisabled)
@@ -790,7 +795,7 @@ public sealed class CodedValueAIService
     {
         _logger.LogDebug("AI tool: setting attribute '{Key}' = '{Value}' on {Code}", key, value, code);
 
-        var item = await _api.GetByCodeAsync(code, ct);
+        var item = await _api.GetByCodeAsync(code, ct: ct);
         if (item is null)
             return $"Coded value '{code}' not found.";
 

@@ -32,7 +32,7 @@ public class CreateCodedValueHandlerTests
     [TestMethod]
     public async Task HandleAsync_WithNewCode_CreatesAndEnqueues()
     {
-        _repository.Setup(r => r.ExistsByCodeAsync("GENDER", default)).ReturnsAsync(false);
+        _repository.Setup(r => r.ExistsByCodeInParentAsync("GENDER", null, default)).ReturnsAsync(false);
 
         await _handler.HandleAsync(new CreateCodedValue("gender", "Gender", null, null, 0));
 
@@ -43,11 +43,25 @@ public class CreateCodedValueHandlerTests
     [TestMethod]
     public async Task HandleAsync_WithDuplicateCode_ThrowsDuplicateCodeException()
     {
-        _repository.Setup(r => r.ExistsByCodeAsync("GENDER", default)).ReturnsAsync(true);
+        _repository.Setup(r => r.ExistsByCodeInParentAsync("GENDER", null, default)).ReturnsAsync(true);
 
         var act = async () => await _handler.HandleAsync(new CreateCodedValue("gender", "Gender", null, null, 0));
 
         await act.Should().ThrowAsync<DuplicateCodeException>();
         _repository.Verify(r => r.AddAsync(It.IsAny<CodedValue>(), default), Times.Never);
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_SameCodeUnderDifferentParent_IsAllowed()
+    {
+        // Code "GENDER" exists as a root, but not under parent "HSPTL"
+        _repository.Setup(r => r.ExistsByCodeInParentAsync("GENDER", null, default)).ReturnsAsync(true);
+        var parentId = Guid.NewGuid();
+        _repository.Setup(r => r.ExistsByCodeInParentAsync("GENDER", parentId, default)).ReturnsAsync(false);
+
+        // Creating "GENDER" under a parent should succeed
+        await _handler.HandleAsync(new CreateCodedValue("gender", "Gender", null, parentId, 0));
+
+        _repository.Verify(r => r.AddAsync(It.Is<CodedValue>(cv => cv.Code == "GENDER" && cv.ParentId == parentId), default), Times.Once);
     }
 }
