@@ -79,8 +79,8 @@
                             <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                                 <code>@context.Code</code>
                             </TemplateColumn>
-                            <PropertyColumn Property="@(x => x.Name)" Sortable="true" Tooltip="true" />
-                            <PropertyColumn Property="@(x => x.Description)" Title="Description" Tooltip="true" />
+                                <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                                <PropertyColumn Property="@(x => x.Description)" Title="Description" />
                             <TemplateColumn Title="Status">
                                 @if (context.IsDisabled)
                                 {
@@ -141,8 +141,8 @@
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                             <code>@context.Code</code>
                         </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" Tooltip="true" />
-                        <PropertyColumn Property="@(x => x.Description)" Title="Description" Tooltip="true" />
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.Description)" Title="Description" />
                         <TemplateColumn Title="Status">
                             @if (context.IsDisabled)
                             {
