@@ -25,6 +25,7 @@ p, span, label, small, strong, em, code, pre {
 
 fluent-data-grid {
     --neutral-foreground-rest: var(--neutral-foreground-1);
+    width: 100%;
 }
 
 fluent-data-grid::part(row) {
