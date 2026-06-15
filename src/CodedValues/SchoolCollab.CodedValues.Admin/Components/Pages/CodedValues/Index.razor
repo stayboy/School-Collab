@@ -25,7 +25,8 @@
                                 Placeholder="Search categories…"
                                 Style="width:260px;"
                                 Immediate="true"
-                                OnInput="@((string v) => OnSearchInput(v))"
+                                ImmediateDelay="300"
+                                ValueChanged="@OnSearchValueChanged"
                                 OnClear="@(() => OnSearchClear())" />
             </div>
             @if (_showDeleted && _deletedItems is not null)
@@ -359,7 +360,7 @@
         }
     }
 
-    private async Task OnSearchInput(string text)
+    private async Task OnSearchValueChanged(string? text)
     {
         _searchText = text?.Trim() ?? string.Empty;
 
@@ -371,14 +372,14 @@
             return;
         }
 
-        _isSearching = true;
+        // Cancel previous in-flight search request
         _searchCts?.Cancel();
         _searchCts = new CancellationTokenSource();
         var ct = _searchCts.Token;
 
+        _isSearching = true;
         try
         {
-            await Task.Delay(300, ct); // debounce 300ms
             _searchResults = await Api.SearchAsync(_searchText, parentId: null, includeDisabled: _showDeleted, ct);
             if (_disposed) return;
             _isSearching = false;
@@ -386,7 +387,7 @@
         }
         catch (OperationCanceledException)
         {
-            // debounced away or navigated away
+            // previous search cancelled — new one already started
         }
         catch (Exception ex)
         {
