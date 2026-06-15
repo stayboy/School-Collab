@@ -60,32 +60,21 @@ app.MapGet("/coded-values", async (
 
 app.MapGet("/coded-values/{id:guid}", async (
     Guid id,
-    [FromServices] IQueryHandler<GetCodedValueById, CodedValueDto> handler,
+    [FromServices] IQueryHandler<GetCodedValueById, CodedValueDto?> handler,
     CancellationToken ct) =>
 {
-    try
-    {
-        return Results.Ok(await handler.HandleAsync(new GetCodedValueById(id), ct));
-    }
-    catch (CodedValueNotFoundException)
-    {
-        return Results.NotFound();
-    }
+    var result = await handler.HandleAsync(new GetCodedValueById(id), ct);
+    return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
 app.MapGet("/coded-values/by-code/{code}", async (
     string code,
-    [FromServices] IQueryHandler<GetCodedValueByCode, CodedValueDto> handler,
+    [FromQuery] Guid? parentId,
+    [FromServices] IQueryHandler<GetCodedValueByCode, CodedValueDto?> handler,
     CancellationToken ct) =>
 {
-    try
-    {
-        return Results.Ok(await handler.HandleAsync(new GetCodedValueByCode(code), ct));
-    }
-    catch (CodedValueNotFoundException)
-    {
-        return Results.NotFound();
-    }
+    var result = await handler.HandleAsync(new GetCodedValueByCode(code, parentId), ct);
+    return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
 app.MapGet("/coded-values/by-ids", async (
@@ -170,6 +159,30 @@ app.MapPost("/coded-values", async (
     }
     catch (DuplicateCodeException ex)
     {
+        return Results.Conflict(new { ex.Message });
+    }
+});
+
+app.MapPost("/coded-values/bulk", async (
+    [FromBody] BulkCreateCodedValuesRequest req,
+    [FromServices] ICommandHandler<BulkCreateCodedValues, BulkCreateResult> handler,
+    CancellationToken ct) =>
+{
+    try
+    {
+        var command = new BulkCreateCodedValues(
+            req.ParentId,
+            req.Children.Select(c => new BulkCreateChildItem(c.Code, c.Name, c.Description, c.DisplayOrder)).ToList());
+        var result = await handler.HandleAsync(command, ct);
+        return Results.Ok(new { result.ParentId, result.CreatedCount, result.SkippedCodes });
+    }
+    catch (CodedValueNotFoundException)
+    {
+        return Results.NotFound(new { Message = $"Parent coded value with ID '{req.ParentId}' not found." });
+    }
+    catch (DuplicateCodeException ex)
+    {
+        // Only thrown for intra-batch duplicates
         return Results.Conflict(new { ex.Message });
     }
 });
@@ -318,6 +331,8 @@ app.Run();
 internal record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
 internal record AttributeValueRequest(string Value);
 internal record AttributeDefinitionRequest(string? DisplayName, AttributeDataType DataType, string? SourceCode, bool IsRequired, bool AllowMultiple = false, int? MinLength = null, int? MaxLength = null, string? RegexPattern = null);
+internal record BulkCreateCodedValuesRequest(Guid ParentId, List<BulkCreateChildRequest> Children);
+internal record BulkCreateChildRequest(string Code, string Name, string? Description, int DisplayOrder);
 
 // Makes Program accessible to WebApplicationFactory in integration tests
 public partial class Program { }

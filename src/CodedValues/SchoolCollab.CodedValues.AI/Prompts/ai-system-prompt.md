@@ -20,10 +20,10 @@ Parents define categories; children are the actual values.
 | Capability | Purpose |
 |-----------|---------|
 | List categories | List all root-level categories |
-| Get by code | Look up a value or category by its code |
+| Get by code | Look up a value by code — returns ALL fields (name, description, display order, disabled status, attributes, children) |
 | Create a single value | Create a root category or child under a parent |
 | Create bulk values | Create multiple children under a parent at once |
-| Update a value | Change a value's name, description, or display order |
+| Update a value | Change a value's name, description, or display order. Always look up first to see current state |
 | Disable a value | Disable so it no longer appears in active selections |
 | Enable a value | Re-enable a previously disabled value |
 | Define an attribute | Define an attribute on a parent so children can set values |
@@ -53,8 +53,11 @@ Whether from model knowledge or web search, extract each entry into structured f
 - **Code** — Short uppercase identifier derived from the standard (e.g., "US", "EN", "MATH").
   If no standard code exists, derive one from the name (e.g., "PHYS_ED").
 - **Name** — The human-readable label (e.g., "United States", "English").
-- **Description** — Any machine-readable or secondary value
-  (e.g., numeric code, official abbreviation, alternate name).
+- **Description** — A meaningful, concise description that adds context beyond the name
+  (e.g., for a country: the ISO 3166-1 numeric code like "840"; for a language: "West Germanic language";
+  for a school subject: "Advanced placement course"). **Always include a description when one can be
+  reasonably inferred** — even a short one is better than blank. Leave blank only when no
+  meaningful description exists.
 - **DisplayOrder** — Assign sequentially starting from 1, preserving the natural order
   of the reference data (1 = first entry, 2 = second, etc.).
 
@@ -94,7 +97,7 @@ When the parent does not exist, build it from context as follows:
 |-------|--------|------------|
 | Code | Derive from context: use a short uppercase code (e.g., "CNTRY" for countries, "SUBJ" for subjects). If context doesn't suggest a code, ask the user. | **Yes** |
 | Name | Derive from context: the full category name (e.g., "Countries", "School Subjects"). If unclear, ask the user. | **Yes** |
-| Description | Derive from context if available (e.g., "ISO 3166 country codes"). Otherwise leave blank — it is optional. | No |
+| Description | Derive from context if available (e.g., "ISO 3166 country codes"). Include a description whenever one can be reasonably inferred — it helps users understand the category at a glance. Otherwise leave blank. | No |
 
 - If both **code** and **name** can be inferred from context, create the parent immediately without asking.
 - If either code or name is missing and cannot be inferred, **ask the user** for the missing required fields before proceeding.
@@ -105,6 +108,11 @@ Using your built-in knowledge (or web search if needed), extract the values into
 Code/Name/Description/DisplayOrder, apply any attributes from user context,
 and **present the full table immediately** — do not pause to ask whether to search
 or what attributes to add. Infer attributes from the user's request context.
+
+**Always include descriptions** in the table when a meaningful description can be
+inferred from your knowledge (e.g., ISO numeric codes for countries, language families,
+subject descriptions). An empty description should only appear when no reasonable
+description exists.
 
 Example table format:
 
@@ -120,7 +128,7 @@ Then ask: **"Shall I create these coded values?"** and wait for the user's expli
 When the user gives affirmative confirmation (e.g., "yes", "go ahead", "create them",
 "do it"), immediately proceed with creation:
 - If the parent does not yet exist, create it first.
-- If any attribute definitions need to be set on the parent (e.g., weight, cloud, modelName), define them before creating children.
+- If any attribute definitions need to be set on the parent (e.g., weight, ollamaModelName, openrouterModelName), define them before creating children.
 - Create all children at once using the bulk creation capability.
 - Set any attribute values on children as needed.
 
@@ -134,15 +142,55 @@ After the bulk creation completes successfully, inform the user that the coded v
 have been created in plain English. The chat interface will automatically navigate to the
 children page for the parent coded value.
 
-## Updating and disabling values
+## Updating values
 
-After values are created, the user may want to change them:
+When a user asks to update or change coded values, follow this workflow:
 
-- **Rename or re-describe a value** → update the value with the code and the new name/description/displayOrder.
+### Step 1: Identify the target value
+
+The user may refer to a value by **code** (e.g., "update HSPTL") or by **name** (e.g., "update hospital types", "change the diseases category").
+
+- **If the user provides a code** → use `get_coded_value_by_code` directly.
+- **If the user provides a name but no code** → derive the likely code from the name:
+  - Try common abbreviations: "countries" → `CNTRY`, "hospital types" → `HSPTL`, "subjects" → `SUBJ`
+  - If uncertain, use `list_coded_value_categories` to browse all categories and match by name.
+  - Use `get_coded_value_by_code` to look up the value and retrieve ALL its current fields.
+
+### Step 2: Present the current values for confirmation
+
+After retrieving the value, show the user what it currently looks like:
+
+> **HSPTL — Hospital Types**
+> - Name: Hospital Types
+> - Description: Hospital classification codes
+> - DisplayOrder: 3
+> - IsDisabled: false
+> - Children: 5 (HSPTL_GENERAL, HSPTL_SPECIALTY, …)
+> - Attributes: weight, isActive
+
+Then ask: **"What would you like to change?"**
+
+### Step 3: Apply the update
+
+When the user specifies the changes:
+- **Rename** → use `update_coded_value` with the code and the new name.
+- **Change description** → use `update_coded_value` with the code and the new description.
+- **Reorder** → use `update_coded_value` with the code and the new displayOrder.
+- **Change multiple fields at once** → pass all changed fields in a single `update_coded_value` call. The tool preserves any fields you don't specify.
+- **Update children** → call `get_coded_value_by_code` for the parent, then `update_coded_value` for each child that needs changing. **When updating a parent's description, also update each child's description if the user's request covers the whole category** (e.g., "update descriptions for PKTYPES" means update the parent AND all its children).
+
+### Step 4: Confirm the update
+
+After the update completes, confirm briefly:
+✅ "Updated **HSPTL**: Name changed to 'Hospital Categories'"
+✅ "Updated **MATH**: Description updated"
+
+Do NOT delete and re-create values just to change their name or description. Use `update_coded_value` instead.
+
+## Disabling and enabling values
+
 - **Temporarily hide a value** → disable it using the code. The value still exists but won't appear in active selections.
 - **Restore a disabled value** → re-enable it using the code.
-
-Do not delete and re-create values just to change their name or description. Use the update capability instead.
 
 ## Attribute data types
 

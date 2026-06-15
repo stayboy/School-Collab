@@ -19,9 +19,9 @@ public sealed class RecoverCodedValueHandler(
             return;
         }
 
-        if (await repository.ExistsByCodeAsync(codedValue.Code, cancellationToken))
+        if (await repository.ExistsByCodeInParentAsync(codedValue.Code, codedValue.ParentId, cancellationToken))
         {
-            throw new DuplicateCodeException(codedValue.Code);
+            throw new DuplicateCodeException(codedValue.Code, codedValue.ParentId);
         }
 
         codedValue.Recover();

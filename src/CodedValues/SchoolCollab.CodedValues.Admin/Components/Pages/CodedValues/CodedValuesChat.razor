@@ -1,13 +1,14 @@
 @using Microsoft.Extensions.AI
+@using SchoolCollab.CodedValues.AI
 @using SchoolCollab.CodedValues.Admin.Services
 @implements IAsyncDisposable
 
-@inject CodedValueAIService AiService
+@inject AiChatClient AiChatClient
 @inject CodedValuesApiClient Api
 @inject ILogger<CodedValuesChat> Logger
 @inject NavigationManager Nav
 
-<div class="chat-container" style="border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1); margin-top: 2rem; padding-top: 1rem;">
+<div class="chat-container" style="border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1); padding-top: 0.75rem; flex-shrink:0;">
     <h3 style="margin-bottom: 0.5rem;">✨ AI Assistant</h3>
     <p style="color: var(--neutral-foreground-3, #616161); margin-bottom: 1rem; font-size: 0.875rem;">
         Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
@@ -64,7 +65,7 @@
                 <li>
                     <FluentSelect Items="@_models"
                                  @bind-SelectedOption="@_selectedModel"
-                                 OptionText="@(m => $"{m!.Label} (w:{m!.Weight}, {(m!.Cloud ? "☁️ cloud" : "🖥️ local")})")"
+                                 OptionText="@(m => $"{m!.Label} (w:{m!.Weight})")"
                                  OptionValue="@(m => m!.Value)"
                                  Style="width: 100%; max-width: 520px;"
                                  aria-label="AI model" />
@@ -89,11 +90,8 @@
                     </div>
                 </li>
             </ul>
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem;">
-                <span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem; font-family: monospace;">Model: @_selectedModel.Value</span>
-                <FluentAnchor Href="/ai-system-prompt.md" Target="_blank" appearance="Appearance.Hypertext">
-                    Edit system prompt
-                </FluentAnchor>
+            <div style="display: flex; justify-content: flex-end; align-items: center; margin-top: 0.25rem;">
+                <span style="color: var(--neutral-foreground-3, #616161); font-size: 0.75rem; font-family: monospace;">Model: @_selectedModel?.Value</span>
             </div>
         </ChildContent>
         <ErrorContent Context="ex">
@@ -119,20 +117,27 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    private record ModelOption(string Value, string Label, decimal Weight = 0m, bool Cloud = false);
+    private record ModelOption(string Value, string Label, decimal Weight = 0m);
 
     private static readonly ModelOption[] _fallbackModels =
     [
-        new("llama3.1:8b", "Llama 3.1 8B", 1.0m, false),
-        new("llama3.2:3b", "Llama 3.2 3B", 0.4m, false),
-        new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m, false),
-        new("mistral:7b", "Mistral 7B", 0.9m, false),
-        new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m, false),
-        new("gemma2:9b", "Gemma 2 9B", 1.2m, false)
+        new("llama3.1:8b", "Llama 3.1 8B", 1.0m),
+        new("llama3.2:3b", "Llama 3.2 3B", 0.4m),
+        new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m),
+        new("mistral:7b", "Mistral 7B", 0.9m),
+        new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m),
+        new("gemma2:9b", "Gemma 2 9B", 1.2m),
+        new("openai/gpt-4o-mini", "GPT-4o Mini", 1.5m),
+        new("openai/gpt-4o", "GPT-4o", 2.0m),
+        new("anthropic/claude-3.5-haiku", "Claude 3.5 Haiku", 1.5m),
+        new("anthropic/claude-sonnet-4", "Claude Sonnet 4", 2.5m),
+        new("google/gemini-2.0-flash-001", "Gemini 2.0 Flash", 1.3m),
+        new("deepseek/deepseek-chat", "DeepSeek V3", 1.0m)
     ];
 
-    private ModelOption[] _models = _fallbackModels;
-    private ModelOption _selectedModel = _fallbackModels[0];
+    private ModelOption[] _models = [];
+    private ModelOption? _selectedModel;
+    private string _defaultProvider = "ollama";
 
     private static string GetMessageStyle(ChatRole role) =>
         role == ChatRole.User
@@ -144,14 +149,35 @@
         _loadCts = new CancellationTokenSource();
         try
         {
-            var parent = await Api.GetByCodeAsync("AI-MODELS", _loadCts.Token);
-            if (_disposed || parent is null) return;
+            // Fetch default provider and model list in parallel
+            var providerTask = AiChatClient.GetDefaultProviderAsync(_loadCts.Token);
+            var parentTask = Api.GetByCodeAsync("AI-MODELS", ct: _loadCts.Token);
+            await Task.WhenAll(providerTask, parentTask);
+
+            if (_disposed) return;
+
+            _defaultProvider = await providerTask;
+            var parent = await parentTask;
+            if (parent is null)
+            {
+                ApplyFallbackModels();
+                return;
+            }
 
             var children = await Api.GetChildrenAsync(parent.Id, _loadCts.Token);
-            if (_disposed || children is null || children.Length == 0) return;
+            if (_disposed || children is null || children.Length == 0)
+            {
+                ApplyFallbackModels();
+                return;
+            }
+
+            // Determine the model-name attribute key based on the default provider
+            var modelNameKey = _defaultProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase)
+                ? "openrouterModelName"
+                : "ollamaModelName";
 
             var models = children
-                .Where(c => !c.IsDisabled && !c.IsDeleted && c.Description is not null)
+                .Where(c => !c.IsDisabled && !c.IsDeleted)
                 .OrderBy(c => c.Attributes.FirstOrDefault(a => a.Key == "weight") is { } wAttr
                     ? decimal.TryParse(wAttr.Value, out var w) ? w : decimal.MaxValue
                     : decimal.MaxValue)
@@ -160,21 +186,9 @@
                 {
                     var weightAttr = c.Attributes.FirstOrDefault(a => a.Key == "weight");
                     var weight = weightAttr is not null && decimal.TryParse(weightAttr.Value, out var w) ? w : 0m;
-                    var cloudAttr = c.Attributes.FirstOrDefault(a => a.Key == "cloud");
-                    var cloud = cloudAttr is not null && bool.TryParse(cloudAttr.Value, out var b) && b;
-                    // Prefer modelName attribute (use as-is, includes :cloud suffix if needed)
-                    // Fall back to Description + :cloud suffix for cloud models
-                    var modelNameAttr = c.Attributes.FirstOrDefault(a => a.Key == "modelName");
-                    string ollamaTag;
-                    if (modelNameAttr is not null && !string.IsNullOrWhiteSpace(modelNameAttr.Value))
-                    {
-                        ollamaTag = modelNameAttr.Value;
-                    }
-                    else
-                    {
-                        ollamaTag = cloud && !c.Description!.EndsWith(":cloud") ? $"{c.Description}:cloud" : c.Description!;
-                    }
-                    return new ModelOption(ollamaTag, c.Name, weight, cloud);
+                    var modelName = c.Attributes.FirstOrDefault(a => a.Key == modelNameKey)?.Value
+                                     ?? c.Name;
+                    return new ModelOption(modelName, c.Name, weight);
                 })
                 .ToArray();
 
@@ -182,7 +196,12 @@
             {
                 _models = models;
                 _selectedModel = models[0];
-                Logger.LogInformation("Loaded {Count} AI models from coded values", models.Length);
+                Logger.LogInformation("Loaded {Count} AI models from coded values (provider: {Provider}, attribute: {Attr})",
+                    models.Length, _defaultProvider, modelNameKey);
+            }
+            else
+            {
+                ApplyFallbackModels();
             }
         }
         catch (OperationCanceledException) { /* user navigated away */ }
@@ -190,7 +209,14 @@
         {
             if (_disposed) return;
             Logger.LogWarning(ex, "Failed to load AI models from API, using fallback list");
+            ApplyFallbackModels();
         }
+    }
+
+    private void ApplyFallbackModels()
+    {
+        _models = _fallbackModels;
+        _selectedModel = _fallbackModels[0];
     }
 
     private async Task SendAsync()
@@ -218,7 +244,7 @@
 
         try
         {
-            await foreach (var update in AiService.ChatAsync(history, _selectedModel.Value, _sendCts.Token))
+            await foreach (var update in AiChatClient.ChatAsync(history, _selectedModel?.Value ?? _fallbackModels[0].Value, _sendCts.Token))
             {
                 if (_disposed) return;
 
@@ -253,6 +279,14 @@
         catch (OperationCanceledException)
         {
             // user navigated away or cancelled
+        }
+        catch (IOException) when (_sendCts?.Token.IsCancellationRequested == true)
+        {
+            // I/O aborted due to cancellation — not an error
+        }
+        catch (HttpRequestException) when (_sendCts?.Token.IsCancellationRequested == true)
+        {
+            // HttpClient wraps I/O errors in HttpRequestException during cancellation
         }
         catch (Exception ex)
         {

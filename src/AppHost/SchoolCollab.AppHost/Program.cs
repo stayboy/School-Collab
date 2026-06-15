@@ -43,8 +43,14 @@ var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("
     .WaitFor(redis)
     .WaitForCompletion(codedValuesMigrator);
 
-builder.AddProject<Projects.SchoolCollab_CodedValues_Admin>("coded-values-admin")
+var codedValuesAi = builder.AddProject<Projects.SchoolCollab_CodedValues_AI>("coded-values-ai")
     .WithReference(codedValuesApi)
     .WaitFor(codedValuesApi);
+
+builder.AddProject<Projects.SchoolCollab_CodedValues_Admin>("coded-values-admin")
+    .WithReference(codedValuesApi)
+    .WithReference(codedValuesAi)
+    .WaitFor(codedValuesApi)
+    .WaitFor(codedValuesAi);
 
 builder.Build().Run();

@@ -59,11 +59,26 @@ public sealed class CodedValuesApiClient(HttpClient http)
     public Task<CodedValueDto[]?> GetChildrenAsync(Guid parentId, CancellationToken ct = default) =>
         http.GetFromJsonAsync<CodedValueDto[]>($"/coded-values/by-parent?parentId={parentId}&includeDisabled=true", ct);
 
-    public Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default) =>
-        http.GetFromJsonAsync<CodedValueDto>($"/coded-values/{id}", ct);
+    public async Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync($"/coded-values/{id}", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CodedValueDto>(ct);
+    }
 
-    public Task<CodedValueDto?> GetByCodeAsync(string code, CancellationToken ct = default) =>
-        http.GetFromJsonAsync<CodedValueDto>($"/coded-values/by-code/{Uri.EscapeDataString(code)}", ct);
+    public async Task<CodedValueDto?> GetByCodeAsync(string code, Guid? parentId = null, CancellationToken ct = default)
+    {
+        var url = parentId.HasValue
+            ? $"/coded-values/by-code/{Uri.EscapeDataString(code)}?parentId={parentId.Value}"
+            : $"/coded-values/by-code/{Uri.EscapeDataString(code)}";
+        var response = await http.GetAsync(url, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<CodedValueDto>(ct);
+    }
 
     public async Task CreateAsync(CreateCodedValueRequest req, CancellationToken ct = default)
     {

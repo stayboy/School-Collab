@@ -2,14 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data;
-using SchoolCollab.CodedValues.Core.Domain.Exceptions;
 using SchoolCollab.CodedValues.Core.DTOs;
 
 namespace SchoolCollab.CodedValues.Core.Queries.GetCodedValueByCode;
 
 public sealed class GetCodedValueByCodeHandler(
     CodedValuesDbContext db,
-    HybridCache cache) : IQueryHandler<GetCodedValueByCode, CodedValueDto>
+    HybridCache cache) : IQueryHandler<GetCodedValueByCode, CodedValueDto?>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -17,24 +16,35 @@ public sealed class GetCodedValueByCodeHandler(
         LocalCacheExpiration = TimeSpan.FromMinutes(1)
     };
 
-    public async Task<CodedValueDto> HandleAsync(
+    public async Task<CodedValueDto?> HandleAsync(
         GetCodedValueByCode query,
         CancellationToken cancellationToken = default)
     {
         var normalisedCode = query.Code.Trim().ToUpperInvariant();
+        var cacheKey = query.ParentId.HasValue
+            ? $"coded-value:code:{normalisedCode}:parent:{query.ParentId.Value}"
+            : $"coded-value:code:{normalisedCode}";
 
         return await cache.GetOrCreateAsync(
-            $"coded-value:code:{normalisedCode}",
-            (db, normalisedCode),
+            cacheKey,
+            (db, normalisedCode, query.ParentId),
             static async (state, ct) =>
             {
-                var (db, code) = state;
-                var cv = await db.CodedValues
-                    .AsNoTracking()
-                    .Include(x => x.Attributes)
-                    .Include(x => x.AttributeDefinitions)
-                    .SingleOrDefaultAsync(x => x.Code == code, ct)
-                    ?? throw new CodedValueNotFoundException($"Code:{code}");
+                var (db, code, parentId) = state;
+                var cv = parentId.HasValue
+                    ? await db.CodedValues
+                        .AsNoTracking()
+                        .Include(x => x.Attributes)
+                        .Include(x => x.AttributeDefinitions)
+                        .FirstOrDefaultAsync(x => x.Code == code && x.ParentId == parentId, ct)
+                    : await db.CodedValues
+                        .AsNoTracking()
+                        .Include(x => x.Attributes)
+                        .Include(x => x.AttributeDefinitions)
+                        .FirstOrDefaultAsync(x => x.Code == code, ct);
+
+                if (cv is null)
+                    return null;
 
                 string? parentCode = cv.ParentId.HasValue
                     ? await db.CodedValues.AsNoTracking()

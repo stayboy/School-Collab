@@ -15,7 +15,15 @@ internal sealed class CodedValueRepository(CodedValuesDbContext db) : ICodedValu
     public Task<CodedValue?> GetByCodeAsync(string code, CancellationToken cancellationToken = default) =>
         db.CodedValues
             .Include(x => x.Attributes)
-            .SingleOrDefaultAsync(x => x.Code == code.Trim().ToUpperInvariant(), cancellationToken);
+            .FirstOrDefaultAsync(x => x.Code == code.Trim().ToUpperInvariant(), cancellationToken);
+
+    public Task<CodedValue?> GetByCodeAndParentAsync(string code, Guid? parentId, CancellationToken cancellationToken = default)
+    {
+        var normalisedCode = code.Trim().ToUpperInvariant();
+        return parentId.HasValue
+            ? db.CodedValues.Include(x => x.Attributes).FirstOrDefaultAsync(x => x.Code == normalisedCode && x.ParentId == parentId, cancellationToken)
+            : db.CodedValues.Include(x => x.Attributes).FirstOrDefaultAsync(x => x.Code == normalisedCode && x.ParentId == null, cancellationToken);
+    }
 
     public Task<CodedValue?> GetIncludingDeletedAsync(Guid id, CancellationToken cancellationToken = default) =>
         db.CodedValues
@@ -26,9 +34,23 @@ internal sealed class CodedValueRepository(CodedValuesDbContext db) : ICodedValu
     public Task<bool> ExistsByCodeAsync(string code, CancellationToken cancellationToken = default) =>
         db.CodedValues.AnyAsync(x => x.Code == code.Trim().ToUpperInvariant(), cancellationToken);
 
+    public Task<bool> ExistsByCodeInParentAsync(string code, Guid? parentId, CancellationToken cancellationToken = default)
+    {
+        var normalisedCode = code.Trim().ToUpperInvariant();
+        return parentId.HasValue
+            ? db.CodedValues.AnyAsync(x => x.Code == normalisedCode && x.ParentId == parentId, cancellationToken)
+            : db.CodedValues.AnyAsync(x => x.Code == normalisedCode && x.ParentId == null, cancellationToken);
+    }
+
     public async Task AddAsync(CodedValue codedValue, CancellationToken cancellationToken = default)
     {
         await db.CodedValues.AddAsync(codedValue, cancellationToken);
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
+    public async Task AddRangeAsync(IEnumerable<CodedValue> codedValues, CancellationToken cancellationToken = default)
+    {
+        await db.CodedValues.AddRangeAsync(codedValues, cancellationToken);
         await db.SaveChangesAsync(cancellationToken);
     }
 
