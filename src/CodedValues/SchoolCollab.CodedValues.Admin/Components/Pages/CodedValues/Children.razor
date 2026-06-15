@@ -50,7 +50,6 @@
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
                                         GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
                                         MultiLine="true"
-                                        Class="grid-sticky-cols"
                                         TGridItem="CodedValueDto">
                             <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                                 <code>@context.Code</code>
@@ -132,7 +131,6 @@
                     <FluentDataGrid Items="@_children.AsQueryable()"
                                     GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
                                     MultiLine="true"
-                                    Class="grid-sticky-cols"
                                     TGridItem="CodedValueDto">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                             <code>@context.Code</code>
