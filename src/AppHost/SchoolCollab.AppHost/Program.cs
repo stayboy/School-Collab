@@ -53,12 +53,6 @@ var codedValuesAi = builder.AddProject<Projects.SchoolCollab_AI>("coded-values-a
     .WithReference(codedValuesApi)
     .WaitFor(codedValuesApi);
 
-builder.AddProject<Projects.SchoolCollab_CodedValues_Admin>("coded-values-admin")
-    .WithReference(codedValuesApi)
-    .WithReference(codedValuesAi)
-    .WaitFor(codedValuesApi)
-    .WaitFor(codedValuesAi);
-
 var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
     .WithReference(assignmentsDb)
     .WithReference(rabbit)
@@ -67,10 +61,13 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WaitFor(redis)
     .WaitForCompletion(migrator);
 
-builder.AddProject<Projects.SchoolCollab_Assignments_Admin>("assignments-admin")
-    .WithReference(assignmentsApi)
+// Unified admin host — serves both CodedValues and Assignments Blazor UIs
+builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WithReference(codedValuesApi)
-    .WaitFor(assignmentsApi)
-    .WaitFor(codedValuesApi);
+    .WithReference(codedValuesAi)
+    .WithReference(assignmentsApi)
+    .WaitFor(codedValuesApi)
+    .WaitFor(codedValuesAi)
+    .WaitFor(assignmentsApi);
 
 builder.Build().Run();

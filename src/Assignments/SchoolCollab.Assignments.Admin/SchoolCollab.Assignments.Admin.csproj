@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+<Project Sdk="Microsoft.NET.Sdk.Razor">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
@@ -9,12 +9,14 @@
     <InternalsVisibleTo Include="SchoolCollab.Assignments.Tests.Unit" />
   </ItemGroup>
   <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
+    <ProjectReference Include="..\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
   </ItemGroup>
 </Project>

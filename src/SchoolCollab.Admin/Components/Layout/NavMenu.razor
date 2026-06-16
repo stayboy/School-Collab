@@ -1,0 +1,81 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.CodedValues.Admin.Services
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<FluentNavMenu Width="250"
+               Title="Main navigation">
+
+    <FluentNavLink Href="/"
+                  Icon="@(Icon.FromType<Icons.Regular.Size20.Home>())"
+                  Match="NavLinkMatch.All">
+        Home
+    </FluentNavLink>
+
+    <FluentNavGroup Title="Coded Values"
+                    Expanded="true">
+        @if (Loading)
+        {
+            <FluentNavLink Href="#" Disabled="true">
+               <FluentProgressRing class="progress-ring-small" />
+            </FluentNavLink>
+        }
+        else if (ParentValues is { Length: > 0 })
+        {
+            foreach (var cv in ParentValues.Take(20))
+            {
+               <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
+                             Icon="@(Icon.FromType<Icons.Regular.Size20.Tag>())"
+                             Title="@cv.Name">
+                   @Truncate(cv.Name, 22)
+               </FluentNavLink>
+            }
+
+            if (ParentValues.Length > 20)
+            {
+               <FluentNavLink Href="/coded-values"
+                             Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowExportUp>())">
+                   <i>Show More …</i>
+               </FluentNavLink>
+            }
+        }
+        else
+        {
+            <FluentNavLink Href="/coded-values"
+                         Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+               All Categories
+            </FluentNavLink>
+        }
+
+        <hr class="nav-separator" />
+
+        <FluentNavLink Href="/coded-values"
+                     Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+            All Categories
+        </FluentNavLink>
+
+        <FluentNavLink Href="/coded-values/chat"
+                     Icon="@(Icon.FromType<Icons.Regular.Size20.Bot>())">
+            AI Assistant
+        </FluentNavLink>
+    </FluentNavGroup>
+
+    <FluentNavGroup Title="Assignments"
+                    Expanded="true">
+        <FluentNavLink Href="/assignments"
+                      Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+            All Assignments
+        </FluentNavLink>
+        <FluentNavLink Href="/assignments/create"
+                      Icon="@(Icon.FromType<Icons.Regular.Size20.Add>())">
+            New Assignment
+        </FluentNavLink>
+    </FluentNavGroup>
+</FluentNavMenu>
+
+@code {
+    [Parameter] public CodedValueDto[]? ParentValues { get; set; }
+    [Parameter] public bool Loading { get; set; }
+
+    private static string Truncate(string value, int maxLength)
+        => value.Length <= maxLength ? value : string.Concat(value.AsSpan(0, maxLength - 1), "…");
+}
