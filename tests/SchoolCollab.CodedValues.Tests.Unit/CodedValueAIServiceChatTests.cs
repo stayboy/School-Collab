@@ -6,8 +6,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
-using SchoolCollab.CodedValues.AI;
-using SchoolCollab.CodedValues.AI.Services;
+using SchoolCollab.AI;
+using SchoolCollab.AI.Services;
 
 namespace SchoolCollab.CodedValues.Tests.Unit;
 

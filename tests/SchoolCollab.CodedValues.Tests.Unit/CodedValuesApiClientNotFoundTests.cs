@@ -3,8 +3,8 @@ using System.Text.Json;
 using FluentAssertions;
 using AdminApi = SchoolCollab.CodedValues.Admin.Services.CodedValuesApiClient;
 using AdminDto = SchoolCollab.CodedValues.Admin.Services.CodedValueDto;
-using AiApi = SchoolCollab.CodedValues.AI.Services.CodedValuesApiClient;
-using AiDto = SchoolCollab.CodedValues.AI.Services.CodedValueDto;
+using AiApi = SchoolCollab.AI.Services.CodedValuesApiClient;
+using AiDto = SchoolCollab.AI.Services.CodedValueDto;
 
 namespace SchoolCollab.CodedValues.Tests.Unit;
 

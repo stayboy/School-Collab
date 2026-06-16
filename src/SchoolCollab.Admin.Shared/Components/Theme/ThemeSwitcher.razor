@@ -1,0 +1,78 @@
+@implements IDisposable
+
+<FluentStack Orientation="Orientation.Horizontal"
+             HorizontalGap="4"
+             VerticalAlignment="VerticalAlignment.Center"
+             class="theme-switcher-stack">
+
+    <FluentButton Appearance="Appearance.Stealth"
+                  OnClick="CycleMode"
+                  Title="@($"Mode: {_mode} — click to switch")"
+                  aria-label="@($"Mode: {_mode}")">
+        @ModeGlyph
+    </FluentButton>
+
+    <FluentSelect Items="@_officeColors"
+                  OptionText="@(c => c.ToString())"
+                  SelectedOption="@_officeColor"
+                  SelectedOptionChanged="EventCallback.Factory.Create<OfficeColor?>(this, OnAccentChanged)"
+                  Width="120px"
+                  aria-label="Accent colour" />
+</FluentStack>
+
+@code {
+    [Parameter] public DesignThemeModes Mode { get; set; } = DesignThemeModes.System;
+    [Parameter] public EventCallback<DesignThemeModes> ModeChanged { get; set; }
+
+    [Parameter] public OfficeColor? Accent { get; set; } = OfficeColor.Teams;
+    [Parameter] public EventCallback<OfficeColor?> AccentChanged { get; set; }
+
+    private DesignThemeModes _mode;
+    private OfficeColor? _officeColor;
+    private OfficeColor?[]? _officeColors;
+
+    protected override void OnInitialized()
+    {
+        _officeColors = new OfficeColor?[]
+        {
+            OfficeColor.Teams,
+            OfficeColor.Word,
+            OfficeColor.Excel,
+            OfficeColor.PowerPoint,
+            OfficeColor.Outlook,
+            OfficeColor.OneNote
+        };
+    }
+
+    protected override void OnParametersSet()
+    {
+        _mode = Mode;
+        _officeColor = Accent;
+    }
+
+    private string ModeGlyph => _mode switch
+    {
+        DesignThemeModes.Light => "\u2600",
+        DesignThemeModes.Dark  => "\uD83C\uDF19",
+        _                      => "\u25D0"
+    };
+
+    private async Task CycleMode()
+    {
+        _mode = _mode switch
+        {
+            DesignThemeModes.Light => DesignThemeModes.Dark,
+            DesignThemeModes.Dark  => DesignThemeModes.System,
+            _                      => DesignThemeModes.Light
+        };
+        await ModeChanged.InvokeAsync(_mode);
+    }
+
+    private async Task OnAccentChanged(OfficeColor? value)
+    {
+        _officeColor = value;
+        await AccentChanged.InvokeAsync(value);
+    }
+
+    public void Dispose() { }
+}

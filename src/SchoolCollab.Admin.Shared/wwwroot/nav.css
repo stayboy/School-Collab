@@ -1,0 +1,7 @@
+/* Navigation separator */
+.nav-separator {
+    border: 0;
+    border-top: 1px solid var(--neutral-stroke-rest);
+    margin: 12px 0;
+    width: 100%;
+}

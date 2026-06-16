@@ -1,0 +1,27 @@
+@inherits LayoutComponentBase
+@using SchoolCollab.Admin.Shared.Components.Layout
+@using SchoolCollab.Assignments.Admin.Services
+
+<SchoolCollabLayout Body="@Body"
+                   DefaultTitle="Assignments"
+                   HeaderExtras="@HeaderExtras"
+                   SidebarContent="@SidebarContent"
+                   TitleResolver="@ResolveTitle" />
+
+@code {
+    private RenderFragment HeaderExtras => __builder => { };
+
+    private RenderFragment SidebarContent => __builder => {
+        <NavMenu />
+    };
+
+    private static string? ResolveTitle(string path) => path switch
+    {
+        "/" or "/assignments"                                                              => "Assignments",
+        var p when p.StartsWith("/assignments/create", StringComparison.OrdinalIgnoreCase) => "New Assignment",
+        var p when p.Contains("/edit", StringComparison.OrdinalIgnoreCase)                => "Edit Assignment",
+        var p when p.EndsWith("/review", StringComparison.OrdinalIgnoreCase)              => "Review",
+        "/Error"                                                                          => "Error",
+        _                                                                                 => null
+    };
+}

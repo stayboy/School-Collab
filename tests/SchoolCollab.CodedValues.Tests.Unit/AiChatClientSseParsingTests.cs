@@ -6,8 +6,8 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.CodedValues.Admin.Services;
-using SchoolCollab.CodedValues.AI;
+using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.AI;
 
 namespace SchoolCollab.CodedValues.Tests.Unit;
 
