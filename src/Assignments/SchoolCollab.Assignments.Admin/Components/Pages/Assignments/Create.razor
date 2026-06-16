@@ -241,7 +241,7 @@
         new(((int)AssignmentTypeDto.SemiManual).ToString(), "Semi-Manual"),
         new(((int)AssignmentTypeDto.Manual).ToString(), "Manual")
     ];
-    private AssignmentTypeOption? _selectedType;
+    private AssignmentTypeOption? _selectedType = new(((int)AssignmentTypeDto.Digital).ToString(), "Digital");
 
     // Step 2 — Resource links
     private class ResourceLinkEntry { public string Label { get; set; } = ""; public string Url { get; set; } = ""; }

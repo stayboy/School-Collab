@@ -1,0 +1,88 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: School Collab
+      - generic [ref=e7]: ·
+      - generic [ref=e8]: New Assignment
+      - generic [ref=e9]:
+        - 'generic "Mode: System" [ref=e10] [cursor=pointer]':
+          - 'button "Mode: System" [ref=e11]':
+            - generic:
+              - generic: ◐
+        - combobox "Accent colour" [ref=e12]:
+          - generic [ref=e14] [cursor=pointer]:
+            - generic [ref=e15]: Teams
+            - img [ref=e18]
+          - generic: Teams
+          - generic: Word
+          - generic: Excel
+          - generic: PowerPoint
+          - generic: Outlook
+          - generic: OneNote
+  - generic [ref=e20]:
+    - menu "Assignments" [ref=e21]:
+      - menuitem "Home" [ref=e22]:
+        - link "Home" [ref=e23] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e25]:
+            - img [ref=e26]
+            - generic [ref=e28]: Home
+      - menuitem "Assignments" [ref=e29]:
+        - generic "Assignments" [ref=e31]:
+          - generic [ref=e32]:
+            - generic [ref=e33]: Assignments
+            - generic [ref=e34] [cursor=pointer]:
+              - img
+        - group [ref=e35]:
+          - menu "Navigation menu" [ref=e36]:
+            - menuitem "All Assignments" [ref=e37]:
+              - link "All Assignments" [ref=e38] [cursor=pointer]:
+                - /url: /assignments
+                - generic [ref=e40]:
+                  - img [ref=e41]
+                  - generic [ref=e43]: All Assignments
+            - menuitem "New Assignment" [ref=e44]:
+              - link "New Assignment" [ref=e45] [cursor=pointer]:
+                - /url: /assignments/create
+                - generic [ref=e47]:
+                  - img [ref=e48]
+                  - generic [ref=e50]: New Assignment
+    - article [ref=e52]:
+      - generic [ref=e53]:
+        - heading "New Assignment" [level=2] [ref=e54]
+        - generic [ref=e55]:
+          - generic [ref=e56] [cursor=pointer]:
+            - generic [ref=e157]: ✓
+            - generic [ref=e58]: Grade & Subject
+          - generic [ref=e60] [cursor=pointer]:
+            - generic [ref=e218]: ✓
+            - generic [ref=e62]: Details
+          - generic [ref=e64]:
+            - generic [ref=e65]: "3"
+            - generic [ref=e66]: Questions & Attachments
+        - generic [ref=e67]:
+          - heading "Questions & Attachments" [level=3] [ref=e219]
+          - paragraph [ref=e220]: Add sample questions and/or attach files for this assignment.
+          - heading "Sample Questions" [level=4] [ref=e221]
+          - button "Add Question" [ref=e223] [cursor=pointer]:
+            - generic:
+              - generic: Add Question
+          - heading "Attachments" [level=4] [ref=e224]
+          - generic [ref=e225]:
+            - img [ref=e227]
+            - generic [ref=e229]: File attachments will be available in a future update. For now, use Resource Links in Step 2 to share external files.
+            - img [ref=e231] [cursor=pointer]
+        - generic [ref=e235]:
+          - img [ref=e237]
+          - generic [ref=e239]: "Response status code does not indicate success: 400 (Bad Request)."
+          - img [ref=e241] [cursor=pointer]
+        - generic [ref=e88]:
+          - button "Back" [ref=e202] [cursor=pointer]:
+            - generic:
+              - generic: Back
+          - button "Cancel" [ref=e90] [cursor=pointer]:
+            - generic:
+              - generic: Cancel
+          - button "Save as Draft" [ref=e234] [cursor=pointer]:
+            - generic:
+              - generic: Save as Draft

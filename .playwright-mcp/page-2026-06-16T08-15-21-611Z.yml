@@ -1,0 +1,151 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: School Collab
+      - generic [ref=e7]: ·
+      - generic [ref=e8]: New Assignment
+      - generic [ref=e9]:
+        - 'generic "Mode: System" [ref=e10] [cursor=pointer]':
+          - 'button "Mode: System" [ref=e11]':
+            - generic:
+              - generic: ◐
+        - combobox "Accent colour" [ref=e12]:
+          - generic [ref=e14] [cursor=pointer]:
+            - generic [ref=e15]: Teams
+            - img [ref=e18]
+          - generic: Teams
+          - generic: Word
+          - generic: Excel
+          - generic: PowerPoint
+          - generic: Outlook
+          - generic: OneNote
+  - generic [ref=e20]:
+    - menu "Assignments" [ref=e21]:
+      - menuitem "Home" [ref=e22]:
+        - link "Home" [ref=e23] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e25]:
+            - img [ref=e26]
+            - generic [ref=e28]: Home
+      - menuitem "Assignments" [ref=e29]:
+        - generic "Assignments" [ref=e31]:
+          - generic [ref=e32]:
+            - generic [ref=e33]: Assignments
+            - generic [ref=e34] [cursor=pointer]:
+              - img
+        - group [ref=e35]:
+          - menu "Navigation menu" [ref=e36]:
+            - menuitem "All Assignments" [ref=e37]:
+              - link "All Assignments" [ref=e38] [cursor=pointer]:
+                - /url: /assignments
+                - generic [ref=e40]:
+                  - img [ref=e41]
+                  - generic [ref=e43]: All Assignments
+            - menuitem "New Assignment" [ref=e44]:
+              - link "New Assignment" [ref=e45] [cursor=pointer]:
+                - /url: /assignments/create
+                - generic [ref=e47]:
+                  - img [ref=e48]
+                  - generic [ref=e50]: New Assignment
+    - article [ref=e52]:
+      - generic [ref=e53]:
+        - heading "New Assignment" [level=2] [ref=e54]
+        - generic [ref=e55]:
+          - generic [ref=e56]:
+            - generic [ref=e57]: "1"
+            - generic [ref=e58]: Grade & Subject
+          - generic [ref=e60]:
+            - generic [ref=e61]: "2"
+            - generic [ref=e62]: Details
+          - generic [ref=e64]:
+            - generic [ref=e65]: "3"
+            - generic [ref=e66]: Questions & Attachments
+        - generic [ref=e67]:
+          - heading "Grade & Subject" [level=3] [ref=e68]
+          - paragraph [ref=e69]: Select the grade and subject for this assignment.
+          - generic "Grade *" [ref=e70] [cursor=pointer]
+          - combobox "Grade *" [ref=e71]:
+            - generic [ref=e73] [cursor=pointer]:
+              - generic [ref=e74]: Grade 10
+              - img [ref=e77]
+            - generic: Grade R
+            - generic: Grade 1
+            - generic: Grade 2
+            - generic: Grade 3
+            - generic: Grade 4
+            - generic: Grade 5
+            - generic: Grade 6
+            - generic: Grade 7
+            - generic: Grade 8
+            - generic: Grade 9
+            - generic: Grade 10
+            - generic: Grade 11
+            - generic: Grade 12
+          - generic "Subject *" [ref=e79] [cursor=pointer]
+          - combobox "Subject *" [expanded] [active] [ref=e80]:
+            - generic [ref=e82] [cursor=pointer]:
+              - generic [ref=e83]: Select a subject…
+              - img [ref=e86]
+            - listbox [ref=e120]:
+              - generic:
+                - option "Mathematics" [ref=e121] [cursor=pointer]:
+                  - generic [ref=e122]:
+                    - generic: Mathematics
+                - option "Physical Sciences" [ref=e123] [cursor=pointer]:
+                  - generic [ref=e124]:
+                    - generic: Physical Sciences
+                - option "Life Sciences" [ref=e125] [cursor=pointer]:
+                  - generic [ref=e126]:
+                    - generic: Life Sciences
+                - option "English Home Language" [ref=e127] [cursor=pointer]:
+                  - generic [ref=e128]:
+                    - generic: English Home Language
+                - option "English First Additional Language" [ref=e129] [cursor=pointer]:
+                  - generic [ref=e130]:
+                    - generic: English First Additional Language
+                - option "Afrikaans Home Language" [ref=e131] [cursor=pointer]:
+                  - generic [ref=e132]:
+                    - generic: Afrikaans Home Language
+                - option "Afrikaans First Additional Language" [ref=e133] [cursor=pointer]:
+                  - generic [ref=e134]:
+                    - generic: Afrikaans First Additional Language
+                - option "Geography" [ref=e135] [cursor=pointer]:
+                  - generic [ref=e136]:
+                    - generic: Geography
+                - option "History" [ref=e137] [cursor=pointer]:
+                  - generic [ref=e138]:
+                    - generic: History
+                - option "Business Studies" [ref=e139] [cursor=pointer]:
+                  - generic [ref=e140]:
+                    - generic: Business Studies
+                - option "Accounting" [ref=e141] [cursor=pointer]:
+                  - generic [ref=e142]:
+                    - generic: Accounting
+                - option "Economics" [ref=e143] [cursor=pointer]:
+                  - generic [ref=e144]:
+                    - generic: Economics
+                - option "Information Technology" [ref=e145] [cursor=pointer]:
+                  - generic [ref=e146]:
+                    - generic: Information Technology
+                - option "Computer Applications Technology" [ref=e147] [cursor=pointer]:
+                  - generic [ref=e148]:
+                    - generic: Computer Applications Technology
+                - option "Drama" [ref=e149] [cursor=pointer]:
+                  - generic [ref=e150]:
+                    - generic: Drama
+                - option "Visual Arts" [ref=e151] [cursor=pointer]:
+                  - generic [ref=e152]:
+                    - generic: Visual Arts
+                - option "Music" [ref=e153] [cursor=pointer]:
+                  - generic [ref=e154]:
+                    - generic: Music
+                - option "Life Orientation" [ref=e155] [cursor=pointer]:
+                  - generic [ref=e156]:
+                    - generic: Life Orientation
+        - generic [ref=e88]:
+          - button "Cancel" [ref=e90] [cursor=pointer]:
+            - generic:
+              - generic: Cancel
+          - button "Next" [ref=e92] [cursor=pointer]:
+            - generic:
+              - generic: Next

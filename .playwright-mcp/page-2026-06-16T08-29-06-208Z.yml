@@ -1,0 +1,111 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: School Collab
+      - generic [ref=e7]: ·
+      - generic [ref=e8]: New Assignment
+      - generic [ref=e9]:
+        - 'generic "Mode: System" [ref=e10] [cursor=pointer]':
+          - 'button "Mode: System" [ref=e11]':
+            - generic:
+              - generic: ◐
+        - combobox "Accent colour" [ref=e12]:
+          - generic [ref=e14] [cursor=pointer]:
+            - generic [ref=e15]: Teams
+            - img [ref=e18]
+          - generic: Teams
+          - generic: Word
+          - generic: Excel
+          - generic: PowerPoint
+          - generic: Outlook
+          - generic: OneNote
+  - generic [ref=e20]:
+    - menu "Assignments" [ref=e21]:
+      - menuitem "Home" [ref=e22]:
+        - link "Home" [ref=e23] [cursor=pointer]:
+          - /url: /
+          - generic [ref=e25]:
+            - img [ref=e26]
+            - generic [ref=e28]: Home
+      - menuitem "Assignments" [ref=e29]:
+        - generic "Assignments" [ref=e31]:
+          - generic [ref=e32]:
+            - generic [ref=e33]: Assignments
+            - generic [ref=e34] [cursor=pointer]:
+              - img
+        - group [ref=e35]:
+          - menu "Navigation menu" [ref=e36]:
+            - menuitem "All Assignments" [ref=e37]:
+              - link "All Assignments" [ref=e38] [cursor=pointer]:
+                - /url: /assignments
+                - generic [ref=e40]:
+                  - img [ref=e41]
+                  - generic [ref=e43]: All Assignments
+            - menuitem "New Assignment" [ref=e44]:
+              - link "New Assignment" [ref=e45] [cursor=pointer]:
+                - /url: /assignments/create
+                - generic [ref=e47]:
+                  - img [ref=e48]
+                  - generic [ref=e50]: New Assignment
+    - article [ref=e52]:
+      - generic [ref=e53]:
+        - heading "New Assignment" [level=2] [ref=e54]
+        - generic [ref=e55]:
+          - generic [ref=e56] [cursor=pointer]:
+            - generic [ref=e157]: ✓
+            - generic [ref=e58]: Grade & Subject
+          - generic [ref=e60]:
+            - generic [ref=e61]: "2"
+            - generic [ref=e62]: Details
+          - generic [ref=e64]:
+            - generic [ref=e65]: "3"
+            - generic [ref=e66]: Questions & Attachments
+        - generic [ref=e67]:
+          - heading "Assignment Details" [level=3] [ref=e158]
+          - paragraph [ref=e159]: Add the assignment title, description, and other details.
+          - generic [ref=e160] [cursor=pointer]: Title *
+          - textbox "Title *" [ref=e163]:
+            - /placeholder: e.g. Chapter 5 Quiz
+            - text: Chapter 5 Quiz
+          - generic [ref=e164] [cursor=pointer]: Description / Instructions
+          - generic "Description / Instructions" [ref=e165]:
+            - textbox "Description / Instructions" [ref=e166]: Complete all questions in Chapter 5 of the textbook.
+          - generic "Assignment Type *" [ref=e167] [cursor=pointer]
+          - combobox "Assignment Type *" [ref=e168]:
+            - generic [ref=e170] [cursor=pointer]:
+              - generic [ref=e171]: Digital
+              - img [ref=e174]
+            - generic: Digital
+            - generic: Semi-Manual
+            - generic: Manual
+          - generic [ref=e176]:
+            - generic [ref=e177] [cursor=pointer]: Due Date
+            - generic [ref=e179]:
+              - textbox "Due Date" [ref=e180]:
+                - /placeholder: M/d/yyyy
+              - img [ref=e182]
+            - generic [ref=e184] [cursor=pointer]: Max Score
+            - generic [ref=e186]:
+              - textbox "Max Score" [ref=e187]: "25"
+              - generic [ref=e188]:
+                - img [ref=e191] [cursor=pointer]
+                - img [ref=e195] [cursor=pointer]
+          - heading "Resource Links" [level=4] [ref=e197]
+          - paragraph [ref=e198]: Add optional links to resources (videos, articles, etc.).
+          - button "Add Link" [ref=e200] [cursor=pointer]:
+            - generic:
+              - generic: Add Link
+          - generic [ref=e203]:
+            - img [ref=e205]
+            - generic [ref=e207]: Assignment Type is required.
+            - img [ref=e209] [cursor=pointer]
+        - generic [ref=e88]:
+          - button "Back" [ref=e202] [cursor=pointer]:
+            - generic:
+              - generic: Back
+          - button "Cancel" [ref=e90] [cursor=pointer]:
+            - generic:
+              - generic: Cancel
+          - button "Next" [ref=e92] [cursor=pointer]:
+            - generic:
+              - generic: Next

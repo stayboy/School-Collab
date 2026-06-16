@@ -1,0 +1,21 @@
+- generic [ref=e1]:
+  - generic [ref=e2]:
+    - generic [ref=e4]:
+      - img [ref=e6]
+      - generic [ref=e16]:
+        - heading "SchoolCollab dashboard" [level=1] [ref=e18]
+        - textbox [invalid] [ref=e22]:
+          - /placeholder: Enter token to log in...
+          - text: e61fc4fead35f68ed0939b606b3501ad
+        - generic [ref=e29]:
+          - img [ref=e30]
+          - generic [ref=e32]: Invalid token. Please try again
+        - generic [ref=e24]:
+          - link "Where do I find the token?" [ref=e25] [cursor=pointer]:
+            - /url: https://localhost:17160/login
+          - button "Log in" [ref=e27] [cursor=pointer]:
+            - generic:
+              - generic: Log in
+    - generic [ref=e28]: 13.3.5
+  - generic:
+    - tooltip "https://go.microsoft.com/fwlink/?linkid=2265718"
