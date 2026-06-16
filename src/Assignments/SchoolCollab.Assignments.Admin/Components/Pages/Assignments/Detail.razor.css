@@ -40,10 +40,10 @@
     max-width: 600px;
 }
 
-.full-width {
+::deep .full-width {
     width: 100%;
 }
 
-.narrow-field {
+::deep .narrow-field {
     width: 200px;
 }
