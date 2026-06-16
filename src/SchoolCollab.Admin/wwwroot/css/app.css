@@ -73,3 +73,15 @@ fluent-card[style*="cursor: pointer"]:hover {
 .mt-2 { margin-top: 0.5rem; }
 .mt-3 { margin-top: 1rem; }
 .my-4 { margin-top: 1.5rem; margin-bottom: 1.5rem; }
+
+/* Form field sizing — used across Assignments and CodedValues modules */
+.full-width {
+    min-width: 400px;
+    max-width: 700px;
+    width: 100%;
+}
+
+.narrow-field {
+    width: 200px;
+    min-width: 120px;
+}

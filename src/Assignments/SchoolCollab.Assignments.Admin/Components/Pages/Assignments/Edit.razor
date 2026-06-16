@@ -92,9 +92,9 @@
     private record AssignmentTypeOption(string Value, string Label);
     private readonly AssignmentTypeOption[] _typeOptions =
     [
-        new(((int)AssignmentTypeDto.Digital).ToString(), "Digital"),
-        new(((int)AssignmentTypeDto.SemiManual).ToString(), "Semi-Manual"),
-        new(((int)AssignmentTypeDto.Manual).ToString(), "Manual")
+        new(((int)AssignmentTypeDto.Online).ToString(), "Online"),
+        new(((int)AssignmentTypeDto.Hybrid).ToString(), "Hybrid"),
+        new(((int)AssignmentTypeDto.Offline).ToString(), "Offline")
     ];
     private AssignmentTypeOption? _selectedType;
 
@@ -166,6 +166,16 @@
             if (_selectedType is null)
             {
                 _error = "Assignment Type is required.";
+                return;
+            }
+            if (_selectedGrading is null)
+            {
+                _error = "Grading Format is required.";
+                return;
+            }
+            if (_selectedAudience is null)
+            {
+                _error = "Target Audience is required.";
                 return;
             }
 

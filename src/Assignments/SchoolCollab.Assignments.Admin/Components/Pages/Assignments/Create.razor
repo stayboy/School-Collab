@@ -3,6 +3,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @inject AssignmentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
 @using SchoolCollab.Assignments.Admin.Helpers
@@ -390,12 +391,6 @@
 
         try
         {
-            if (_selectedType is null)
-            {
-                _error = "Assignment Type is required.";
-                return;
-            }
-
             Logger.LogInformation("User initiated create for assignment {Title}", _model.Title);
 
             var req = new CreateAssignmentRequest(
@@ -409,7 +404,9 @@
                 _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
                 _model.MaxScore);
 
-            await Api.CreateAsync(req, ct);
+            var assignmentId = await Api.CreateAsync(req, ct);
+
+            Logger.LogInformation("Assignment {AssignmentId} created, questions will be added in future update", assignmentId);
             Nav.NavigateTo("/assignments");
         }
         catch (OperationCanceledException) { }
@@ -446,7 +443,6 @@
 
         public decimal? MaxScore { get; set; }
 
-        // Placeholder — will wire to CodedValues API in Phase 6
         public Guid SubjectCodedValueId { get; set; } = Guid.Empty;
         public Guid? GradeCodedValueId { get; set; }
     }
