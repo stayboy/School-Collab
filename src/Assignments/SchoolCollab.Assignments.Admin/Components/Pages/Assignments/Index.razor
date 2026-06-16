@@ -58,7 +58,11 @@
                                 <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
                             </TemplateColumn>
                             <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
-                                @context.AssignmentType
+                                <FluentBadge Appearance="@(context.AssignmentType == AssignmentTypeDto.Online ? Appearance.Accent
+                                    : context.AssignmentType == AssignmentTypeDto.Hybrid ? Appearance.Lightweight
+                                    : Appearance.Neutral)">
+                                    @context.AssignmentType
+                                </FluentBadge>
                             </TemplateColumn>
                             <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
                                 <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
@@ -116,7 +120,11 @@
                             <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
                         </TemplateColumn>
                         <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
-                            @context.AssignmentType
+                            <FluentBadge Appearance="@(context.AssignmentType == AssignmentTypeDto.Online ? Appearance.Accent
+                                : context.AssignmentType == AssignmentTypeDto.Hybrid ? Appearance.Lightweight
+                                : Appearance.Neutral)">
+                                @context.AssignmentType
+                            </FluentBadge>
                         </TemplateColumn>
                         <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
                             <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent

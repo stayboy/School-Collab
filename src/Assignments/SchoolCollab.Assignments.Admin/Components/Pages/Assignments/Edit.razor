@@ -76,9 +76,9 @@
     private record AssignmentTypeOption(string Value, string Label);
     private readonly AssignmentTypeOption[] _typeOptions =
     [
-        new(((int)AssignmentTypeDto.Digital).ToString(), "Digital"),
-        new(((int)AssignmentTypeDto.SemiManual).ToString(), "Semi-Manual"),
-        new(((int)AssignmentTypeDto.Manual).ToString(), "Manual")
+        new(((int)AssignmentTypeDto.Online).ToString(), "Online — Fully digital (MCQ, free-text, auto-graded)"),
+        new(((int)AssignmentTypeDto.Hybrid).ToString(), "Hybrid — Mix of online and physical submission"),
+        new(((int)AssignmentTypeDto.Offline).ToString(), "Offline — Instructions for physical submission")
     ];
     private AssignmentTypeOption? _selectedType;
 

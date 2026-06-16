@@ -6,7 +6,7 @@ using Microsoft.Extensions.Logging;
 namespace SchoolCollab.Assignments.Admin.Services;
 
 public enum AssignmentStatusDto { Draft, Published, Closed }
-public enum AssignmentTypeDto { Digital, SemiManual, Manual }
+public enum AssignmentTypeDto { Online, Hybrid, Offline }
 
 public record AssignmentSummaryDto(
     Guid Id,

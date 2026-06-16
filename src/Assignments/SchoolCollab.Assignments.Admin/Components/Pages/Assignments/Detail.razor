@@ -24,16 +24,22 @@
             <div class="detail-container">
                 <div class="title-row">
                     <h2 class="page-title">@_item.Title</h2>
-                    <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                    <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? Appearance.Accent
                         : _item.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                        : Appearance.Outline)">
+                        : Appearance.Lightweight)">
                         @_item.Status
                     </FluentBadge>
                 </div>
 
                 <div class="detail-grid">
                     <div class="detail-label">Type</div>
-                    <div class="detail-value">@_item.AssignmentType</div>
+                    <div class="detail-value">
+                        <FluentBadge Appearance="@(_item.AssignmentType == AssignmentTypeDto.Online ? Appearance.Accent
+                            : _item.AssignmentType == AssignmentTypeDto.Hybrid ? Appearance.Lightweight
+                            : Appearance.Neutral)">
+                            @_item.AssignmentType
+                        </FluentBadge>
+                    </div>
 
                     <div class="detail-label">Subject</div>
                     <div class="detail-value">@( _item.SubjectName ?? "—")</div>
