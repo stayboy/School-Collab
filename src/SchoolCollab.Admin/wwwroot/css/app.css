@@ -76,7 +76,6 @@ fluent-card[style*="cursor: pointer"]:hover {
 
 /* Form field sizing — used across Assignments and CodedValues modules */
 .full-width {
-    width: 100%;
     min-width: 400px;
 }
 
