@@ -61,9 +61,9 @@
                                 @context.AssignmentType
                             </TemplateColumn>
                             <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
-                                <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                                <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
                                     : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                                    : Appearance.Outline)">
+                                    : Appearance.Lightweight)">
                                     @context.Status
                                 </FluentBadge>
                             </TemplateColumn>
@@ -119,9 +119,9 @@
                             @context.AssignmentType
                         </TemplateColumn>
                         <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
-                            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
                                 : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                                : Appearance.Outline)">
+                                : Appearance.Lightweight)">
                                 @context.Status
                             </FluentBadge>
                         </TemplateColumn>
