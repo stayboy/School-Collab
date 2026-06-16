@@ -18,3 +18,47 @@ a.card-link:focus-visible fluent-card {
 fluent-card[style*="cursor: pointer"]:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
+
+/* Home dashboard layout */
+.home-dashboard {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 2rem 0;
+}
+
+.home-dashboard h1 {
+    font-size: 2rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.home-subtitle {
+    color: var(--neutral-foreground-2, #616161);
+    margin-bottom: 2rem;
+}
+
+.home-cards {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.home-card .home-card-inner {
+    padding: 1.5rem;
+}
+
+.home-card-inner h3 {
+    margin: 0.5rem 0 0.5rem;
+    font-size: 1.15rem;
+}
+
+.home-card-inner p {
+    margin: 0;
+    color: var(--neutral-foreground-2, #616161);
+    font-size: 0.9rem;
+}
+
+.home-card-icon {
+    font-size: 2rem;
+    margin-bottom: 0.25rem;
+}

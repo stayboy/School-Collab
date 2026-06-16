@@ -37,7 +37,10 @@
                  HorizontalGap="0"
                  class="layout-body">
 
-        @SidebarContent
+        @if (ShowSidebar)
+        {
+            @SidebarContent
+        }
 
         <FluentBodyContent class="layout-content">
             <article class="content">
@@ -68,6 +71,11 @@
     /// Optional content for the header area (e.g., ThemeSwitcher).
     /// </summary>
     [Parameter] public RenderFragment? HeaderExtras { get; set; }
+
+    /// <summary>
+    /// Whether to show the sidebar. When false, the body content fills the full width.
+    /// </summary>
+    [Parameter] public bool ShowSidebar { get; set; } = true;
 
     /// <summary>
     /// Sidebar content (e.g., NavMenu).

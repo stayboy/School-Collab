@@ -5,16 +5,19 @@
 @implements IDisposable
 @inject CodedValuesApiClient Api
 @inject ILogger<MainLayout> Logger
+@inject NavigationManager Nav
 
 <SchoolCollabLayout Body="@Body"
                     DefaultTitle="School Collab"
                     HeaderExtras="@HeaderExtras"
                     SidebarContent="@SidebarContent"
+                    ShowSidebar="@_showSidebar"
                     TitleResolver="@ResolveTitle" />
 
 @code {
     private CodedValueDto[]? _parentValues;
     private bool _loadingParents = true;
+    private bool _showSidebar = true;
     private DesignThemeModes _mode = DesignThemeModes.System;
     private OfficeColor? _officeColor = OfficeColor.Teams;
 
@@ -28,8 +31,9 @@
 
     private static string? ResolveTitle(string path) => path switch
     {
-        "/" or "/coded-values"                                                              => "Coded Values",
-        "/assignments"                                                                       => "Assignments",
+        "/"                                                                                    => "Home",
+        "/coded-values"                                                                         => "Coded Values",
+        "/assignments"                                                                          => "Assignments",
         var p when p.StartsWith("/coded-values/new", StringComparison.OrdinalIgnoreCase)     => "New Category",
         var p when p.StartsWith("/assignments/create", StringComparison.OrdinalIgnoreCase)  => "New Assignment",
         var p when p.EndsWith("/children/new", StringComparison.OrdinalIgnoreCase)          => "New Child",
@@ -39,6 +43,25 @@
         "/Error"                                                                            => "Error",
         _                                                                                   => null
     };
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        UpdateSidebarVisibility(new Uri(Nav.Uri).AbsolutePath);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => UpdateSidebarVisibility(new Uri(e.Location).AbsolutePath);
+
+    private void UpdateSidebarVisibility(string path)
+    {
+        var showSidebar = path is not ("/" or "");
+        if (showSidebar != _showSidebar)
+        {
+            _showSidebar = showSidebar;
+            StateHasChanged();
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -58,5 +81,8 @@
         }
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
 }
