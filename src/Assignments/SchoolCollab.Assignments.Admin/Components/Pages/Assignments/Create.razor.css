@@ -2,11 +2,3 @@
 .form-container {
     max-width: 600px;
 }
-
-::deep .full-width {
-    width: 100%;
-}
-
-::deep .narrow-field {
-    width: 200px;
-}
