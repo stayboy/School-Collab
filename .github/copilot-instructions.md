@@ -708,7 +708,7 @@ under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
    is submitted. If existing tests break, fix them in the same commit.
 
 6. **Reference the production project.** The unit test project already references
-   `SchoolCollab.CodedValues.AI` and `SchoolCollab.CodedValues.Core` via
+   `SchoolCollab.AI` and `SchoolCollab.CodedValues.Core` via
    `<ProjectReference>`. Add a new reference only if the new production code lives in a
    different project.
 

@@ -1,0 +1,94 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using SchoolCollab.Assignments.Core.Data;
+using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.MigrationService.Seeding;
+using Serilog;
+
+var builder = Host.CreateApplicationBuilder(args);
+
+// Must be first — initialises Serilog and OTLP telemetry pipeline
+builder.AddServiceDefaults();
+
+// Register CodedValues DbContext
+var codedValuesConnectionString = builder.Configuration.GetConnectionString("coded-values-db")
+    ?? throw new InvalidOperationException("Connection string 'coded-values-db' is not configured.");
+
+builder.Services.AddDbContext<CodedValuesDbContext>(opts =>
+    opts.UseNpgsql(codedValuesConnectionString).UseSnakeCaseNamingConvention());
+
+// Register Assignments DbContext
+var assignmentsConnectionString = builder.Configuration.GetConnectionString("assignments-db")
+    ?? throw new InvalidOperationException("Connection string 'assignments-db' is not configured.");
+
+builder.Services.AddDbContext<AssignmentsDbContext>(opts =>
+    opts.UseNpgsql(assignmentsConnectionString).UseSnakeCaseNamingConvention());
+
+// Register CodedValueSeeder
+builder.Services.AddScoped<CodedValueSeeder>();
+
+using var host = builder.Build();
+var logger = host.Services.GetRequiredService<ILogger<Program>>();
+
+var exitCode = 0;
+
+try
+{
+    logger.LogInformation("Unified migration service starting");
+
+    using (var scope = host.Services.CreateScope())
+    {
+        // ── CodedValues migrations + seeding ──
+        try
+        {
+            var codedValuesDb = scope.ServiceProvider.GetRequiredService<CodedValuesDbContext>();
+
+            logger.LogInformation("Applying EF Core migrations for CodedValues");
+            await codedValuesDb.Database.MigrateAsync();
+            logger.LogInformation("CodedValues EF Core migrations applied successfully");
+
+            var seeder = scope.ServiceProvider.GetRequiredService<CodedValueSeeder>();
+            await seeder.SeedAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "CodedValues migration or seeding failed");
+            exitCode = 1;
+        }
+
+        // ── Assignments migrations ──
+        try
+        {
+            var assignmentsDb = scope.ServiceProvider.GetRequiredService<AssignmentsDbContext>();
+
+            logger.LogInformation("Applying EF Core migrations for Assignments");
+            await assignmentsDb.Database.MigrateAsync();
+            logger.LogInformation("Assignments EF Core migrations applied successfully");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Assignments migration failed");
+            exitCode = 1;
+        }
+    }
+
+    if (exitCode == 0)
+        logger.LogInformation("Unified migration service completed successfully");
+    else
+        logger.LogWarning("Unified migration service completed with errors");
+}
+catch (Exception ex)
+{
+    logger.LogError(ex, "Unified migration service failed unexpectedly");
+    exitCode = 1;
+}
+finally
+{
+    // Ensure all buffered log entries reach the OTLP sink before the process exits
+    await Log.CloseAndFlushAsync();
+}
+
+return exitCode;

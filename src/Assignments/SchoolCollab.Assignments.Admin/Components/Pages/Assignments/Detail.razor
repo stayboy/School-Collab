@@ -1,0 +1,185 @@
+@page "/assignments/{Id:guid}"
+@using SchoolCollab.Assignments.Admin.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject AssignmentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Detail> Logger
+@implements IDisposable
+
+<PageTitle>Assignment @_item?.Title</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (_item is null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">Assignment not found.</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="mt-2">Back to List</FluentButton>
+        }
+        else
+        {
+            <div class="detail-container">
+                <div class="title-row">
+                    <h2 class="page-title">@_item.Title</h2>
+                    <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                        : _item.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
+                        : Appearance.Outline)">
+                        @_item.Status
+                    </FluentBadge>
+                </div>
+
+                <div class="detail-grid">
+                    <div class="detail-label">Type</div>
+                    <div class="detail-value">@_item.AssignmentType</div>
+
+                    <div class="detail-label">Subject</div>
+                    <div class="detail-value">@( _item.SubjectName ?? "—")</div>
+
+                    <div class="detail-label">Grade</div>
+                    <div class="detail-value">@( _item.GradeName ?? "—")</div>
+
+                    <div class="detail-label">Due Date</div>
+                    <div class="detail-value">@( _item.DueDate?.ToLocalTime().ToString("g") ?? "—")</div>
+
+                    <div class="detail-label">Max Score</div>
+                    <div class="detail-value">@( _item.MaxScore?.ToString("0.##") ?? "—")</div>
+
+                    <div class="detail-label">Created</div>
+                    <div class="detail-value">@_item.CreatedAt.ToLocalTime().ToString("g")</div>
+
+                    <div class="detail-label">Updated</div>
+                    <div class="detail-value">@_item.UpdatedAt.ToLocalTime().ToString("g")</div>
+                </div>
+
+                @if (!string.IsNullOrWhiteSpace(_item.Description))
+                {
+                    <div class="mt-3">
+                        <div class="detail-label">Description</div>
+                        <div class="detail-value description">@_item.Description</div>
+                    </div>
+                }
+
+                <div class="mt-3">
+                    <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Back to List</FluentButton>
+                    @if (_item.Status == AssignmentStatusDto.Draft)
+                    {
+                        <FluentAnchor Href="@($"/assignments/{_item.Id}/edit")" Appearance="Appearance.Accent" class="ms-2">Edit</FluentAnchor>
+                    }
+                </div>
+
+                @if (_item.Status == AssignmentStatusDto.Closed)
+                {
+                    <hr class="my-4" />
+                    <h4>Submit Review</h4>
+                    <EditForm Model="_reviewModel" OnValidSubmit="SubmitReviewAsync" class="form-container">
+                        <DataAnnotationsValidator />
+
+                        <FluentNumberField @bind-Value="_reviewModel.Score" Label="Score" class="narrow-field mb-3" />
+                        <FluentTextArea @bind-Value="_reviewModel.Comments" Label="Comments" Rows="3" class="full-width mb-3" />
+
+                        @if (!string.IsNullOrEmpty(_reviewError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_reviewError</FluentMessageBar>
+                        }
+
+                        <div>
+                            <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_submittingReview">
+                                @(_submittingReview ? "Submitting…" : "Submit Review")
+                            </FluentButton>
+                        </div>
+                    </EditForm>
+                }
+            </div>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private AssignmentSummaryDto? _item;
+    private bool _loading = true;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private bool _submittingReview;
+    private string? _reviewError;
+    private readonly ReviewFormModel _reviewModel = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        try
+        {
+            Logger.LogInformation("Loading assignment {AssignmentId}", Id);
+            _item = await Api.GetByIdAsync(Id, ct);
+            if (_disposed) return;
+            Logger.LogInformation("Loaded assignment {AssignmentId}", Id);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load assignment {AssignmentId}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    private async Task SubmitReviewAsync()
+    {
+        _submittingReview = true;
+        _reviewError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            Logger.LogInformation("Submitting review for assignment {AssignmentId}", Id);
+            var req = new ReviewAssignmentRequest(
+                Guid.Empty, // TeacherId — placeholder, will be wired to auth in Phase 6
+                _reviewModel.Score,
+                _reviewModel.Comments);
+            await Api.ReviewAsync(Id, req, ct);
+            Nav.NavigateTo("/assignments");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to submit review for assignment {AssignmentId}", Id);
+            _reviewError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _submittingReview = false;
+        }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/assignments");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+
+    private sealed class ReviewFormModel
+    {
+        public decimal? Score { get; set; }
+        public string? Comments { get; set; }
+    }
+}

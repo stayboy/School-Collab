@@ -1,0 +1,115 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Admin.Shared.Services
+@implements IDisposable
+@inject NavigationManager Nav
+@inject ILogger<SchoolCollabLayout> Logger
+
+<FluentDesignTheme @bind-Mode="@_mode"
+                   @bind-OfficeColor="@_officeColor"
+                   StorageName="theme"
+                   OnLuminanceChanged="OnLuminanceChanged" />
+
+<FluentToastProvider />
+<FluentDialogProvider />
+<FluentMessageBarProvider />
+<FluentTooltipProvider />
+<FluentKeyCodeProvider />
+
+<FluentLayout>
+    <FluentHeader Height="50">
+        <FluentStack Orientation="Orientation.Horizontal"
+                     VerticalAlignment="VerticalAlignment.Center"
+                     HorizontalGap="12"
+                     class="layout-header-stack">
+
+            <span class="brand">School Collab</span>
+            <span class="brand-sep" aria-hidden="true">&#183;</span>
+            <span class="brand-page">@(_pageTitle ?? DefaultTitle)</span>
+
+            <FluentSpacer />
+
+            @HeaderExtras
+        </FluentStack>
+    </FluentHeader>
+
+    <FluentStack Orientation="Orientation.Horizontal"
+                 HorizontalGap="0"
+                 class="layout-body">
+
+        @SidebarContent
+
+        <FluentBodyContent class="layout-content">
+            <article class="content">
+                @Body
+            </article>
+        </FluentBodyContent>
+    </FluentStack>
+</FluentLayout>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">&#10060;</span>
+</div>
+
+@code {
+    /// <summary>
+    /// The page content to render. Passed from the project's MainLayout which inherits LayoutComponentBase.
+    /// </summary>
+    [Parameter] public RenderFragment? Body { get; set; }
+
+    /// <summary>
+    /// Default page title shown in the header when no route-specific title is resolved.
+    /// </summary>
+    [Parameter] public string DefaultTitle { get; set; } = "School Collab";
+
+    /// <summary>
+    /// Optional content for the header area (e.g., ThemeSwitcher).
+    /// </summary>
+    [Parameter] public RenderFragment? HeaderExtras { get; set; }
+
+    /// <summary>
+    /// Sidebar content (e.g., NavMenu).
+    /// </summary>
+    [Parameter] public RenderFragment? SidebarContent { get; set; }
+
+    /// <summary>
+    /// Optional function that maps a URL path to a page title. Return null to use <see cref="DefaultTitle"/>.
+    /// </summary>
+    [Parameter] public Func<string, string?>? TitleResolver { get; set; }
+
+    private DesignThemeModes _mode = DesignThemeModes.System;
+    private OfficeColor? _officeColor = OfficeColor.Teams;
+    private string? _pageTitle;
+    private string? _lastPath;
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        UpdatePageTitle(new Uri(Nav.Uri).AbsolutePath);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => UpdatePageTitle(new Uri(e.Location).AbsolutePath);
+
+    private void UpdatePageTitle(string path)
+    {
+        if (string.Equals(path, _lastPath, StringComparison.OrdinalIgnoreCase)) return;
+        _lastPath = path;
+
+        _pageTitle = TitleResolver?.Invoke(path);
+
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLuminanceChanged(LuminanceChangedEventArgs args)
+    {
+        Logger.LogInformation("Theme luminance changed to {Mode}", args.Mode);
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

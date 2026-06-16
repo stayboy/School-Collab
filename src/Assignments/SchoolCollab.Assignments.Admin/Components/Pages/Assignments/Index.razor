@@ -1,0 +1,420 @@
+@page "/assignments"
+@using SchoolCollab.Assignments.Admin.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject AssignmentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Index> Logger
+@implements IDisposable
+
+<PageTitle>Assignments</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">Assignments</h1>
+            </div>
+            <div class="action-bar">
+                <FluentButton Appearance="Appearance.Accent" OnClick="@(() => Nav.NavigateTo("/assignments/create"))">
+                    + New Assignment
+                </FluentButton>
+                <FluentSelect Items="@_statusOptions"
+                              @bind-SelectedOption="_selectedStatus"
+                              @bind-SelectedOption:after="OnStatusFilterChangedAsync"
+                              OptionText="@(o => o!.Label)"
+                              OptionValue="@(o => o!.Value?.ToString() ?? "")"
+                              class="status-filter" />
+                <div class="spacer"></div>
+                <FluentTextField Id="search-assignments"
+                                Placeholder="Search assignments…"
+                                class="search-box"
+                                Immediate="true"
+                                ImmediateDelay="300"
+                                ValueChanged="@OnSearchValueChanged"
+                                OnClear="@(() => OnSearchClear())" />
+            </div>
+
+            @* Search results view *@
+            @if (_isSearching && _searchResults is null)
+            {
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else if (!string.IsNullOrWhiteSpace(_searchText) && _searchResults is not null)
+            {
+                if (_searchResults.Length == 0)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info">No assignments match '@_searchText'.</FluentMessageBar>
+                }
+                else
+                {
+                    <div class="grid-container">
+                        <FluentDataGrid Items="@_searchResults.AsQueryable()"
+                                        GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr auto"
+                                        MultiLine="true"
+                                        TGridItem="AssignmentSummaryDto">
+                            <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
+                                <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
+                            </TemplateColumn>
+                            <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
+                                @context.AssignmentType
+                            </TemplateColumn>
+                            <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
+                                <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                                    : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
+                                    : Appearance.Outline)">
+                                    @context.Status
+                                </FluentBadge>
+                            </TemplateColumn>
+                            <TemplateColumn Title="Due Date" SortBy="@_sortByDueDate" Sortable="true">
+                                @(context.DueDate?.ToLocalTime().ToString("g") ?? "—")
+                            </TemplateColumn>
+                            <TemplateColumn Title="Max Score" SortBy="@_sortByMaxScore" Sortable="true">
+                                @(context.MaxScore?.ToString("0.##") ?? "—")
+                            </TemplateColumn>
+                            <TemplateColumn Title="Actions">
+                                @if (context.Status == AssignmentStatusDto.Draft)
+                                {
+                                    <FluentAnchor Href="@($"/assignments/{context.Id}/edit")" class="link-action">Edit</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="link-action ms-2">Publish</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                                }
+                                else if (context.Status == AssignmentStatusDto.Published)
+                                {
+                                    <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))" class="link-action">Unpublish</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="link-action ms-2">Close</FluentAnchor>
+                                }
+                                else if (context.Status == AssignmentStatusDto.Closed)
+                                {
+                                    <FluentAnchor Href="@($"/assignments/{context.Id}")" class="link-action">Review</FluentAnchor>
+                                }
+                            </TemplateColumn>
+                        </FluentDataGrid>
+                    </div>
+                }
+            }
+            @* Default list view *@
+            else if (_items is null)
+            {
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else if (_items.Length == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">No assignments yet.</FluentMessageBar>
+            }
+            else
+            {
+                <div class="grid-container">
+                    <FluentDataGrid Items="@_items.AsQueryable()"
+                                    GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr auto"
+                                    MultiLine="true"
+                                    TGridItem="AssignmentSummaryDto">
+                        <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
+                            <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
+                            @context.AssignmentType
+                        </TemplateColumn>
+                        <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
+                            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                                : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
+                                : Appearance.Outline)">
+                                @context.Status
+                            </FluentBadge>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Due Date" SortBy="@_sortByDueDate" Sortable="true">
+                            @(context.DueDate?.ToLocalTime().ToString("g") ?? "—")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Max Score" SortBy="@_sortByMaxScore" Sortable="true">
+                            @(context.MaxScore?.ToString("0.##") ?? "—")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Actions">
+                            @if (context.Status == AssignmentStatusDto.Draft)
+                            {
+                                <FluentAnchor Href="@($"/assignments/{context.Id}/edit")" class="link-action">Edit</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="link-action ms-2">Publish</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                            }
+                            else if (context.Status == AssignmentStatusDto.Published)
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))" class="link-action">Unpublish</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="link-action ms-2">Close</FluentAnchor>
+                            }
+                            else if (context.Status == AssignmentStatusDto.Closed)
+                            {
+                                <FluentAnchor Href="@($"/assignments/{context.Id}")" class="link-action">Review</FluentAnchor>
+                            }
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+            }
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private AssignmentSummaryDto[]? _items;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    // Search state
+    private string _searchText = string.Empty;
+    private AssignmentSummaryDto[]? _searchResults;
+    private bool _isSearching;
+    private CancellationTokenSource? _searchCts;
+
+    // Status filter
+    private record StatusOption(int? Value, string Label);
+    private readonly StatusOption[] _statusOptions =
+    [
+        new(null, "All"),
+        new(0, "Draft"),
+        new(1, "Published"),
+        new(2, "Closed")
+    ];
+    private StatusOption? _selectedStatus;
+
+    private readonly GridSort<AssignmentSummaryDto> _sortByTitle =
+        GridSort<AssignmentSummaryDto>.ByAscending(x => x.Title);
+    private readonly GridSort<AssignmentSummaryDto> _sortByType =
+        GridSort<AssignmentSummaryDto>.ByAscending(x => x.AssignmentType);
+    private readonly GridSort<AssignmentSummaryDto> _sortByStatus =
+        GridSort<AssignmentSummaryDto>.ByAscending(x => x.Status);
+    private readonly GridSort<AssignmentSummaryDto> _sortByDueDate =
+        GridSort<AssignmentSummaryDto>.ByAscending(x => x.DueDate);
+    private readonly GridSort<AssignmentSummaryDto> _sortByMaxScore =
+        GridSort<AssignmentSummaryDto>.ByAscending(x => x.MaxScore);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        Logger.LogInformation("Loading assignments list");
+        try
+        {
+            _items = await LoadAssignmentsAsync(token);
+            if (_disposed) return;
+            Logger.LogInformation("Loaded {Count} assignments", _items?.Length ?? 0);
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load assignments");
+            _error = ex.Message;
+        }
+    }
+
+    private async Task<AssignmentSummaryDto[]?> LoadAssignmentsAsync(CancellationToken ct)
+    {
+        AssignmentStatusDto? statusFilter = _selectedStatus?.Value switch
+        {
+            0 => AssignmentStatusDto.Draft,
+            1 => AssignmentStatusDto.Published,
+            2 => AssignmentStatusDto.Closed,
+            _ => null
+        };
+        return await Api.ListAsync(statusFilter, ct);
+    }
+
+    private async Task OnPublishAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+        var idx = Array.FindIndex(_items, x => x.Id == id);
+        if (idx < 0) return;
+
+        var previous = _items[idx];
+        _items[idx] = previous with { Status = AssignmentStatusDto.Published };
+        StateHasChanged();
+
+        try
+        {
+            await Api.PublishAsync(id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to publish assignment {AssignmentId}", id);
+            var i = Array.FindIndex(_items, x => x.Id == id);
+            if (i >= 0) _items[i] = previous;
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnUnpublishAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+        var idx = Array.FindIndex(_items, x => x.Id == id);
+        if (idx < 0) return;
+
+        var previous = _items[idx];
+        _items[idx] = previous with { Status = AssignmentStatusDto.Draft };
+        StateHasChanged();
+
+        try
+        {
+            await Api.UnpublishAsync(id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to unpublish assignment {AssignmentId}", id);
+            var i = Array.FindIndex(_items, x => x.Id == id);
+            if (i >= 0) _items[i] = previous;
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnCloseAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+        var idx = Array.FindIndex(_items, x => x.Id == id);
+        if (idx < 0) return;
+
+        var previous = _items[idx];
+        _items[idx] = previous with { Status = AssignmentStatusDto.Closed };
+        StateHasChanged();
+
+        try
+        {
+            await Api.CloseAsync(id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to close assignment {AssignmentId}", id);
+            var i = Array.FindIndex(_items, x => x.Id == id);
+            if (i >= 0) _items[i] = previous;
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnDeleteAsync(Guid id, string title)
+    {
+        if (_disposed) return;
+
+        try
+        {
+            await Api.DeleteAsync(id);
+            if (_disposed) return;
+            if (_items is not null)
+            {
+                _items = _items.Where(x => x.Id != id).ToArray();
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete assignment {AssignmentId}", id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSearchValueChanged(string? text)
+    {
+        _searchText = text?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(_searchText))
+        {
+            _searchResults = null;
+            _isSearching = false;
+            StateHasChanged();
+            return;
+        }
+
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+
+        _isSearching = true;
+        try
+        {
+            _searchResults = await Api.ListAsync(null, ct);
+            if (_disposed) return;
+            // Client-side filter for search
+            _searchResults = _searchResults?
+                .Where(a => a.Title.Contains(_searchText, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            _isSearching = false;
+            Logger.LogInformation("Search returned {Count} results for '{SearchText}'", _searchResults?.Length ?? 0, _searchText);
+        }
+        catch (OperationCanceledException)
+        {
+            // previous search cancelled
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Search failed for '{SearchText}'", _searchText);
+            _error = ex.Message;
+            _isSearching = false;
+        }
+
+        StateHasChanged();
+    }
+
+    private void OnSearchClear()
+    {
+        _searchText = string.Empty;
+        _searchResults = null;
+        _isSearching = false;
+        _searchCts?.Cancel();
+        StateHasChanged();
+    }
+
+    private async Task OnStatusFilterChangedAsync()
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        try
+        {
+            _items = await LoadAssignmentsAsync(ct);
+            if (_disposed) return;
+            Logger.LogInformation("Reloaded {Count} assignments for status filter {Status}", _items?.Length ?? 0, _selectedStatus?.Value);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reload assignments for status filter");
+            _error = ex.Message;
+        }
+
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
+    }
+}

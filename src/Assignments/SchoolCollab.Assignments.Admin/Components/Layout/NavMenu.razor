@@ -1,0 +1,24 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+<FluentNavMenu Width="250"
+               Title="Main navigation">
+
+    <FluentNavLink Href="/"
+                  Icon="@(Icon.FromType<Icons.Regular.Size20.Home>())"
+                  Match="NavLinkMatch.All">
+        Home
+    </FluentNavLink>
+
+    <FluentNavGroup Title="Assignments"
+                   Expanded="true">
+        <FluentNavLink Href="/assignments"
+                      Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+            All Assignments
+        </FluentNavLink>
+        <FluentNavLink Href="/assignments/create"
+                      Icon="@(Icon.FromType<Icons.Regular.Size20.Add>())">
+            New Assignment
+        </FluentNavLink>
+    </FluentNavGroup>
+</FluentNavMenu>

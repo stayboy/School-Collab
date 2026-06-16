@@ -1,0 +1,11 @@
+{
+  "profiles": {
+    "SchoolCollab.Assignments.Api": {
+      "commandName": "Project",
+      "applicationUrl": "https://localhost:7199;http://localhost:5199",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
+    }
+  }
+}
