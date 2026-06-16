@@ -3,3 +3,18 @@
 :root {
     --content-width: 1200px;
 }
+
+/* Navigation cards on the Home page */
+a.card-link {
+    text-decoration: none;
+    color: inherit;
+}
+
+a.card-link:hover fluent-card,
+a.card-link:focus-visible fluent-card {
+    outline: 2px solid var(--neutral-stroke-active, #616161);
+}
+
+fluent-card[style*="cursor: pointer"]:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}

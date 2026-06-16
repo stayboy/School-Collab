@@ -7,21 +7,21 @@
 <p>School Collab is a collaborative platform for managing educational data.</p>
 
 <div style="display: flex; gap: 1.5rem; margin-top: 2rem; flex-wrap: wrap;">
-    <FluentCard Style="width: 300px; cursor: pointer;" OnClick="@(() => Nav.NavigateTo("/coded-values"))">
-        <div style="padding: 1.5rem;">
-            <h3>📚 Coded Values</h3>
-            <p>Manage categories, subjects, grades, and other reference data.</p>
-        </div>
-    </FluentCard>
+    <NavLink href="/coded-values" Match="NavLinkMatch.Prefix" class="card-link">
+        <FluentCard Style="width: 300px; cursor: pointer;">
+            <div style="padding: 1.5rem;">
+                <h3>📚 Coded Values</h3>
+                <p>Manage categories, subjects, grades, and other reference data.</p>
+            </div>
+        </FluentCard>
+    </NavLink>
 
-    <FluentCard Style="width: 300px; cursor: pointer;" OnClick="@(() => Nav.NavigateTo("/assignments"))">
-        <div style="padding: 1.5rem;">
-            <h3>📝 Assignments</h3>
-            <p>Create, publish, and review assignments and homework.</p>
-        </div>
-    </FluentCard>
+    <NavLink href="/assignments" Match="NavLinkMatch.Prefix" class="card-link">
+        <FluentCard Style="width: 300px; cursor: pointer;">
+            <div style="padding: 1.5rem;">
+                <h3>📝 Assignments</h3>
+                <p>Create, publish, and review assignments and homework.</p>
+            </div>
+        </FluentCard>
+    </NavLink>
 </div>
-
-@code {
-    [Inject] private NavigationManager Nav { get; set; } = default!;
-}
