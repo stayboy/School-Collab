@@ -15,10 +15,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                 table: "assignments",
                 type: "integer",
                 nullable: false,
-                defaultValue: 2);
+                defaultValue: 0);
 
             migrationBuilder.AddColumn<int>(
-                name: "target_audience",
+                name: "target_audience_type",
                 table: "assignments",
                 type: "integer",
                 nullable: false,
@@ -33,7 +33,7 @@ namespace SchoolCollab.Assignments.Core.Migrations
                 table: "assignments");
 
             migrationBuilder.DropColumn(
-                name: "target_audience",
+                name: "target_audience_type",
                 table: "assignments");
         }
     }

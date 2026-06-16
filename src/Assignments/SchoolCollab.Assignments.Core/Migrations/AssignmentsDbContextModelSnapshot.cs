@@ -58,7 +58,7 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.Property<int>("GradingFormat")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasDefaultValue(2)
+                        .HasDefaultValue(0)
                         .HasColumnName("grading_format");
 
                     b.Property<decimal?>("MaxScore")
@@ -82,11 +82,11 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("subject_coded_value_id");
 
-                    b.Property<int>("TargetAudience")
+                    b.Property<int>("TargetAudienceType")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
                         .HasDefaultValue(0)
-                        .HasColumnName("target_audience");
+                        .HasColumnName("target_audience_type");
 
                     b.Property<string>("Title")
                         .IsRequired()

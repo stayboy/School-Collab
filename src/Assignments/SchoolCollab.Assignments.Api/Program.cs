@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Serilog;
 using SchoolCollab.Assignments.Api;
+using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -10,7 +11,10 @@ builder.AddRabbitMQClient("rabbitmq");
 
 builder.Services.ConfigureHttpJsonOptions(options =>
 {
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<AssignmentTypeDto>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<AssignmentStatusDto>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GradingFormatDto>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<TargetAudienceTypeDto>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")

@@ -22,7 +22,7 @@ public sealed class CreateAssignmentHandler(
             command.Description,
             command.AssignmentType,
             command.GradingFormat,
-            command.TargetAudience,
+            command.TargetAudienceType,
             command.SubjectCodedValueId,
             command.GradeCodedValueId,
             command.DueDate,

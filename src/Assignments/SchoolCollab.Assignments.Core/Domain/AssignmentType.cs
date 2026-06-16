@@ -4,12 +4,10 @@ namespace SchoolCollab.Assignments.Core.Domain;
 
 public enum AssignmentType
 {
-    [Description("Fully online — MCQ, free-text, auto-graded")]
-    Online = 0,
-
-    [Description("Mix of online and physical submission")]
-    Hybrid = 1,
-
-    [Description("Instructions for physical submission")]
-    Offline = 2
+    [Description("Online")]
+    Digital = 0,
+    [Description("Hybrid")]
+    SemiManual = 1,
+    [Description("Offline")]
+    Manual = 2
 }

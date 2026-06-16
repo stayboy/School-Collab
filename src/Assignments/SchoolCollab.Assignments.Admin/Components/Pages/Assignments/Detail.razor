@@ -1,6 +1,7 @@
 @page "/assignments/{Id:guid}"
-@using SchoolCollab.Assignments.Admin.Services
+@using SchoolCollab.Assignments.Contracts
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Admin.Helpers
 @inject AssignmentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
@@ -33,31 +34,13 @@
 
                 <div class="detail-grid">
                     <div class="detail-label">Type</div>
-                    <div class="detail-value">
-                        <FluentBadge Appearance="@(_item.AssignmentType == AssignmentTypeDto.Online ? Appearance.Accent
-                            : _item.AssignmentType == AssignmentTypeDto.Hybrid ? Appearance.Lightweight
-                            : Appearance.Neutral)">
-                            @_item.AssignmentType
-                        </FluentBadge>
-                    </div>
+                    <div class="detail-value">@EnumHelper.GetDescription(_item.AssignmentType)</div>
 
                     <div class="detail-label">Grading</div>
-                    <div class="detail-value">
-                        <FluentBadge Appearance="@(_item.GradingFormat == GradingFormatDto.TeacherGraded ? Appearance.Accent
-                            : _item.GradingFormat == GradingFormatDto.AutoGraded ? Appearance.Lightweight
-                            : Appearance.Neutral)">
-                            @_item.GradingFormat
-                        </FluentBadge>
-                    </div>
+                    <div class="detail-value">@EnumHelper.GetDescription(_item.GradingFormat)</div>
 
                     <div class="detail-label">Audience</div>
-                    <div class="detail-value">
-                        <FluentBadge Appearance="@(_item.TargetAudience == TargetAudienceDto.AllStudents ? Appearance.Accent
-                            : _item.TargetAudience == TargetAudienceDto.SelectedStudents ? Appearance.Lightweight
-                            : Appearance.Neutral)">
-                            @_item.TargetAudience
-                        </FluentBadge>
-                    </div>
+                    <div class="detail-value">@EnumHelper.GetDescription(_item.TargetAudienceType)</div>
 
                     <div class="detail-label">Subject</div>
                     <div class="detail-value">@( _item.SubjectName ?? "—")</div>
