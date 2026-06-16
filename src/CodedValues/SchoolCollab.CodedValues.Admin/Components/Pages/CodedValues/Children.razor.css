@@ -33,7 +33,7 @@
     flex-grow: 1;
 }
 
-.search-box {
+::deep .search-box {
     width: 260px;
 }
 

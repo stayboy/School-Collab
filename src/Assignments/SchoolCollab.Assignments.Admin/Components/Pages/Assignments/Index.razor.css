@@ -24,7 +24,7 @@
     padding-bottom: 0.75rem;
 }
 
-.status-filter {
+::deep .status-filter {
     width: 160px;
 }
 
@@ -32,7 +32,7 @@
     flex-grow: 1;
 }
 
-.search-box {
+::deep .search-box {
     width: 260px;
 }
 
