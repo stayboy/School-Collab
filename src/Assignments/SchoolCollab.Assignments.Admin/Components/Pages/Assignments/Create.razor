@@ -149,7 +149,9 @@
 
                         @* Resource links *@
                         <h4 style="margin-top:0.5rem">Resource Links</h4>
-                        <p class="step-description">Add optional links to resources (videos, articles, etc.).</p>
+                        <FluentMessageBar Intent="MessageIntent.Info" class="mb-2">
+                            Resource links will be saved in a future update.
+                        </FluentMessageBar>
                         @for (var i = 0; i < _resourceLinks.Count; i++)
                         {
                             var idx = i;
@@ -186,6 +188,9 @@
 
                         @* Questions *@
                         <h4 style="margin-top:0.5rem">Sample Questions</h4>
+                        <FluentMessageBar Intent="MessageIntent.Info" class="mb-2">
+                            Questions will be saved in a future update.
+                        </FluentMessageBar>
                         @for (var i = 0; i < _questions.Count; i++)
                         {
                             var idx = i;
