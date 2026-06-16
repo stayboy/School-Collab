@@ -3,7 +3,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Data;
-using SchoolCollab.Assignments.Core.DTOs;
+using SchoolCollab.Assignments.Contracts;
 
 namespace SchoolCollab.Assignments.Core.Queries.GetAssignmentById;
 
@@ -40,11 +40,15 @@ public sealed class GetAssignmentByIdQueryHandler(
                 return new AssignmentSummaryDto(
                     assignment.Id,
                     assignment.Title,
-                    assignment.Description ?? string.Empty,
-                    assignment.AssignmentType.ToString(),
+                    assignment.Description,
+                    (AssignmentTypeDto)assignment.AssignmentType,
+                    (GradingFormatDto)assignment.GradingFormat,
+                    (TargetAudienceTypeDto)assignment.TargetAudienceType,
                     assignment.SubjectCodedValueId,
+                    null,
                     assignment.GradeCodedValueId,
-                    assignment.Status.ToString(),
+                    null,
+                    (AssignmentStatusDto)assignment.Status,
                     assignment.DueDate,
                     assignment.MaxScore,
                     assignment.CreatedByTeacherId,

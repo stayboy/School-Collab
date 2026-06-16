@@ -1,6 +1,7 @@
 @page "/assignments/{Id:guid}"
-@using SchoolCollab.Assignments.Admin.Services
+@using SchoolCollab.Assignments.Contracts
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Admin.Helpers
 @inject AssignmentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
@@ -24,16 +25,22 @@
             <div class="detail-container">
                 <div class="title-row">
                     <h2 class="page-title">@_item.Title</h2>
-                    <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                    <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? Appearance.Accent
                         : _item.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                        : Appearance.Outline)">
+                        : Appearance.Lightweight)">
                         @_item.Status
                     </FluentBadge>
                 </div>
 
                 <div class="detail-grid">
                     <div class="detail-label">Type</div>
-                    <div class="detail-value">@_item.AssignmentType</div>
+                    <div class="detail-value">@EnumHelper.GetDescription(_item.AssignmentType)</div>
+
+                    <div class="detail-label">Grading</div>
+                    <div class="detail-value">@EnumHelper.GetDescription(_item.GradingFormat)</div>
+
+                    <div class="detail-label">Audience</div>
+                    <div class="detail-value">@EnumHelper.GetDescription(_item.TargetAudienceType)</div>
 
                     <div class="detail-label">Subject</div>
                     <div class="detail-value">@( _item.SubjectName ?? "—")</div>

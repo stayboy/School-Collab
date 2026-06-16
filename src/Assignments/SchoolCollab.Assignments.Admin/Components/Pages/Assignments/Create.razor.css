@@ -1,4 +1,170 @@
-/* Form layout */
+/* ── Wizard sections ── */
+.wizard-section {
+    margin-bottom: 2.5rem;
+}
+
+.wizard-section-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 1.25rem;
+}
+
+.wizard-section-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+}
+
+.wizard-hint {
+    color: var(--neutral-foreground-hint);
+    font-size: 0.85rem;
+    margin: 0.15rem 0 0;
+}
+
+/* ── Wizard card selection ── */
+.wizard-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+@media (max-width: 768px) {
+    .wizard-cards {
+        grid-template-columns: 1fr;
+    }
+}
+
+.wizard-card {
+    position: relative;
+    cursor: pointer;
+    border: 2px solid var(--neutral-stroke-active);
+    border-radius: 12px;
+    padding: 1.5rem 1.25rem 1.25rem;
+    text-align: center;
+    transition: all 0.2s ease;
+    background: var(--neutral-fill);
+    user-select: none;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+}
+
+.wizard-card:hover {
+    border-color: #e65100;
+    background: var(--neutral-fill-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.wizard-card:active {
+    transform: translateY(0);
+}
+
+.wizard-card.selected {
+    border-color: #e65100;
+    background: color-mix(in srgb, #e65100 8%, var(--neutral-fill));
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1), inset 0 0 0 2px #e65100;
+}
+
+/* Checkmark badge — top-right corner */
+.wizard-card-check {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    opacity: 0;
+    transform: scale(0.5);
+    transition: all 0.2s ease;
+}
+
+.wizard-card.selected .wizard-card-check {
+    opacity: 1;
+    transform: scale(1);
+}
+
+.wizard-card-icon {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 0.5rem;
+    color: var(--neutral-foreground-hint);
+    transition: color 0.2s ease;
+}
+
+.wizard-card.selected .wizard-card-icon {
+    color: #e65100;
+}
+
+.wizard-card h4 {
+    margin: 0 0 0.35rem;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.wizard-card-desc {
+    font-size: 0.8rem;
+    color: var(--neutral-foreground-hint);
+    margin: 0;
+    line-height: 1.4;
+}
+
+/* ── Wizard form ── */
+.wizard-form {
+    max-width: 600px;
+}
+
+/* ── Wizard actions ── */
+.wizard-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 2rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--neutral-stroke);
+}
+
+/* ── Review step ── */
+.review-card {
+    background: var(--neutral-fill);
+    border-radius: 12px;
+    padding: 1.5rem;
+    border: 1px solid var(--neutral-stroke);
+}
+
+.review-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.review-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--neutral-stroke);
+}
+
+.review-row:last-child {
+    border-bottom: none;
+}
+
+.review-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.review-value {
+    font-weight: 500;
+    word-break: break-word;
+    text-align: right;
+}
+
+/* ── Form layout helpers ── */
 .form-container {
     max-width: 600px;
 }

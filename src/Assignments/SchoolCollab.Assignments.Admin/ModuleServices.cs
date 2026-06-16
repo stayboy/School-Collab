@@ -8,7 +8,9 @@ public static class ModuleServices
     public static IServiceCollection AddAssignmentsModule(this IServiceCollection services)
     {
         services.AddHttpClient<AssignmentsApiClient>(client =>
-            client.BaseAddress = new Uri("https+http://assignments-api"));
+        {
+            client.BaseAddress = new Uri("https+http://assignments-api");
+        });
 
         return services;
     }

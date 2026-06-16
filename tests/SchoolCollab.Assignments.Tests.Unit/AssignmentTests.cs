@@ -10,6 +10,14 @@ public class AssignmentTests
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
     private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-000000000010");
 
+    private static Assignment CreateTestAssignment(
+        string title = "Title",
+        string? description = null,
+        AssignmentType type = AssignmentType.Digital,
+        GradingFormat grading = GradingFormat.TeacherGraded,
+        TargetAudienceType audience = TargetAudienceType.AllStudents) =>
+        Assignment.Create(title, description, type, grading, audience, SubjectId, null, null, null, TeacherId);
+
     [TestMethod]
     public void Create_SetsProperties()
     {
@@ -19,6 +27,8 @@ public class AssignmentTests
             "Math Homework",
             "Complete exercises 1-10",
             AssignmentType.Digital,
+            GradingFormat.AutoGraded,
+            TargetAudienceType.AllStudents,
             SubjectId,
             null,
             dueDate,
@@ -28,6 +38,8 @@ public class AssignmentTests
         Assert.AreEqual("Math Homework", assignment.Title);
         Assert.AreEqual("Complete exercises 1-10", assignment.Description);
         Assert.AreEqual(AssignmentType.Digital, assignment.AssignmentType);
+        Assert.AreEqual(GradingFormat.AutoGraded, assignment.GradingFormat);
+        Assert.AreEqual(TargetAudienceType.AllStudents, assignment.TargetAudienceType);
         Assert.AreEqual(SubjectId, assignment.SubjectCodedValueId);
         Assert.IsNull(assignment.GradeCodedValueId);
         Assert.AreEqual(dueDate, assignment.DueDate);
@@ -44,6 +56,8 @@ public class AssignmentTests
             "  Test Title  ",
             "  Test Description  ",
             AssignmentType.Manual,
+            GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents,
             SubjectId,
             null, null, null,
             TeacherId);
@@ -55,29 +69,47 @@ public class AssignmentTests
     [TestMethod]
     public void Create_SetsStatusToDraft()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         Assert.AreEqual(AssignmentStatus.Draft, assignment.Status);
     }
 
     [TestMethod]
     public void Create_RaisesAssignmentCreatedEvent()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         Assert.AreEqual(1, assignment.DomainEvents.Count);
         Assert.IsInstanceOfType(assignment.DomainEvents[0], typeof(AssignmentCreatedEvent));
     }
 
     [TestMethod]
+    public void Create_DefaultGradingFormatIsTeacherGraded()
+    {
+        var assignment = CreateTestAssignment(grading: GradingFormat.TeacherGraded);
+        Assert.AreEqual(GradingFormat.TeacherGraded, assignment.GradingFormat);
+    }
+
+    [TestMethod]
+    public void Create_DefaultTargetAudienceIsAllStudents()
+    {
+        var assignment = CreateTestAssignment(audience: TargetAudienceType.AllStudents);
+        Assert.AreEqual(TargetAudienceType.AllStudents, assignment.TargetAudienceType);
+    }
+
+    [TestMethod]
     public void Update_WhenDraft_UpdatesProperties()
     {
-        var assignment = Assignment.Create("Old Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment("Old Title");
         var newSubjectId = Guid.NewGuid();
 
-        assignment.Update("New Title", "New Desc", AssignmentType.SemiManual, newSubjectId, Guid.NewGuid(), null, 50m);
+        assignment.Update("New Title", "New Desc", AssignmentType.SemiManual,
+            GradingFormat.InstantGraded, TargetAudienceType.SelectedGrades,
+            newSubjectId, Guid.NewGuid(), null, 50m);
 
         Assert.AreEqual("New Title", assignment.Title);
         Assert.AreEqual("New Desc", assignment.Description);
         Assert.AreEqual(AssignmentType.SemiManual, assignment.AssignmentType);
+        Assert.AreEqual(GradingFormat.InstantGraded, assignment.GradingFormat);
+        Assert.AreEqual(TargetAudienceType.SelectedGrades, assignment.TargetAudienceType);
         Assert.AreEqual(newSubjectId, assignment.SubjectCodedValueId);
         Assert.AreEqual(50m, assignment.MaxScore);
     }
@@ -85,26 +117,30 @@ public class AssignmentTests
     [TestMethod]
     public void Update_WhenPublished_Throws()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Publish();
-        var act = () => assignment.Update("New Title", null, AssignmentType.Digital, SubjectId, null, null, null);
+        var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
+            GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
+            SubjectId, null, null, null);
         act.Should().Throw<InvalidOperationException>();
     }
 
     [TestMethod]
     public void Update_WhenClosed_Throws()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Publish();
         assignment.Close();
-        var act = () => assignment.Update("New Title", null, AssignmentType.Digital, SubjectId, null, null, null);
+        var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
+            GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
+            SubjectId, null, null, null);
         act.Should().Throw<InvalidOperationException>();
     }
 
     [TestMethod]
     public void Publish_ChangesStatusToPublished()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Publish();
         Assert.AreEqual(AssignmentStatus.Published, assignment.Status);
     }
@@ -112,7 +148,7 @@ public class AssignmentTests
     [TestMethod]
     public void Publish_WhenAlreadyPublished_IsNoOp()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Publish();
         assignment.Publish(); // Should not throw
         Assert.AreEqual(AssignmentStatus.Published, assignment.Status);
@@ -121,7 +157,7 @@ public class AssignmentTests
     [TestMethod]
     public void Unpublish_ChangesStatusBackToDraft()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Publish();
         assignment.Unpublish();
         Assert.AreEqual(AssignmentStatus.Draft, assignment.Status);
@@ -130,7 +166,7 @@ public class AssignmentTests
     [TestMethod]
     public void Unpublish_WhenDraft_Throws()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         var act = () => assignment.Unpublish();
         act.Should().Throw<InvalidOperationException>();
     }
@@ -138,7 +174,7 @@ public class AssignmentTests
     [TestMethod]
     public void Close_ChangesStatusToClosed()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Publish();
         assignment.Close();
         Assert.AreEqual(AssignmentStatus.Closed, assignment.Status);
@@ -147,7 +183,7 @@ public class AssignmentTests
     [TestMethod]
     public void Close_WhenDraft_ChangesToClosed()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Close();
         Assert.AreEqual(AssignmentStatus.Closed, assignment.Status);
     }
@@ -155,7 +191,7 @@ public class AssignmentTests
     [TestMethod]
     public void Close_WhenAlreadyClosed_IsNoOp()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.Close();
         assignment.Close(); // Should not throw
         Assert.AreEqual(AssignmentStatus.Closed, assignment.Status);
@@ -164,7 +200,7 @@ public class AssignmentTests
     [TestMethod]
     public void AddQuestion_AddsToQuestionsList()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         var question = assignment.AddQuestion("What is 2+2?", QuestionType.MultipleChoice, 1);
 
         Assert.AreEqual(1, assignment.Questions.Count);
@@ -176,7 +212,7 @@ public class AssignmentTests
     [TestMethod]
     public void RemoveQuestion_RemovesFromList()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         var question = assignment.AddQuestion("Q1", QuestionType.ShortAnswer, 1);
         assignment.RemoveQuestion(question.Id);
 
@@ -186,7 +222,7 @@ public class AssignmentTests
     [TestMethod]
     public void RemoveQuestion_WithInvalidId_DoesNothing()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         assignment.AddQuestion("Q1", QuestionType.ShortAnswer, 1);
         assignment.RemoveQuestion(Guid.NewGuid()); // Non-existent
 
@@ -196,7 +232,7 @@ public class AssignmentTests
     [TestMethod]
     public void AddReview_AddsToReviewsList()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         var review = assignment.AddReview(TeacherId, 95m, "Good work");
 
         Assert.AreEqual(1, assignment.Reviews.Count);
@@ -207,7 +243,7 @@ public class AssignmentTests
     [TestMethod]
     public void ClearDomainEvents_ClearsList()
     {
-        var assignment = Assignment.Create("Title", null, AssignmentType.Digital, SubjectId, null, null, null, TeacherId);
+        var assignment = CreateTestAssignment();
         Assert.AreEqual(1, assignment.DomainEvents.Count);
 
         assignment.ClearDomainEvents();
