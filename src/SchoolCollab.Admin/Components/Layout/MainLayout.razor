@@ -1,0 +1,56 @@
+@inherits LayoutComponentBase
+@using SchoolCollab.Admin.Shared.Components.Layout
+@implements IDisposable
+@inject NavigationManager Nav
+
+<SchoolCollabLayout Body="@Body"
+                    DefaultTitle="School Collab"
+                    SidebarContent="@SidebarContent"
+                    TitleResolver="@ResolveTitle" />
+
+@code {
+    private RenderFragment? SidebarContent => _showSidebar ? __builder => {
+        <NavMenu />
+    } : null;
+
+    private bool _showSidebar = true;
+
+    private static string? ResolveTitle(string path) => path switch
+    {
+        "/"                                                                                    => "Home",
+        "/coded-values"                                                                         => "Coded Values",
+        "/assignments"                                                                          => "Assignments",
+        var p when p.StartsWith("/coded-values/new", StringComparison.OrdinalIgnoreCase)     => "New Category",
+        var p when p.StartsWith("/assignments/create", StringComparison.OrdinalIgnoreCase)  => "New Assignment",
+        var p when p.EndsWith("/children/new", StringComparison.OrdinalIgnoreCase)          => "New Child",
+        var p when p.EndsWith("/children", StringComparison.OrdinalIgnoreCase)              => "Children",
+        var p when p.Contains("/edit", StringComparison.OrdinalIgnoreCase)                   => "Edit",
+        var p when p.EndsWith("/review", StringComparison.OrdinalIgnoreCase)              => "Review",
+        "/Error"                                                                            => "Error",
+        _                                                                                   => null
+    };
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        UpdateSidebarVisibility(new Uri(Nav.Uri).AbsolutePath);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => UpdateSidebarVisibility(new Uri(e.Location).AbsolutePath);
+
+    private void UpdateSidebarVisibility(string path)
+    {
+        var showSidebar = path is not ("/" or "");
+        if (showSidebar != _showSidebar)
+        {
+            _showSidebar = showSidebar;
+            StateHasChanged();
+        }
+    }
+
+    public void Dispose()
+    {
+        Nav.LocationChanged -= OnLocationChanged;
+    }
+}

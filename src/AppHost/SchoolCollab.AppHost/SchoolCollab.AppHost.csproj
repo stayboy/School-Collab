@@ -17,12 +17,11 @@
     <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Contracts\SchoolCollab.CodedValues.Contracts.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Core\SchoolCollab.CodedValues.Core.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Api\SchoolCollab.CodedValues.Api.csproj" />
-    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Admin\SchoolCollab.CodedValues.Admin.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.Admin\SchoolCollab.Admin.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.MigrationService\SchoolCollab.MigrationService.csproj" />
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Api\SchoolCollab.Assignments.Api.csproj" />
-    <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Admin\SchoolCollab.Assignments.Admin.csproj" />
   </ItemGroup>
 </Project>

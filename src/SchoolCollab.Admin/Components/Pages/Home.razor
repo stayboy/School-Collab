@@ -1,0 +1,30 @@
+@page "/"
+
+<PageTitle>Home</PageTitle>
+
+<div class="home-dashboard">
+    <h1>Welcome to School Collab</h1>
+    <p class="home-subtitle">A collaborative platform for managing educational data.</p>
+
+    <div class="home-cards">
+        <NavLink href="/coded-values" Match="NavLinkMatch.Prefix" class="card-link">
+            <FluentCard Style="width: 320px; cursor: pointer;" class="home-card">
+                <div class="home-card-inner">
+                    <div class="home-card-icon">🏷️</div>
+                    <h3>Coded Values</h3>
+                    <p>Manage categories, subjects, grades, and other reference data.</p>
+                </div>
+            </FluentCard>
+        </NavLink>
+
+        <NavLink href="/assignments" Match="NavLinkMatch.Prefix" class="card-link">
+            <FluentCard Style="width: 320px; cursor: pointer;" class="home-card">
+                <div class="home-card-inner">
+                    <div class="home-card-icon">📝</div>
+                    <h3>Assignments</h3>
+                    <p>Create, publish, and review assignments and homework.</p>
+                </div>
+            </FluentCard>
+        </NavLink>
+    </div>
+</div>
