@@ -1,33 +1,19 @@
 @inherits LayoutComponentBase
 @using SchoolCollab.Admin.Shared.Components.Layout
-@using SchoolCollab.Admin.Shared.Components.Theme
-@using SchoolCollab.CodedValues.Admin.Services
 @implements IDisposable
-@inject CodedValuesApiClient Api
-@inject ILogger<MainLayout> Logger
 @inject NavigationManager Nav
 
 <SchoolCollabLayout Body="@Body"
                     DefaultTitle="School Collab"
-                    HeaderExtras="@HeaderExtras"
                     SidebarContent="@SidebarContent"
-                    ShowSidebar="@_showSidebar"
                     TitleResolver="@ResolveTitle" />
 
 @code {
-    private CodedValueDto[]? _parentValues;
-    private bool _loadingParents = true;
+    private RenderFragment? SidebarContent => _showSidebar ? __builder => {
+        <NavMenu />
+    } : null;
+
     private bool _showSidebar = true;
-    private DesignThemeModes _mode = DesignThemeModes.System;
-    private OfficeColor? _officeColor = OfficeColor.Teams;
-
-    private RenderFragment HeaderExtras => __builder => {
-        <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
-    };
-
-    private RenderFragment SidebarContent => __builder => {
-        <NavMenu ParentValues="@_parentValues" Loading="@_loadingParents" />
-    };
 
     private static string? ResolveTitle(string path) => path switch
     {
@@ -59,24 +45,6 @@
         if (showSidebar != _showSidebar)
         {
             _showSidebar = showSidebar;
-            StateHasChanged();
-        }
-    }
-
-    protected override async Task OnInitializedAsync()
-    {
-        try
-        {
-            _parentValues = await Api.GetRootValuesAsync();
-            Logger.LogInformation("Loaded {Count} parent coded values for sidebar", _parentValues?.Length ?? 0);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to load parent coded values for sidebar");
-        }
-        finally
-        {
-            _loadingParents = false;
             StateHasChanged();
         }
     }

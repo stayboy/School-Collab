@@ -6,8 +6,12 @@
 
 /* Navigation cards on the Home page */
 a.card-link {
-    text-decoration: none;
+    text-decoration: none !important;
     color: inherit;
+}
+
+a.card-link:hover {
+    text-decoration: none !important;
 }
 
 a.card-link:hover fluent-card,

@@ -1,6 +1,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components.Theme
 @implements IDisposable
 @inject NavigationManager Nav
 @inject ILogger<SchoolCollabLayout> Logger
@@ -29,7 +30,7 @@
 
             <FluentSpacer />
 
-            @HeaderExtras
+            <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
         </FluentStack>
     </FluentHeader>
 
@@ -37,10 +38,7 @@
                  HorizontalGap="0"
                  class="layout-body">
 
-        @if (ShowSidebar)
-        {
-            @SidebarContent
-        }
+        @SidebarContent
 
         <FluentBodyContent class="layout-content">
             <article class="content">
@@ -57,34 +55,12 @@
 </div>
 
 @code {
-    /// <summary>
-    /// The page content to render. Passed from the project's MainLayout which inherits LayoutComponentBase.
-    /// </summary>
     [Parameter] public RenderFragment? Body { get; set; }
 
-    /// <summary>
-    /// Default page title shown in the header when no route-specific title is resolved.
-    /// </summary>
     [Parameter] public string DefaultTitle { get; set; } = "School Collab";
 
-    /// <summary>
-    /// Optional content for the header area (e.g., ThemeSwitcher).
-    /// </summary>
-    [Parameter] public RenderFragment? HeaderExtras { get; set; }
-
-    /// <summary>
-    /// Whether to show the sidebar. When false, the body content fills the full width.
-    /// </summary>
-    [Parameter] public bool ShowSidebar { get; set; } = true;
-
-    /// <summary>
-    /// Sidebar content (e.g., NavMenu).
-    /// </summary>
     [Parameter] public RenderFragment? SidebarContent { get; set; }
 
-    /// <summary>
-    /// Optional function that maps a URL path to a page title. Return null to use <see cref="DefaultTitle"/>.
-    /// </summary>
     [Parameter] public Func<string, string?>? TitleResolver { get; set; }
 
     private DesignThemeModes _mode = DesignThemeModes.System;

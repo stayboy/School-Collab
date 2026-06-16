@@ -1,6 +1,9 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.CodedValues.Admin.Services
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@implements IAsyncDisposable
+@inject CodedValuesApiClient Api
+@inject ILogger<NavMenu> Logger
 
 <FluentNavMenu Width="250"
                Title="Main navigation">
@@ -13,15 +16,15 @@
 
     <FluentNavGroup Title="Coded Values"
                     Expanded="true">
-        @if (Loading)
+        @if (_loadingParents)
         {
             <FluentNavLink Href="#" Disabled="true">
                <FluentProgressRing class="progress-ring-small" />
             </FluentNavLink>
         }
-        else if (ParentValues is { Length: > 0 })
+        else if (_parentValues is { Length: > 0 })
         {
-            foreach (var cv in ParentValues.Take(20))
+            foreach (var cv in _parentValues.Take(20))
             {
                <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
                              Icon="@(Icon.FromType<Icons.Regular.Size20.Tag>())"
@@ -30,7 +33,7 @@
                </FluentNavLink>
             }
 
-            if (ParentValues.Length > 20)
+            if (_parentValues.Length > 20)
             {
                <FluentNavLink Href="/coded-values"
                              Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowExportUp>())">
@@ -73,9 +76,41 @@
 </FluentNavMenu>
 
 @code {
-    [Parameter] public CodedValueDto[]? ParentValues { get; set; }
-    [Parameter] public bool Loading { get; set; }
+    private CodedValueDto[]? _parentValues;
+    private bool _loadingParents = true;
+    private volatile bool _disposed;
+    private CancellationTokenSource? _loadCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        try
+        {
+            _parentValues = await Api.GetRootValuesAsync(_loadCts.Token);
+            if (_disposed) return;
+            Logger.LogInformation("Loaded {Count} parent coded values for sidebar", _parentValues?.Length ?? 0);
+        }
+        catch (OperationCanceledException) { /* user navigated away */ }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load parent coded values for sidebar");
+        }
+        finally
+        {
+            _loadingParents = false;
+            if (!_disposed) StateHasChanged();
+        }
+    }
 
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : string.Concat(value.AsSpan(0, maxLength - 1), "…");
+
+    public async ValueTask DisposeAsync()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
 }
