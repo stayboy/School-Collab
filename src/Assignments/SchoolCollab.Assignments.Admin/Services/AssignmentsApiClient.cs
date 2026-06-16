@@ -7,12 +7,16 @@ namespace SchoolCollab.Assignments.Admin.Services;
 
 public enum AssignmentStatusDto { Draft, Published, Closed }
 public enum AssignmentTypeDto { Online, Hybrid, Offline }
+public enum GradingFormatDto { AutoGraded, InstantGraded, TeacherGraded }
+public enum TargetAudienceDto { AllStudents, SelectedStudents, SelectedGrades }
 
 public record AssignmentSummaryDto(
     Guid Id,
     string Title,
     string? Description,
     AssignmentTypeDto AssignmentType,
+    GradingFormatDto GradingFormat,
+    TargetAudienceDto TargetAudience,
     Guid SubjectCodedValueId,
     string? SubjectName,
     Guid? GradeCodedValueId,
@@ -28,6 +32,8 @@ public record CreateAssignmentRequest(
     string Title,
     string? Description,
     AssignmentTypeDto AssignmentType,
+    GradingFormatDto GradingFormat,
+    TargetAudienceDto TargetAudience,
     Guid SubjectCodedValueId,
     Guid? GradeCodedValueId,
     DateTimeOffset? DueDate,
@@ -37,6 +43,8 @@ public record UpdateAssignmentRequest(
     string Title,
     string? Description,
     AssignmentTypeDto AssignmentType,
+    GradingFormatDto GradingFormat,
+    TargetAudienceDto TargetAudience,
     Guid SubjectCodedValueId,
     Guid? GradeCodedValueId,
     DateTimeOffset? DueDate,

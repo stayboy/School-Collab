@@ -24,6 +24,14 @@ internal sealed class AssignmentConfiguration : IEntityTypeConfiguration<Assignm
             .IsRequired()
             .HasDefaultValue(AssignmentType.Online);
 
+        builder.Property(x => x.GradingFormat)
+            .IsRequired()
+            .HasDefaultValue(GradingFormat.TeacherGraded);
+
+        builder.Property(x => x.TargetAudience)
+            .IsRequired()
+            .HasDefaultValue(TargetAudience.AllStudents);
+
         builder.Property(x => x.SubjectCodedValueId)
             .IsRequired();
 

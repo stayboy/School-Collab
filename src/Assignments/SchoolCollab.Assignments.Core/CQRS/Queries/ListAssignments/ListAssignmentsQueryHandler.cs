@@ -23,6 +23,8 @@ public sealed class ListAssignmentsQueryHandler(
             s.Title,
             s.Description ?? string.Empty,
             s.AssignmentType.ToString(),
+            s.GradingFormat.ToString(),
+            s.TargetAudience.ToString(),
             s.SubjectCodedValueId,
             s.GradeCodedValueId,
             s.Status.ToString(),

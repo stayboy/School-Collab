@@ -41,6 +41,24 @@
                         </FluentBadge>
                     </div>
 
+                    <div class="detail-label">Grading</div>
+                    <div class="detail-value">
+                        <FluentBadge Appearance="@(_item.GradingFormat == GradingFormatDto.TeacherGraded ? Appearance.Accent
+                            : _item.GradingFormat == GradingFormatDto.AutoGraded ? Appearance.Lightweight
+                            : Appearance.Neutral)">
+                            @_item.GradingFormat
+                        </FluentBadge>
+                    </div>
+
+                    <div class="detail-label">Audience</div>
+                    <div class="detail-value">
+                        <FluentBadge Appearance="@(_item.TargetAudience == TargetAudienceDto.AllStudents ? Appearance.Accent
+                            : _item.TargetAudience == TargetAudienceDto.SelectedStudents ? Appearance.Lightweight
+                            : Appearance.Neutral)">
+                            @_item.TargetAudience
+                        </FluentBadge>
+                    </div>
+
                     <div class="detail-label">Subject</div>
                     <div class="detail-value">@( _item.SubjectName ?? "—")</div>
 

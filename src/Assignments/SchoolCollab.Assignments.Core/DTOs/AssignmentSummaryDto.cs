@@ -5,6 +5,8 @@ public sealed record AssignmentSummaryDto(
     string Title,
     string? Description,
     string AssignmentType,
+    string GradingFormat,
+    string TargetAudience,
     Guid SubjectCodedValueId,
     Guid? GradeCodedValueId,
     string Status,

@@ -51,6 +51,7 @@ public static class AssignmentEndpoints
             {
                 var cmd = new UpdateAssignmentCommand(
                     id, req.Title, req.Description, req.AssignmentType,
+                    req.GradingFormat, req.TargetAudience,
                     req.SubjectCodedValueId, req.GradeCodedValueId,
                     req.DueDate, req.MaxScore);
                 await handler.HandleAsync(cmd, ct);
@@ -168,6 +169,8 @@ internal record UpdateAssignmentRequest(
     string Title,
     string? Description,
     AssignmentType AssignmentType,
+    GradingFormat GradingFormat,
+    TargetAudience TargetAudience,
     Guid SubjectCodedValueId,
     Guid? GradeCodedValueId,
     DateTimeOffset? DueDate,
