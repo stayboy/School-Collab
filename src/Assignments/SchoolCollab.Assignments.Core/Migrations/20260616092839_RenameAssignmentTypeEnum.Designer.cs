@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.Assignments.Core.Data;
@@ -11,9 +12,11 @@ using SchoolCollab.Assignments.Core.Data;
 namespace SchoolCollab.Assignments.Core.Migrations
 {
     [DbContext(typeof(AssignmentsDbContext))]
-    partial class AssignmentsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260616092839_RenameAssignmentTypeEnum")]
+    partial class RenameAssignmentTypeEnum
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -55,12 +58,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("grade_coded_value_id");
 
-                    b.Property<int>("GradingFormat")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(2)
-                        .HasColumnName("grading_format");
-
                     b.Property<decimal?>("MaxScore")
                         .HasPrecision(5, 2)
                         .HasColumnType("numeric(5,2)")
@@ -81,12 +78,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.Property<Guid>("SubjectCodedValueId")
                         .HasColumnType("uuid")
                         .HasColumnName("subject_coded_value_id");
-
-                    b.Property<int>("TargetAudience")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("target_audience");
 
                     b.Property<string>("Title")
                         .IsRequired()

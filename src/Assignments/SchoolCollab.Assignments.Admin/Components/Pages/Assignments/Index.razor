@@ -51,19 +51,30 @@
                 {
                     <div class="grid-container">
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
-                                        GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr auto"
+                                        GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr auto"
                                         MultiLine="true"
                                         TGridItem="AssignmentSummaryDto">
                             <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
                                 <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
                             </TemplateColumn>
                             <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
-                                @context.AssignmentType
+                                <FluentBadge Appearance="@(context.AssignmentType == AssignmentTypeDto.Online ? Appearance.Accent
+                                    : context.AssignmentType == AssignmentTypeDto.Hybrid ? Appearance.Lightweight
+                                    : Appearance.Neutral)">
+                                    @context.AssignmentType
+                                </FluentBadge>
+                            </TemplateColumn>
+                            <TemplateColumn Title="Grading" SortBy="@_sortByGrading" Sortable="true">
+                                <FluentBadge Appearance="@(context.GradingFormat == GradingFormatDto.TeacherGraded ? Appearance.Accent
+                                    : context.GradingFormat == GradingFormatDto.AutoGraded ? Appearance.Lightweight
+                                    : Appearance.Neutral)">
+                                    @context.GradingFormat
+                                </FluentBadge>
                             </TemplateColumn>
                             <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
-                                <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                                <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
                                     : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                                    : Appearance.Outline)">
+                                    : Appearance.Lightweight)">
                                     @context.Status
                                 </FluentBadge>
                             </TemplateColumn>
@@ -109,19 +120,30 @@
             {
                 <div class="grid-container">
                     <FluentDataGrid Items="@_items.AsQueryable()"
-                                    GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr auto"
+                                    GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr auto"
                                     MultiLine="true"
                                     TGridItem="AssignmentSummaryDto">
                         <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
                             <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
                         </TemplateColumn>
                         <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
-                            @context.AssignmentType
+                            <FluentBadge Appearance="@(context.AssignmentType == AssignmentTypeDto.Online ? Appearance.Accent
+                                : context.AssignmentType == AssignmentTypeDto.Hybrid ? Appearance.Lightweight
+                                : Appearance.Neutral)">
+                                @context.AssignmentType
+                            </FluentBadge>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Grading" SortBy="@_sortByGrading" Sortable="true">
+                            <FluentBadge Appearance="@(context.GradingFormat == GradingFormatDto.TeacherGraded ? Appearance.Accent
+                                : context.GradingFormat == GradingFormatDto.AutoGraded ? Appearance.Lightweight
+                                : Appearance.Neutral)">
+                                @context.GradingFormat
+                            </FluentBadge>
                         </TemplateColumn>
                         <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
-                            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Filled
+                            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
                                 : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                                : Appearance.Outline)">
+                                : Appearance.Lightweight)">
                                 @context.Status
                             </FluentBadge>
                         </TemplateColumn>
@@ -190,6 +212,8 @@
         GridSort<AssignmentSummaryDto>.ByAscending(x => x.Title);
     private readonly GridSort<AssignmentSummaryDto> _sortByType =
         GridSort<AssignmentSummaryDto>.ByAscending(x => x.AssignmentType);
+    private readonly GridSort<AssignmentSummaryDto> _sortByGrading =
+        GridSort<AssignmentSummaryDto>.ByAscending(x => x.GradingFormat);
     private readonly GridSort<AssignmentSummaryDto> _sortByStatus =
         GridSort<AssignmentSummaryDto>.ByAscending(x => x.Status);
     private readonly GridSort<AssignmentSummaryDto> _sortByDueDate =

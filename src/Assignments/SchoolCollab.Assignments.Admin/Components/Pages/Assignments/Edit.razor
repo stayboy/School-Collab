@@ -41,6 +41,22 @@
                                Label="Assignment Type *"
                                class="full-width mb-3" />
 
+                <FluentSelect TOption="GradingFormatOption"
+                               Items="@_gradingOptions"
+                               @bind-SelectedOption="_selectedGrading"
+                               OptionText="@(o => o.Label)"
+                               OptionValue="@(o => o.Value)"
+                               Label="Grading Format *"
+                               class="full-width mb-3" />
+
+                <FluentSelect TOption="TargetAudienceOption"
+                               Items="@_audienceOptions"
+                               @bind-SelectedOption="_selectedAudience"
+                               OptionText="@(o => o.Label)"
+                               OptionValue="@(o => o.Value)"
+                               Label="Target Audience *"
+                               class="full-width mb-3" />
+
                 <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" class="full-width mb-3" />
                 <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" class="narrow-field mb-3" />
 
@@ -76,11 +92,29 @@
     private record AssignmentTypeOption(string Value, string Label);
     private readonly AssignmentTypeOption[] _typeOptions =
     [
-        new(((int)AssignmentTypeDto.Digital).ToString(), "Digital"),
-        new(((int)AssignmentTypeDto.SemiManual).ToString(), "Semi-Manual"),
-        new(((int)AssignmentTypeDto.Manual).ToString(), "Manual")
+        new(((int)AssignmentTypeDto.Online).ToString(), "Online"),
+        new(((int)AssignmentTypeDto.Hybrid).ToString(), "Hybrid"),
+        new(((int)AssignmentTypeDto.Offline).ToString(), "Offline")
     ];
     private AssignmentTypeOption? _selectedType;
+
+    private record GradingFormatOption(string Value, string Label);
+    private readonly GradingFormatOption[] _gradingOptions =
+    [
+        new(((int)GradingFormatDto.AutoGraded).ToString(), "Auto-Graded"),
+        new(((int)GradingFormatDto.InstantGraded).ToString(), "Instant-Graded"),
+        new(((int)GradingFormatDto.TeacherGraded).ToString(), "Teacher-Graded")
+    ];
+    private GradingFormatOption? _selectedGrading;
+
+    private record TargetAudienceOption(string Value, string Label);
+    private readonly TargetAudienceOption[] _audienceOptions =
+    [
+        new(((int)TargetAudienceDto.AllStudents).ToString(), "All Students"),
+        new(((int)TargetAudienceDto.SelectedStudents).ToString(), "Selected Students"),
+        new(((int)TargetAudienceDto.SelectedGrades).ToString(), "Selected Grades/Classes")
+    ];
+    private TargetAudienceOption? _selectedAudience;
 
     private readonly EditFormModel _model = new();
 
@@ -102,6 +136,8 @@
                 _model.DueDate = _item.DueDate?.DateTime;
                 _model.MaxScore = _item.MaxScore;
                 _selectedType = _typeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
+                _selectedGrading = _gradingOptions.FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
+                _selectedAudience = _audienceOptions.FirstOrDefault(o => o.Value == ((int)_item.TargetAudience).ToString());
             }
 
             Logger.LogInformation("Loaded assignment {AssignmentId} for edit", Id);
@@ -132,6 +168,16 @@
                 _error = "Assignment Type is required.";
                 return;
             }
+            if (_selectedGrading is null)
+            {
+                _error = "Grading Format is required.";
+                return;
+            }
+            if (_selectedAudience is null)
+            {
+                _error = "Target Audience is required.";
+                return;
+            }
 
             Logger.LogInformation("Updating assignment {AssignmentId}", Id);
 
@@ -139,6 +185,8 @@
                 _model.Title!,
                 _model.Description,
                 (AssignmentTypeDto)int.Parse(_selectedType!.Value),
+                (GradingFormatDto)int.Parse(_selectedGrading!.Value),
+                (TargetAudienceDto)int.Parse(_selectedAudience!.Value),
                 _item!.SubjectCodedValueId,
                 _item.GradeCodedValueId,
                 _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,

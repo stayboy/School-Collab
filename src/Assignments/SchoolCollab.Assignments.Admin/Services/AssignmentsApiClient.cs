@@ -1,16 +1,22 @@
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 
 namespace SchoolCollab.Assignments.Admin.Services;
 
 public enum AssignmentStatusDto { Draft, Published, Closed }
-public enum AssignmentTypeDto { Digital, SemiManual, Manual }
+public enum AssignmentTypeDto { Online, Hybrid, Offline }
+public enum GradingFormatDto { AutoGraded, InstantGraded, TeacherGraded }
+public enum TargetAudienceDto { AllStudents, SelectedStudents, SelectedGrades }
 
 public record AssignmentSummaryDto(
     Guid Id,
     string Title,
     string? Description,
     AssignmentTypeDto AssignmentType,
+    GradingFormatDto GradingFormat,
+    TargetAudienceDto TargetAudience,
     Guid SubjectCodedValueId,
     string? SubjectName,
     Guid? GradeCodedValueId,
@@ -26,6 +32,8 @@ public record CreateAssignmentRequest(
     string Title,
     string? Description,
     AssignmentTypeDto AssignmentType,
+    GradingFormatDto GradingFormat,
+    TargetAudienceDto TargetAudience,
     Guid SubjectCodedValueId,
     Guid? GradeCodedValueId,
     DateTimeOffset? DueDate,
@@ -35,6 +43,8 @@ public record UpdateAssignmentRequest(
     string Title,
     string? Description,
     AssignmentTypeDto AssignmentType,
+    GradingFormatDto GradingFormat,
+    TargetAudienceDto TargetAudience,
     Guid SubjectCodedValueId,
     Guid? GradeCodedValueId,
     DateTimeOffset? DueDate,
@@ -47,6 +57,11 @@ public record ReviewAssignmentRequest(
 
 public sealed class AssignmentsApiClient(HttpClient http, ILogger<AssignmentsApiClient> logger)
 {
+    private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     public async Task<AssignmentSummaryDto[]?> ListAsync(AssignmentStatusDto? status = null, CancellationToken ct = default)
     {
         var url = "/assignments";
@@ -54,7 +69,7 @@ public sealed class AssignmentsApiClient(HttpClient http, ILogger<AssignmentsApi
             url += $"?status={status.Value}";
 
         logger.LogDebug("Listing assignments with status filter {Status}", status);
-        var result = await http.GetFromJsonAsync<AssignmentSummaryDto[]>(url, ct);
+        var result = await http.GetFromJsonAsync<AssignmentSummaryDto[]>(url, _jsonOptions, ct);
         logger.LogInformation("Listed {Count} assignments", result?.Length ?? 0);
         return result;
     }
@@ -69,13 +84,13 @@ public sealed class AssignmentsApiClient(HttpClient http, ILogger<AssignmentsApi
             return null;
         }
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<AssignmentSummaryDto>(ct);
+        return await response.Content.ReadFromJsonAsync<AssignmentSummaryDto>(_jsonOptions, ct);
     }
 
     public async Task<Guid> CreateAsync(CreateAssignmentRequest req, CancellationToken ct = default)
     {
         logger.LogInformation("Creating assignment with title {Title}", req.Title);
-        var response = await http.PostAsJsonAsync("/assignments", req, ct);
+        var response = await http.PostAsJsonAsync("/assignments", req, _jsonOptions, ct);
         response.EnsureSuccessStatusCode();
         var id = await response.Content.ReadFromJsonAsync<Guid>(ct);
         logger.LogInformation("Assignment created with id {AssignmentId}", id);
@@ -85,7 +100,7 @@ public sealed class AssignmentsApiClient(HttpClient http, ILogger<AssignmentsApi
     public async Task UpdateAsync(Guid id, UpdateAssignmentRequest req, CancellationToken ct = default)
     {
         logger.LogInformation("Updating assignment {AssignmentId}", id);
-        var response = await http.PutAsJsonAsync($"/assignments/{id}", req, ct);
+        var response = await http.PutAsJsonAsync($"/assignments/{id}", req, _jsonOptions, ct);
         response.EnsureSuccessStatusCode();
     }
 

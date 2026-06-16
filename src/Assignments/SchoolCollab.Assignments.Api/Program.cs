@@ -1,3 +1,4 @@
+using System.Text.Json.Serialization;
 using Serilog;
 using SchoolCollab.Assignments.Api;
 using SchoolCollab.Assignments.Core;
@@ -6,6 +7,11 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddRabbitMQClient("rabbitmq");
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
     ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];

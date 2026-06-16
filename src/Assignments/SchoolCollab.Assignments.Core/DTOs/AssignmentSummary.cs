@@ -7,6 +7,8 @@ public record AssignmentSummary(
     string Title,
     string? Description,
     AssignmentType AssignmentType,
+    GradingFormat GradingFormat,
+    TargetAudience TargetAudience,
     Guid SubjectCodedValueId,
     Guid? GradeCodedValueId,
     AssignmentStatus Status,

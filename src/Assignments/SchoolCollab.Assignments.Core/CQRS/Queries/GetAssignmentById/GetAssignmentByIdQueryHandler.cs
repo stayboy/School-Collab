@@ -42,6 +42,8 @@ public sealed class GetAssignmentByIdQueryHandler(
                     assignment.Title,
                     assignment.Description ?? string.Empty,
                     assignment.AssignmentType.ToString(),
+                    assignment.GradingFormat.ToString(),
+                    assignment.TargetAudience.ToString(),
                     assignment.SubjectCodedValueId,
                     assignment.GradeCodedValueId,
                     assignment.Status.ToString(),
