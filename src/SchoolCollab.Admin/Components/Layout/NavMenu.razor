@@ -4,9 +4,10 @@
 @implements IAsyncDisposable
 @inject CodedValuesApiClient Api
 @inject ILogger<NavMenu> Logger
+@inject NavigationManager Nav
 
 <FluentNavMenu Width="250"
-               Title="Main navigation">
+               Title="@(_currentModule == "coded-values" ? "Coded Values" : _currentModule == "assignments" ? "Assignments" : "Navigation")">
 
     <FluentNavLink Href="/"
                   Icon="@(Icon.FromType<Icons.Regular.Size20.Home>())"
@@ -14,76 +15,123 @@
         Home
     </FluentNavLink>
 
-    <FluentNavGroup Title="Coded Values"
-                    Expanded="true">
-        @if (_loadingParents)
-        {
-            <FluentNavLink Href="#" Disabled="true">
-               <FluentProgressRing class="progress-ring-small" />
-            </FluentNavLink>
-        }
-        else if (_parentValues is { Length: > 0 })
-        {
-            foreach (var cv in _parentValues.Take(20))
+    @if (_currentModule == "coded-values")
+    {
+        <FluentNavGroup Title="Coded Values"
+                        Expanded="true">
+            @if (_loadingParents)
             {
-               <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
-                             Icon="@(Icon.FromType<Icons.Regular.Size20.Tag>())"
-                             Title="@cv.Name">
-                   @Truncate(cv.Name, 22)
-               </FluentNavLink>
+                <FluentNavLink Href="#" Disabled="true">
+                   <FluentProgressRing class="progress-ring-small" />
+                </FluentNavLink>
+            }
+            else if (_parentValues is { Length: > 0 })
+            {
+                foreach (var cv in _parentValues.Take(20))
+                {
+                   <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
+                                 Icon="@(Icon.FromType<Icons.Regular.Size20.Tag>())"
+                                 Title="@cv.Name">
+                       @Truncate(cv.Name, 22)
+                   </FluentNavLink>
+                }
+
+                if (_parentValues.Length > 20)
+                {
+                   <FluentNavLink Href="/coded-values"
+                                 Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowExportUp>())">
+                       <i>Show More …</i>
+                   </FluentNavLink>
+                }
+            }
+            else
+            {
+                <FluentNavLink Href="/coded-values"
+                             Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+                   All Categories
+                </FluentNavLink>
             }
 
-            if (_parentValues.Length > 20)
-            {
-               <FluentNavLink Href="/coded-values"
-                             Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowExportUp>())">
-                   <i>Show More …</i>
-               </FluentNavLink>
-            }
-        }
-        else
-        {
+            <hr class="nav-separator" />
+
             <FluentNavLink Href="/coded-values"
                          Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
-               All Categories
+                All Categories
             </FluentNavLink>
-        }
 
-        <hr class="nav-separator" />
+            <FluentNavLink Href="/coded-values/chat"
+                         Icon="@(Icon.FromType<Icons.Regular.Size20.Bot>())">
+                AI Assistant
+            </FluentNavLink>
+        </FluentNavGroup>
+    }
 
-        <FluentNavLink Href="/coded-values"
-                     Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
-            All Categories
-        </FluentNavLink>
+    @if (_currentModule == "assignments")
+    {
+        <FluentNavGroup Title="Assignments"
+                        Expanded="true">
+            <FluentNavLink Href="/assignments"
+                          Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
+                All Assignments
+            </FluentNavLink>
+            <FluentNavLink Href="/assignments/create"
+                          Icon="@(Icon.FromType<Icons.Regular.Size20.Add>())">
+                New Assignment
+            </FluentNavLink>
+        </FluentNavGroup>
+    }
 
-        <FluentNavLink Href="/coded-values/chat"
-                     Icon="@(Icon.FromType<Icons.Regular.Size20.Bot>())">
-            AI Assistant
-        </FluentNavLink>
-    </FluentNavGroup>
-
-    <FluentNavGroup Title="Assignments"
-                    Expanded="true">
-        <FluentNavLink Href="/assignments"
-                      Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
-            All Assignments
-        </FluentNavLink>
-        <FluentNavLink Href="/assignments/create"
-                      Icon="@(Icon.FromType<Icons.Regular.Size20.Add>())">
-            New Assignment
-        </FluentNavLink>
-    </FluentNavGroup>
 </FluentNavMenu>
 
 @code {
     private CodedValueDto[]? _parentValues;
-    private bool _loadingParents = true;
+    private bool _loadingParents;
     private volatile bool _disposed;
     private CancellationTokenSource? _loadCts;
+    private string _currentModule = "";
+
+    protected override void OnInitialized()
+    {
+        Nav.LocationChanged += OnLocationChanged;
+        _currentModule = DetermineModule(new Uri(Nav.Uri).AbsolutePath);
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        if (_currentModule == "coded-values")
+        {
+            await LoadParentValuesAsync();
+        }
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+    {
+        var newModule = DetermineModule(new Uri(e.Location).AbsolutePath);
+        if (newModule != _currentModule)
+        {
+            _currentModule = newModule;
+            StateHasChanged();
+
+            if (_currentModule == "coded-values" && _parentValues is null && !_loadingParents)
+            {
+                _ = LoadParentValuesAsync();
+            }
+        }
+    }
+
+    private static string DetermineModule(string path) => path switch
+    {
+        var p when p.StartsWith("/coded-values", StringComparison.OrdinalIgnoreCase) => "coded-values",
+        var p when p.StartsWith("/assignments", StringComparison.OrdinalIgnoreCase) => "assignments",
+        _ => ""
+    };
+
+    private async Task LoadParentValuesAsync()
+    {
+        if (_loadingParents || _parentValues is not null) return;
+
         _loadCts = new CancellationTokenSource();
+        _loadingParents = true;
         try
         {
             _parentValues = await Api.GetRootValuesAsync(_loadCts.Token);
@@ -109,6 +157,7 @@
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
+        Nav.LocationChanged -= OnLocationChanged;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
