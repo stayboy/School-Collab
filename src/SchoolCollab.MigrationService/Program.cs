@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.Students.Core.Data;
 using SchoolCollab.MigrationService.Seeding;
 using Serilog;
 
@@ -26,6 +27,13 @@ var assignmentsConnectionString = builder.Configuration.GetConnectionString("ass
 
 builder.Services.AddDbContext<AssignmentsDbContext>(opts =>
     opts.UseNpgsql(assignmentsConnectionString).UseSnakeCaseNamingConvention());
+
+// Register Students DbContext
+var studentsConnectionString = builder.Configuration.GetConnectionString("students-db")
+    ?? throw new InvalidOperationException("Connection string 'students-db' is not configured.");
+
+builder.Services.AddDbContext<StudentsDbContext>(opts =>
+    opts.UseNpgsql(studentsConnectionString).UseSnakeCaseNamingConvention());
 
 // Register CodedValueSeeder
 builder.Services.AddScoped<CodedValueSeeder>();
@@ -71,6 +79,21 @@ try
         catch (Exception ex)
         {
             logger.LogError(ex, "Assignments migration failed");
+            exitCode = 1;
+        }
+
+        // ── Students migrations ──
+        try
+        {
+            var studentsDb = scope.ServiceProvider.GetRequiredService<StudentsDbContext>();
+
+            logger.LogInformation("Applying EF Core migrations for Students");
+            await studentsDb.Database.MigrateAsync();
+            logger.LogInformation("Students EF Core migrations applied successfully");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Students migration failed");
             exitCode = 1;
         }
     }

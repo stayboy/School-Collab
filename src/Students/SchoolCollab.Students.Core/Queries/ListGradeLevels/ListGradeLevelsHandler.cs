@@ -1,0 +1,46 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
+using SchoolCollab.Students.Core.CQRS;
+using SchoolCollab.Students.Core.Data;
+using SchoolCollab.Students.Core.DTOs;
+
+namespace SchoolCollab.Students.Core.Queries.ListGradeLevels;
+
+public sealed class ListGradeLevelsHandler(
+    StudentsDbContext db,
+    HybridCache cache) : IQueryHandler<ListGradeLevels, GradeLevelDto[]>
+{
+    private static readonly HybridCacheEntryOptions CacheOptions = new()
+    {
+        Expiration = TimeSpan.FromMinutes(5),
+        LocalCacheExpiration = TimeSpan.FromMinutes(1)
+    };
+
+    public async Task<GradeLevelDto[]> HandleAsync(
+        ListGradeLevels query,
+        CancellationToken cancellationToken = default)
+    {
+        return await cache.GetOrCreateAsync(
+            "grade-levels:list",
+            db,
+            static async (db, ct) =>
+            {
+                var results = await db.GradeLevels
+                    .AsNoTracking()
+                    .OrderBy(x => x.Level)
+                    .ToArrayAsync(ct);
+
+                return results.Select(gl => new GradeLevelDto(
+                    gl.Id,
+                    gl.CodedValueId,
+                    gl.Level,
+                    gl.Name,
+                    gl.DisplayOrder,
+                    gl.CreatedAt,
+                    gl.UpdatedAt)).ToArray();
+            },
+            CacheOptions,
+            tags: ["students"],
+            cancellationToken: cancellationToken);
+    }
+}

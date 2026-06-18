@@ -25,7 +25,7 @@ fluent-card[style*="cursor: pointer"]:hover {
 
 /* Home dashboard layout */
 .home-dashboard {
-    max-width: 900px;
+    max-width: 1100px;
     margin: 0 auto;
     padding: 2rem 0;
 }
@@ -63,8 +63,8 @@ fluent-card[style*="cursor: pointer"]:hover {
 }
 
 .home-card-icon {
-    font-size: 2rem;
-    margin-bottom: 0.25rem;
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
 }
 
 /* Spacing utilities (replacing Bootstrap conventions used across modules) */
