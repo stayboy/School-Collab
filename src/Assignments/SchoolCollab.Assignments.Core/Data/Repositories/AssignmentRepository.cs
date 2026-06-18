@@ -40,8 +40,8 @@ public sealed class AssignmentRepository : IAssignmentRepository
         return await query
             .OrderByDescending(a => a.UpdatedAt)
             .Select(a => new AssignmentSummary(
-                a.Id, a.Title, a.Description, a.AssignmentType, a.SubjectCodedValueId,
-                a.GradeCodedValueId, a.Status, a.DueDate, a.MaxScore,
+                a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
+                a.SubjectCodedValueId, a.GradeCodedValueId, a.Status, a.DueDate, a.MaxScore,
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt))
             .ToListAsync(ct);
     }

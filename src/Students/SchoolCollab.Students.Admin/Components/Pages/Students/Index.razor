@@ -1,0 +1,284 @@
+@page "/students"
+@using SchoolCollab.Students.Admin.Services
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Index> Logger
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>Students</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">Students</h1>
+            </div>
+            <div class="action-bar">
+                <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/students/create")'>
+                    + New Student
+                </FluentButton>
+                <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
+                <div class="spacer"></div>
+                <FluentTextField Placeholder="Search students…"
+                                 class="search-box"
+                                 Immediate="true"
+                                 ImmediateDelay="300"
+                                 ValueChanged="@OnSearchValueChanged"
+                                 OnClear="@(() => OnSearchClear())" />
+            </div>
+            @if (_showDeleted && _deletedItems is not null)
+            {
+                @if (_deletedItems.Length == 0)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">No deleted students.</FluentMessageBar>
+                }
+                else
+                {
+                    <h3>Deleted Students</h3>
+                    <FluentDataGrid Items="@_deletedItems.AsQueryable()"
+                                    GridTemplateColumns="1fr 2fr 2fr 2fr 1fr auto"
+                                    TGridItem="StudentDto"
+                                    MultiLine="true"
+                                    class="mb-4">
+                        <TemplateColumn Title="Student #" SortBy="@_sortByStudentNumber" Sortable="true">
+                            <code>@context.StudentNumber</code>
+                        </TemplateColumn>
+                        <PropertyColumn Property="@(x => x.FirstName)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.LastName)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.ContactEmail)" />
+                        <TemplateColumn Title="Status">
+                            <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Actions">
+                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="link-action">Recover</FluentAnchor>
+                            <FluentAnchor Href="@($"/students/{context.Id}")" class="link-action ms-2">View</FluentAnchor>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                }
+            }
+
+            @* -- Grid fills remaining vertical space -- *@
+            @if (_items is null)
+            {
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else if (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">No students match '@_searchText'.</FluentMessageBar>
+            }
+            else if (_items.Length == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">No students yet.</FluentMessageBar>
+            }
+            else
+            {
+                <div class="grid-container">
+                    <FluentDataGrid Items="@_filteredItems.AsQueryable()"
+                                    GridTemplateColumns="120px minmax(180px,2fr) minmax(180px,2fr) minmax(200px,2fr) 120px 100px auto"
+                                    MultiLine="true"
+                                    TGridItem="StudentDto">
+                        <TemplateColumn Title="Student #" SortBy="@_sortByStudentNumber" Sortable="true">
+                            <code>@context.StudentNumber</code>
+                        </TemplateColumn>
+                        <PropertyColumn Property="@(x => x.FirstName)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.LastName)" Sortable="true" />
+                        <PropertyColumn Property="@(x => x.ContactEmail)" />
+                        <TemplateColumn Title="Date of Birth">
+                            @(context.DateOfBirth?.ToShortDateString() ?? "—")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Status">
+                            @if (context.IsDeleted)
+                            {
+                                <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+                            }
+                            else
+                            {
+                                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                            }
+                        </TemplateColumn>
+                        <TemplateColumn Title="Actions">
+                            <FluentAnchor Href="@($"/students/{context.Id}")" class="link-action">View</FluentAnchor>
+                            @if (!context.IsDeleted)
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                            }
+                            else
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="link-action ms-2">Recover</FluentAnchor>
+                            }
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+            }
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private StudentDto[]? _items;
+    private StudentDto[]? _deletedItems;
+    private bool _showDeleted;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private string _searchText = string.Empty;
+
+    private StudentDto[] _filteredItems => string.IsNullOrWhiteSpace(_searchText)
+        ? _items ?? []
+        : (_items ?? []).Where(MatchesSearch).ToArray();
+
+    private readonly GridSort<StudentDto> _sortByStudentNumber =
+        GridSort<StudentDto>.ByAscending(x => x.StudentNumber);
+
+    private bool MatchesSearch(StudentDto s)
+    {
+        var search = _searchText.Trim();
+        return s.StudentNumber.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || s.FirstName.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || s.LastName.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || s.ContactEmail.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        Logger.LogInformation("Loading students list");
+        try
+        {
+            _items = await Api.ListStudentsAsync(token);
+
+            if (_disposed) return;
+
+            Logger.LogInformation("Loaded {Count} students", _items?.Length ?? 0);
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load students");
+            _error = ex.Message;
+        }
+    }
+
+    private async Task OnShowDeletedChanged(bool isChecked)
+    {
+        _showDeleted = isChecked;
+        if (_showDeleted && _deletedItems is null)
+        {
+            try
+            {
+                _deletedItems = await Api.ListDeletedStudentsAsync();
+                if (_disposed) return;
+            }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to load deleted students");
+                _error = ex.Message;
+            }
+        }
+    }
+
+    private async Task OnDeleteAsync(Guid id, string studentNumber)
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Are you sure you want to delete student '{studentNumber}'? This will soft-delete the student.",
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        if (_items is null) return;
+        var previous = _items;
+        _items = _items.Where(x => x.Id != id).ToArray();
+        StateHasChanged();
+
+        try
+        {
+            await Api.DeleteStudentAsync(id);
+            if (_disposed) return;
+
+            if (_showDeleted)
+            {
+                _deletedItems = await Api.ListDeletedStudentsAsync();
+                if (_disposed) return;
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete student {Id}", id);
+            _items = previous; // rollback
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnRecoverAsync(Guid id, string studentNumber)
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Recover student '{studentNumber}'? This will restore the student to the active list.",
+            "Recover",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        try
+        {
+            await Api.RecoverStudentAsync(id);
+            if (_disposed) return;
+            // Remove from deleted list, re-fetch active list
+            _deletedItems = _deletedItems?.Where(x => x.Id != id).ToArray();
+            _items = await Api.ListStudentsAsync();
+            if (_disposed) return;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to recover student {Id}", id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private void OnSearchValueChanged(string? text)
+    {
+        _searchText = text?.Trim() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void OnSearchClear()
+    {
+        _searchText = string.Empty;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

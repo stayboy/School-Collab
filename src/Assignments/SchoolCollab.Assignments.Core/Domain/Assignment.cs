@@ -15,6 +15,8 @@ public sealed class Assignment
     public string Title { get; private set; } = default!;
     public string? Description { get; private set; }
     public AssignmentType AssignmentType { get; private set; }
+    public GradingFormat GradingFormat { get; private set; }
+    public TargetAudienceType TargetAudienceType { get; private set; }
     public Guid SubjectCodedValueId { get; private set; }
     public Guid? GradeCodedValueId { get; private set; }
     public DateTimeOffset? DueDate { get; private set; }
@@ -34,6 +36,8 @@ public sealed class Assignment
         string title,
         string? description,
         AssignmentType assignmentType,
+        GradingFormat gradingFormat,
+        TargetAudienceType targetAudienceType,
         Guid subjectCodedValueId,
         Guid? gradeCodedValueId,
         DateTimeOffset? dueDate,
@@ -47,6 +51,8 @@ public sealed class Assignment
             Title = title.Trim(),
             Description = description?.Trim(),
             AssignmentType = assignmentType,
+            GradingFormat = gradingFormat,
+            TargetAudienceType = targetAudienceType,
             SubjectCodedValueId = subjectCodedValueId,
             GradeCodedValueId = gradeCodedValueId,
             DueDate = dueDate,
@@ -62,6 +68,7 @@ public sealed class Assignment
     }
 
     public void Update(string title, string? description, AssignmentType assignmentType,
+        GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
         Guid subjectCodedValueId, Guid? gradeCodedValueId, DateTimeOffset? dueDate, decimal? maxScore)
     {
         if (Status != AssignmentStatus.Draft)
@@ -70,6 +77,8 @@ public sealed class Assignment
         Title = title.Trim();
         Description = description?.Trim();
         AssignmentType = assignmentType;
+        GradingFormat = gradingFormat;
+        TargetAudienceType = targetAudienceType;
         SubjectCodedValueId = subjectCodedValueId;
         GradeCodedValueId = gradeCodedValueId;
         DueDate = dueDate;

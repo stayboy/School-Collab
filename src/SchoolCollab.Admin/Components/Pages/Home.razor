@@ -1,4 +1,5 @@
 @page "/"
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
 <PageTitle>Home</PageTitle>
 
@@ -7,24 +8,10 @@
     <p class="home-subtitle">A collaborative platform for managing educational data.</p>
 
     <div class="home-cards">
-        <NavLink href="/coded-values" Match="NavLinkMatch.Prefix" class="card-link">
-            <FluentCard Style="width: 320px; cursor: pointer;" class="home-card">
-                <div class="home-card-inner">
-                    <div class="home-card-icon">🏷️</div>
-                    <h3>Coded Values</h3>
-                    <p>Manage categories, subjects, grades, and other reference data.</p>
-                </div>
-            </FluentCard>
-        </NavLink>
+        <DashboardCard Href="/coded-values" Icon="@(Icons.Regular.Size24.Tag)" Title="Coded Values" Description="Manage categories, subjects, grades, and other reference data." />
 
-        <NavLink href="/assignments" Match="NavLinkMatch.Prefix" class="card-link">
-            <FluentCard Style="width: 320px; cursor: pointer;" class="home-card">
-                <div class="home-card-inner">
-                    <div class="home-card-icon">📝</div>
-                    <h3>Assignments</h3>
-                    <p>Create, publish, and review assignments and homework.</p>
-                </div>
-            </FluentCard>
-        </NavLink>
+        <DashboardCard Href="/assignments" Icon="@(Icons.Regular.Size24.ClipboardCheckmark)" Title="Assignments" Description="Create, publish, and review assignments and homework." />
+
+        <DashboardCard Href="/students" Icon="@(Icons.Regular.Size24.People)" Title="Students" Description="Manage student records, enrollments, grade levels, subjects, and periods." />
     </div>
 </div>

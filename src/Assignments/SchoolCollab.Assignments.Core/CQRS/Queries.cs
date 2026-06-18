@@ -1,5 +1,5 @@
 using SchoolCollab.Assignments.Core.Domain;
-using SchoolCollab.Assignments.Core.DTOs;
+using SchoolCollab.Assignments.Contracts;
 
 namespace SchoolCollab.Assignments.Core.CQRS;
 

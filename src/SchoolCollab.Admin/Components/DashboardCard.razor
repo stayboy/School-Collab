@@ -1,0 +1,34 @@
+@typeparam Icon where Icon : Microsoft.FluentUI.AspNetCore.Components.Icon, new()
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<NavLink Href="@Href" Match="@Match" class="card-link" aria-label="@Title">
+    <FluentCard Style="width: 320px; cursor: pointer;" class="home-card">
+        <div class="home-card-inner">
+            <div class="home-card-icon" aria-hidden="true">
+                <FluentIcon Icon="@Icon" Width="@IconWidth" />
+            </div>
+
+            <h3>@Title</h3>
+            <p>@Description</p>
+        </div>
+    </FluentCard>
+</NavLink>
+
+@code {
+    [Parameter, EditorRequired]
+    public string Href { get; set; } = "/";
+
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    [Parameter, EditorRequired]
+    public string Description { get; set; } = string.Empty;
+
+    [Parameter]
+    public NavLinkMatch Match { get; set; } = NavLinkMatch.Prefix;
+
+    [Parameter]
+    public string IconWidth { get; set; } = "48px";
+}

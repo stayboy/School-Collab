@@ -32,14 +32,20 @@ var redis = builder.AddRedis("cache");
 
 var assignmentsDb = postgres.AddDatabase("assignments-db");
 
+// ── Students bounded context ──
+
+var studentsDb = postgres.AddDatabase("students-db");
+
 // Unified migration service: runs EF Core migrations for all bounded contexts
 // and seeds CodedValues data, then exits. The APIs wait for successful completion
 // before starting, ensuring the schema and seed data are ready in all environments.
 var migrator = builder.AddProject<Projects.SchoolCollab_MigrationService>("migrator")
     .WithReference(codedValuesDb)
     .WithReference(assignmentsDb)
+    .WithReference(studentsDb)
     .WaitFor(codedValuesDb)
-    .WaitFor(assignmentsDb);
+    .WaitFor(assignmentsDb)
+    .WaitFor(studentsDb);
 
 var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("coded-values-api")
     .WithReference(codedValuesDb)
@@ -61,13 +67,29 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WaitFor(redis)
     .WaitForCompletion(migrator);
 
-// Unified admin host — serves both CodedValues and Assignments Blazor UIs
+var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("students-api")
+    .WithReference(studentsDb)
+    .WithReference(rabbit)
+    .WithReference(redis)
+    .WaitFor(rabbit)
+    .WaitFor(redis)
+    .WaitForCompletion(migrator);
+
+var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("students-worker")
+    .WithReference(studentsDb)
+    .WithReference(rabbit)
+    .WaitFor(rabbit)
+    .WaitForCompletion(migrator);
+
+// Unified admin host — serves CodedValues, Assignments, and Students Blazor UIs
 builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WithReference(codedValuesApi)
     .WithReference(codedValuesAi)
     .WithReference(assignmentsApi)
+    .WithReference(studentsApi)
     .WaitFor(codedValuesApi)
     .WaitFor(codedValuesAi)
-    .WaitFor(assignmentsApi);
+    .WaitFor(assignmentsApi)
+    .WaitFor(studentsApi);
 
 builder.Build().Run();

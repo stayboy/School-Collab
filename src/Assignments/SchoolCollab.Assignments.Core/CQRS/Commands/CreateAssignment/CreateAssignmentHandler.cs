@@ -21,6 +21,8 @@ public sealed class CreateAssignmentHandler(
             command.Title,
             command.Description,
             command.AssignmentType,
+            command.GradingFormat,
+            command.TargetAudienceType,
             command.SubjectCodedValueId,
             command.GradeCodedValueId,
             command.DueDate,

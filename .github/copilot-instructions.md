@@ -676,6 +676,43 @@ it instead of replicating the same effect in CSS.
 
 ---
 
+## Bug-fix regression tests
+
+Every bug fix must include a regression test that proves the reported bug is fixed.
+Do not treat a bug fix as complete when it only changes production code.
+
+### Rules
+
+1. **Write the regression test first when practical.** The test should fail against the
+   buggy code and pass after the fix. If reproducing the exact failure is too expensive,
+   add the smallest test that covers the fixed behaviour and explain the trade-off in the
+   PR description.
+
+2. **Run the relevant test project after the fix.** At minimum, run the test project that
+   owns the changed production code before committing. If the fix crosses projects, run
+   all affected test projects.
+
+3. **Backend and domain bugs.** Add or update unit/integration tests using the existing
+   MSTest/Moq/FluentAssertions patterns. API/client bug fixes should include HTTP status,
+   payload, and error-path coverage where applicable.
+
+4. **UI and Blazor component bugs.** Use **bUnit** tests for Razor/Blazor component
+   regressions. Test the rendered component tree and user-facing behaviour, not only
+   private methods or view models.
+
+   - Add `bunit` packages to the test project that owns the component if they are not
+     already present.
+   - Register required services (`NavigationManager`, dialog/toast providers, HTTP
+     clients, etc.) in the bUnit `TestContext`.
+   - Assert the bug-specific UI outcome, such as route discovery, expected headings,
+     buttons, empty states, error boundaries, or disabled actions.
+
+5. **No untested bug fixes.** If a bug cannot be tested directly, document why in the PR
+   and add the closest available coverage, such as routing, service, or component
+   integration coverage.
+
+---
+
 ## Unit tests for feature additions
 
 Every new feature, service, or behavioural class **must** include unit tests in
@@ -722,3 +759,55 @@ under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
    throwing `HttpRequestException`. Never use `GetFromJsonAsync<T>()` for endpoints
    that can return 404 — it throws on non-success status codes. Use `GetAsync()` +
    status check + `ReadFromJsonAsync<T>()` instead.
+
+---
+
+## Pre-flight review & PR creation
+
+Before creating **any** pull request, the following pre-flight checks must pass:
+
+### 1. Run pre-flight code review
+
+Execute a code-review pass on the branch changes **before** pushing or creating a PR.
+This catches issues early and avoids back-and-forth on the PR.
+
+```
+# Use the code-review skill or agent to review staged/unstaged changes
+# Focus on: bugs, security vulnerabilities, logic errors, missing tests
+```
+
+### 2. Verify tests exist for the feature
+
+- Every new feature, service, or behavioural class added on the branch **must** have
+  corresponding unit tests (see "Unit tests for feature additions" above).
+- If the PR introduces new behavioural code without tests, **do not create the PR** —
+  write the tests first.
+
+### 3. Run tests and confirm they pass
+
+```bash
+dotnet test
+```
+
+- `dotnet test` must complete with **0 failures** before the PR is created.
+- If any test fails, fix the issue in the same branch before proceeding.
+
+### 4. Build must succeed
+
+```bash
+dotnet build
+```
+
+- Zero errors. Warnings are acceptable but should be reviewed.
+
+### Checklist (before `gh pr create`)
+
+| Check | Command | Must be |
+|-------|---------|---------|
+| Code review | Review branch changes for bugs/security/logic | No issues found |
+| Tests exist | New behavioural code has corresponding test files | Yes |
+| Tests pass | `dotnet test` | 0 failures |
+| Build succeeds | `dotnet build` | 0 errors |
+
+**Do not skip these checks.** If any check fails, fix the issue on the branch before
+creating the PR.

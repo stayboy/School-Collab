@@ -13,6 +13,7 @@
     <ProjectReference Include="..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
     <ProjectReference Include="..\CodedValues\SchoolCollab.CodedValues.Admin\SchoolCollab.CodedValues.Admin.csproj" />
     <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Admin\SchoolCollab.Assignments.Admin.csproj" />
+    <ProjectReference Include="..\Students\SchoolCollab.Students.Admin\SchoolCollab.Students.Admin.csproj" />
     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
   </ItemGroup>

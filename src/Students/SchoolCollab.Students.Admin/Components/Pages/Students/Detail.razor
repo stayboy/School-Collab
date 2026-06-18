@@ -1,0 +1,167 @@
+@page "/students/{id:guid}"
+@using SchoolCollab.Students.Admin.Services
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Detail> Logger
+@implements IDisposable
+
+<PageTitle>Student — @(_student?.StudentNumber ?? "Loading…")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">@(_student?.StudentNumber ?? "Loading…")</h1>
+                @if (_student is not null)
+                {
+                    <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}/edit")'>Edit</FluentButton>
+                }
+            </div>
+
+            @if (_student is null)
+            {
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else
+            {
+                <div class="form-container">
+                    <div class="form-field">
+                        <FluentTextField Value="@_student.StudentNumber" ReadOnly Label="Student Number" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField Value="@_student.FirstName" ReadOnly Label="First Name" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField Value="@_student.LastName" ReadOnly Label="Last Name" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField Value="@(_student.DateOfBirth?.ToString() ?? "—")" ReadOnly Label="Date of Birth" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField Value="@_student.ContactEmail" ReadOnly Label="Contact Email" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField Value="@(_student.ContactPhone ?? "—")" ReadOnly Label="Contact Phone" />
+                    </div>
+                    <div class="form-field">
+                        @if (_student.IsDeleted)
+                        {
+                            <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+                        }
+                        else
+                        {
+                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                        }
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField Value="@_student.CreatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Created At" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField Value="@_student.UpdatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Updated At" />
+                    </div>
+                </div>
+
+                <h3>Enrollments</h3>
+                @if (_enrollments is null)
+                {
+                    <div class="spinner-container">
+                        <FluentProgressRing />
+                    </div>
+                }
+                else if (_enrollments.Length == 0)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info">No enrollments yet.</FluentMessageBar>
+                }
+                else
+                {
+                    <FluentDataGrid Items="@_enrollments.AsQueryable()"
+                                    TGridItem="StudentEnrollmentDto"
+                                    MultiLine="true">
+                        <PropertyColumn Property="@(e => e.PeriodId)" Title="Period ID" />
+                        <PropertyColumn Property="@(e => e.GradeLevelId)" Title="Grade Level ID" />
+                        <TemplateColumn Title="Enrolled On">
+                            @context.EnrolledOn.ToString("d")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Exit Date">
+                            @(context.ExitDate?.ToString("d") ?? "—")
+                        </TemplateColumn>
+                        <PropertyColumn Property="@(e => e.Status)" />
+                    </FluentDataGrid>
+                }
+            }
+
+            <div class="action-bar">
+                <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo("/students")'>Back</FluentButton>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+            }
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private StudentDto? _student;
+    private StudentEnrollmentDto[]? _enrollments;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        Logger.LogInformation("Loading student {StudentId}", Id);
+        try
+        {
+            var studentTask = Api.GetStudentByIdAsync(Id, ct);
+            var enrollmentsTask = Api.ListEnrollmentsByStudentAsync(Id, ct);
+
+            await Task.WhenAll(studentTask, enrollmentsTask);
+
+            if (_disposed) return;
+
+            _student = studentTask.Result;
+            _enrollments = enrollmentsTask.Result;
+
+            if (_student is null)
+            {
+                _error = $"Student {Id} not found.";
+                Logger.LogWarning("Student {StudentId} not found", Id);
+            }
+            else
+            {
+                Logger.LogInformation("Loaded student {StudentNumber} with {Count} enrollments",
+                    _student.StudentNumber, _enrollments?.Length ?? 0);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load student {StudentId}", Id);
+            _error = ex.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}
