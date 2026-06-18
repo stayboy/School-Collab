@@ -1,8 +1,9 @@
 @using SchoolCollab.CodedValues.Admin
 @using SchoolCollab.Assignments.Admin
+@using SchoolCollab.Students.Admin
 
 <Router AppAssembly="typeof(global::Program).Assembly"
-        AdditionalAssemblies="new[] { typeof(SchoolCollab.CodedValues.Admin.Components._Imports).Assembly, typeof(SchoolCollab.Assignments.Admin.Components._Imports).Assembly }">
+        AdditionalAssemblies="new[] { typeof(SchoolCollab.CodedValues.Admin.Components._Imports).Assembly, typeof(SchoolCollab.Assignments.Admin.Components._Imports).Assembly, typeof(SchoolCollab.Students.Admin.Components._Imports).Assembly }">
     <Found Context="routeData">
         <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
         <FocusOnNavigate RouteData="routeData" Selector="h1" />

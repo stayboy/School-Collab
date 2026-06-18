@@ -1,0 +1,180 @@
+@page "/students/{id:guid}/edit"
+@using SchoolCollab.Students.Admin.Services
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Edit> Logger
+@implements IDisposable
+
+<PageTitle>Edit Student — @(_student?.StudentNumber ?? "Loading…")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">Edit Student</h1>
+            </div>
+
+            @if (_student is null)
+            {
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else
+            {
+                <div class="form-container">
+                    <div class="form-field">
+                        <FluentTextField Value="@_student.StudentNumber" ReadOnly Label="Student Number" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField @bind-Value="_firstName" Label="First Name *" Required />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField @bind-Value="_lastName" Label="Last Name *" Required />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField @bind-Value="_dateOfBirthText" Label="Date of Birth" Placeholder="yyyy-MM-dd" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField @bind-Value="_contactEmail" Label="Contact Email *" Required />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField @bind-Value="_contactPhone" Label="Contact Phone" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextField @bind-Value="_genderCodedValueIdText" Label="Gender Coded Value ID" Placeholder="Optional GUID" />
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_error))
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
+                    }
+                </div>
+
+                <div class="action-bar">
+                    <FluentButton Appearance="Appearance.Accent" OnClick="OnSaveAsync" Disabled="@_saving">
+                        @(_saving ? "Saving…" : "Save")
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}")'>Cancel</FluentButton>
+                </div>
+            }
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private StudentDto? _student;
+    private string _firstName = string.Empty;
+    private string _lastName = string.Empty;
+    private string _dateOfBirthText = string.Empty;
+    private string _contactEmail = string.Empty;
+    private string _contactPhone = string.Empty;
+    private string _genderCodedValueIdText = string.Empty;
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        Logger.LogInformation("Loading student {StudentId} for edit", Id);
+        try
+        {
+            _student = await Api.GetStudentByIdAsync(Id, ct);
+            if (_disposed) return;
+
+            if (_student is null)
+            {
+                _error = $"Student {Id} not found.";
+                Logger.LogWarning("Student {StudentId} not found for edit", Id);
+            }
+            else
+            {
+                _firstName = _student.FirstName;
+                _lastName = _student.LastName;
+                _dateOfBirthText = _student.DateOfBirth?.ToString() ?? string.Empty;
+                _contactEmail = _student.ContactEmail;
+                _contactPhone = _student.ContactPhone ?? string.Empty;
+                _genderCodedValueIdText = _student.GenderCodedValueId?.ToString() ?? string.Empty;
+                Logger.LogInformation("Loaded student {StudentNumber} for edit", _student.StudentNumber);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load student {StudentId} for edit", Id);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task OnSaveAsync()
+    {
+        if (_student is null || _disposed) return;
+
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName) || string.IsNullOrWhiteSpace(_contactEmail))
+        {
+            _error = "First Name, Last Name, and Contact Email are required.";
+            return;
+        }
+
+        DateOnly? dateOfBirth = null;
+        if (!string.IsNullOrWhiteSpace(_dateOfBirthText) && DateOnly.TryParse(_dateOfBirthText, out var dob))
+        {
+            dateOfBirth = dob;
+        }
+
+        Guid? genderCodedValueId = null;
+        if (!string.IsNullOrWhiteSpace(_genderCodedValueIdText) && Guid.TryParse(_genderCodedValueIdText, out var gid))
+        {
+            genderCodedValueId = gid;
+        }
+
+        var req = new UpdateStudentRequest(
+            _firstName, _lastName, dateOfBirth, genderCodedValueId,
+            _contactEmail, string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone);
+
+        _saving = true;
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            await Api.UpdateStudentAsync(Id, req, ct);
+            if (_disposed) return;
+
+            Logger.LogInformation("Updated student {StudentId}", Id);
+            Nav.NavigateTo($"/students/{Id}");
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update student {StudentId}", Id);
+            _error = ex.Message;
+            _saving = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

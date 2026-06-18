@@ -1,67 +1,76 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.CodedValues.Admin.Services
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @implements IAsyncDisposable
 @inject CodedValuesApiClient Api
 @inject ILogger<NavMenu> Logger
 @inject NavigationManager Nav
 
 <FluentNavMenu Width="250"
-               Title="@(_currentModule == "coded-values" ? "Coded Values" : _currentModule == "assignments" ? "Assignments" : "Navigation")">
+               Title="@(_currentModule == "coded-values" ? "Coded Values" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
 
     <FluentNavLink Href="/"
-                  Icon="@(Icon.FromType<Icons.Regular.Size20.Home>())"
-                  Match="NavLinkMatch.All">
+                 Icon="@FluentIcons.Home"
+                 Match="NavLinkMatch.All">
         Home
     </FluentNavLink>
+
+    <FluentNavGroup Title="Admin Modules" Expanded="false">
+        <FluentNavLink Href="/coded-values"
+                        Icon="@FluentIcons.Tag">
+            Coded Values
+        </FluentNavLink>
+        <FluentNavLink Href="/assignments"
+                        Icon="@FluentIcons.ClipboardCheckmark">
+            Assignments
+        </FluentNavLink>
+        <FluentNavLink Href="/students"
+                        Icon="@FluentIcons.People">
+            Students
+        </FluentNavLink>
+    </FluentNavGroup>
 
     @if (_currentModule == "coded-values")
     {
         <FluentNavGroup Title="Coded Values"
-                        Expanded="true">
+                       Expanded="true">
             @if (_loadingParents)
             {
-                <FluentNavLink Href="#" Disabled="true">
-                   <FluentProgressRing class="progress-ring-small" />
-                </FluentNavLink>
+               <FluentNavLink Href="#" Disabled="true">
+                  <FluentProgressRing class="progress-ring-small" />
+               </FluentNavLink>
             }
             else if (_parentValues is { Length: > 0 })
             {
-                foreach (var cv in _parentValues.Take(20))
-                {
-                   <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
-                                 Icon="@(Icon.FromType<Icons.Regular.Size20.Tag>())"
-                                 Title="@cv.Name">
-                       @Truncate(cv.Name, 22)
-                   </FluentNavLink>
-                }
+               foreach (var cv in _parentValues.Take(20))
+               {
+                  <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
+                                Icon="@FluentIcons.Tag"
+                                Title="@cv.Name">
+                      @Truncate(cv.Name, 22)
+                  </FluentNavLink>
+               }
 
-                if (_parentValues.Length > 20)
-                {
-                   <FluentNavLink Href="/coded-values"
-                                 Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowExportUp>())">
-                       <i>Show More …</i>
-                   </FluentNavLink>
-                }
+               if (_parentValues.Length > 20)
+               {
+                  <FluentNavLink Href="/coded-values"
+                                Icon="@FluentIcons.ArrowExportUp">
+                      <i>Show More …</i>
+                  </FluentNavLink>
+               }
             }
             else
             {
-                <FluentNavLink Href="/coded-values"
-                             Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
-                   All Categories
-                </FluentNavLink>
+               <FluentNavLink Href="/coded-values"
+                            Icon="@FluentIcons.TextBulletList">
+                  All Categories
+               </FluentNavLink>
             }
 
             <hr class="nav-separator" />
 
-            <FluentNavLink Href="/coded-values"
-                         Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
-                All Categories
-            </FluentNavLink>
-
             <FluentNavLink Href="/coded-values/chat"
-                         Icon="@(Icon.FromType<Icons.Regular.Size20.Bot>())">
-                AI Assistant
+                          Icon="@FluentIcons.Bot">
+               AI Assistant
             </FluentNavLink>
         </FluentNavGroup>
     }
@@ -69,14 +78,42 @@
     @if (_currentModule == "assignments")
     {
         <FluentNavGroup Title="Assignments"
-                        Expanded="true">
+                       Expanded="true">
             <FluentNavLink Href="/assignments"
-                          Icon="@(Icon.FromType<Icons.Regular.Size20.TextBulletList>())">
-                All Assignments
+                         Icon="@FluentIcons.TextBulletList">
+               All Assignments
             </FluentNavLink>
             <FluentNavLink Href="/assignments/create"
-                          Icon="@(Icon.FromType<Icons.Regular.Size20.Add>())">
-                New Assignment
+                         Icon="@FluentIcons.Add">
+               New Assignment
+            </FluentNavLink>
+        </FluentNavGroup>
+    }
+
+    @if (_currentModule == "students")
+    {
+        <FluentNavGroup Title="Students"
+                       Expanded="true">
+            <FluentNavLink Href="/students"
+                         Icon="@FluentIcons.People">
+               All Students
+            </FluentNavLink>
+            <FluentNavLink Href="/students/create"
+                         Icon="@FluentIcons.PersonAdd">
+               New Student
+            </FluentNavLink>
+            <hr class="nav-separator" />
+            <FluentNavLink Href="/students/grade-levels"
+                         Icon="@FluentIcons.SlideText">
+               Grade Levels
+            </FluentNavLink>
+            <FluentNavLink Href="/students/subjects"
+                         Icon="@FluentIcons.Book">
+               Subjects
+            </FluentNavLink>
+            <FluentNavLink Href="/students/periods"
+                         Icon="@FluentIcons.Calendar">
+               Periods
             </FluentNavLink>
         </FluentNavGroup>
     }
@@ -114,7 +151,7 @@
 
             if (_currentModule == "coded-values" && _parentValues is null && !_loadingParents)
             {
-                _ = LoadParentValuesAsync();
+               _ = LoadParentValuesAsync();
             }
         }
     }
@@ -123,6 +160,7 @@
     {
         var p when p.StartsWith("/coded-values", StringComparison.OrdinalIgnoreCase) => "coded-values",
         var p when p.StartsWith("/assignments", StringComparison.OrdinalIgnoreCase) => "assignments",
+        var p when p.StartsWith("/students", StringComparison.OrdinalIgnoreCase) => "students",
         _ => ""
     };
 

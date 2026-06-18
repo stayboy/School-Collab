@@ -676,6 +676,43 @@ it instead of replicating the same effect in CSS.
 
 ---
 
+## Bug-fix regression tests
+
+Every bug fix must include a regression test that proves the reported bug is fixed.
+Do not treat a bug fix as complete when it only changes production code.
+
+### Rules
+
+1. **Write the regression test first when practical.** The test should fail against the
+   buggy code and pass after the fix. If reproducing the exact failure is too expensive,
+   add the smallest test that covers the fixed behaviour and explain the trade-off in the
+   PR description.
+
+2. **Run the relevant test project after the fix.** At minimum, run the test project that
+   owns the changed production code before committing. If the fix crosses projects, run
+   all affected test projects.
+
+3. **Backend and domain bugs.** Add or update unit/integration tests using the existing
+   MSTest/Moq/FluentAssertions patterns. API/client bug fixes should include HTTP status,
+   payload, and error-path coverage where applicable.
+
+4. **UI and Blazor component bugs.** Use **bUnit** tests for Razor/Blazor component
+   regressions. Test the rendered component tree and user-facing behaviour, not only
+   private methods or view models.
+
+   - Add `bunit` packages to the test project that owns the component if they are not
+     already present.
+   - Register required services (`NavigationManager`, dialog/toast providers, HTTP
+     clients, etc.) in the bUnit `TestContext`.
+   - Assert the bug-specific UI outcome, such as route discovery, expected headings,
+     buttons, empty states, error boundaries, or disabled actions.
+
+5. **No untested bug fixes.** If a bug cannot be tested directly, document why in the PR
+   and add the closest available coverage, such as routing, service, or component
+   integration coverage.
+
+---
+
 ## Unit tests for feature additions
 
 Every new feature, service, or behavioural class **must** include unit tests in

@@ -1,0 +1,285 @@
+@page "/students/periods"
+@using SchoolCollab.Students.Admin.Services
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Periods> Logger
+@inject IDialogService DialogService
+@implements IDisposable
+
+<PageTitle>Periods</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">Periods</h1>
+            </div>
+            <div class="action-bar">
+                <FluentButton Appearance="Appearance.Accent" OnClick="@ShowCreatePanel">+ New Period</FluentButton>
+            </div>
+
+            @if (_showCreate)
+            {
+                <div class="create-panel">
+                    <FluentStack Orientation="Orientation.Vertical" Gap="0.75rem">
+                        <FluentTextField @bind-Value="_createName" Label="Name" Required />
+                        <FluentTextField @bind-Value="_createStartDate" Label="Start Date (yyyy-MM-dd)" Required Placeholder="e.g. 2026-01-01" />
+                        <FluentTextField @bind-Value="_createEndDate" Label="End Date (yyyy-MM-dd)" Required Placeholder="e.g. 2026-06-30" />
+                        <FluentCheckbox @bind-Checked="_createAllowOverrides" Label="Allow subject overrides" />
+                        <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem">
+                            <FluentButton Appearance="Appearance.Accent" OnClick="@OnCreateAsync">Create</FluentButton>
+                            <FluentButton Appearance="Appearance.Outline" OnClick="@HideCreatePanel">Cancel</FluentButton>
+                        </FluentStack>
+                    </FluentStack>
+                </div>
+            }
+
+            @if (_items is null)
+            {
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else if (_items.Length == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">No periods yet.</FluentMessageBar>
+            }
+            else
+            {
+                <div class="grid-container">
+                    <FluentDataGrid Items="@_items.AsQueryable()"
+                                    GridTemplateColumns="minmax(160px,2fr) 110px 110px 120px 140px auto"
+                                    MultiLine="true"
+                                    TGridItem="PeriodDto">
+                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" Title="Name" />
+                        <TemplateColumn Title="Start Date">
+                            @context.StartDate.ToString("d")
+                        </TemplateColumn>
+                        <TemplateColumn Title="End Date">
+                            @context.EndDate.ToString("d")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Status">
+                            @GetStatusBadge(context.Status)
+                        </TemplateColumn>
+                        <TemplateColumn Title="Overrides">
+                            @(context.AllowSubjectOverrides ? "Yes" : "No")
+                        </TemplateColumn>
+                        <TemplateColumn Title="Actions">
+                            @if (context.Status == "Draft")
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => OnActivateAsync(context.Id))">Activate</FluentAnchor>
+                            }
+                            else if (context.Status == "Active")
+                            {
+                                <FluentAnchor Href="#" OnClick="@(() => OnCompleteAsync(context.Id))">Complete</FluentAnchor>
+                            }
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+            }
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private PeriodDto[]? _items;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    // Create form state
+    private bool _showCreate;
+    private string _createName = string.Empty;
+    private string _createStartDate = string.Empty;
+    private string _createEndDate = string.Empty;
+    private bool _createAllowOverrides;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        Logger.LogInformation("Loading periods list");
+        try
+        {
+            _items = await Api.ListPeriodsAsync(token);
+
+            if (_disposed) return;
+
+            Logger.LogInformation("Loaded {Count} periods", _items?.Length ?? 0);
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load periods");
+            _error = ex.Message;
+        }
+    }
+
+    private void ShowCreatePanel()
+    {
+        _showCreate = true;
+        _createName = string.Empty;
+        _createStartDate = string.Empty;
+        _createEndDate = string.Empty;
+        _createAllowOverrides = false;
+    }
+
+    private void HideCreatePanel()
+    {
+        _showCreate = false;
+    }
+
+    private async Task OnCreateAsync()
+    {
+        if (!DateOnly.TryParse(_createStartDate, out var startDate))
+        {
+            _error = "Invalid start date format. Use yyyy-MM-dd.";
+            StateHasChanged();
+            return;
+        }
+        if (!DateOnly.TryParse(_createEndDate, out var endDate))
+        {
+            _error = "Invalid end date format. Use yyyy-MM-dd.";
+            StateHasChanged();
+            return;
+        }
+
+        var request = new CreatePeriodRequest(_createName, startDate, endDate, _createAllowOverrides);
+
+        Logger.LogInformation("Creating period {Name}", request.Name);
+        try
+        {
+            await Api.CreatePeriodAsync(request);
+
+            if (_disposed) return;
+
+            Logger.LogInformation("Period {Name} created", request.Name);
+            _showCreate = false;
+            _error = null;
+
+            // Reload list
+            _items = await Api.ListPeriodsAsync();
+            if (_disposed) return;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create period {Name}", request.Name);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnActivateAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            "Activate this period? Once active, enrollments can begin.",
+            "Activate",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        var idx = Array.FindIndex(_items, x => x.Id == id);
+        if (idx < 0) return;
+
+        var previous = _items[idx];
+        _items[idx] = previous with { Status = "Active" };
+        StateHasChanged();
+
+        Logger.LogInformation("Activating period {Id}", id);
+        try
+        {
+            await Api.ActivatePeriodAsync(id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to activate period {Id}", id);
+            if (_items is not null)
+            {
+                var i = Array.FindIndex(_items, x => x.Id == id);
+                if (i >= 0) _items[i] = previous;
+            }
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnCompleteAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            "Complete this period? This will finalize the period.",
+            "Complete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        var idx = Array.FindIndex(_items, x => x.Id == id);
+        if (idx < 0) return;
+
+        var previous = _items[idx];
+        _items[idx] = previous with { Status = "Completed" };
+        StateHasChanged();
+
+        Logger.LogInformation("Completing period {Id}", id);
+        try
+        {
+            await Api.CompletePeriodAsync(id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to complete period {Id}", id);
+            if (_items is not null)
+            {
+                var i = Array.FindIndex(_items, x => x.Id == id);
+                if (i >= 0) _items[i] = previous;
+            }
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private static RenderFragment GetStatusBadge(string status) => builder =>
+    {
+        var (appearance, label) = status switch
+        {
+            "Draft"     => ((Appearance)Appearance.Neutral, "Draft"),
+            "Active"    => ((Appearance)Appearance.Accent, "Active"),
+            "Completed" => ((Appearance)Appearance.Outline, "Completed"),
+            "Archived"  => ((Appearance)Appearance.Neutral, "Archived"),
+            _           => ((Appearance)Appearance.Neutral, status)
+        };
+        builder.OpenComponent<FluentBadge>(0);
+        builder.AddAttribute(1, "Appearance", appearance);
+        builder.AddAttribute(2, "ChildContent", (RenderFragment)(b =>
+            b.AddContent(0, label)));
+        builder.CloseComponent();
+    };
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}
