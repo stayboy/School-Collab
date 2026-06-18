@@ -811,3 +811,34 @@ dotnet build
 
 **Do not skip these checks.** If any check fails, fix the issue on the branch before
 creating the PR.
+
+---
+
+## Main branch merge policy
+
+`main` is a protected delivery branch in process. Do not push or merge directly to
+`main` from ad-hoc work.
+
+Required workflow:
+
+1. Create a feature or fix branch from `main`.
+2. Add/update tests for behavioural changes.
+3. Open a PR targeting `main`.
+4. Wait for the GitHub Actions `Build & Test` check to pass.
+5. Merge with squash merge by default:
+   ```bash
+   gh pr merge <pr-number> --squash --delete-branch
+   ```
+6. Switch to `main` and pull the merged result:
+   ```bash
+   git checkout main
+   git pull origin main
+   ```
+
+Do not merge a PR while required status checks are still running or failing. If
+CI fails, fix the branch and wait for a green workflow before merging.
+
+The repository includes `.github/merge-policy.md` for the full policy and
+`.githooks/pre-push` as a local convenience guard that blocks direct pushes to
+`main`. GitHub branch protection or rulesets should be enabled in repository
+settings where available to enforce the same rule server-side.

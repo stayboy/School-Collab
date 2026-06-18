@@ -66,8 +66,9 @@ Follow these steps **in order**. Do not skip a step unless the user explicitly a
 
 ### 9. Merge
 
-- Once CI is green and all issues are resolved, merge the PR:
+- Once CI is green and all issues are resolved, merge the PR through the PR workflow:
   - Default strategy: squash merge (`gh pr merge <pr-number> --squash --delete-branch`).
+  - Do not push or merge directly to `main`; follow `.github/merge-policy.md`.
   - If the user prefers a different strategy, use `--merge` or `--rebase` instead.
 - After merging, switch to `main` and pull: `git checkout main && git pull origin main`.
 
