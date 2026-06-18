@@ -3,7 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
-using SchoolCollab.Assignments.Core.DTOs;
+using SchoolCollab.Assignments.Contracts;
 
 namespace SchoolCollab.Assignments.Api;
 
@@ -33,10 +33,15 @@ public static class AssignmentEndpoints
         });
 
         group.MapPost("/", async (
-            [FromBody] CreateAssignmentCommand cmd,
+            [FromBody] CreateAssignmentRequest req,
             [FromServices] ICommandHandler<CreateAssignmentCommand, Guid> handler,
             CancellationToken ct) =>
         {
+            var cmd = new CreateAssignmentCommand(
+                req.Title, req.Description, (AssignmentType)req.AssignmentType,
+                (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
+                req.SubjectCodedValueId, req.GradeCodedValueId,
+                req.DueDate, req.MaxScore);
             var id = await handler.HandleAsync(cmd, ct);
             return Results.Created($"/assignments/{id}", new { id });
         });
@@ -50,7 +55,8 @@ public static class AssignmentEndpoints
             try
             {
                 var cmd = new UpdateAssignmentCommand(
-                    id, req.Title, req.Description, req.AssignmentType,
+                    id, req.Title, req.Description, (AssignmentType)req.AssignmentType,
+                    (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
                     req.SubjectCodedValueId, req.GradeCodedValueId,
                     req.DueDate, req.MaxScore);
                 await handler.HandleAsync(cmd, ct);
@@ -163,17 +169,3 @@ public static class AssignmentEndpoints
         return app;
     }
 }
-
-internal record UpdateAssignmentRequest(
-    string Title,
-    string? Description,
-    AssignmentType AssignmentType,
-    Guid SubjectCodedValueId,
-    Guid? GradeCodedValueId,
-    DateTimeOffset? DueDate,
-    decimal? MaxScore);
-
-internal record ReviewAssignmentRequest(
-    Guid TeacherId,
-    decimal? Score,
-    string? Comments);

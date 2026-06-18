@@ -2,7 +2,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Data.Repositories;
-using SchoolCollab.Assignments.Core.DTOs;
+using SchoolCollab.Assignments.Contracts;
 
 namespace SchoolCollab.Assignments.Core.Queries.ListAssignments;
 
@@ -21,11 +21,15 @@ public sealed class ListAssignmentsQueryHandler(
         var dtos = summaries.Select(s => new AssignmentSummaryDto(
             s.Id,
             s.Title,
-            s.Description ?? string.Empty,
-            s.AssignmentType.ToString(),
+            s.Description,
+            (AssignmentTypeDto)s.AssignmentType,
+            (GradingFormatDto)s.GradingFormat,
+            (TargetAudienceTypeDto)s.TargetAudienceType,
             s.SubjectCodedValueId,
+            null, // SubjectName — populated via CodedValues API lookup
             s.GradeCodedValueId,
-            s.Status.ToString(),
+            null, // GradeName — populated via CodedValues API lookup
+            (AssignmentStatusDto)s.Status,
             s.DueDate,
             s.MaxScore,
             s.CreatedByTeacherId,

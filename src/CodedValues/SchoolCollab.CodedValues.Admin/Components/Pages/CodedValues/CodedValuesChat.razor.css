@@ -104,10 +104,6 @@
     max-width: 520px;
 }
 
-::deep .full-width {
-    width: 100%;
-}
-
 /* Model info */
 .model-info {
     display: flex;
