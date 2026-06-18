@@ -45,7 +45,7 @@
                {
                   <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
                                 Icon="@FluentIcons.Tag"
-                                Title="@cv.Name">
+                                Tooltip="@cv.Name">
                       @Truncate(cv.Name, 22)
                   </FluentNavLink>
                }
