@@ -151,6 +151,26 @@ The pipeline is: **Serilog → OTLP gRPC → Aspire dashboard**.
 - **Do not add a separate `appsettings.json` Serilog section** unless overriding minimum
   levels per environment — the code configuration in `Extensions.cs` is the source of truth.
 
+## Tenancy & Operational Standards
+
+### Tenancy Patterns
+The repository follows two distinct tenancy patterns based on the data type:
+
+1. **Override Pattern (Reference Data)**: 
+   Used for system-wide blueprints (e.g., Coded Values). Implements a `Global Value` $\rightarrow$ `Tenant Override` $\rightarrow$ `Resolved Value` flow.
+   - **Pattern Guide**: See `.skills/tenancy-override-pattern/SKILL.md`.
+   - **Key Component**: `CodedValueResolver` logic.
+
+2. **Direct Tenancy (Operational Data)**: 
+   Used for tenant-created entities (e.g., Students, Assignments). Entities inherit from `BaseTenantEntity` and are filtered directly by `TenantId`.
+   - **Restriction**: Do not use the override pattern for operational data. Use a Permissions/ACL system for specialized access.
+
+### Implementation Rule
+Any new auditable entity or feature requiring tenancy **must** follow the patterns defined in `SchoolCollab.Core/Tenancy` and the corresponding skill documentation. Always verify implementations with:
+- `dotnet build` (zero errors).
+- Unit tests covering the merge/resolution logic.
+- Tenant-isolated cache keys.
+
 ---
 
 ## Blazor component best practices
@@ -673,6 +693,34 @@ layout on `<Fluent*>` components:
 
 When FluentUI provides a parameter (e.g. `Appearance`, `Gap`, `Orientation`), use
 it instead of replicating the same effect in CSS.
+
+### Edit form layout with FluentUI
+
+Use FluentUI's own layout components for edit/create forms:
+
+- Put form controls in a `<FluentStack Orientation="Orientation.Vertical" Gap="1rem">`
+  when fields should stack vertically. This gives consistent spacing between fields
+  without custom flex containers.
+- Keep each FluentUI control's label/input relationship intact. Do not add custom
+  `margin-bottom` to labels; let the control render its normal label spacing.
+- Use `full-width` only for controls that should span the available form width
+  (text fields, text areas, selects). Short controls such as dates, numbers, and
+  display-order fields should use a narrower width, either with the component
+  `Style` parameter or a small helper class such as `narrow-field`.
+- Required labels must include the asterisk in the label text, for example
+  `Label="Title *"`, and required fields should use a helper class such as
+  `required-field` so the label can be styled bold.
+
+```razor
+<FluentEditForm Model="_model" class="wizard-form details-form">
+    <FluentStack Orientation="Orientation.Vertical" Gap="1rem" class="details-form-fields">
+        <FluentTextField @bind-Value="_model.Title" Label="Title *" class="full-width required-field" Required />
+        <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="4" class="full-width" />
+        <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" Style="width: 12rem;" />
+        <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" Style="width: 12rem;" />
+    </FluentStack>
+</FluentEditForm>
+```
 
 ---
 

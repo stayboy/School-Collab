@@ -22,10 +22,20 @@
                 <DataAnnotationsValidator />
                 <ValidationSummary />
 
-                <FluentTextField Value="@_item.Code" Disabled="true" Label="Code" class="full-width mb-3" />
-                <FluentTextField @bind-Value="_model.Name" Label="Name *" class="full-width mb-3" />
-                <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" class="full-width mb-3" />
-                <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="narrow-field mb-3" />
+                <div class="form-fields">
+                    <div class="form-field">
+                        <FluentTextField Value="@_item.Code" Disabled="true" Label="Code" class="full-width" />
+                    </div>
+                    <div class="form-field required-field">
+                        <FluentTextField @bind-Value="_model.Name" Label="Name *" class="full-width" />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="2" class="full-width" />
+                    </div>
+                    <div class="form-field">
+                        <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="narrow-field" />
+                    </div>
+                </div>
 
                 @if (!string.IsNullOrEmpty(_error))
                 {

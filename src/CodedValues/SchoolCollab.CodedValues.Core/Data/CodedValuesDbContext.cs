@@ -8,6 +8,8 @@ public sealed class CodedValuesDbContext(DbContextOptions<CodedValuesDbContext> 
     : DbContext(options)
 {
     public DbSet<CodedValue> CodedValues => Set<CodedValue>();
+    public DbSet<TenantCodedValueOverride> TenantCodedValueOverrides => Set<TenantCodedValueOverride>();
+    public DbSet<TenantCodedValueAttributeOverride> TenantCodedValueAttributeOverrides => Set<TenantCodedValueAttributeOverride>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

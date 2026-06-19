@@ -4,12 +4,16 @@ using SchoolCollab.CodedValues.Core.Caching;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.DTOs;
+using SchoolCollab.CodedValues.Core.Services;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByParent;
 
 public sealed class GetCodedValuesByParentHandler(
     CodedValuesDbContext db,
-    HybridCache cache) : IQueryHandler<GetCodedValuesByParent, CodedValueDto[]>
+    HybridCache cache,
+    ITenantProvider tenantProvider,
+    ICodedValueResolver resolver) : IQueryHandler<GetCodedValuesByParent, CodedValueDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -21,21 +25,22 @@ public sealed class GetCodedValuesByParentHandler(
         GetCodedValuesByParent query,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = tenantProvider.GetTenantId();
         var filterStr = query.AttributeFilters is { Count: > 0 }
             ? string.Join("|", query.AttributeFilters
                 .OrderBy(kv => kv.Key, StringComparer.Ordinal)
                 .Select(kv => $"{kv.Key}={kv.Value}"))
             : string.Empty;
 
-        var rawKey = $"{query.ParentId}:{query.ParentCode?.Trim().ToUpperInvariant() ?? string.Empty}:{query.IncludeDisabled}:{filterStr}";
-        var cacheKey = $"coded-values:by-parent:{CacheKeyHelper.Hash(rawKey)}";
+        var rawKey = $"{tenantId}:{query.ParentId}:{query.ParentCode?.Trim().ToUpperInvariant() ?? string.Empty}:{query.IncludeDisabled}:{filterStr}";
+        var cacheKey = $"tenant:{tenantId}:coded-values:by-parent:{CacheKeyHelper.Hash(rawKey)}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, query),
+            (db, resolver, tenantId, query),
             static async (state, ct) =>
             {
-                var (db, query) = state;
+                var (db, resolver, tenantId, query) = state;
 
                 IQueryable<Domain.CodedValue> q = db.CodedValues.AsNoTracking();
 
@@ -71,31 +76,22 @@ public sealed class GetCodedValuesByParentHandler(
                 }
 
                 var results = await q
+                    .Include(x => x.Attributes)
+                    .Include(x => x.AttributeDefinitions)
                     .OrderBy(x => x.DisplayOrder)
                     .ThenBy(x => x.Name)
                     .ToArrayAsync(ct);
 
-                return results.Select(ToDto).ToArray();
+                var resolved = new List<CodedValueDto>();
+                foreach (var cv in results)
+                {
+                    resolved.Add(await resolver.ResolveAsync(cv, tenantId, ct));
+                }
+
+                return resolved.ToArray();
             },
             CacheOptions,
-            tags: ["coded-values"],
+            tags: ["coded-values", $"tenant:{tenantId}"],
             cancellationToken: cancellationToken);
     }
-
-    private static CodedValueDto ToDto(Domain.CodedValue cv) => new(
-        cv.Id,
-        cv.Code,
-        cv.Name,
-        cv.Description,
-        cv.ParentId,
-        null,
-        cv.IsDisabled,
-        cv.DisplayOrder,
-        cv.CreatedAt,
-        cv.UpdatedAt,
-        cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
-        cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
-        0,
-        cv.IsDeleted,
-        cv.DeletedAt);
 }
