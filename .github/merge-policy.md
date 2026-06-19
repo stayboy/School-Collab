@@ -6,8 +6,13 @@ This repository uses pull requests as the only supported path for changes to `ma
 
 1. Create a feature/fix branch from `main`.
 2. Add or update tests for behavioural changes.
-3. Push the branch and open a PR targeting `main`.
-4. Run the local pre-flight checks:
+3. Commit locally on the branch.
+4. Push only after the user explicitly instructs to push:
+   ```bash
+   SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>
+   ```
+5. Open a PR targeting `main`.
+6. Run the local pre-flight checks:
    - code review
    - `dotnet build`
    - `dotnet test`
@@ -44,14 +49,24 @@ Use squash merge by default for feature and bug-fix PRs. This keeps `main` focus
 
 Use merge or rebase only when the user explicitly requests it or when the PR requires preserving a multi-commit history.
 
-## Direct pushes to `main`
+## Local push hold
 
-Direct pushes to `main` are not part of the normal workflow.
+The local `pre-push` hook in `.githooks/pre-push` holds all local pushes by default until the user explicitly allows the push.
 
-The repository includes a tracked `pre-push` hook in `.githooks/pre-push` that blocks local pushes to `main`. To use it locally:
+This prevents agents or automation from pushing commits without an explicit user instruction.
+
+To allow one push after the user says to push, run:
 
 ```bash
-git config core.hooksPath .githooks
+SCHOOLCOLLAB_ALLOW_PUSH=1 git push <remote> <branch>
 ```
 
-GitHub branch protection or rulesets should be configured in repository settings to enforce the same rule server-side.
+PowerShell example:
+
+```powershell
+$env:SCHOOLCOLLAB_ALLOW_PUSH='1'
+git push <remote> <branch>
+Remove-Item Env:SCHOOLCOLLAB_ALLOW_PUSH
+```
+
+The hook still blocks direct pushes to `main` even after the explicit push allow flag is set.
