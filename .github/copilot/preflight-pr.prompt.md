@@ -16,8 +16,13 @@ Follow these steps **in order**. Do not skip a step unless the user explicitly a
 
 ### 2. Push branch
 
-- Push the feature branch to origin: `git push -u origin <branch-name>`
-- If the branch already exists remotely, just push new commits.
+- Do **not** push automatically.
+- Stop after committing and ask for explicit user instruction to push.
+- When the user explicitly instructs to push, use:
+  ```bash
+  SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>
+  ```
+- If the branch already exists remotely, push new commits only after the user explicitly instructs to push.
 
 ### 3. Build & test locally
 
@@ -32,14 +37,17 @@ Follow these steps **in order**. Do not skip a step unless the user explicitly a
 - If issues are found:
   - Fix each issue with surgical edits.
   - Re-run tests to confirm the fix doesn't break anything.
-  - Commit and push the fixes.
+  - Commit and push the fixes only after the user explicitly instructs to push:
+    ```bash
+    SCHOOLCOLLAB_ALLOW_PUSH=1 git push
+    ```
 
 ### 5. Check for missing tests
 
 - After reviewing, assess whether the changes need additional tests:
   - Domain logic, command/query handlers, and API endpoints should have unit tests.
   - Blazor page lifecycle patterns (IDisposable, CancellationToken, optimistic UI) should have Playwright integration tests.
-- If tests are missing, write them. Run them to confirm they pass. Commit and push.
+- If tests are missing, write them. Run them to confirm they pass. Commit, then ask for explicit user instruction before pushing.
 
 ### 6. EF migration guard
 
@@ -62,7 +70,7 @@ Follow these steps **in order**. Do not skip a step unless the user explicitly a
 
 - Run `gh pr checks <pr-number>` to see CI status.
 - Poll every 30 seconds until all checks pass or one fails.
-- If CI fails, read the logs, fix the issue, push, and wait again.
+- If CI fails, read the logs, fix the issue, commit, then ask for explicit user instruction before pushing. Wait again after the user instructs to push.
 
 ### 9. Merge
 
