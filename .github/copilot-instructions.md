@@ -823,9 +823,14 @@ Required workflow:
 
 1. Create a feature or fix branch from `main`.
 2. Add/update tests for behavioural changes.
-3. Open a PR targeting `main`.
-4. Wait for the GitHub Actions `Build & Test` check to pass.
-5. Merge with squash merge by default:
+3. Commit locally on the branch.
+4. Push only after the user explicitly instructs to push:
+   ```bash
+   SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>
+   ```
+5. Open a PR targeting `main`.
+6. Wait for the GitHub Actions `Build & Test` check to pass.
+7. Merge with squash merge by default:
    ```bash
    gh pr merge <pr-number> --squash --delete-branch
    ```
@@ -839,6 +844,7 @@ Do not merge a PR while required status checks are still running or failing. If
 CI fails, fix the branch and wait for a green workflow before merging.
 
 The repository includes `.github/merge-policy.md` for the full policy and
-`.githooks/pre-push` as a local convenience guard that blocks direct pushes to
-`main`. GitHub branch protection or rulesets should be enabled in repository
-settings where available to enforce the same rule server-side.
+`.githooks/pre-push` as a local convenience guard that holds all pushes until
+the user explicitly allows them and still blocks direct pushes to `main`. GitHub
+branch protection or rulesets should be enabled in repository settings where
+available to enforce the same rule server-side.
