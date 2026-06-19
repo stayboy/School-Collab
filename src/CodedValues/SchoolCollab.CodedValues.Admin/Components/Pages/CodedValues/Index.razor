@@ -71,14 +71,18 @@
                 {
                     <div class="grid-container">
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
-                                        GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                        GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(180px,2fr) auto"
                                         MultiLine="true"
                                         TGridItem="CodedValueDto">
                             <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                                 <code>@context.Code</code>
                             </TemplateColumn>
-                                <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
-                                <PropertyColumn Property="@(x => x.Description)" Title="Description" />
+                            <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
+                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="name-link">
+                                    @context.Name (@context.ChildrenCount)
+                                </FluentAnchor>
+                            </TemplateColumn>
+                            <PropertyColumn Property="@(x => x.Description)" Title="Description" />
                             <TemplateColumn Title="Status">
                                 @if (context.IsDisabled)
                                 {
@@ -88,9 +92,6 @@
                                 {
                                     <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
                                 }
-                            </TemplateColumn>
-                            <TemplateColumn Title="Children">
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
                             </TemplateColumn>
                             <TemplateColumn Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
                                 @if (context.AttributeDefinitions.Count > 0)
@@ -103,15 +104,15 @@
                                 }
                             </TemplateColumn>
                             <TemplateColumn Title="Actions">
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
                                 @if (context.IsDisabled)
                                 {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action">Enable</FluentAnchor>
                                 }
                                 else
                                 {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action">Disable</FluentAnchor>
                                 }
+                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action ms-2">Edit</FluentAnchor>
                                 <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
                             </TemplateColumn>
                         </FluentDataGrid>
@@ -132,13 +133,17 @@
             {
                 <div class="grid-container">
                     <FluentDataGrid Items="@_items.AsQueryable()"
-                                   GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                   GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(180px,2fr) auto"
                                     MultiLine="true"
                                     TGridItem="CodedValueDto">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                             <code>@context.Code</code>
                         </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                        <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
+                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="name-link">
+                                @context.Name (@context.ChildrenCount)
+                            </FluentAnchor>
+                        </TemplateColumn>
                         <PropertyColumn Property="@(x => x.Description)" Title="Description" />
                         <TemplateColumn Title="Status">
                             @if (context.IsDisabled)
@@ -149,9 +154,6 @@
                             {
                                 <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
                             }
-                        </TemplateColumn>
-                        <TemplateColumn Title="Children">
-                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">Items(@context.ChildrenCount)</FluentAnchor>
                         </TemplateColumn>
                         <TemplateColumn Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
                             @if (context.AttributeDefinitions.Count > 0)
@@ -164,15 +166,15 @@
                             }
                         </TemplateColumn>
                         <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action">Edit</FluentAnchor>
                             @if (context.IsDisabled)
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action ms-2">Enable</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action">Enable</FluentAnchor>
                             }
                             else
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action ms-2">Disable</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action">Disable</FluentAnchor>
                             }
+                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action ms-2">Edit</FluentAnchor>
                             <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
@@ -209,6 +211,9 @@
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);
+
+    private readonly GridSort<CodedValueDto> _sortByName =
+        GridSort<CodedValueDto>.ByAscending(x => x.Name);
 
     protected override async Task OnInitializedAsync()
     {

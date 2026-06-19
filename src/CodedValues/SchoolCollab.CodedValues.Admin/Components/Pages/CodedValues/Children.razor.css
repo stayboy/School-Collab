@@ -35,6 +35,12 @@
 
 ::deep .search-box {
     width: 260px;
+    margin-left: auto;
+}
+
+.name-link {
+    font-weight: 600;
+    text-decoration: none;
 }
 
 /* Loading / empty states */

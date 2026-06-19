@@ -114,6 +114,18 @@
     max-width: 600px;
 }
 
+.details-form-fields {
+    max-width: 560px;
+}
+
+.details-form ::deep .full-width {
+    width: 100%;
+}
+
+.details-form ::deep .required-field label {
+    font-weight: 700;
+}
+
 /* ── Wizard actions ── */
 .wizard-actions {
     display: flex;
