@@ -48,13 +48,17 @@
                 {
                     <div class="grid-container">
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
-                                        GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                        GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
                                         MultiLine="true"
                                         TGridItem="CodedValueDto">
                             <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                                 <code>@context.Code</code>
                             </TemplateColumn>
-                           <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                           <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
+                               <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
+                                   @context.Name
+                               </FluentAnchor>
+                           </TemplateColumn>
                            <PropertyColumn Property="@(x => x.Description)" Title="Description" />
                             <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
                             <TemplateColumn Title="Status">
@@ -76,7 +80,6 @@
                                 }
                             </TemplateColumn>
                             <TemplateColumn Title="Actions">
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="me-2 link-action">Edit</FluentAnchor>
                                 @if (context.IsDisabled)
                                 {
                                     <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))" class="link-action">Enable</FluentAnchor>
@@ -129,13 +132,17 @@
 
                 <div class="grid-container">
                     <FluentDataGrid Items="@_children.AsQueryable()"
-                                    GridTemplateColumns="120px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                    GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
                                     MultiLine="true"
                                     TGridItem="CodedValueDto">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
                             <code>@context.Code</code>
                         </TemplateColumn>
-                       <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
+                       <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
+                           <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="name-link">
+                               @context.Name
+                           </FluentAnchor>
+                       </TemplateColumn>
                        <PropertyColumn Property="@(x => x.Description)" Title="Description" />
                         <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
                         <TemplateColumn Title="Status">
@@ -162,7 +169,6 @@
                             }
                         </TemplateColumn>
                         <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="me-2 link-action">Edit</FluentAnchor>
                             @if (context.IsDisabled)
                             {
                                 <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))" class="link-action">Enable</FluentAnchor>
@@ -207,6 +213,9 @@
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);
+
+    private readonly GridSort<CodedValueDto> _sortByName =
+        GridSort<CodedValueDto>.ByAscending(x => x.Name);
 
     protected override async Task OnInitializedAsync()
     {

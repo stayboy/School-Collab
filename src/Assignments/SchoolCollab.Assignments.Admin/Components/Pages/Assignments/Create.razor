@@ -214,13 +214,12 @@
                             </div>
                         </div>
 
-                        <FluentEditForm Model="_model" class="wizard-form">
-                            <FluentTextField @bind-Value="_model.Title" Label="Title *" Placeholder="e.g. Chapter 5 Quiz" class="full-width mb-4" Required />
-                            <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="4" Placeholder="Assignment instructions…" class="full-width mb-4" />
-
-                            <FluentStack Orientation="Orientation.Horizontal" class="mb-4">
-                                <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" style="flex:1" />
-                                <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" style="flex:1; margin-left:1rem" />
+                        <FluentEditForm Model="_model" class="wizard-form details-form">
+                            <FluentStack Orientation="Orientation.Vertical" Gap="1rem" class="details-form-fields">
+                                <FluentTextField @bind-Value="_model.Title" Label="Title *" Placeholder="e.g. Chapter 5 Quiz" class="full-width required-field" Required />
+                                <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="4" Placeholder="Assignment instructions…" class="full-width" />
+                                <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" Style="width: 12rem;" />
+                                <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" Style="width: 12rem;" />
                             </FluentStack>
                         </FluentEditForm>
                     </section>
@@ -349,7 +348,7 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    private AssignmentTypeDto? _selectedType;
+    private AssignmentTypeDto? _selectedType = AssignmentTypeDto.Manual;
     private GradingFormatDto _selectedGradingFormat = GradingFormatDto.TeacherGraded;
     private TargetAudienceTypeDto _selectedTargetAudience = TargetAudienceTypeDto.AllStudents;
 

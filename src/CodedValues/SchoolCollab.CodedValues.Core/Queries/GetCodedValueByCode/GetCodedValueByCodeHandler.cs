@@ -3,12 +3,16 @@ using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.CodedValues.Core.CQRS;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.DTOs;
+using SchoolCollab.CodedValues.Core.Services;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.CodedValues.Core.Queries.GetCodedValueByCode;
 
 public sealed class GetCodedValueByCodeHandler(
     CodedValuesDbContext db,
-    HybridCache cache) : IQueryHandler<GetCodedValueByCode, CodedValueDto?>
+    HybridCache cache,
+    ITenantProvider tenantProvider,
+    ICodedValueResolver resolver) : IQueryHandler<GetCodedValueByCode, CodedValueDto?>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -20,17 +24,18 @@ public sealed class GetCodedValueByCodeHandler(
         GetCodedValueByCode query,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = tenantProvider.GetTenantId();
         var normalisedCode = query.Code.Trim().ToUpperInvariant();
         var cacheKey = query.ParentId.HasValue
-            ? $"coded-value:code:{normalisedCode}:parent:{query.ParentId.Value}"
-            : $"coded-value:code:{normalisedCode}";
+            ? $"tenant:{tenantId}:coded-value:code:{normalisedCode}:parent:{query.ParentId.Value}"
+            : $"tenant:{tenantId}:coded-value:code:{normalisedCode}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, normalisedCode, query.ParentId),
+            (db, resolver, tenantId, normalisedCode, query.ParentId),
             static async (state, ct) =>
             {
-                var (db, code, parentId) = state;
+                var (db, resolver, tenantId, code, parentId) = state;
                 var cv = parentId.HasValue
                     ? await db.CodedValues
                         .AsNoTracking()
@@ -46,32 +51,10 @@ public sealed class GetCodedValueByCodeHandler(
                 if (cv is null)
                     return null;
 
-                string? parentCode = cv.ParentId.HasValue
-                    ? await db.CodedValues.AsNoTracking()
-                        .Where(x => x.Id == cv.ParentId.Value)
-                        .Select(x => x.Code)
-                        .SingleOrDefaultAsync(ct)
-                    : null;
-
-                return new CodedValueDto(
-                    cv.Id,
-                    cv.Code,
-                    cv.Name,
-                    cv.Description,
-                    cv.ParentId,
-                    parentCode,
-                    cv.IsDisabled,
-                    cv.DisplayOrder,
-                    cv.CreatedAt,
-                    cv.UpdatedAt,
-                    cv.Attributes.Select(a => new CodedValueAttributeDto(a.Key, a.Value)).ToArray(),
-                    cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
-                    0,
-                    cv.IsDeleted,
-                    cv.DeletedAt);
+                return await resolver.ResolveAsync(cv, tenantId, ct);
             },
             CacheOptions,
-            tags: ["coded-values"],
+            tags: ["coded-values", $"tenant:{tenantId}"],
             cancellationToken: cancellationToken);
     }
 }
