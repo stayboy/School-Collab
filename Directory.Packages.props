@@ -5,6 +5,8 @@
     <PackageVersion Include="Aspire.Hosting.RabbitMQ" Version="13.4.5" />
     <PackageVersion Include="Aspire.Hosting.Redis" Version="13.4.5" />
     <PackageVersion Include="Aspire.StackExchange.Redis.DistributedCaching" Version="13.4.5" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.Cookies" Version="2.3.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" Version="10.0.9" />
     <PackageVersion Include="System.Threading.RateLimiting" Version="8.0.0" />
     <PackageVersion Include="Testcontainers.RabbitMq" Version="4.12.0" />
   </ItemGroup>

@@ -238,6 +238,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("character varying(50)")
                         .HasColumnName("student_number");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");

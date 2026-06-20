@@ -1,8 +1,9 @@
 using SchoolCollab.Students.Core.Domain.Events;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class Student
+public sealed class Student : ITenantEntity
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
@@ -16,6 +17,10 @@ public sealed class Student
     public Guid? GenderCodedValueId { get; private set; }
     public string ContactEmail { get; private set; } = default!;
     public string? ContactPhone { get; private set; }
+
+    // Multi-tenancy: each student belongs to a tenant (e.g., school)
+    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
+    public Guid TenantId { get; private set; }
     public bool IsDeleted { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -43,6 +48,7 @@ public sealed class Student
             GenderCodedValueId = genderCodedValueId,
             ContactEmail = contactEmail.Trim(),
             ContactPhone = contactPhone?.Trim(),
+            // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             IsDeleted = false,
             CreatedAt = now,
             UpdatedAt = now

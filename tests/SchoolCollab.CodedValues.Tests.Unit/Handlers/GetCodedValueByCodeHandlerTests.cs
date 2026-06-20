@@ -2,10 +2,13 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.DTOs;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValueByCode;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 
@@ -14,6 +17,7 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
 {
     private readonly CodedValuesDbContext _db;
     private readonly HybridCache _cache;
+    private readonly Mock<ITenantProvider> _tenantProvider;
     private readonly GetCodedValueByCodeHandler _handler;
     private readonly Guid _rootId;
     private readonly Guid _childId;
@@ -34,7 +38,15 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         var sp = services.BuildServiceProvider();
         _cache = sp.GetRequiredService<HybridCache>();
 
-        _handler = new GetCodedValueByCodeHandler(_db, _cache);
+        _tenantProvider = new Mock<ITenantProvider>();
+        _tenantProvider.Setup(tp => tp.GetTenantContext())
+            .Returns(new TenantContext(Guid.NewGuid(), "TestTenant", TenantType.School));
+
+        var repository = new SchoolCollab.CodedValues.Core.Data.Repositories.CodedValueRepository(_db);
+        var resolver = new SchoolCollab.CodedValues.Core.Services.CodedValueResolver(repository);
+        _handler = new GetCodedValueByCodeHandler(_db, _cache, _tenantProvider.Object, resolver);
+
+        // Seed test data
 
         // Seed test data
         _rootId = Guid.NewGuid();
@@ -142,6 +154,43 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         result!.Attributes.Should().HaveCount(2);
         result.Attributes.Should().Contain(a => a.Key == "city" && a.Value == "Accra");
         result.Attributes.Should().Contain(a => a.Key == "region" && a.Value == "Greater Accra");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_UsesTenantSpecificOverrideForCurrentTenant()
+    {
+        var tenantAId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var tenantBId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var value = CodedValue.Create("TENANT_CODE", "Global Name", "Global Description", null, 0);
+        value.SetAttribute("region", "Global Region");
+        _db.CodedValues.Add(value);
+        _db.TenantCodedValueOverrides.AddRange(
+            new TenantCodedValueOverride(tenantAId, value.Id, "A_CODE", "Tenant A Name", false),
+            new TenantCodedValueOverride(tenantBId, value.Id, "B_CODE", "Tenant B Name", true));
+        _db.TenantCodedValueAttributeOverrides.AddRange(
+            new TenantCodedValueAttributeOverride(tenantAId, value.Id, "region", "Tenant A Region"),
+            new TenantCodedValueAttributeOverride(tenantBId, value.Id, "region", "Tenant B Region"));
+        _db.SaveChanges();
+
+        _tenantProvider.Setup(tp => tp.GetTenantContext())
+            .Returns(new TenantContext(tenantAId, "Tenant A", TenantType.School));
+        var tenantAResult = await _handler.HandleAsync(new GetCodedValueByCode("tenant_code"));
+
+        tenantAResult.Should().NotBeNull();
+        tenantAResult!.Code.Should().Be("A_CODE");
+        tenantAResult.Name.Should().Be("Tenant A Name");
+        tenantAResult.IsDisabled.Should().BeFalse();
+        tenantAResult.Attributes.Should().ContainSingle(a => a.Key == "region" && a.Value == "Tenant A Region");
+
+        _tenantProvider.Setup(tp => tp.GetTenantContext())
+            .Returns(new TenantContext(tenantBId, "Tenant B", TenantType.School));
+        var tenantBResult = await _handler.HandleAsync(new GetCodedValueByCode("tenant_code"));
+
+        tenantBResult.Should().NotBeNull();
+        tenantBResult!.Code.Should().Be("B_CODE");
+        tenantBResult.Name.Should().Be("Tenant B Name");
+        tenantBResult.IsDisabled.Should().BeTrue();
+        tenantBResult.Attributes.Should().ContainSingle(a => a.Key == "region" && a.Value == "Tenant B Region");
     }
 
     [TestMethod]

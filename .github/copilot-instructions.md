@@ -171,6 +171,16 @@ Any new auditable entity or feature requiring tenancy **must** follow the patter
 - Unit tests covering the merge/resolution logic.
 - Tenant-isolated cache keys.
 
+## Documentation & Knowledge Management
+
+All research, architectural decisions, and implementation steps must be documented in `documents/solution/`.
+
+### The "Finding $\rightarrow$ Implementation" Standard
+Whenever a new feature or architectural change is requested:
+1. **Research Phase**: Document "Findings" (the research, alternatives analyzed, and the chosen "why") in a `.md` file.
+2. **Implementation Phase**: Document "Implementation Steps" (the *how*, the code changes, and the verification results) in the same or a related file.
+3. **Outcome**: The `documents/solution/` folder must act as the project's technical memory, allowing any developer to trace *why* a decision was made before seeing *how* it was executed.
+
 ---
 
 ## Blazor component best practices

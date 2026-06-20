@@ -3,12 +3,14 @@ using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Students.Core.CQRS;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.DTOs;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Students.Core.Queries.ListDeletedStudents;
 
 public sealed class ListDeletedStudentsHandler(
     StudentsDbContext db,
-    HybridCache cache) : IQueryHandler<ListDeletedStudents, StudentDto[]>
+    HybridCache cache,
+    ITenantProvider tenantProvider) : IQueryHandler<ListDeletedStudents, StudentDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -20,14 +22,18 @@ public sealed class ListDeletedStudentsHandler(
         ListDeletedStudents query,
         CancellationToken cancellationToken = default)
     {
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        var cacheKey = $"students:deleted:{tenantId}";
+
         return await cache.GetOrCreateAsync(
-            "students:deleted",
-            db,
-            static async (db, ct) =>
+            cacheKey,
+            (db, tenantId),
+            static async (state, ct) =>
             {
+                var (db, tid) = state;
                 var results = await db.Students
                     .AsNoTracking()
-                    .Where(x => x.IsDeleted)
+                    .Where(x => x.IsDeleted && x.TenantId == tid)
                     .OrderBy(x => x.LastName)
                     .ThenBy(x => x.FirstName)
                     .ToArrayAsync(ct);

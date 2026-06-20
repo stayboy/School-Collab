@@ -3,6 +3,7 @@ using Serilog;
 using SchoolCollab.Assignments.Api;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
+using SchoolCollab.Core.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -32,6 +33,9 @@ else
 builder.Services.AddAssignmentsCore(builder.Configuration);
 builder.Services.AddOpenApi();
 
+// Auth + tenancy (OIDC via Keycloak)
+builder.Services.AddAuthAndTenancy(builder.Configuration);
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -39,9 +43,13 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.UseSerilogRequestLogging();
-app.MapAssignmentEndpoints();
+
+// All assignment endpoints require an authenticated user
+app.MapAssignmentEndpoints(); // endpoints add [Authorize] or per-route requirements as needed
 
 app.Run();
 

@@ -2,13 +2,18 @@ namespace SchoolCollab.Core.Tenancy;
 
 public interface ITenantEntity
 {
-    Guid TenantId { get; }
+    Guid TenantId { get; set; }
 }
 
 public abstract class BaseTenantEntity : ITenantEntity
 {
     public Guid Id { get; protected set; } = Guid.NewGuid();
-    public Guid TenantId { get; protected set; }
+    public Guid TenantId { get; set; }
+
+    // Explicit interface mapping so the reflection helper in TenantEntityExtensions
+    // can set TenantId on any ITenantEntity, including those that have a private
+    // setter on their own TenantId property.
+    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
 
     protected BaseTenantEntity() { }
 

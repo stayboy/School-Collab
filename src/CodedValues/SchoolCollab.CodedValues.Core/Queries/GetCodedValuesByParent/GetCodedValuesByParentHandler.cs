@@ -25,7 +25,7 @@ public sealed class GetCodedValuesByParentHandler(
         GetCodedValuesByParent query,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = tenantProvider.GetTenantId();
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
         var filterStr = query.AttributeFilters is { Count: > 0 }
             ? string.Join("|", query.AttributeFilters
                 .OrderBy(kv => kv.Key, StringComparer.Ordinal)

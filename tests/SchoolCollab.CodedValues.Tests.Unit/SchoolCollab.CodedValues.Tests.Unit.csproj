@@ -7,6 +7,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\CodedValues\SchoolCollab.CodedValues.Api\SchoolCollab.CodedValues.Api.csproj" />
     <ProjectReference Include="..\..\src\CodedValues\SchoolCollab.CodedValues.Core\SchoolCollab.CodedValues.Core.csproj" />
     <ProjectReference Include="..\..\src\CodedValues\SchoolCollab.CodedValues.Admin\SchoolCollab.CodedValues.Admin.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
