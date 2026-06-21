@@ -1,3 +1,5 @@
+using SchoolCollab.Core.Data;
+
 namespace SchoolCollab.Core.Tenancy;
 
 public interface ITenantEntity
@@ -5,7 +7,7 @@ public interface ITenantEntity
     Guid TenantId { get; set; }
 }
 
-public abstract class BaseTenantEntity : ITenantEntity
+public abstract class BaseTenantEntity : IEntity, ITenantEntity
 {
     public Guid Id { get; protected set; } = Guid.NewGuid();
     public Guid TenantId { get; set; }
@@ -23,7 +25,7 @@ public abstract class BaseTenantEntity : ITenantEntity
     }
 }
 
-public abstract class BaseTenantEntityWithAudit : BaseTenantEntity
+public abstract class BaseTenantEntityWithAudit : BaseTenantEntity, IAuditableEntity, ISoftDeletableEntity
 {
     public DateTimeOffset CreatedAt { get; protected set; }
     public DateTimeOffset UpdatedAt { get; protected set; }

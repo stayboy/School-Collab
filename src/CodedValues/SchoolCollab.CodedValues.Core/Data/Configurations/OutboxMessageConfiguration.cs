@@ -1,18 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SchoolCollab.Core.Data;
 using SchoolCollab.CodedValues.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Core.Data.Configurations;
 
-internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage>
+internal sealed class OutboxMessageConfiguration : EntityTypeConfigurationBase<OutboxMessage>
 {
-    public void Configure(EntityTypeBuilder<OutboxMessage> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<OutboxMessage> builder)
     {
         builder.ToTable("outbox_messages");
-
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
-
         builder.Property(x => x.OccurredAt).IsRequired();
         builder.Property(x => x.Type).IsRequired().HasMaxLength(500);
         builder.Property(x => x.Payload).IsRequired().HasColumnType("jsonb");

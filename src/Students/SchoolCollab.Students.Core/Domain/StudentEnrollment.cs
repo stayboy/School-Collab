@@ -1,8 +1,9 @@
+using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class StudentEnrollment
+public sealed class StudentEnrollment : IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 

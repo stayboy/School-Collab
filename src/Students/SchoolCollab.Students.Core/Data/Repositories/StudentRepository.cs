@@ -15,6 +15,14 @@ internal sealed class StudentRepository(StudentsDbContext db, ITenantProvider te
             .SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId, cancellationToken);
     }
 
+    public async Task<Student?> GetIncludingDeletedAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        return await db.Students
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId, cancellationToken);
+    }
+
     public async Task<Student?> GetByStudentNumberAsync(string studentNumber, CancellationToken cancellationToken = default)
     {
         var tenantId = tenantProvider.GetTenantContext().TenantId;

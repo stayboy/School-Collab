@@ -1,7 +1,7 @@
 ---
 name: fluentui-icons
 description: |
-  Fluent UI Blazor icon usage patterns and Razor parser gotchas.
+  Fluent UI Blazor icon usage patterns for Microsoft.FluentUI.AspNetCore.Components 4.x.
   Triggers: "FluentIcon", "icon in Blazor", "add icon", "icon parser error",
   "CS0305 icon", "Icons.Regular", "Icons.Filled", "FluentUI icon not rendering",
   "how to use icons in FluentUI Blazor".
@@ -17,56 +17,69 @@ description: |
 <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
 ```
 
-Both packages are required. The icons package provides the `Icons` static class.
+Both packages are required. The icons package provides the `Icons` static classes.
 
-## Critical: Two Ways to Reference Icons
+## Repository Rule
 
-### ✅ Pattern A — `Value` property with static `Icons` class (preferred)
+Use package-native icon patterns and keep reusable `Icon` instances in shared constants:
 
-Use this for **standalone `<FluentIcon>` components**:
+- Standalone `<FluentIcon>` is generic. Pass the icon type through the `Icon` parameter.
+- Fluent components that expose `Icon`, `IconStart`, `IconEnd`, `IconPrevious`,
+  `IconCurrent`, or `IconNext` expect an `Icon` instance. Prefer shared constants
+  from `SchoolCollab.Admin.Shared.Constants.FluentIcons`.
+- Do not use `Icon.FromType<T>()` in Razor markup. It is unnecessary for this
+  package version and is not the repo pattern.
+- Do not declare page-local `static readonly Icon` fields when a shared constant
+  exists. Add missing reusable icons to
+  `src/SchoolCollab.Admin.Shared/Constants/FluentIcons.cs`.
+
+## Standalone `<FluentIcon>`
+
+`<FluentIcon>` is generic in Microsoft.FluentUI.AspNetCore.Components 4.x, so pass
+the icon type directly:
 
 ```razor
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
-<FluentIcon Value="@(Icons.Regular.Size24.Save)" />
-<FluentIcon Value="@(Icons.Filled.Size20.Delete)" Color="@Color.Error" />
-<FluentIcon Value="@(Icons.Regular.Size16.Search)" />
+<FluentIcon Icon="@(Icons.Regular.Size24.Document)" />
+<FluentIcon Icon="@(Icons.Filled.Size20.Delete)" Color="@Color.Error" />
+<FluentIcon Icon="@(Icons.Regular.Size24.CheckmarkCircle)" Width="16" Height="16" />
 ```
 
-**This is the only safe pattern for `<FluentIcon>`.**
-
-### ✅ Pattern B — `Icon.FromType<T>()` on component parameters
-
-Use this for **`Icon` parameters on other Fluent components** (`FluentButton`, `FluentNavLink`, etc.):
+For custom images, use the `Value` property with an `Icon` instance:
 
 ```razor
-<FluentNavLink Icon="@(Icon.FromType<Icons.Regular.Size20.Home>())"
-               Href="" Match="NavLinkMatch.All">
-    Home
-</FluentNavLink>
+<FluentIcon Value="@(Icon.FromImageUrl("/images/custom-icon.png"))" />
+```
 
-<FluentButton Icon="@(Icon.FromType<Icons.Regular.Size20.AddCircle>())"
-              Appearance="Appearance.Accent">
-    Add
+## Icon Parameters on Fluent Components
+
+Components such as `FluentButton`, `FluentWizardStep`, and `FluentNavLink` expect an
+`Icon` instance for their icon parameters. Prefer shared constants:
+
+```razor
+<FluentButton Appearance="Appearance.Accent" IconStart="@FluentIcons.Add">
+    Create New
 </FluentButton>
+
+<FluentWizardStep IconPrevious="@FluentIcons.CheckmarkCircleFilled" />
 ```
 
-This pattern works on component parameters because the generic syntax is inside a quoted attribute value, not a standalone component tag.
+If a reusable icon is needed, add it to `FluentIcons`:
 
-## ❌ Never Do This — Razor Parser Error
+```csharp
+using Microsoft.FluentUI.AspNetCore.Components;
 
-```razor
-@* WRONG — causes CS0305/CS0019 compiler errors *@
-@* The Razor parser sees <Icons.Regular.Size24.Star>() as HTML elements *@
-<FluentIcon Icon="@(Icon.FromType<Icons.Regular.Size24.Star>())" />
+namespace SchoolCollab.Admin.Shared.Constants;
+
+public static class FluentIcons
+{
+    public static readonly Icon Add =
+        new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Add();
+}
 ```
 
-The `>()/>` suffix after a generic type argument confuses the Razor parser into treating the closing `/>` as HTML tag closers, producing errors like:
-
-- `CS0305: Using the generic type 'Icons' requires 1 type arguments`
-- `CS0019: Operator '>' cannot be applied to operands of type...`
-
-## Icon Naming Convention
+## Naming Convention
 
 Pattern: `Icons.[Variant].[Size].[Name]`
 
@@ -75,53 +88,18 @@ Pattern: `Icons.[Variant].[Size].[Name]`
 | `Regular` | Default/outline icons (most common) |
 | `Filled`  | Filled/solid icons for emphasis |
 
-Available sizes: `Size12`, `Size16`, `Size20`, `Size24`, `Size28`, `Size32`, `Size48`
+Available sizes: `Size12`, `Size16`, `Size20`, `Size24`, `Size28`, `Size32`, `Size48`.
 
-Common icons: `Save`, `Delete`, `Search`, `Add`, `AddCircle`, `Home`, `Edit`, `Dismiss`, `Checkmark`, `Warning`, `Error`, `Info`, `ArrowDownload`, `ArrowExportUp`, `TextBulletList`, `Tag`, `Star`, `Settings`, `Mail`, `Calendar`, `People`, `Document`, `Folder`
-
-## Common Patterns
-
-### Standalone icon with color
-
-```razor
-<FluentIcon Value="@(Icons.Regular.Size20.Warning)" Color="@Color.Warning" />
-<FluentIcon Value="@(Icons.Filled.Size24.Delete)" Color="@Color.Error" />
-```
-
-### Icon in a button
-
-```razor
-<FluentButton Appearance="Appearance.Accent"
-              Icon="@(Icon.FromType<Icons.Regular.Size20.AddCircle>())">
-    Create New
-</FluentButton>
-```
-
-### Icon-only button (no text)
-
-```razor
-<FluentButton Icon="@(Icon.FromType<Icons.Regular.Size20.Delete>())"
-              Appearance="Appearance.Outline"
-              aria-label="Delete" />
-```
-
-### Custom image icon
-
-```razor
-<FluentIcon Value="@(Icon.FromImageUrl("/images/custom-icon.png"))" />
-```
-
-### Icon size override
-
-```razor
-<FluentIcon Value="@(Icons.Regular.Size24.Save)" Width="16" Height="16" />
-```
+Common icons: `Save`, `Delete`, `Search`, `Add`, `AddCircle`, `Home`, `Edit`,
+`Dismiss`, `Checkmark`, `CheckmarkCircle`, `Warning`, `Error`, `Info`,
+`ArrowDownload`, `ArrowExportUp`, `TextBulletList`, `Tag`, `Star`, `Settings`,
+`Mail`, `Calendar`, `People`, `Document`, `Folder`.
 
 ## Troubleshooting
 
 | Problem | Cause | Fix |
 |---------|-------|-----|
-| CS0305 / CS0019 on `<FluentIcon>` | `Icon.FromType<T>()` used on `<FluentIcon>` | Switch to `Value="@(Icons.Regular.Size20.Name)"` |
+| CS0305 / CS0019 on `<FluentIcon>` | Generic icon type used in a non-generic parameter | Use `<FluentIcon Icon="@(Icons.Regular.Size24.Name)" />` or an `Icon` instance for `Value` |
 | Icon shows blank | Missing `Microsoft.FluentUI.AspNetCore.Components.Icons` package | Add the Icons NuGet package |
 | Icon not found at design time | Missing `@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons` | Add the alias to `_Imports.razor` |
 | `@using` alias conflicts | Multiple `Icons` namespaces | Use the explicit `@using Icons = ...` alias form |
@@ -131,6 +109,8 @@ Common icons: `Save`, `Delete`, `Search`, `Add`, `AddCircle`, `Home`, `Edit`, `D
 ```razor
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Admin.Shared.Constants
 ```
 
-This makes all Fluent components available and the `Icons` alias shorthand for icon references.
+This makes Fluent components, the `Icons` alias, and shared `FluentIcons` constants
+available to Razor components.

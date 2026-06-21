@@ -32,6 +32,7 @@ public sealed class ListDeletedStudentsHandler(
             {
                 var (db, tid) = state;
                 var results = await db.Students
+                    .IgnoreQueryFilters()
                     .AsNoTracking()
                     .Where(x => x.IsDeleted && x.TenantId == tid)
                     .OrderBy(x => x.LastName)

@@ -1,3 +1,5 @@
+using SchoolCollab.Core.Data;
+
 namespace SchoolCollab.Students.Core.Messaging;
 
 /// <summary>
@@ -5,7 +7,7 @@ namespace SchoolCollab.Students.Core.Messaging;
 /// change that produced it. The <see cref="OutboxDispatcher"/> reads pending
 /// rows, publishes them to RabbitMQ, and sets <see cref="DispatchedAt"/>.
 /// </summary>
-public sealed class OutboxMessage
+public sealed class OutboxMessage : IEntity
 {
     public Guid Id { get; set; }
     public DateTimeOffset OccurredAt { get; set; }

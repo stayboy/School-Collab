@@ -16,7 +16,7 @@ public sealed class RecoverStudentHandler(
     {
         logger.LogDebug("Handling RecoverStudent {Id}", command.Id);
 
-        var student = await repository.GetAsync(command.Id, cancellationToken)
+        var student = await repository.GetIncludingDeletedAsync(command.Id, cancellationToken)
             ?? throw new StudentNotFoundException(command.Id);
 
         if (!student.IsDeleted)

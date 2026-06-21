@@ -1,17 +1,19 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.Assignments.Core.Data.Configurations;
 
-internal sealed class AssignmentConfiguration : IEntityTypeConfiguration<Assignment>
+internal sealed class AssignmentConfiguration : EntityTypeConfigurationBase<Assignment>
 {
-    public void Configure(EntityTypeBuilder<Assignment> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<Assignment> builder)
     {
         builder.ToTable("assignments");
 
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.ConfigureTenantProperties();
+        builder.ConfigureAuditProperties();
+        builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.Title)
             .IsRequired()
@@ -49,17 +51,6 @@ internal sealed class AssignmentConfiguration : IEntityTypeConfiguration<Assignm
         builder.Property(x => x.CreatedByTeacherId)
             .IsRequired();
 
-        builder.Property(x => x.RowVersion)
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRowVersion();
-
-        builder.Property(x => x.CreatedAt)
-            .IsRequired();
-
-        builder.Property(x => x.UpdatedAt)
-            .IsRequired();
 
         builder.HasIndex(x => x.SubjectCodedValueId)
             .HasDatabaseName("ix_assignments_subject_cv_id");

@@ -1,9 +1,10 @@
 using SchoolCollab.Assignments.Core.Domain.Events;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.Domain;
 
-public sealed class Assignment : ITenantEntity
+public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<AssignmentQuestion> _questions = [];
     private readonly List<AssignmentReview> _reviews = [];

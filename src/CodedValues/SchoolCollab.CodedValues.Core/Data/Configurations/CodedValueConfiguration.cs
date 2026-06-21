@@ -1,17 +1,20 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SchoolCollab.Core.Data;
 using SchoolCollab.CodedValues.Core.Domain;
 
 namespace SchoolCollab.CodedValues.Core.Data.Configurations;
 
-internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedValue>
+internal sealed class CodedValueConfiguration : EntityTypeConfigurationBase<CodedValue>
 {
-    public void Configure(EntityTypeBuilder<CodedValue> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<CodedValue> builder)
     {
         builder.ToTable("coded_values");
 
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.ConfigureAuditProperties();
+        builder.ConfigureSoftDeleteProperties();
+        builder.ConfigureSoftDeleteQueryFilter();
+        builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.Code)
             .IsRequired()
@@ -37,22 +40,6 @@ internal sealed class CodedValueConfiguration : IEntityTypeConfiguration<CodedVa
         builder.Property(x => x.IsDisabled)
             .HasDefaultValue(false);
 
-        builder.Property(x => x.IsDeleted)
-            .HasDefaultValue(false);
-
-        builder.Property(x => x.DeletedAt);
-
-        builder.Property(x => x.CreatedAt)
-            .IsRequired();
-
-        builder.Property(x => x.UpdatedAt)
-            .IsRequired();
-
-        builder.Property(x => x.RowVersion)
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRowVersion();
 
         builder.HasOne<CodedValue>()
             .WithMany()

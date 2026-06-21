@@ -1,9 +1,10 @@
-using SchoolCollab.Students.Core.Domain.Events;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class Student : ITenantEntity
+public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
@@ -22,6 +23,7 @@ public sealed class Student : ITenantEntity
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
     public Guid TenantId { get; private set; }
     public bool IsDeleted { get; private set; }
+    public DateTimeOffset? DeletedAt { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -80,6 +82,7 @@ public sealed class Student : ITenantEntity
     {
         if (IsDeleted) return;
         IsDeleted = true;
+        DeletedAt = DateTimeOffset.UtcNow;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new StudentDeletedEvent(Id, StudentNumber));
     }
@@ -88,6 +91,7 @@ public sealed class Student : ITenantEntity
     {
         if (!IsDeleted) return;
         IsDeleted = false;
+        DeletedAt = null;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

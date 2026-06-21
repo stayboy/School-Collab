@@ -1,17 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class GradeLevelConfiguration : IEntityTypeConfiguration<GradeLevel>
+internal sealed class GradeLevelConfiguration : EntityTypeConfigurationBase<GradeLevel>
 {
-    public void Configure(EntityTypeBuilder<GradeLevel> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<GradeLevel> builder)
     {
         builder.ToTable("grade_levels");
 
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.ConfigureAuditProperties();
+        builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.CodedValueId).IsRequired();
 
@@ -23,14 +24,6 @@ internal sealed class GradeLevelConfiguration : IEntityTypeConfiguration<GradeLe
 
         builder.Property(x => x.DisplayOrder).IsRequired();
 
-        builder.Property(x => x.RowVersion)
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRowVersion();
-
-        builder.Property(x => x.CreatedAt).IsRequired();
-        builder.Property(x => x.UpdatedAt).IsRequired();
 
         builder.HasIndex(x => x.CodedValueId)
             .HasDatabaseName("ix_grade_levels_coded_value_id");

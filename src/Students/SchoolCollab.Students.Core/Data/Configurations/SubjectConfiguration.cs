@@ -1,17 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class SubjectConfiguration : IEntityTypeConfiguration<Subject>
+internal sealed class SubjectConfiguration : EntityTypeConfigurationBase<Subject>
 {
-    public void Configure(EntityTypeBuilder<Subject> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<Subject> builder)
     {
         builder.ToTable("subjects");
 
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.ConfigureAuditProperties();
+        builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.CodedValueId).IsRequired();
 
@@ -25,14 +26,6 @@ internal sealed class SubjectConfiguration : IEntityTypeConfiguration<Subject>
 
         builder.Property(x => x.DisplayOrder).IsRequired();
 
-        builder.Property(x => x.RowVersion)
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRowVersion();
-
-        builder.Property(x => x.CreatedAt).IsRequired();
-        builder.Property(x => x.UpdatedAt).IsRequired();
 
         builder.HasIndex(x => x.Code)
             .IsUnique()
