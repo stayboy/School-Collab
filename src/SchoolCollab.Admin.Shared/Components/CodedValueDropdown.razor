@@ -1,0 +1,161 @@
+@inject CodedValuesApiClient Api
+@inject ILogger<CodedValueDropdown> Logger
+@implements IDisposable
+
+@if (_error is not null)
+{
+    <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+}
+
+<FluentSelect TOption="CodedValueDto"
+              Items="@(_items ?? [])"
+              SelectedOption="@_selectedOption"
+              SelectedOptionChanged="@OnSelectedOptionChanged"
+              OptionText="@(o => o.Name)"
+              OptionValue="@(o => o.Id.ToString())"
+              Label="@Label"
+              Placeholder="@EffectivePlaceholder"
+              Disabled="@IsDisabled"
+              class="coded-value-dropdown" />
+
+@code {
+    /// <summary>
+    /// The parent coded value code whose children populate the dropdown.
+    /// Changing this value after initialization will reload the dropdown items.
+    /// Values are resolved through the tenant-aware coded-value API, so any
+    /// tenant-specific overrides are applied automatically.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string ParentCode { get; set; } = default!;
+
+    /// <summary>
+    /// Label shown above the dropdown.
+    /// </summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// Placeholder text when no value is selected.
+    /// </summary>
+    [Parameter]
+    public string? Placeholder { get; set; } = "Select…";
+
+    /// <summary>
+    /// The currently selected coded value id (two-way bindable).
+    /// </summary>
+    [Parameter]
+    public Guid? SelectedId { get; set; }
+
+    /// <summary>
+    /// Callback invoked when the selected coded value id changes.
+    /// </summary>
+    [Parameter]
+    public EventCallback<Guid?> SelectedIdChanged { get; set; }
+
+    /// <summary>
+    /// Disables the dropdown independently of loading state.
+    /// </summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    private CodedValueDto[]? _items;
+    private CodedValueDto? _selectedOption;
+    private string? _error;
+    private string _lastLoadedParentCode = string.Empty;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private bool IsDisabled => Disabled || _items is null || _items.Length == 0 || _error is not null;
+
+    private string EffectivePlaceholder => _error is not null
+        ? "—"
+        : _items is null
+            ? "Loading…"
+            : _items.Length == 0
+                ? "No options available"
+                : (Placeholder ?? "Select…");
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync(ParentCode);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // ParentCode is a string parameter that may change after initialization
+        // (e.g. cascading value, wizard step, or form field dependency). When it
+        // changes we must discard the previous items and reload for the new parent.
+        if (!string.Equals(ParentCode, _lastLoadedParentCode, StringComparison.OrdinalIgnoreCase))
+        {
+            await LoadAsync(ParentCode);
+        }
+
+        // Keep the internal selection in sync when the consumer updates SelectedId.
+        if (_items is not null && SelectedId.HasValue)
+        {
+            var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
+            if (!Equals(selected, _selectedOption))
+            {
+                _selectedOption = selected;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Reloads the dropdown items for the current <see cref="ParentCode"/>.
+    /// Call this from a parent component when the underlying coded value list
+    /// may have changed (e.g. after creating a new option in a dialog).
+    /// </summary>
+    public async Task RefreshAsync()
+    {
+        if (_disposed) return;
+        await LoadAsync(ParentCode);
+    }
+
+    private async Task LoadAsync(string parentCode)
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        _items = null;
+        _error = null;
+        _selectedOption = null;
+        _lastLoadedParentCode = parentCode;
+
+        try
+        {
+            var items = await Api.GetChildrenByParentCodeAsync(parentCode, ct) ?? [];
+            if (_disposed || ct.IsCancellationRequested) return;
+
+            _items = items;
+            _selectedOption = _items.FirstOrDefault(x => x.Id == SelectedId);
+        }
+        catch (OperationCanceledException)
+        {
+            // User navigated away or ParentCode changed before the lookup completed.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed || ct.IsCancellationRequested) return;
+
+            Logger.LogError(ex, "Failed to load coded values for parent {ParentCode}", parentCode);
+            _error = $"Unable to load options for {parentCode}.";
+        }
+    }
+
+    private async Task OnSelectedOptionChanged(CodedValueDto? value)
+    {
+        _selectedOption = value;
+        await SelectedIdChanged.InvokeAsync(value?.Id);
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

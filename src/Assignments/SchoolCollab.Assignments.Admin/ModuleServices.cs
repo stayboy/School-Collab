@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Assignments.Admin.Services;
-using SchoolCollab.CodedValues.Admin.Services;
+using SchoolCollab.Admin.Shared.Services;
 
 namespace SchoolCollab.Assignments.Admin;
 

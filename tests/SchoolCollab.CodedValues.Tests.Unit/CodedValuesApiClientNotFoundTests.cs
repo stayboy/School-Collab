@@ -1,8 +1,8 @@
 using System.Net;
 using System.Text.Json;
 using FluentAssertions;
-using AdminApi = SchoolCollab.CodedValues.Admin.Services.CodedValuesApiClient;
-using AdminDto = SchoolCollab.CodedValues.Admin.Services.CodedValueDto;
+using AdminApi = SchoolCollab.Admin.Shared.Services.CodedValuesApiClient;
+using AdminDto = SchoolCollab.Admin.Shared.Services.CodedValueDto;
 using AiApi = SchoolCollab.AI.Services.CodedValuesApiClient;
 using AiDto = SchoolCollab.AI.Services.CodedValueDto;
 
@@ -114,6 +114,22 @@ public class CodedValuesApiClientNotFoundTests
         var act = () => client.GetByCodeAsync("TEST", ct: CancellationToken.None);
 
         await act.Should().ThrowAsync<HttpRequestException>("500 should still throw");
+    }
+
+    [TestMethod]
+    public async Task Admin_GetChildrenByParentCodeAsync_CallsCorrectEndpoint()
+    {
+        var dto = SampleAdminDto();
+        var json = JsonSerializer.Serialize(new[] { dto });
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, json);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var client = new AdminApi(http);
+
+        var result = await client.GetChildrenByParentCodeAsync("PARENT_CODE", CancellationToken.None);
+
+        result.Should().NotBeNull();
+        result!.Should().ContainSingle();
+        handler.Requests.Should().ContainSingle(r => r.RequestUri!.PathAndQuery == "/coded-values/by-parent?parentCode=PARENT_CODE");
     }
 
     // --- AI CodedValuesApiClient tests ---

@@ -1,4 +1,4 @@
-using SchoolCollab.CodedValues.Admin.Services;
+using SchoolCollab.Admin.Shared.Services;
 
 namespace SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues;
 
