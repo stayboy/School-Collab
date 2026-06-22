@@ -4,6 +4,7 @@ using SchoolCollab.Assignments.Api;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -49,7 +50,8 @@ app.MapDefaultEndpoints();
 app.UseSerilogRequestLogging();
 
 // All assignment endpoints require an authenticated user
-app.MapAssignmentEndpoints(); // endpoints add [Authorize] or per-route requirements as needed
+var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
+app.MapAssignmentEndpoints(featureFlags); 
 
 app.Run();
 

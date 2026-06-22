@@ -31,7 +31,9 @@ jobs:
           --no-build
           --configuration Release
           --filter "FullyQualifiedName~Tests.Unit"
-          --logger "trx;LogFileName=unit-results.trx"
+          --ignore-exit-code 8
+          --report-trx
+          --report-trx-filename unit-results.trx
           --results-directory ./test-results
 
       - name: Integration tests
@@ -40,7 +42,9 @@ jobs:
           --no-build
           --configuration Release
           --filter "FullyQualifiedName~Tests.Integration"
-          --logger "trx;LogFileName=integration-results.trx"
+          --ignore-exit-code 8
+          --report-trx
+          --report-trx-filename integration-results.trx
           --results-directory ./test-results
         continue-on-error: false
 

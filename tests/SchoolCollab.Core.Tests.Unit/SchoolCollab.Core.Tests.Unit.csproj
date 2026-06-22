@@ -4,17 +4,19 @@
     <EnableMSTestRunner>true</EnableMSTestRunner>
     <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
     <TargetFramework>net10.0</TargetFramework>
-    <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" />
     <PackageReference Include="MSTest" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" />
   </ItemGroup>
+
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
+    <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
 </Project>

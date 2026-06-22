@@ -3,6 +3,23 @@
 This file contains topic-specific guidance for bug-fix regression tests and unit tests
 for feature additions.
 
+## Test Platform & Frameworks
+
+The repository has adopted **Microsoft Testing Platform (MTP)** as the primary test execution engine for .NET 10.
+
+### Framework Standards
+- **Primary Framework**: **MSTest** is the preferred framework for all new unit and integration tests.
+- **Legacy Frameworks**: xUnit and NUnit are maintained for existing projects but should not be used for new development.
+- **Tooling**: Use **Moq** for mocking and **FluentAssertions** for assertions.
+- **Component Testing**: Use **bUnit** for Blazor components.
+
+### MTP Configuration
+All test projects must be MTP-compatible:
+1. Set `<OutputType>Exe</OutputType>` in the `.csproj`.
+2. Use the `global.json` runner configuration: `{ "test": { "runner": "Microsoft.Testing.Platform" } }`.
+
+---
+
 ## Bug-fix regression tests
 
 Every bug fix must include a regression test that proves the reported bug is fixed. Do
@@ -38,10 +55,12 @@ not treat a bug fix as complete when it only changes production code.
    and add the closest available coverage, such as routing, service, or component
    integration coverage.
 
-## Unit tests for feature additions
+---
 
-Every new feature, service, or behavioural class **must** include unit tests in
-`tests/SchoolCollab.CodedValues.Tests.Unit/`. Tests go in a file named after the class
+## Unit and Integration tests for feature additions
+
+Every new feature, service, or behavioural class **must** include tests in
+the corresponding test project. Tests go in a file named after the class
 under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
 
 ### Rules
@@ -52,11 +71,11 @@ under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
    trivial wrappers (delegates, thin extension methods) are exempt.
 
 2. **Test file naming.** `<ClassName>Tests.cs` — one test class per production class.
-   Keep tests in the root `SchoolCollab.CodedValues.Tests.Unit` namespace unless a
+   Keep tests in the project root namespace unless a
    `Domain/` subfolder matches the production namespace.
 
 3. **Framework.** Use MSTest (`[TestClass]`/`[TestMethod]`), Moq for mocking, and
-   FluentAssertions for assertions. These packages are already referenced.
+   FluentAssertions for assertions.
 
 4. **Coverage targets.** At minimum, test:
    - **Happy path** — the primary use case works correctly.
@@ -64,21 +83,26 @@ under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
    - **Error/fallback paths** — what happens when a dependency is missing or returns an
      unexpected result.
    - **Routing/branching logic** — every `if`/`switch` branch must have at least one
-     test that exercises it (e.g. local vs cloud routing in `ChatClientFactory`).
+     test that exercises it.
 
-5. **Run tests before committing.** `dotnet test` must pass with 0 failures before a PR
+5. **API Integration Testing Patterns.** When testing API endpoints:
+   - Use `Microsoft.AspNetCore.Mvc.Testing` (`WebApplicationFactory<TProgram>`) to host the API in-memory.
+   - **Auth Bypass Verification**: If a feature is guarded by a feature flag (e.g. `FEATURE:DisableOIDCAuth`), write tests for both states: one where the flag is enabled (verifying anonymous access) and one where it is disabled (verifying 401/403 response).
+   - **Contract Testing**: Assert on the exact JSON structure of the response and the correct HTTP status code.
+   - **Tenant Isolation**: For operational data, verify that requests with different tenant headers/claims do not leak data between tenants.
+
+6. **Run tests before committing.** `dotnet test` must pass with 0 failures before a PR
    is submitted. If existing tests break, fix them in the same commit.
 
-6. **Reference the production project.** The unit test project already references
-   `SchoolCollab.AI` and `SchoolCollab.CodedValues.Core` via `<ProjectReference>`. Add a
-   new reference only if the new production code lives in a different project.
+7. **Reference the production project.** Ensure the test project references
+   the relevant production project via `<ProjectReference>`.
 
-7. **`InternalsVisibleTo`.** If the class under test is `internal`, ensure the
+8. **`InternalsVisibleTo`.** If the class under test is `internal`, ensure the
    production project has
-   `<InternalsVisibleTo Include="SchoolCollab.CodedValues.Tests.Unit" />` in its
+   `<InternalsVisibleTo Include="Your.Test.Project.Name" />` in its
    `.csproj`.
 
-8. **HTTP 404 handling pattern.** When an API client method calls an endpoint that may
+9. **HTTP 404 handling pattern.** When an API client method calls an endpoint that may
    return 404 (e.g. "get by code" or "get by id"), the method must check
    `response.StatusCode == HttpStatusCode.NotFound` and return `null` instead of
    throwing `HttpRequestException`. Never use `GetFromJsonAsync<T>()` for endpoints that
