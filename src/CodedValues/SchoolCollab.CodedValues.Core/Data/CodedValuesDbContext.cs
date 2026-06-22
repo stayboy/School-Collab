@@ -1,12 +1,15 @@
 using Microsoft.EntityFrameworkCore;
+using SchoolCollab.CodedValues.Core.Data.Configurations;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Messaging;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Identity;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.CodedValues.Core.Data;
 
-public sealed class CodedValuesDbContext(DbContextOptions<CodedValuesDbContext> options)
-    : DbContext(options)
+public sealed class CodedValuesDbContext(DbContextOptions<CodedValuesDbContext> options, ITenantProvider tenantProvider)
+    : ModuleDbContext(options, tenantProvider)
 {
     public DbSet<CodedValue> CodedValues => Set<CodedValue>();
     public DbSet<TenantCodedValueOverride> TenantCodedValueOverrides => Set<TenantCodedValueOverride>();
@@ -17,6 +20,13 @@ public sealed class CodedValuesDbContext(DbContextOptions<CodedValuesDbContext> 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(CodedValuesDbContext).Assembly);
+
+        // Apply configurations explicitly so constructor-injected dependencies are
+        // available to tenant-aware configuration base classes. Do not use
+        // ApplyConfigurationsFromAssembly here because it cannot inject arguments.
+        modelBuilder.ApplyConfiguration(new CodedValueConfiguration());
+        modelBuilder.ApplyConfiguration(new TenantCodedValueOverrideConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TenantCodedValueAttributeOverrideConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
     }
 }

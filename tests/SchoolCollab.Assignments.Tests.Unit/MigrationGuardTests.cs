@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Assignments.Core.Data;
+using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
 
@@ -9,11 +10,13 @@ public class MigrationGuardTests
     [TestMethod]
     public void NoUncommittedModelChanges()
     {
+        var tenantProvider = new DesignTimeTenantProvider();
         using var context = new AssignmentsDbContext(
             new DbContextOptionsBuilder<AssignmentsDbContext>()
                 .UseNpgsql("Host=localhost;Database=guard")
                 .UseSnakeCaseNamingConvention()
-                .Options);
+                .Options,
+            tenantProvider);
 
         Assert.IsFalse(
             context.Database.HasPendingModelChanges(),

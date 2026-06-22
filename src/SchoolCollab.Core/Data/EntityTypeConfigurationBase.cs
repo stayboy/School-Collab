@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Tenancy;
+using System.Linq.Expressions;
 
 namespace SchoolCollab.Core.Data;
 
@@ -54,7 +55,7 @@ public abstract class EntityTypeConfigurationBase<TEntity> : IEntityTypeConfigur
     where TEntity : class, IEntity
 {
     /// <inheritdoc />
-    public void Configure(EntityTypeBuilder<TEntity> builder)
+    public virtual void Configure(EntityTypeBuilder<TEntity> builder)
     {
         builder.ConfigureGuidId();
         ConfigureEntity(builder);
@@ -62,9 +63,49 @@ public abstract class EntityTypeConfigurationBase<TEntity> : IEntityTypeConfigur
 
     /// <summary>
     /// Configures entity-specific table, column, relationship, owned type, and index mappings.
+    /// Override this method in derived configuration classes.
     /// </summary>
     /// <param name="builder">The EF Core entity type builder.</param>
-    protected abstract void ConfigureEntity(EntityTypeBuilder<TEntity> builder);
+    protected virtual void ConfigureEntity(EntityTypeBuilder<TEntity> builder)
+    {
+    }
+}
+
+/// <summary>
+/// Base EF Core configuration for tenant-scoped entities. Applies the tenant column mapping
+/// and the named "Tenant" global query filter.
+/// </summary>
+/// <typeparam name="TEntity">The tenant-scoped entity type.</typeparam>
+public abstract class TenantEntityTypeConfigurationBase<TEntity>
+    : EntityTypeConfigurationBase<TEntity>
+    where TEntity : class, IEntity, ITenantEntity
+{
+    private readonly Expression<Func<Guid>> _tenantIdAccessor;
+
+    /// <summary>
+    /// Initialises a new instance of the tenant-scoped configuration base class.
+    /// </summary>
+    /// <param name="tenantIdAccessor">
+    /// An expression that returns the current tenant id from the active <see cref="DbContext"/>.
+    /// The expression body is spliced into the query filter so EF Core evaluates it per query.
+    /// </param>
+    protected TenantEntityTypeConfigurationBase(Expression<Func<Guid>> tenantIdAccessor) =>
+        _tenantIdAccessor = tenantIdAccessor;
+
+    /// <inheritdoc />
+    public sealed override void Configure(EntityTypeBuilder<TEntity> builder)
+    {
+        base.Configure(builder);
+        builder.ConfigureTenantProperties();
+        builder.ConfigureTenantQueryFilter(_tenantIdAccessor);
+        ConfigureTenantEntity(builder);
+    }
+
+    /// <summary>
+    /// Configures entity-specific table, column, relationship, owned type, and index mappings.
+    /// </summary>
+    /// <param name="builder">The EF Core entity type builder.</param>
+    protected abstract void ConfigureTenantEntity(EntityTypeBuilder<TEntity> builder);
 }
 
 /// <summary>
@@ -112,12 +153,31 @@ public static class EntityTypeBuilderExtensions
     }
 
     /// <summary>
-    /// Adds the standard soft-delete query filter.
+    /// Adds the standard soft-delete query filter using the named filter "SoftDelete" so it can
+    /// be disabled independently of other filters (requires EF Core 10+).
     /// </summary>
     public static void ConfigureSoftDeleteQueryFilter<TEntity>(this EntityTypeBuilder<TEntity> builder)
         where TEntity : class, ISoftDeletableEntity
     {
-        builder.HasQueryFilter(entity => !EF.Property<bool>(entity, nameof(ISoftDeletableEntity.IsDeleted)));
+        builder.HasQueryFilter("SoftDelete", entity => !entity.IsDeleted);
+    }
+
+    /// <summary>
+    /// Adds the standard tenant isolation query filter using the named filter "Tenant".
+    /// The tenant id accessor expression is spliced into the filter so EF Core evaluates it
+    /// per query. This avoids hard-coding a constant in the cached EF model.
+    /// </summary>
+    public static void ConfigureTenantQueryFilter<TEntity>(
+        this EntityTypeBuilder<TEntity> builder,
+        Expression<Func<Guid>> tenantIdAccessor)
+        where TEntity : class, ITenantEntity
+    {
+        var entityParam = Expression.Parameter(typeof(TEntity), "entity");
+        var tenantIdProperty = typeof(ITenantEntity).GetProperty(nameof(ITenantEntity.TenantId))!;
+        var left = Expression.Property(entityParam, tenantIdProperty);
+        var body = Expression.Equal(left, tenantIdAccessor.Body);
+        var lambda = Expression.Lambda<Func<TEntity, bool>>(body, entityParam);
+        builder.HasQueryFilter("Tenant", lambda);
     }
 
     /// <summary>

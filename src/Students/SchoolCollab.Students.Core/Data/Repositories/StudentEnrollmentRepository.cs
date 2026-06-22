@@ -1,26 +1,19 @@
 using Microsoft.EntityFrameworkCore;
+using SchoolCollab.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Core.Data.Repositories;
 
-internal sealed class StudentEnrollmentRepository(StudentsDbContext db) : IStudentEnrollmentRepository
+internal sealed class StudentEnrollmentRepository(StudentsDbContext db)
+    : RepositoryBase<StudentEnrollment, StudentsDbContext>(db), IStudentEnrollmentRepository
 {
-    public Task<StudentEnrollment?> GetAsync(Guid id, CancellationToken cancellationToken = default) =>
-        db.StudentEnrollments.SingleOrDefaultAsync(x => x.Id == id, cancellationToken);
-
-    public async Task AddAsync(StudentEnrollment enrollment, CancellationToken cancellationToken = default)
-    {
-        await db.StudentEnrollments.AddAsync(enrollment, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task UpdateAsync(StudentEnrollment enrollment, CancellationToken cancellationToken = default)
+    public override async Task UpdateAsync(StudentEnrollment enrollment, CancellationToken cancellationToken = default)
     {
         try
         {
-            await db.SaveChangesAsync(cancellationToken);
+            await Db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -29,7 +22,7 @@ internal sealed class StudentEnrollmentRepository(StudentsDbContext db) : IStude
     }
 
     public async Task<StudentEnrollmentDto[]> ListByPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) =>
-        await db.StudentEnrollments
+        await Db.StudentEnrollments
             .AsNoTracking()
             .Where(x => x.PeriodId == periodId)
             .OrderBy(x => x.StudentId)
@@ -40,7 +33,7 @@ internal sealed class StudentEnrollmentRepository(StudentsDbContext db) : IStude
             .ToArrayAsync(cancellationToken);
 
     public async Task<StudentEnrollmentDto[]> ListByStudentAsync(Guid studentId, CancellationToken cancellationToken = default) =>
-        await db.StudentEnrollments
+        await Db.StudentEnrollments
             .AsNoTracking()
             .Where(x => x.StudentId == studentId)
             .OrderByDescending(x => x.EnrolledOn)
@@ -51,7 +44,7 @@ internal sealed class StudentEnrollmentRepository(StudentsDbContext db) : IStude
             .ToArrayAsync(cancellationToken);
 
     public async Task<StudentEnrollment[]> GetActiveEnrollmentsForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) =>
-        await db.StudentEnrollments
+        await Db.StudentEnrollments
             .Where(x => x.PeriodId == periodId && x.Status == EnrollmentStatus.Active)
             .ToArrayAsync(cancellationToken);
 }

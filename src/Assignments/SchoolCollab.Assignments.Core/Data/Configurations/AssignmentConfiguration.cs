@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Assignments.Core.Domain;
@@ -5,13 +6,14 @@ using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.Assignments.Core.Data.Configurations;
 
-internal sealed class AssignmentConfiguration : EntityTypeConfigurationBase<Assignment>
+internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBase<Assignment>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<Assignment> builder)
+    public AssignmentConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<Assignment> builder)
     {
         builder.ToTable("assignments");
 
-        builder.ConfigureTenantProperties();
         builder.ConfigureAuditProperties();
         builder.ConfigurePostgresRowVersion();
 

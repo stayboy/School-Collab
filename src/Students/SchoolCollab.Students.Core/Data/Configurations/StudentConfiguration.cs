@@ -1,17 +1,20 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
+using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class StudentConfiguration : EntityTypeConfigurationBase<Student>
+internal sealed class StudentConfiguration : TenantEntityTypeConfigurationBase<Student>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<Student> builder)
+    public StudentConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<Student> builder)
     {
         builder.ToTable("students");
 
-        builder.ConfigureTenantProperties();
         builder.ConfigureAuditProperties();
         builder.ConfigureSoftDeleteProperties();
         builder.ConfigureSoftDeleteQueryFilter();
@@ -49,6 +52,9 @@ internal sealed class StudentConfiguration : EntityTypeConfigurationBase<Student
 
         builder.HasIndex(x => x.IsDeleted)
             .HasDatabaseName("ix_students_is_deleted");
+
+        builder.HasIndex(x => new { x.TenantId, x.IsDeleted })
+            .HasDatabaseName("ix_students_tenant_id_is_deleted");
 
         builder.Ignore(x => x.DomainEvents);
     }

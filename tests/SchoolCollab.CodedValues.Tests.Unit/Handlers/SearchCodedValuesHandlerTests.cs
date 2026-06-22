@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
+using SchoolCollab.Core.Data;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.Queries.SearchCodedValues;
 
@@ -16,11 +17,12 @@ public class SearchCodedValuesHandlerTests : IDisposable
 
     public SearchCodedValuesHandlerTests()
     {
+        var tenantProvider = new DesignTimeTenantProvider();
         var options = new DbContextOptionsBuilder<CodedValuesDbContext>()
             .UseInMemoryDatabase($"SearchTest_{Guid.NewGuid()}")
             .Options;
 
-        _db = new CodedValuesDbContext(options);
+        _db = new CodedValuesDbContext(options, tenantProvider);
 
         var services = new ServiceCollection();
         services.AddHybridCache();

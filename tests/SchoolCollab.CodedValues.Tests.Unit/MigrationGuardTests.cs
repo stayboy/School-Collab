@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.CodedValues.Tests.Unit;
 
@@ -12,11 +13,13 @@ public class MigrationGuardTests
         // Must match DesignTimeCodedValuesDbContextFactory configuration exactly,
         // including UseSnakeCaseNamingConvention(), otherwise HasPendingModelChanges()
         // will report false positives due to annotation differences.
+        var tenantProvider = new DesignTimeTenantProvider();
         using var context = new CodedValuesDbContext(
             new DbContextOptionsBuilder<CodedValuesDbContext>()
                 .UseNpgsql("Host=localhost;Database=guard")
                 .UseSnakeCaseNamingConvention()
-                .Options);
+                .Options,
+            tenantProvider);
 
         Assert.IsFalse(
             context.Database.HasPendingModelChanges(),

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.CodedValues.Core.Data;
 
@@ -12,6 +13,7 @@ public sealed class DesignTimeCodedValuesDbContextFactory : IDesignTimeDbContext
             .UseNpgsql("Host=localhost;Port=5432;Database=schoolcollab_coded_values;Username=postgres;Password=postgres")
             .UseSnakeCaseNamingConvention();
 
-        return new CodedValuesDbContext(optionsBuilder.Options);
+        var tenantProvider = new DesignTimeTenantProvider();
+        return new CodedValuesDbContext(optionsBuilder.Options, tenantProvider);
     }
 }
