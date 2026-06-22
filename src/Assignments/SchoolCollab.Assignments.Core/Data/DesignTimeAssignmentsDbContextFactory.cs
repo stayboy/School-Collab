@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
+using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.Assignments.Core.Data;
 
@@ -12,6 +13,7 @@ public sealed class DesignTimeAssignmentsDbContextFactory : IDesignTimeDbContext
             .UseSnakeCaseNamingConvention()
             .Options;
 
-        return new AssignmentsDbContext(options);
+        var tenantProvider = new DesignTimeTenantProvider();
+        return new AssignmentsDbContext(options, tenantProvider);
     }
 }

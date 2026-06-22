@@ -4,14 +4,12 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Contracts;
-using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.Queries.GetAssignmentById;
 
 public sealed class GetAssignmentByIdQueryHandler(
     AssignmentsDbContext db,
     HybridCache cache,
-    ITenantProvider tenantProvider,
     ILogger<GetAssignmentByIdQueryHandler> logger) : IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
@@ -26,18 +24,17 @@ public sealed class GetAssignmentByIdQueryHandler(
     {
         logger.LogDebug("Handling GetAssignmentByIdQuery {Id}", query.Id);
 
-        var tenantId = tenantProvider.GetTenantContext().TenantId;
-        var cacheKey = $"assignment:{query.Id}:{tenantId}";
+        var cacheKey = $"assignment:{query.Id}:{db.CurrentTenantId}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, query.Id, tenantId),
+            (db, query.Id),
             static async (state, ct) =>
             {
-                var (dbContext, id, tid) = state;
+                var (dbContext, id) = state;
                 var assignment = await dbContext.Assignments
                     .AsNoTracking()
-                    .SingleOrDefaultAsync(a => a.Id == id && a.TenantId == tid, ct);
+                    .SingleOrDefaultAsync(a => a.Id == id, ct);
 
                 if (assignment is null)
                     return null;

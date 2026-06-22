@@ -25,11 +25,15 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
 
     public GetCodedValueByCodeHandlerTests()
     {
+        _tenantProvider = new Mock<ITenantProvider>();
+        _tenantProvider.Setup(tp => tp.GetTenantContext())
+            .Returns(new TenantContext(Guid.NewGuid(), "TestTenant", TenantType.School));
+
         var options = new DbContextOptionsBuilder<CodedValuesDbContext>()
             .UseInMemoryDatabase($"ByCodeTest_{Guid.NewGuid()}")
             .Options;
 
-        _db = new CodedValuesDbContext(options);
+        _db = new CodedValuesDbContext(options, _tenantProvider.Object);
 
         // HybridCache requires DI but can be created standalone for tests.
         // Use AddHybridCache via a minimal ServiceCollection.
@@ -38,15 +42,9 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         var sp = services.BuildServiceProvider();
         _cache = sp.GetRequiredService<HybridCache>();
 
-        _tenantProvider = new Mock<ITenantProvider>();
-        _tenantProvider.Setup(tp => tp.GetTenantContext())
-            .Returns(new TenantContext(Guid.NewGuid(), "TestTenant", TenantType.School));
-
         var repository = new SchoolCollab.CodedValues.Core.Data.Repositories.CodedValueRepository(_db);
         var resolver = new SchoolCollab.CodedValues.Core.Services.CodedValueResolver(repository);
         _handler = new GetCodedValueByCodeHandler(_db, _cache, _tenantProvider.Object, resolver);
-
-        // Seed test data
 
         // Seed test data
         _rootId = Guid.NewGuid();

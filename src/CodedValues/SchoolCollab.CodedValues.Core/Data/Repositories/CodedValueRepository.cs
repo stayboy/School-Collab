@@ -113,7 +113,9 @@ internal sealed class CodedValueRepository(CodedValuesDbContext db) : ICodedValu
     }
 
     public async Task<TenantCodedValueOverride?> GetOverrideAsync(Guid tenantId, Guid codedValueId, CancellationToken cancellationToken = default) =>
-        await db.TenantCodedValueOverrides.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.CodedValueId == codedValueId, cancellationToken);
+        await db.TenantCodedValueOverrides
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.CodedValueId == codedValueId, cancellationToken);
 
     public async Task UpsertOverrideAsync(TenantCodedValueOverride overrideValue, CancellationToken cancellationToken = default)
     {
@@ -137,7 +139,9 @@ internal sealed class CodedValueRepository(CodedValuesDbContext db) : ICodedValu
     }
 
     public async Task<TenantCodedValueAttributeOverride?> GetAttributeOverrideAsync(Guid tenantId, Guid codedValueId, string key, CancellationToken cancellationToken = default) =>
-        await db.TenantCodedValueAttributeOverrides.SingleOrDefaultAsync(x => x.TenantId == tenantId && x.CodedValueId == codedValueId && x.AttributeKey == key, cancellationToken);
+        await db.TenantCodedValueAttributeOverrides
+            .IgnoreQueryFilters()
+            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.CodedValueId == codedValueId && x.AttributeKey == key, cancellationToken);
 
     public async Task UpsertAttributeOverrideAsync(TenantCodedValueAttributeOverride attributeOverride, CancellationToken cancellationToken = default)
     {
