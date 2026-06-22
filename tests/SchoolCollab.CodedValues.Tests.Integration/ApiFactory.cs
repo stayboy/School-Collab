@@ -53,6 +53,9 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
         });
 
         builder.UseEnvironment("Testing");
+        // Integration tests run without Keycloak; force the test auth handler so
+        // endpoints do not try to challenge against the unavailable OIDC authority.
+        builder.UseSetting("FeatureFlags:FEATURE:DisableOIDCAuth", "true");
         builder.UseSetting("ConnectionStrings:rabbitmq", _rabbit.GetConnectionString());
     }
 }
