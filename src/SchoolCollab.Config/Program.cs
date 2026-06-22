@@ -9,6 +9,7 @@ builder.Services.AddSingleton<IFeatureFlagService, FeatureFlagService>();
 var app = builder.Build();
 
 app.MapGet("/api/features", (IFeatureFlagService featureService) => 
-    Results.Ok(featureService.GetAllFlags()));
+    Results.Ok(featureService.GetAllFlags()))
+    .AllowAnonymous();
 
 app.Run();

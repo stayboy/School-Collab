@@ -9,21 +9,48 @@ The `SchoolCollab.Config` project eliminates circular dependencies and configura
 2. Exposing a unified endpoint (`GET /api/features`) so the frontend can react to flags without hardcoding logic.
 3. Centralizing the definition of critical flags, such as authentication bypasses for development.
 
-## Feature Flag Implementation
+## Feature Flags
 
-### 1. Adding a New Flag
-To add a new feature flag, add it to the `appsettings.json` of the `SchoolCollab.Config` project (or the central configuration provider) under the `FeatureFlags` section:
+Feature flags are managed centrally by `SchoolCollab.Config` and consumed via `IFeatureFlagService`. They allow functionality to be toggled without redeploying the application.
+
+### Configuring flags
+
+Flags are read from the `FeatureFlags` configuration section. Set them in `appsettings.json`:
 
 ```json
 {
   "FeatureFlags": {
-    "FEATURE:MyNewFeature": "true"
+    "FEATURE:DisableOIDCAuth": "true"
   }
 }
 ```
 
-### 2. Using the Flag in Backend Services
-All backend services should inject the `IFeatureFlagService` and use the `IsEnabled` method:
+Or via environment variable:
+
+```bash
+FeatureFlags__FEATURE:DisableOIDCAuth=true
+```
+
+### Introduced flags
+
+| Flag | Purpose | Default | Consumers |
+| :--- | :--- | :--- | :--- |
+| `FEATURE:DisableOIDCAuth` | Disables Keycloak OIDC authentication and switches to `TestAuthHandler`, allowing local development and testing without a live identity provider. | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.CodedValues.Api`, `SchoolCollab.Students.Api` |
+
+#### `FEATURE:DisableOIDCAuth`
+
+When enabled:
+- `AddAuthAndTenancy` registers the `TestAuth` scheme instead of cookies + OpenID Connect.
+- API endpoint groups do not call `RequireAuthorization()`.
+- The Admin Blazor app skips `UseAuthentication()` / `UseAuthorization()` and does not require authorization on Razor components.
+
+When disabled (default):
+- Standard Keycloak OIDC authentication is used.
+- All API endpoints and the Admin UI require authentication.
+
+### Using a flag in code
+
+Inject `IFeatureFlagService` and call `IsEnabled`:
 
 ```csharp
 public class MyService(IFeatureFlagService featureFlags) 
@@ -38,8 +65,9 @@ public class MyService(IFeatureFlagService featureFlags)
 }
 ```
 
-### 3. Conditional Authorization (The API Pattern)
-To maintain consistency and allow development bypasses, follow the established pattern in `Program.cs` and endpoint grouping extensions:
+### Conditional authorization pattern
+
+Follow this pattern when guarding endpoint groups or middleware:
 
 ```csharp
 var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
@@ -51,12 +79,6 @@ if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
 }
 ```
 
-## Critical Flags
-
-| Flag | Description | Default | Impact |
-| :--- | :--- | :--- | :--- |
-| `FEATURE:DisableOIDCAuth` | Bypasses Keycloak OIDC authentication and uses `TestAuthHandler`. | `false` | Disables auth requirements across all APIs and Admin UI. |
-
 ## API Reference
 
 ### `GET /api/features`
@@ -65,8 +87,7 @@ Returns a list of all active feature flags and their current states. Used by the
 **Response:**
 ```json
 {
-  "FEATURE:DisableOIDCAuth": true,
-  "FEATURE:MyNewFeature": false
+  "FEATURE:DisableOIDCAuth": false
 }
 ```
 

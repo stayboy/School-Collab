@@ -47,6 +47,8 @@ using SchoolCollab.Students.Api;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Configuration.AddRemoteFeatureFlags("https+http://config");
+
 builder.AddServiceDefaults();
 builder.AddRabbitMQClient("rabbitmq");
 

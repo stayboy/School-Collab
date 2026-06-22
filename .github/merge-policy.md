@@ -2,6 +2,10 @@
 
 This repository uses pull requests as the only supported path for changes to `main`.
 
+## Feature flags
+
+Feature flags are centralized in `SchoolCollab.Config`. Consuming services load them from the Config API via `ConfigFeatureFlagConfigurationProvider` at startup. Do not duplicate flag values across service-level `appsettings.Development.json` files; define them once in `src/SchoolCollab.Config/appsettings.Development.json`.
+
 ## Required merge path
 
 1. Create a feature/fix branch from `main`.
@@ -70,3 +74,9 @@ Remove-Item Env:SCHOOLCOLLAB_ALLOW_PUSH
 ```
 
 The hook still blocks direct pushes to `main` even after the explicit push allow flag is set.
+
+## Local commit hold
+
+Agents and automation must **not** commit staged or unstaged changes to a branch, and must **not** push uncommitted changes to `origin`, without an explicit user instruction such as "commit" or "push".
+
+Keep working-tree changes local and uncommitted by default. When the user asks to commit, create the commit and then stop; do not push unless the user explicitly asks to push. When the user asks to push, use `SCHOOLCOLLAB_ALLOW_PUSH=1` and follow the required PR workflow above.
