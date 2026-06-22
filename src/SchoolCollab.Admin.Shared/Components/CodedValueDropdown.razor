@@ -6,35 +6,17 @@
 {
     <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
 }
-else if (_items is null)
-{
-    <FluentSelect TOption="CodedValueDto"
-                  Label="@Label"
-                  Placeholder="Loading…"
-                  Disabled="true"
-                  class="coded-value-dropdown" />
-}
-else if (_items.Length == 0)
-{
-    <FluentSelect TOption="CodedValueDto"
-                  Label="@Label"
-                  Placeholder="No options available"
-                  Disabled="true"
-                  class="coded-value-dropdown" />
-}
-else
-{
-    <FluentSelect TOption="CodedValueDto"
-                  Items="@_items"
-                  SelectedOption="@_selectedOption"
-                  SelectedOptionChanged="@OnSelectedOptionChanged"
-                  OptionText="@(o => o.Name)"
-                  OptionValue="@(o => o.Id.ToString())"
-                  Label="@Label"
-                  Placeholder="@Placeholder"
-                  Disabled="@Disabled"
-                  class="coded-value-dropdown" />
-}
+
+<FluentSelect TOption="CodedValueDto"
+              Items="@(_items ?? [])"
+              SelectedOption="@_selectedOption"
+              SelectedOptionChanged="@OnSelectedOptionChanged"
+              OptionText="@(o => o.Name)"
+              OptionValue="@(o => o.Id.ToString())"
+              Label="@Label"
+              Placeholder="@EffectivePlaceholder"
+              Disabled="@IsDisabled"
+              class="coded-value-dropdown" />
 
 @code {
     /// <summary>
@@ -80,6 +62,16 @@ else
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+
+    private bool IsDisabled => Disabled || _items is null || _items.Length == 0 || _error is not null;
+
+    private string EffectivePlaceholder => _error is not null
+        ? "—"
+        : _items is null
+            ? "Loading…"
+            : _items.Length == 0
+                ? "No options available"
+                : (Placeholder ?? "Select…");
 
     protected override async Task OnInitializedAsync()
     {
