@@ -30,12 +30,16 @@ if (!app.Environment.IsDevelopment())
     app.UseHsts();
 }
 
+
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+
+// Feature Flags API removed from Admin, now served by SchoolCollab.Config
 app.MapStaticAssets();
 app.MapDefaultEndpoints();
+
 app.MapRazorComponents<App>()
     .RequireAuthorization()
     .AddInteractiveServerRenderMode()

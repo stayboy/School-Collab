@@ -4,15 +4,21 @@ using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Assignments.Api;
 
 public static class AssignmentEndpoints
 {
-    public static WebApplication MapAssignmentEndpoints(this WebApplication app)
+    public static WebApplication MapAssignmentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)
     {
         // All assignment endpoints require an authenticated user and a resolved TenantContext
-        var group = app.MapGroup("/assignments").RequireAuthorization();
+        var group = app.MapGroup("/assignments");
+
+        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        {
+            group.RequireAuthorization();
+        }
 
         group.MapGet("/", async (
             [FromQuery] AssignmentStatus? status,

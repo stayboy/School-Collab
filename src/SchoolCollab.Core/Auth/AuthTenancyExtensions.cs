@@ -3,8 +3,10 @@ using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Core.Auth;
 
@@ -29,10 +31,19 @@ public static class AuthTenancyExtensions
         // Bridge from ClaimsPrincipal -> TenantContext
         services.AddScoped<IClaimsTransformation, TenantClaimsTransformation>();
 
+        // Register configuration and feature flag service only if not already registered
+        services.AddSingleton<IConfiguration>(configuration);
+        services.TryAddSingleton<IFeatureFlagService, FeatureFlagService>();
+
         var isTesting = configuration["Environment"] == "Testing"
             || configuration[HostDefaults.EnvironmentKey] == "Testing";
 
-        if (isTesting)
+        // Use a temporary service provider to check the flag during registration
+        var sp = services.BuildServiceProvider();
+        var featureService = sp.GetRequiredService<IFeatureFlagService>();
+        var disableOIDC = featureService.IsEnabled("FEATURE:DisableOIDCAuth");
+
+        if (disableOIDC || isTesting)
         {
             services
                 .AddAuthentication(TestAuthExtensions.TestAuthScheme)

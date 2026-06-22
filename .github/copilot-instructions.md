@@ -50,7 +50,7 @@ guidance instead of duplicating it.
 | Blazor components, Fluent UI, and styling | `.github/copilot/rules/blazor-components.md` |
 | Entity Framework Core migrations | `.github/copilot/rules/ef-migrations.md` |
 | Logging and Aspire observability | `.github/copilot/rules/logging-aspire.md` |
-| Testing | `.github/copilot/rules/testing.md` |
+| Testing (MTP Standard) | `.github/copilot/rules/testing.md` |
 | Fluent UI icons | `.github/skills/fluentui-icons/SKILL.md` |
 | Fluent UI component props | `.github/skills/fluentui-component-props/SKILL.md` |
 | Bounded context creation | `.github/skills/bounded-context/SKILL.md` |
@@ -152,6 +152,7 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
 - No MediatR — CQRS is implemented via `ICommandHandler<T>` / `IQueryHandler<T,R>` with
   Scrutor assembly scanning.
 - Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.
+- **API Endpoint Grouping**: All API endpoints must be grouped using an extension method (e.g., `MapStudentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)`). Do not define routes inline in `Program.cs`. Authorization requirements on these groups should be conditional based on `IFeatureFlagService` (e.g., `FEATURE:DisableOIDCAuth`).
 
 ## Pre-flight review & PR creation
 
