@@ -1,0 +1,131 @@
+@inject CodedValuesApiClient Api
+@inject ILogger<CodedValueDropdown> Logger
+@implements IDisposable
+
+@if (_error is not null)
+{
+    <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+}
+else if (_items is null)
+{
+    <FluentSelect TOption="CodedValueDto"
+                  Label="@Label"
+                  Placeholder="Loading…"
+                  Disabled="true"
+                  class="coded-value-dropdown" />
+}
+else if (_items.Length == 0)
+{
+    <FluentSelect TOption="CodedValueDto"
+                  Label="@Label"
+                  Placeholder="No options available"
+                  Disabled="true"
+                  class="coded-value-dropdown" />
+}
+else
+{
+    <FluentSelect TOption="CodedValueDto"
+                  Items="@_items"
+                  SelectedOption="@_selectedOption"
+                  SelectedOptionChanged="@OnSelectedOptionChanged"
+                  OptionText="@(o => o.Name)"
+                  OptionValue="@(o => o.Id.ToString())"
+                  Label="@Label"
+                  Placeholder="@Placeholder"
+                  Disabled="@Disabled"
+                  class="coded-value-dropdown" />
+}
+
+@code {
+    /// <summary>
+    /// The parent coded value code whose children populate the dropdown.
+    /// Values are resolved through the tenant-aware coded-value API, so any
+    /// tenant-specific overrides are applied automatically.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string ParentCode { get; set; } = default!;
+
+    /// <summary>
+    /// Label shown above the dropdown.
+    /// </summary>
+    [Parameter]
+    public string? Label { get; set; }
+
+    /// <summary>
+    /// Placeholder text when no value is selected.
+    /// </summary>
+    [Parameter]
+    public string? Placeholder { get; set; } = "Select…";
+
+    /// <summary>
+    /// The currently selected coded value id (two-way bindable).
+    /// </summary>
+    [Parameter]
+    public Guid? SelectedId { get; set; }
+
+    /// <summary>
+    /// Callback invoked when the selected coded value id changes.
+    /// </summary>
+    [Parameter]
+    public EventCallback<Guid?> SelectedIdChanged { get; set; }
+
+    /// <summary>
+    /// Disables the dropdown independently of loading state.
+    /// </summary>
+    [Parameter]
+    public bool Disabled { get; set; }
+
+    private CodedValueDto[]? _items;
+    private CodedValueDto? _selectedOption;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        try
+        {
+            _items = await Api.GetChildrenByParentCodeAsync(ParentCode, _loadCts.Token) ?? [];
+            if (_disposed) return;
+            _selectedOption = _items.FirstOrDefault(x => x.Id == SelectedId);
+        }
+        catch (OperationCanceledException)
+        {
+            // User navigated away before the lookup completed.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load coded values for parent {ParentCode}", ParentCode);
+            _error = $"Unable to load options for {ParentCode}.";
+        }
+    }
+
+    protected override void OnParametersSet()
+    {
+        // Keep the internal selection in sync when the parent updates SelectedCode.
+        if (_items is not null && SelectedId.HasValue)
+        {
+            var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
+            if (!Equals(selected, _selectedOption))
+            {
+                _selectedOption = selected;
+            }
+        }
+    }
+
+    private async Task OnSelectedOptionChanged(CodedValueDto? value)
+    {
+        _selectedOption = value;
+        await SelectedIdChanged.InvokeAsync(value?.Id);
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

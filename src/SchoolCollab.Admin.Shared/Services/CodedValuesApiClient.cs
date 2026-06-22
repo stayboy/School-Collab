@@ -1,7 +1,7 @@
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 
-namespace SchoolCollab.CodedValues.Admin.Services;
+namespace SchoolCollab.Admin.Shared.Services;
 
 public record CodedValueAttributeDto(string Key, string Value);
 
@@ -72,6 +72,9 @@ public sealed class CodedValuesApiClient(HttpClient http)
 
     public Task<CodedValueDto[]?> GetChildrenAsync(Guid parentId, CancellationToken ct = default) =>
         http.GetFromJsonAsync<CodedValueDto[]>($"/coded-values/by-parent?parentId={parentId}&includeDisabled=true", ct);
+
+    public Task<CodedValueDto[]?> GetChildrenByParentCodeAsync(string parentCode, CancellationToken ct = default) =>
+        http.GetFromJsonAsync<CodedValueDto[]>($"/coded-values/by-parent?parentCode={Uri.EscapeDataString(parentCode)}", ct);
 
     public async Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
