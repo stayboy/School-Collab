@@ -41,15 +41,25 @@ public class FeatureFlagService : IFeatureFlagService
     {
         var flags = new Dictionary<string, bool>();
         var section = _configuration.GetSection(SectionKey);
-        
+        CollectFlags(section, flags, prefix: null);
+        return flags;
+    }
+
+    private static void CollectFlags(IConfigurationSection section, Dictionary<string, bool> flags, string? prefix)
+    {
         foreach (var child in section.GetChildren())
         {
-            if (bool.TryParse(child.Value, out var enabled))
+            var key = prefix is null ? child.Key : $"{prefix}:{child.Key}";
+
+            if (!string.IsNullOrEmpty(child.Value) && bool.TryParse(child.Value, out var enabled))
             {
-                flags[child.Key] = enabled;
+                flags[key] = enabled;
+            }
+            else
+            {
+                // Recurse into nested sections (e.g. "FEATURE:DisableOIDCAuth")
+                CollectFlags(child, flags, key);
             }
         }
-        
-        return flags;
     }
 }

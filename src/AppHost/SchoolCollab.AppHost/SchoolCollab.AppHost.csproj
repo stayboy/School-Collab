@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Api\SchoolCollab.CodedValues.Api.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Admin\SchoolCollab.Admin.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.Config\SchoolCollab.Config.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.MigrationService\SchoolCollab.MigrationService.csproj" />
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Assignments\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" IsAspireProjectResource="false" />

@@ -28,6 +28,9 @@ var codedValuesDb = postgres.AddDatabase("coded-values-db");
 
 var redis = builder.AddRedis("cache");
 
+var config = builder.AddProject<Projects.SchoolCollab_Config>("config")
+    .WithReference(redis);
+
 // ── Assignments bounded context ──
 
 var assignmentsDb = postgres.AddDatabase("assignments-db");
@@ -51,8 +54,10 @@ var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("
     .WithReference(codedValuesDb)
     .WithReference(rabbit)
     .WithReference(redis)
+    .WithReference(config)
     .WaitFor(rabbit)
     .WaitFor(redis)
+    .WaitFor(config)
     .WaitForCompletion(migrator);
 
 var codedValuesAi = builder.AddProject<Projects.SchoolCollab_AI>("coded-values-ai")
@@ -63,16 +68,20 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithReference(assignmentsDb)
     .WithReference(rabbit)
     .WithReference(redis)
+    .WithReference(config)
     .WaitFor(rabbit)
     .WaitFor(redis)
+    .WaitFor(config)
     .WaitForCompletion(migrator);
 
 var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("students-api")
     .WithReference(studentsDb)
     .WithReference(rabbit)
     .WithReference(redis)
+    .WithReference(config)
     .WaitFor(rabbit)
     .WaitFor(redis)
+    .WaitFor(config)
     .WaitForCompletion(migrator);
 
 var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("students-worker")
@@ -87,9 +96,11 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WithReference(codedValuesAi)
     .WithReference(assignmentsApi)
     .WithReference(studentsApi)
+    .WithReference(config)
     .WaitFor(codedValuesApi)
     .WaitFor(codedValuesAi)
     .WaitFor(assignmentsApi)
-    .WaitFor(studentsApi);
+    .WaitFor(studentsApi)
+    .WaitFor(config);
 
 builder.Build().Run();

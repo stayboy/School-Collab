@@ -8,6 +8,8 @@ using SchoolCollab.Core.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.Configuration.AddRemoteFeatureFlags("https+http://config");
+
 builder.AddServiceDefaults();
 
 // Auth + tenancy (OIDC via Keycloak for the unified admin host)

@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.Extensions.Hosting;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Core.Features;
 
@@ -18,7 +17,8 @@ public static class AuthTenancyExtensions
     /// <summary>
     /// Adds cookie + OpenID Connect authentication using Keycloak and wires the current tenant
     /// from token claims into <see cref="ITenantProvider"/> via <see cref="TenantClaimsTransformation"/>.
-    /// In the "Testing" environment, replaces OIDC with <see cref="TestAuthHandler"/>.
+    /// When <c>FEATURE:DisableOIDCAuth</c> is enabled (typically in Development), replaces OIDC with
+    /// <see cref="TestAuthHandler"/>.
     /// </summary>
     public static IServiceCollection AddAuthAndTenancy(
         this IServiceCollection services,
@@ -35,15 +35,9 @@ public static class AuthTenancyExtensions
         services.AddSingleton<IConfiguration>(configuration);
         services.TryAddSingleton<IFeatureFlagService, FeatureFlagService>();
 
-        var isTesting = configuration["Environment"] == "Testing"
-            || configuration[HostDefaults.EnvironmentKey] == "Testing";
+        var disableOIDC = IsFlagEnabled(configuration, "FEATURE:DisableOIDCAuth");
 
-        // Use a temporary service provider to check the flag during registration
-        var sp = services.BuildServiceProvider();
-        var featureService = sp.GetRequiredService<IFeatureFlagService>();
-        var disableOIDC = featureService.IsEnabled("FEATURE:DisableOIDCAuth");
-
-        if (disableOIDC || isTesting)
+        if (disableOIDC)
         {
             services
                 .AddAuthentication(TestAuthExtensions.TestAuthScheme)
@@ -78,5 +72,13 @@ public static class AuthTenancyExtensions
         services.AddAuthorization();
 
         return services;
+    }
+
+    private static bool IsFlagEnabled(IConfiguration configuration, string featureKey)
+    {
+        var value = configuration[$"FeatureFlags:{featureKey}"]
+                 ?? configuration[featureKey];
+
+        return bool.TryParse(value, out var enabled) && enabled;
     }
 }
