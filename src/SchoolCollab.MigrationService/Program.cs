@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.MigrationService.Seeding;
 using Serilog;
@@ -13,6 +14,11 @@ var builder = Host.CreateApplicationBuilder(args);
 
 // Must be first — initialises Serilog and OTLP telemetry pipeline
 builder.AddServiceDefaults();
+
+// Core tenancy provider is required by all module DbContexts. Register it before
+// any DbContext so the contexts can resolve ITenantProvider even though this
+// worker does not use authentication/claims transformation.
+builder.Services.AddTenancy();
 
 // Register CodedValues DbContext
 var codedValuesConnectionString = builder.Configuration.GetConnectionString("coded-values-db")

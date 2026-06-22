@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Messaging;
@@ -14,6 +15,9 @@ public static class Extensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        // Ensure the tenant provider is available for the DbContext and handlers
+        // even when this module is used without authentication (e.g. worker/tests).
+        services.AddTenancy();
         var connectionString = configuration.GetConnectionString("students-db")
             ?? configuration["ConnectionStrings:students-db"]
             ?? "Host=localhost;Port=5432;Database=schoolcollab_students;Username=postgres;Password=postgres";

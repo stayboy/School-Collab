@@ -6,6 +6,7 @@ using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Messaging;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core;
 
@@ -15,6 +16,9 @@ public static class Extensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
+        // Ensure the tenant provider is available for the DbContext and handlers
+        // even when this module is used without authentication (e.g. worker/tests).
+        services.AddTenancy();
         var connectionString = configuration.GetConnectionString("assignments-db")
             ?? configuration["ConnectionStrings:assignments-db"]
             ?? "Host=localhost;Port=5432;Database=schoolcollab_assignments;Username=postgres;Password=postgres";
