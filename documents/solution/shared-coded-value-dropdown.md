@@ -50,8 +50,9 @@ parameter.
   - `CodedValuesApiClientNotFoundTests.Admin_GetChildrenByParentCodeAsync_CallsCorrectEndpoint`
   - `CodedValueDropdownTests.CodedValueDropdown_LoadsOptionsByParentCode`
   - `CodedValueDropdownTests.CodedValueDropdown_WithSelectedId_MarksOptionSelected`
+  - `CodedValueDropdownTests.CodedValueDropdown_RefreshAsync_ReloadsCurrentParentCode`
 - Test suites passing:
-  - `SchoolCollab.CodedValues.Tests.Unit`: 215 passed
+  - `SchoolCollab.CodedValues.Tests.Unit`: 216 passed
   - `SchoolCollab.Assignments.Tests.Unit`: 41 passed
   - `SchoolCollab.Admin.Tests.Unit`: 3 passed
 
@@ -60,11 +61,18 @@ parameter.
 ```razor
 @using SchoolCollab.Admin.Shared.Components
 
-<CodedValueDropdown ParentCode="SUBJECT"
+<CodedValueDropdown ParentCode="SUBJECTS"
                    Label="Subject *"
-                   @bind-SelectedId="_model.SubjectId" />
+                   Placeholder="Select a subject"
+                   @bind-SelectedId="_model.SubjectCodedValueId" />
 ```
 
 The consumer only needs to provide the parent coded value code and bind to the
 selected `Guid?` id. The component handles the rest, including tenant-resolved
 option loading.
+
+## Current consumers
+
+- Assignment create wizard (`Assignments.Admin/Components/Pages/Assignments/Create.razor`):
+  - `ParentCode="SUBJECTS"` bound to `_model.SubjectCodedValueId` (required)
+  - `ParentCode="GRADES"` bound to `_model.GradeCodedValueId` (optional)
