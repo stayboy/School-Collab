@@ -24,9 +24,10 @@ public static class AuthTenancyExtensions
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // Tenant context storage (AsyncLocal-backed provider shared per process)
-        services.AddSingleton<TenantProvider>();
-        services.AddSingleton<ITenantProvider>(sp => sp.GetRequiredService<TenantProvider>());
+        // Tenant context storage (AsyncLocal-backed provider shared per process).
+        // Register via the shared tenancy helper so core modules can also resolve
+        // ITenantProvider when authentication is not configured (e.g. workers/tests).
+        services.AddTenancy();
 
         // Bridge from ClaimsPrincipal -> TenantContext
         services.AddScoped<IClaimsTransformation, TenantClaimsTransformation>();
