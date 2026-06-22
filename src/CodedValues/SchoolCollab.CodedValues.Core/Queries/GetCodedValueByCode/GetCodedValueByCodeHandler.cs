@@ -24,7 +24,7 @@ public sealed class GetCodedValueByCodeHandler(
         GetCodedValueByCode query,
         CancellationToken cancellationToken = default)
     {
-        var tenantId = tenantProvider.GetTenantId();
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
         var normalisedCode = query.Code.Trim().ToUpperInvariant();
         var cacheKey = query.ParentId.HasValue
             ? $"tenant:{tenantId}:coded-value:code:{normalisedCode}:parent:{query.ParentId.Value}"

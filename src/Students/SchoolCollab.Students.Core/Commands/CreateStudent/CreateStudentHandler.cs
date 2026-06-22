@@ -7,6 +7,7 @@ using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Events;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.Messaging;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Students.Core.Commands.CreateStudent;
 
@@ -14,6 +15,7 @@ public sealed class CreateStudentHandler(
     IStudentRepository repository,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
+    ITenantProvider tenantProvider,
     ILogger<CreateStudentHandler> logger) : ICommandHandler<CreateStudent, Guid>
 {
     public async Task<Guid> HandleAsync(CreateStudent command, CancellationToken cancellationToken = default)
@@ -23,6 +25,8 @@ public sealed class CreateStudentHandler(
         if (await repository.ExistsByStudentNumberAsync(command.StudentNumber, cancellationToken))
             throw new DuplicateStudentNumberException(command.StudentNumber);
 
+        var tenantContext = tenantProvider.GetTenantContext();
+
         var student = Student.Create(
             command.StudentNumber,
             command.FirstName,
@@ -30,7 +34,8 @@ public sealed class CreateStudentHandler(
             command.DateOfBirth,
             command.GenderCodedValueId,
             command.ContactEmail,
-            command.ContactPhone);
+            command.ContactPhone)
+            .WithTenant(tenantProvider);
 
         await repository.AddAsync(student, cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);
@@ -47,7 +52,7 @@ public sealed class CreateStudentHandler(
 
         student.ClearDomainEvents();
 
-        logger.LogInformation("Student {Id} created with number {StudentNumber}", student.Id, student.StudentNumber);
+        logger.LogInformation("Student {Id} created with number {StudentNumber} for tenant {TenantId}", student.Id, student.StudentNumber, tenantContext.TenantId);
         return student.Id;
     }
 }

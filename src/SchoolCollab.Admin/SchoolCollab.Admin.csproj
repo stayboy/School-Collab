@@ -16,5 +16,6 @@
     <ProjectReference Include="..\Students\SchoolCollab.Students.Admin\SchoolCollab.Students.Admin.csproj" />
     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
+    <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
 </Project>

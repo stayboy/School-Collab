@@ -6,6 +6,7 @@ namespace SchoolCollab.Students.Core.Data.Repositories;
 public interface IStudentRepository
 {
     Task<Student?> GetAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<Student?> GetIncludingDeletedAsync(Guid id, CancellationToken cancellationToken = default);
     Task<Student?> GetByStudentNumberAsync(string studentNumber, CancellationToken cancellationToken = default);
     Task<bool> ExistsByStudentNumberAsync(string studentNumber, CancellationToken cancellationToken = default);
     Task AddAsync(Student student, CancellationToken cancellationToken = default);

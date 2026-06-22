@@ -8,5 +8,6 @@ public interface IAssignmentRepository
     Task<Assignment?> GetIncludingDeletedAsync(Guid id, CancellationToken ct = default);
     Task AddAsync(Assignment assignment, CancellationToken ct = default);
     Task UpdateAsync(Assignment assignment, CancellationToken ct = default);
+    Task DeleteAsync(Assignment assignment, CancellationToken ct = default);
     Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? status, CancellationToken ct = default);
 }

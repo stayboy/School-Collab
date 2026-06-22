@@ -136,6 +136,10 @@
     border-top: 1px solid var(--neutral-stroke);
 }
 
+.wizard-actions-spacer {
+    flex: 1;
+}
+
 /* ── Review step ── */
 .review-card {
     background: var(--neutral-fill);

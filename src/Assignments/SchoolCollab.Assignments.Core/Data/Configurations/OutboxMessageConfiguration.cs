@@ -1,15 +1,15 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Assignments.Core.Messaging;
+using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.Assignments.Core.Data.Configurations;
 
-internal sealed class OutboxMessageConfiguration : IEntityTypeConfiguration<OutboxMessage>
+internal sealed class OutboxMessageConfiguration : EntityTypeConfigurationBase<OutboxMessage>
 {
-    public void Configure(EntityTypeBuilder<OutboxMessage> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<OutboxMessage> builder)
     {
         builder.ToTable("outbox_messages");
-        builder.HasKey(x => x.Id);
         builder.Property(x => x.Type).HasMaxLength(200).IsRequired();
         builder.Property(x => x.Payload).IsRequired();
         builder.HasIndex(x => x.ProcessedAt)

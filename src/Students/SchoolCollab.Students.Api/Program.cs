@@ -41,6 +41,7 @@ using SchoolCollab.Students.Core.Queries.ListStudentSubjectAssignmentsByPeriod;
 using SchoolCollab.Students.Core.Queries.ListStudentSubjectAssignmentsByStudent;
 using SchoolCollab.Students.Core.Queries.ListStudents;
 using SchoolCollab.Students.Core.Queries.ListSubjects;
+using SchoolCollab.Core.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -62,6 +63,9 @@ else
 builder.Services.AddStudentsCore(builder.Configuration);
 builder.Services.AddOpenApi();
 
+// Auth + tenancy (OIDC via Keycloak)
+builder.Services.AddAuthAndTenancy(builder.Configuration);
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -69,17 +73,21 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.UseSerilogRequestLogging();
 
 // ── Students ──────────────────────────────────────────────────────────────
 
-app.MapGet("/students", async (
+var studentsGroup = app.MapGroup("/students").RequireAuthorization();
+
+studentsGroup.MapGet("/", async (
     [FromServices] IQueryHandler<ListStudents, StudentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListStudents(), ct)));
 
-app.MapGet("/students/{id:guid}", async (
+studentsGroup.MapGet("/{id:guid}", async (
     Guid id,
     [FromServices] IQueryHandler<GetStudentById, StudentDto?> handler,
     CancellationToken ct) =>
@@ -88,7 +96,7 @@ app.MapGet("/students/{id:guid}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapGet("/students/by-number/{studentNumber}", async (
+studentsGroup.MapGet("/by-number/{studentNumber}", async (
     string studentNumber,
     [FromServices] IQueryHandler<GetStudentByStudentNumber, StudentDto?> handler,
     CancellationToken ct) =>
@@ -97,12 +105,12 @@ app.MapGet("/students/by-number/{studentNumber}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapGet("/students/deleted", async (
+studentsGroup.MapGet("/deleted", async (
     [FromServices] IQueryHandler<ListDeletedStudents, StudentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListDeletedStudents(), ct)));
 
-app.MapPost("/students", async (
+studentsGroup.MapPost("/", async (
     [FromBody] CreateStudent command,
     [FromServices] ICommandHandler<CreateStudent, Guid> handler,
     CancellationToken ct) =>
@@ -118,7 +126,7 @@ app.MapPost("/students", async (
     }
 });
 
-app.MapPut("/students/{id:guid}", async (
+studentsGroup.MapPut("/{id:guid}", async (
     Guid id,
     [FromBody] UpdateStudentRequest req,
     [FromServices] ICommandHandler<UpdateStudent> handler,
@@ -140,7 +148,7 @@ app.MapPut("/students/{id:guid}", async (
     }
 });
 
-app.MapDelete("/students/{id:guid}", async (
+studentsGroup.MapDelete("/{id:guid}", async (
     Guid id,
     [FromServices] ICommandHandler<DeleteStudent> handler,
     CancellationToken ct) =>
@@ -160,7 +168,7 @@ app.MapDelete("/students/{id:guid}", async (
     }
 });
 
-app.MapPost("/students/{id:guid}/recover", async (
+studentsGroup.MapPost("/{id:guid}/recover", async (
     Guid id,
     [FromServices] ICommandHandler<RecoverStudent> handler,
     CancellationToken ct) =>
@@ -182,12 +190,12 @@ app.MapPost("/students/{id:guid}/recover", async (
 
 // ── Grade Levels ──────────────────────────────────────────────────────────
 
-app.MapGet("/grade-levels", async (
+studentsGroup.MapGet("/grade-levels", async (
     [FromServices] IQueryHandler<ListGradeLevels, GradeLevelDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListGradeLevels(), ct)));
 
-app.MapGet("/grade-levels/{id:guid}", async (
+studentsGroup.MapGet("/grade-levels/{id:guid}", async (
     Guid id,
     [FromServices] IQueryHandler<GetGradeLevelById, GradeLevelDto?> handler,
     CancellationToken ct) =>
@@ -196,7 +204,7 @@ app.MapGet("/grade-levels/{id:guid}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapPost("/grade-levels", async (
+studentsGroup.MapPost("/grade-levels", async (
     [FromBody] CreateGradeLevel command,
     [FromServices] ICommandHandler<CreateGradeLevel, Guid> handler,
     CancellationToken ct) =>
@@ -205,7 +213,7 @@ app.MapPost("/grade-levels", async (
     return Results.Created($"/grade-levels/{id}", new { id });
 });
 
-app.MapPut("/grade-levels/{id:guid}", async (
+studentsGroup.MapPut("/grade-levels/{id:guid}", async (
     Guid id,
     [FromBody] UpdateGradeLevelRequest req,
     [FromServices] ICommandHandler<UpdateGradeLevel> handler,
@@ -228,12 +236,12 @@ app.MapPut("/grade-levels/{id:guid}", async (
 
 // ── Subjects ──────────────────────────────────────────────────────────────
 
-app.MapGet("/subjects", async (
+studentsGroup.MapGet("/subjects", async (
     [FromServices] IQueryHandler<ListSubjects, SubjectDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListSubjects(), ct)));
 
-app.MapGet("/subjects/{id:guid}", async (
+studentsGroup.MapGet("/subjects/{id:guid}", async (
     Guid id,
     [FromServices] IQueryHandler<GetSubjectById, SubjectDto?> handler,
     CancellationToken ct) =>
@@ -242,7 +250,7 @@ app.MapGet("/subjects/{id:guid}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapGet("/subjects/by-code/{code}", async (
+studentsGroup.MapGet("/subjects/by-code/{code}", async (
     string code,
     [FromServices] IQueryHandler<GetSubjectByCode, SubjectDto?> handler,
     CancellationToken ct) =>
@@ -251,7 +259,7 @@ app.MapGet("/subjects/by-code/{code}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapPost("/subjects", async (
+studentsGroup.MapPost("/subjects", async (
     [FromBody] CreateSubject command,
     [FromServices] ICommandHandler<CreateSubject, Guid> handler,
     CancellationToken ct) =>
@@ -267,7 +275,7 @@ app.MapPost("/subjects", async (
     }
 });
 
-app.MapPut("/subjects/{id:guid}", async (
+studentsGroup.MapPut("/subjects/{id:guid}", async (
     Guid id,
     [FromBody] UpdateSubjectRequest req,
     [FromServices] ICommandHandler<UpdateSubject> handler,
@@ -290,12 +298,12 @@ app.MapPut("/subjects/{id:guid}", async (
 
 // ── Periods ───────────────────────────────────────────────────────────────
 
-app.MapGet("/periods", async (
+studentsGroup.MapGet("/periods", async (
     [FromServices] IQueryHandler<ListPeriods, PeriodDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListPeriods(), ct)));
 
-app.MapGet("/periods/{id:guid}", async (
+studentsGroup.MapGet("/periods/{id:guid}", async (
     Guid id,
     [FromServices] IQueryHandler<GetPeriodById, PeriodDto?> handler,
     CancellationToken ct) =>
@@ -304,7 +312,7 @@ app.MapGet("/periods/{id:guid}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapPost("/periods", async (
+studentsGroup.MapPost("/periods", async (
     [FromBody] CreatePeriod command,
     [FromServices] ICommandHandler<CreatePeriod, Guid> handler,
     CancellationToken ct) =>
@@ -313,7 +321,7 @@ app.MapPost("/periods", async (
     return Results.Created($"/periods/{id}", new { id });
 });
 
-app.MapPut("/periods/{id:guid}", async (
+studentsGroup.MapPut("/periods/{id:guid}", async (
     Guid id,
     [FromBody] UpdatePeriodRequest req,
     [FromServices] ICommandHandler<UpdatePeriod> handler,
@@ -335,7 +343,7 @@ app.MapPut("/periods/{id:guid}", async (
     }
 });
 
-app.MapPost("/periods/{id:guid}/activate", async (
+studentsGroup.MapPost("/periods/{id:guid}/activate", async (
     Guid id,
     [FromServices] ICommandHandler<ActivatePeriod> handler,
     CancellationToken ct) =>
@@ -355,7 +363,7 @@ app.MapPost("/periods/{id:guid}/activate", async (
     }
 });
 
-app.MapPost("/periods/{id:guid}/complete", async (
+studentsGroup.MapPost("/periods/{id:guid}/complete", async (
     Guid id,
     [FromServices] ICommandHandler<CompletePeriod> handler,
     CancellationToken ct) =>
@@ -377,19 +385,19 @@ app.MapPost("/periods/{id:guid}/complete", async (
 
 // ── Enrollments ───────────────────────────────────────────────────────────
 
-app.MapGet("/enrollments/by-student/{studentId:guid}", async (
+studentsGroup.MapGet("/enrollments/by-student/{studentId:guid}", async (
     Guid studentId,
     [FromServices] IQueryHandler<ListEnrollmentsByStudent, StudentEnrollmentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListEnrollmentsByStudent(studentId), ct)));
 
-app.MapGet("/enrollments/by-period/{periodId:guid}", async (
+studentsGroup.MapGet("/enrollments/by-period/{periodId:guid}", async (
     Guid periodId,
     [FromServices] IQueryHandler<ListEnrollmentsByPeriod, StudentEnrollmentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListEnrollmentsByPeriod(periodId), ct)));
 
-app.MapPost("/enrollments", async (
+studentsGroup.MapPost("/enrollments", async (
     [FromBody] EnrollStudent command,
     [FromServices] ICommandHandler<EnrollStudent, Guid> handler,
     CancellationToken ct) =>
@@ -409,7 +417,7 @@ app.MapPost("/enrollments", async (
     }
 });
 
-app.MapPost("/enrollments/{id:guid}/transfer", async (
+studentsGroup.MapPost("/enrollments/{id:guid}/transfer", async (
     Guid id,
     [FromBody] TransferStudentRequest req,
     [FromServices] ICommandHandler<TransferStudent> handler,
@@ -430,7 +438,7 @@ app.MapPost("/enrollments/{id:guid}/transfer", async (
     }
 });
 
-app.MapPost("/enrollments/{id:guid}/withdraw", async (
+studentsGroup.MapPost("/enrollments/{id:guid}/withdraw", async (
     Guid id,
     [FromBody] WithdrawStudentRequest req,
     [FromServices] ICommandHandler<WithdrawStudent> handler,
@@ -453,20 +461,20 @@ app.MapPost("/enrollments/{id:guid}/withdraw", async (
 
 // ── Grade Subject Assignments ─────────────────────────────────────────────
 
-app.MapGet("/grade-subjects/by-period/{periodId:guid}", async (
+studentsGroup.MapGet("/grade-subjects/by-period/{periodId:guid}", async (
     Guid periodId,
     [FromServices] IQueryHandler<ListGradeSubjectAssignmentsByPeriod, GradeSubjectAssignmentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListGradeSubjectAssignmentsByPeriod(periodId), ct)));
 
-app.MapGet("/grade-subjects/by-grade/{gradeLevelId:guid}/period/{periodId:guid}", async (
+studentsGroup.MapGet("/grade-subjects/by-grade/{gradeLevelId:guid}/period/{periodId:guid}", async (
     Guid gradeLevelId,
     Guid periodId,
     [FromServices] IQueryHandler<ListGradeSubjectAssignmentsByGradeLevel, GradeSubjectAssignmentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListGradeSubjectAssignmentsByGradeLevel(gradeLevelId, periodId), ct)));
 
-app.MapPost("/grade-subjects", async (
+studentsGroup.MapPost("/grade-subjects", async (
     [FromBody] AssignGradeSubject command,
     [FromServices] ICommandHandler<AssignGradeSubject, Guid> handler,
     CancellationToken ct) =>
@@ -475,7 +483,7 @@ app.MapPost("/grade-subjects", async (
     return Results.Created($"/grade-subjects/{id}", new { id });
 });
 
-app.MapDelete("/grade-subjects/{id:guid}", async (
+studentsGroup.MapDelete("/grade-subjects/{id:guid}", async (
     Guid id,
     [FromServices] ICommandHandler<RemoveGradeSubject> handler,
     CancellationToken ct) =>
@@ -493,20 +501,20 @@ app.MapDelete("/grade-subjects/{id:guid}", async (
 
 // ── Student Subject Assignments ───────────────────────────────────────────
 
-app.MapGet("/student-subjects/by-student/{studentId:guid}/period/{periodId:guid}", async (
+studentsGroup.MapGet("/student-subjects/by-student/{studentId:guid}/period/{periodId:guid}", async (
     Guid studentId,
     Guid periodId,
     [FromServices] IQueryHandler<ListStudentSubjectAssignmentsByStudent, StudentSubjectAssignmentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListStudentSubjectAssignmentsByStudent(studentId, periodId), ct)));
 
-app.MapGet("/student-subjects/by-period/{periodId:guid}", async (
+studentsGroup.MapGet("/student-subjects/by-period/{periodId:guid}", async (
     Guid periodId,
     [FromServices] IQueryHandler<ListStudentSubjectAssignmentsByPeriod, StudentSubjectAssignmentDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListStudentSubjectAssignmentsByPeriod(periodId), ct)));
 
-app.MapPost("/student-subjects", async (
+studentsGroup.MapPost("/student-subjects", async (
     [FromBody] AssignStudentSubject command,
     [FromServices] ICommandHandler<AssignStudentSubject, Guid> handler,
     CancellationToken ct) =>
@@ -515,7 +523,7 @@ app.MapPost("/student-subjects", async (
     return Results.Created($"/student-subjects/{id}", new { id });
 });
 
-app.MapDelete("/student-subjects/{id:guid}", async (
+studentsGroup.MapDelete("/student-subjects/{id:guid}", async (
     Guid id,
     [FromServices] ICommandHandler<RemoveStudentSubject> handler,
     CancellationToken ct) =>

@@ -1,21 +1,32 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.Data.Repositories;
 
 public sealed class AssignmentRepository : IAssignmentRepository
 {
     private readonly AssignmentsDbContext _db;
+    private readonly ITenantProvider _tenantProvider;
 
-    public AssignmentRepository(AssignmentsDbContext db) => _db = db;
+    public AssignmentRepository(AssignmentsDbContext db, ITenantProvider tenantProvider)
+    {
+        _db = db;
+        _tenantProvider = tenantProvider;
+    }
 
-    public async Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default) =>
-        await _db.Assignments.FindAsync([id], ct);
+    public async Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default)
+    {
+        var tenantId = _tenantProvider.GetTenantContext().TenantId;
+        return await _db.Assignments
+            .SingleOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId, ct);
+    }
 
     public async Task<Assignment?> GetIncludingDeletedAsync(Guid id, CancellationToken ct = default)
     {
-        // No query filter for soft-delete yet; just return directly
-        return await _db.Assignments.FindAsync([id], ct);
+        var tenantId = _tenantProvider.GetTenantContext().TenantId;
+        return await _db.Assignments
+            .SingleOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId, ct);
     }
 
     public async Task AddAsync(Assignment assignment, CancellationToken ct = default)
@@ -30,9 +41,19 @@ public sealed class AssignmentRepository : IAssignmentRepository
         await _db.SaveChangesAsync(ct);
     }
 
+    public async Task DeleteAsync(Assignment assignment, CancellationToken ct = default)
+    {
+        _db.Assignments.Remove(assignment);
+        await _db.SaveChangesAsync(ct);
+    }
+
     public async Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? status, CancellationToken ct = default)
     {
-        var query = _db.Assignments.AsNoTracking();
+        var tenantId = _tenantProvider.GetTenantContext().TenantId;
+
+        var query = _db.Assignments
+            .AsNoTracking()
+            .Where(a => a.TenantId == tenantId);
 
         if (status.HasValue)
             query = query.Where(a => a.Status == status.Value);

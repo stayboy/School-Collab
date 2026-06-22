@@ -1,13 +1,13 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.CQRS;
-using SchoolCollab.Assignments.Core.Data;
+using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Assignments.Core.Commands.DeleteAssignment;
 
 public sealed class DeleteAssignmentHandler(
-    AssignmentsDbContext db,
+    IAssignmentRepository repository,
     HybridCache cache,
     ILogger<DeleteAssignmentHandler> logger) : ICommandHandler<DeleteAssignmentCommand>
 {
@@ -15,14 +15,13 @@ public sealed class DeleteAssignmentHandler(
     {
         logger.LogDebug("Handling DeleteAssignment {Id}", command.Id);
 
-        var assignment = await db.Assignments.FindAsync([command.Id], cancellationToken)
+        var assignment = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.Id);
 
         if (assignment.Status != Domain.AssignmentStatus.Draft)
             throw new InvalidOperationException("Only draft assignments can be deleted.");
 
-        db.Assignments.Remove(assignment);
-        await db.SaveChangesAsync(cancellationToken);
+        await repository.DeleteAsync(assignment, cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);
 
         logger.LogInformation("Assignment {Id} deleted", command.Id);

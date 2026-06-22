@@ -1,17 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class StudentEnrollmentConfiguration : IEntityTypeConfiguration<StudentEnrollment>
+internal sealed class StudentEnrollmentConfiguration : EntityTypeConfigurationBase<StudentEnrollment>
 {
-    public void Configure(EntityTypeBuilder<StudentEnrollment> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<StudentEnrollment> builder)
     {
         builder.ToTable("student_enrollments");
 
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.ConfigureAuditProperties();
+        builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.StudentId).IsRequired();
         builder.Property(x => x.PeriodId).IsRequired();
@@ -24,14 +25,6 @@ internal sealed class StudentEnrollmentConfiguration : IEntityTypeConfiguration<
             .IsRequired()
             .HasDefaultValue(EnrollmentStatus.Active);
 
-        builder.Property(x => x.RowVersion)
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRowVersion();
-
-        builder.Property(x => x.CreatedAt).IsRequired();
-        builder.Property(x => x.UpdatedAt).IsRequired();
 
         builder.HasIndex(x => new { x.StudentId, x.PeriodId })
             .HasDatabaseName("ix_student_enrollments_student_period");

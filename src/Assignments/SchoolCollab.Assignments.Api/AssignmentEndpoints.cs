@@ -11,7 +11,8 @@ public static class AssignmentEndpoints
 {
     public static WebApplication MapAssignmentEndpoints(this WebApplication app)
     {
-        var group = app.MapGroup("/assignments");
+        // All assignment endpoints require an authenticated user and a resolved TenantContext
+        var group = app.MapGroup("/assignments").RequireAuthorization();
 
         group.MapGet("/", async (
             [FromQuery] AssignmentStatus? status,

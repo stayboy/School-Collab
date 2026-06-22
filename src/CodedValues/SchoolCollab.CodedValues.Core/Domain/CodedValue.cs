@@ -1,8 +1,10 @@
 using SchoolCollab.CodedValues.Core.Domain.Events;
 
+using SchoolCollab.Core.Data;
+
 namespace SchoolCollab.CodedValues.Core.Domain;
 
-public sealed class CodedValue
+public sealed class CodedValue : IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
     private readonly List<CodedValueAttribute> _attributes = [];
     private readonly List<CodedValueAttributeDefinition> _attributeDefinitions = [];

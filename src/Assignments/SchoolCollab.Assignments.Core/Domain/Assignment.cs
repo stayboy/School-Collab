@@ -1,8 +1,10 @@
 using SchoolCollab.Assignments.Core.Domain.Events;
+using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.Domain;
 
-public sealed class Assignment
+public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<AssignmentQuestion> _questions = [];
     private readonly List<AssignmentReview> _reviews = [];
@@ -19,6 +21,10 @@ public sealed class Assignment
     public TargetAudienceType TargetAudienceType { get; private set; }
     public Guid SubjectCodedValueId { get; private set; }
     public Guid? GradeCodedValueId { get; private set; }
+
+    // Multi-tenancy: all assignments belong to a tenant (e.g., school or organization)
+    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
+    public Guid TenantId { get; private set; }
     public DateTimeOffset? DueDate { get; private set; }
     public decimal? MaxScore { get; private set; }
     public AssignmentStatus Status { get; private set; }
@@ -59,6 +65,7 @@ public sealed class Assignment
             MaxScore = maxScore,
             Status = AssignmentStatus.Draft,
             CreatedByTeacherId = createdByTeacherId,
+            // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             CreatedAt = now,
             UpdatedAt = now
         };

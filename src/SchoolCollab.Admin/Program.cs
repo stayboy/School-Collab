@@ -3,10 +3,14 @@ using SchoolCollab.Admin.Components;
 using SchoolCollab.Assignments.Admin;
 using SchoolCollab.CodedValues.Admin;
 using SchoolCollab.Students.Admin;
+using SchoolCollab.Core.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
+
+// Auth + tenancy (OIDC via Keycloak for the unified admin host)
+builder.Services.AddAuthAndTenancy(builder.Configuration);
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -27,10 +31,13 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
 app.MapStaticAssets();
 app.MapDefaultEndpoints();
 app.MapRazorComponents<App>()
+    .RequireAuthorization()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies(
         typeof(SchoolCollab.CodedValues.Admin.Components._Imports).Assembly,

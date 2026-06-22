@@ -1,17 +1,21 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class StudentConfiguration : IEntityTypeConfiguration<Student>
+internal sealed class StudentConfiguration : EntityTypeConfigurationBase<Student>
 {
-    public void Configure(EntityTypeBuilder<Student> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<Student> builder)
     {
         builder.ToTable("students");
 
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.ConfigureTenantProperties();
+        builder.ConfigureAuditProperties();
+        builder.ConfigureSoftDeleteProperties();
+        builder.ConfigureSoftDeleteQueryFilter();
+        builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.StudentNumber)
             .IsRequired()
@@ -35,19 +39,6 @@ internal sealed class StudentConfiguration : IEntityTypeConfiguration<Student>
 
         builder.Property(x => x.ContactPhone)
             .HasMaxLength(50);
-
-        builder.Property(x => x.IsDeleted)
-            .IsRequired()
-            .HasDefaultValue(false);
-
-        builder.Property(x => x.RowVersion)
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRowVersion();
-
-        builder.Property(x => x.CreatedAt).IsRequired();
-        builder.Property(x => x.UpdatedAt).IsRequired();
 
         builder.HasIndex(x => x.StudentNumber)
             .IsUnique()

@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Messaging;
+using SchoolCollab.CodedValues.Core.Services;
 
 namespace SchoolCollab.CodedValues.Core;
 
@@ -23,6 +24,7 @@ public static class Extensions
                 .UseSnakeCaseNamingConvention());
 
         services.AddScoped<ICodedValueRepository, CodedValueRepository>();
+        services.AddScoped<ICodedValueResolver, CodedValueResolver>();
 
         services.AddHybridCache(options =>
         {

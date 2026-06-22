@@ -23,6 +23,10 @@ using SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByIds;
 using SchoolCollab.CodedValues.Core.Queries.GetCodedValuesByParent;
 using SchoolCollab.CodedValues.Core.Queries.SearchCodedValues;
 using SchoolCollab.CodedValues.Core.Queries.ListRootCodedValues;
+using SchoolCollab.Core.Tenancy;
+using SchoolCollab.CodedValues.Api.Infrastructure.Auth;
+using SchoolCollab.CodedValues.Api.Infrastructure.Data;
+using SchoolCollab.Core.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -44,6 +48,9 @@ else
 builder.Services.AddCodedValuesCore(builder.Configuration);
 builder.Services.AddOpenApi();
 
+// Tenancy & Auth Infrastructure
+builder.Services.AddAuthAndTenancy(builder.Configuration);
+
 var app = builder.Build();
 
 if (app.Environment.IsDevelopment())
@@ -51,10 +58,14 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapDefaultEndpoints();
 app.UseSerilogRequestLogging();
 
-app.MapGet("/coded-values/search", async (
+var codedValuesGroup = app.MapGroup("/coded-values").RequireAuthorization();
+
+codedValuesGroup.MapGet("/search", async (
     [FromQuery] string text,
     [FromQuery] Guid? parentId,
     [FromQuery] bool? includeDisabled,
@@ -69,12 +80,12 @@ app.MapGet("/coded-values/search", async (
     return Results.Ok(result);
 });
 
-app.MapGet("/coded-values", async (
+codedValuesGroup.MapGet("/", async (
     [FromServices] IQueryHandler<ListRootCodedValues, CodedValueDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new ListRootCodedValues(), ct)));
 
-app.MapGet("/coded-values/{id:guid}", async (
+codedValuesGroup.MapGet("/{id:guid}", async (
     Guid id,
     [FromServices] IQueryHandler<GetCodedValueById, CodedValueDto?> handler,
     CancellationToken ct) =>
@@ -83,7 +94,7 @@ app.MapGet("/coded-values/{id:guid}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapGet("/coded-values/by-code/{code}", async (
+codedValuesGroup.MapGet("/by-code/{code}", async (
     string code,
     [FromQuery] Guid? parentId,
     [FromServices] IQueryHandler<GetCodedValueByCode, CodedValueDto?> handler,
@@ -93,13 +104,13 @@ app.MapGet("/coded-values/by-code/{code}", async (
     return result is null ? Results.NotFound() : Results.Ok(result);
 });
 
-app.MapGet("/coded-values/by-ids", async (
+codedValuesGroup.MapGet("/by-ids", async (
     [FromQuery] Guid[] ids,
     [FromServices] IQueryHandler<GetCodedValuesByIds, CodedValueDto[]> handler,
     CancellationToken ct) =>
     Results.Ok(await handler.HandleAsync(new GetCodedValuesByIds(ids), ct)));
 
-app.MapGet("/coded-values/by-parent", async (
+codedValuesGroup.MapGet("/by-parent", async (
     [FromQuery] Guid? parentId,
     [FromQuery] string? parentCode,
     [FromQuery] string? attributeKey,
@@ -118,7 +129,7 @@ app.MapGet("/coded-values/by-parent", async (
         new GetCodedValuesByParent(parentId, parentCode, filters, includeDisabled ?? false), ct));
 });
 
-app.MapDelete("/coded-values/{id:guid}", async (
+codedValuesGroup.MapDelete("/{id:guid}", async (
     Guid id,
     [FromServices] ICommandHandler<DeleteCodedValue> handler,
     CancellationToken ct) =>
@@ -142,7 +153,7 @@ app.MapDelete("/coded-values/{id:guid}", async (
     }
 });
 
-app.MapPost("/coded-values/{id:guid}/recover", async (
+codedValuesGroup.MapPost("/{id:guid}/recover", async (
     Guid id,
     [FromServices] ICommandHandler<RecoverCodedValue> handler,
     CancellationToken ct) =>
@@ -158,12 +169,12 @@ app.MapPost("/coded-values/{id:guid}/recover", async (
     }
 });
 
-app.MapGet("/coded-values/deleted", async (
+codedValuesGroup.MapGet("/deleted", async (
     [FromServices] ICodedValueRepository repository,
     CancellationToken ct) =>
     Results.Ok(await repository.ListDeletedAsync(ct)));
 
-app.MapPost("/coded-values", async (
+codedValuesGroup.MapPost("/", async (
     [FromBody] CreateCodedValue command,
     [FromServices] ICommandHandler<CreateCodedValue, Guid> handler,
     CancellationToken ct) =>
@@ -179,7 +190,7 @@ app.MapPost("/coded-values", async (
     }
 });
 
-app.MapPost("/coded-values/bulk", async (
+codedValuesGroup.MapPost("/bulk", async (
     [FromBody] BulkCreateCodedValuesRequest req,
     [FromServices] ICommandHandler<BulkCreateCodedValues, BulkCreateResult> handler,
     CancellationToken ct) =>
@@ -203,7 +214,7 @@ app.MapPost("/coded-values/bulk", async (
     }
 });
 
-app.MapPut("/coded-values/{id:guid}", async (
+codedValuesGroup.MapPut("/{id:guid}", async (
     Guid id,
     [FromBody] UpdateCodedValueRequest req,
     [FromServices] ICommandHandler<UpdateCodedValue> handler,
@@ -224,7 +235,7 @@ app.MapPut("/coded-values/{id:guid}", async (
     }
 });
 
-app.MapPost("/coded-values/{id:guid}/disable", async (
+codedValuesGroup.MapPost("/{id:guid}/disable", async (
     Guid id,
     [FromServices] ICommandHandler<DisableCodedValue> handler,
     CancellationToken ct) =>
@@ -240,7 +251,7 @@ app.MapPost("/coded-values/{id:guid}/disable", async (
     }
 });
 
-app.MapPost("/coded-values/{id:guid}/enable", async (
+codedValuesGroup.MapPost("/{id:guid}/enable", async (
     Guid id,
     [FromServices] ICommandHandler<EnableCodedValue> handler,
     CancellationToken ct) =>
@@ -256,7 +267,7 @@ app.MapPost("/coded-values/{id:guid}/enable", async (
     }
 });
 
-app.MapPut("/coded-values/{id:guid}/attributes/{key}", async (
+codedValuesGroup.MapPut("/{id:guid}/attributes/{key}", async (
     Guid id,
     string key,
     [FromBody] AttributeValueRequest req,
@@ -278,7 +289,7 @@ app.MapPut("/coded-values/{id:guid}/attributes/{key}", async (
     }
 });
 
-app.MapDelete("/coded-values/{id:guid}/attributes/{key}", async (
+codedValuesGroup.MapDelete("/{id:guid}/attributes/{key}", async (
     Guid id,
     string key,
     [FromServices] ICommandHandler<RemoveCodedValueAttribute> handler,
@@ -299,7 +310,7 @@ app.MapDelete("/coded-values/{id:guid}/attributes/{key}", async (
     }
 });
 
-app.MapPut("/coded-values/{id:guid}/attribute-definitions/{key}", async (
+codedValuesGroup.MapPut("/{id:guid}/attribute-definitions/{key}", async (
     Guid id,
     string key,
     [FromBody] AttributeDefinitionRequest req,
@@ -321,7 +332,7 @@ app.MapPut("/coded-values/{id:guid}/attribute-definitions/{key}", async (
     }
 });
 
-app.MapDelete("/coded-values/{id:guid}/attribute-definitions/{key}", async (
+codedValuesGroup.MapDelete("/{id:guid}/attribute-definitions/{key}", async (
     Guid id,
     string key,
     [FromServices] ICommandHandler<RemoveCodedValueAttributeDefinition> handler,

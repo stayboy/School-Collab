@@ -3,12 +3,14 @@ using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Students.Core.CQRS;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.DTOs;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Students.Core.Queries.GetStudentByStudentNumber;
 
 public sealed class GetStudentByStudentNumberHandler(
     StudentsDbContext db,
-    HybridCache cache) : IQueryHandler<GetStudentByStudentNumber, StudentDto?>
+    HybridCache cache,
+    ITenantProvider tenantProvider) : IQueryHandler<GetStudentByStudentNumber, StudentDto?>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -21,17 +23,18 @@ public sealed class GetStudentByStudentNumberHandler(
         CancellationToken cancellationToken = default)
     {
         var normalisedNumber = query.StudentNumber.Trim().ToUpperInvariant();
-        var cacheKey = $"student:number:{normalisedNumber}";
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        var cacheKey = $"student:number:{normalisedNumber}:{tenantId}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, normalisedNumber),
+            (db, normalisedNumber, tenantId),
             static async (state, ct) =>
             {
-                var (db, studentNumber) = state;
+                var (db, studentNumber, tid) = state;
                 var student = await db.Students
                     .AsNoTracking()
-                    .SingleOrDefaultAsync(x => x.StudentNumber == studentNumber, ct);
+                    .SingleOrDefaultAsync(x => x.StudentNumber == studentNumber && x.TenantId == tid, ct);
 
                 if (student is null)
                     return null;

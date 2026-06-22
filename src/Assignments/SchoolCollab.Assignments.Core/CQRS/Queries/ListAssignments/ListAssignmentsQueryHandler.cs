@@ -3,40 +3,59 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.Queries.ListAssignments;
 
 public sealed class ListAssignmentsQueryHandler(
     IAssignmentRepository repository,
+    HybridCache cache,
+    ITenantProvider tenantProvider,
     ILogger<ListAssignmentsQueryHandler> logger) : IQueryHandler<ListAssignmentsQuery, AssignmentSummaryDto[]>
 {
+    private static readonly HybridCacheEntryOptions CacheOptions = new()
+    {
+        Expiration = TimeSpan.FromMinutes(5),
+        LocalCacheExpiration = TimeSpan.FromMinutes(1)
+    };
+
     public async Task<AssignmentSummaryDto[]> HandleAsync(
         ListAssignmentsQuery query,
         CancellationToken cancellationToken = default)
     {
         logger.LogDebug("Handling ListAssignmentsQuery with status {Status}", query.Status?.ToString() ?? "all");
 
-        var summaries = await repository.ListAsync(query.Status, cancellationToken);
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        var cacheKey = $"assignments:list:{tenantId}:{query.Status?.ToString() ?? "all"}";
 
-        var dtos = summaries.Select(s => new AssignmentSummaryDto(
-            s.Id,
-            s.Title,
-            s.Description,
-            (AssignmentTypeDto)s.AssignmentType,
-            (GradingFormatDto)s.GradingFormat,
-            (TargetAudienceTypeDto)s.TargetAudienceType,
-            s.SubjectCodedValueId,
-            null, // SubjectName — populated via CodedValues API lookup
-            s.GradeCodedValueId,
-            null, // GradeName — populated via CodedValues API lookup
-            (AssignmentStatusDto)s.Status,
-            s.DueDate,
-            s.MaxScore,
-            s.CreatedByTeacherId,
-            s.CreatedAt,
-            s.UpdatedAt)).ToArray();
+        return await cache.GetOrCreateAsync(
+            cacheKey,
+            (repository, query.Status),
+            static async (state, ct) =>
+            {
+                var (repo, status) = state;
+                var summaries = await repo.ListAsync(status, ct);
 
-        logger.LogInformation("Listed {Count} assignments", dtos.Length);
-        return dtos;
+                return summaries.Select(s => new AssignmentSummaryDto(
+                    s.Id,
+                    s.Title,
+                    s.Description,
+                    (AssignmentTypeDto)s.AssignmentType,
+                    (GradingFormatDto)s.GradingFormat,
+                    (TargetAudienceTypeDto)s.TargetAudienceType,
+                    s.SubjectCodedValueId,
+                    null,
+                    s.GradeCodedValueId,
+                    null,
+                    (AssignmentStatusDto)s.Status,
+                    s.DueDate,
+                    s.MaxScore,
+                    s.CreatedByTeacherId,
+                    s.CreatedAt,
+                    s.UpdatedAt)).ToArray();
+            },
+            CacheOptions,
+            tags: ["assignments"],
+            cancellationToken: cancellationToken);
     }
 }

@@ -22,11 +22,11 @@
                 @* ── Step 1: Assignment Type, Grading Format, Target Audience ── *@
                 <FluentWizardStep Label="Type &amp; Format"
                                   Summary="Choose type, grading, audience"
-                                  IconPrevious="@(Icon.FromType<Icons.Filled.Size24.CheckmarkCircle>())"
+                                  IconPrevious="@FluentIcons.CheckmarkCircleFilled"
                                   OnChange="OnStep1ChangingAsync">
                     <section class="wizard-section">
                         <div class="wizard-section-header">
-                            <FluentIcon Value="@_typeSectionIcon" Color="@Color.Accent" />
+                            <FluentIcon Icon="@(Icons.Regular.Size24.Document)" Color="@Color.Accent" />
                             <div>
                                 <h3>Assignment Type</h3>
                                 <p class="wizard-hint">How will this assignment be completed and submitted?</p>
@@ -40,10 +40,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedType == AssignmentTypeDto.Digital)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_digitalIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.PhoneLaptop)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(AssignmentTypeDto.Digital)</h4>
                                 <p class="wizard-card-desc">Online MCQ or free-text response. Auto-graded or instant feedback.</p>
@@ -55,10 +55,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedType == AssignmentTypeDto.SemiManual)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_semiManualIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.DocumentEdit)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(AssignmentTypeDto.SemiManual)</h4>
                                 <p class="wizard-card-desc">Computer-generated prompts with user-uploaded submissions.</p>
@@ -70,10 +70,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedType == AssignmentTypeDto.Manual)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_manualIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.Document)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(AssignmentTypeDto.Manual)</h4>
                                 <p class="wizard-card-desc">Instructions only. Students submit offline (printed, hand-written).</p>
@@ -83,7 +83,7 @@
 
                     <section class="wizard-section">
                         <div class="wizard-section-header">
-                            <FluentIcon Value="@_gradingSectionIcon" Color="@Color.Accent" />
+                            <FluentIcon Icon="@(Icons.Regular.Size24.CheckmarkCircle)" Color="@Color.Accent" />
                             <div>
                                 <h3>Grading Format</h3>
                                 <p class="wizard-hint">How should this assignment be graded?</p>
@@ -97,10 +97,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedGradingFormat == GradingFormatDto.TeacherGraded)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_teacherGradedIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.Person)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(GradingFormatDto.TeacherGraded)</h4>
                                 <p class="wizard-card-desc">Teacher reviews and assigns marks manually.</p>
@@ -112,10 +112,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedGradingFormat == GradingFormatDto.AutoGraded)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_autoGradedIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.CheckmarkCircle)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(GradingFormatDto.AutoGraded)</h4>
                                 <p class="wizard-card-desc">System scores MCQ / structured answers automatically.</p>
@@ -127,10 +127,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedGradingFormat == GradingFormatDto.InstantGraded)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_instantGradedIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.Flash)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(GradingFormatDto.InstantGraded)</h4>
                                 <p class="wizard-card-desc">Students see results immediately on submission.</p>
@@ -140,7 +140,7 @@
 
                     <section class="wizard-section">
                         <div class="wizard-section-header">
-                            <FluentIcon Value="@_audienceSectionIcon" Color="@Color.Accent" />
+                            <FluentIcon Icon="@(Icons.Regular.Size24.People)" Color="@Color.Accent" />
                             <div>
                                 <h3>Target Audience</h3>
                                 <p class="wizard-hint">Who is this assignment for?</p>
@@ -154,10 +154,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedTargetAudience == TargetAudienceTypeDto.AllStudents)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_allStudentsIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.People)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(TargetAudienceTypeDto.AllStudents)</h4>
                                 <p class="wizard-card-desc">Available to every student in the subject.</p>
@@ -169,10 +169,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGrades)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_selectedGradesIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.Organization)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGrades)</h4>
                                 <p class="wizard-card-desc">Target specific grade levels or classes.</p>
@@ -184,10 +184,10 @@
                                 role="radio" tabindex="0"
                                 aria-checked="@(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)">
                                 <div class="wizard-card-check">
-                                    <FluentIcon Value="@_checkmarkIcon" Color="@Color.Accent" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
                                 </div>
                                 <div class="wizard-card-icon">
-                                    <FluentIcon Value="@_selectedGroupsIcon" />
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.PeopleTeam)" />
                                 </div>
                                 <h4>@EnumHelper.GetDescription(TargetAudienceTypeDto.SelectedGroups)</h4>
                                 <p class="wizard-card-desc">Assign to specific student groups or sections.</p>
@@ -204,10 +204,10 @@
                 @* ── Step 2: Title, Description, Due Date, Max Score ── *@
                 <FluentWizardStep Label="Details"
                                   Summary="Title, date, score"
-                                  IconPrevious="@(Icon.FromType<Icons.Filled.Size24.CheckmarkCircle>())">
+                                  IconPrevious="@FluentIcons.CheckmarkCircleFilled">
                     <section class="wizard-section">
                         <div class="wizard-section-header">
-                            <FluentIcon Value="@_detailsSectionIcon" Color="@Color.Accent" />
+                            <FluentIcon Icon="@(Icons.Regular.Size24.DocumentEdit)" Color="@Color.Accent" />
                             <div>
                                 <h3>Assignment Details</h3>
                                 <p class="wizard-hint">Provide the basic information for this assignment.</p>
@@ -228,11 +228,11 @@
                 @* ── Step 3: Review & Submit ── *@
                 <FluentWizardStep Label="Review"
                                   Summary="Verify and submit"
-                                  IconPrevious="@(Icon.FromType<Icons.Filled.Size24.CheckmarkCircle>())"
+                                  IconPrevious="@FluentIcons.CheckmarkCircleFilled"
                                   DeferredLoading="true">
                     <section class="wizard-section">
                         <div class="wizard-section-header">
-                            <FluentIcon Value="@_reviewSectionIcon" Color="@Color.Accent" />
+                            <FluentIcon Icon="@(Icons.Regular.Size24.Eye)" Color="@Color.Accent" />
                             <div>
                                 <h3>Review &amp; Submit</h3>
                                 <p class="wizard-hint">Verify the details before creating this assignment.</p>
@@ -241,9 +241,12 @@
 
                         <div class="review-card">
                             <div class="review-grid">
+                                @{
+                                    var selectedType = _selectedType ?? AssignmentTypeDto.Manual;
+                                }
                                 <div class="review-row">
                                     <span class="review-label">Type</span>
-                                    <FluentBadge Appearance="Appearance.Accent">@EnumHelper.GetDescription(_selectedType.Value)</FluentBadge>
+                                    <FluentBadge Appearance="Appearance.Accent">@EnumHelper.GetDescription(selectedType)</FluentBadge>
                                 </div>
                                 <div class="review-row">
                                     <span class="review-label">Grading</span>
@@ -285,21 +288,21 @@
                     @if (stepIndex > 0)
                     {
                         <FluentButton Appearance="Appearance.Neutral"
-                                      Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowLeft>())"
-                                      OnClick="@(() => _wizard.GoToStepAsync(stepIndex - 1, false))">
+                                      IconStart="@FluentIcons.ArrowLeft"
+                                      OnClick="@(() => GoToStepAsync(stepIndex - 1))">
                             Back
                         </FluentButton>
                     }
 
-                    <span style="flex:1"></span>
+                    <span class="wizard-actions-spacer" aria-hidden="true"></span>
 
                     <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
 
                     @if (stepIndex < 2)
                     {
                         <FluentButton Appearance="Appearance.Accent"
-                                      Icon="@(Icon.FromType<Icons.Regular.Size20.ArrowRight>())"
-                                      OnClick="@(() => _wizard.GoToStepAsync(stepIndex + 1))"
+                                      IconStart="@FluentIcons.ArrowRight"
+                                      OnClick="@(() => GoToStepAsync(stepIndex + 1))"
                                       class="ms-2">
                             Continue
                         </FluentButton>
@@ -307,7 +310,7 @@
                     else
                     {
                         <FluentButton Appearance="Appearance.Accent"
-                                      Icon="@(Icon.FromType<Icons.Regular.Size20.Save>())"
+                                      IconStart="@FluentIcons.Save"
                                       Disabled="@_saving" OnClick="SubmitAsync"
                                       class="ms-2">
                             @(_saving ? "Saving…" : "Save as Draft")
@@ -323,22 +326,6 @@
 </ErrorBoundary>
 
 @code {
-    private static readonly Icon _digitalIcon = Icon.FromType<Icons.Regular.Size24.PhoneLaptop>();
-    private static readonly Icon _semiManualIcon = Icon.FromType<Icons.Regular.Size24.DocumentEdit>();
-    private static readonly Icon _manualIcon = Icon.FromType<Icons.Regular.Size24.Document>();
-    private static readonly Icon _teacherGradedIcon = Icon.FromType<Icons.Regular.Size24.Person>();
-    private static readonly Icon _autoGradedIcon = Icon.FromType<Icons.Regular.Size24.CheckmarkCircle>();
-    private static readonly Icon _instantGradedIcon = Icon.FromType<Icons.Regular.Size24.Flash>();
-    private static readonly Icon _allStudentsIcon = Icon.FromType<Icons.Regular.Size24.People>();
-    private static readonly Icon _selectedGradesIcon = Icon.FromType<Icons.Regular.Size24.Organization>();
-    private static readonly Icon _selectedGroupsIcon = Icon.FromType<Icons.Regular.Size24.PeopleTeam>();
-    private static readonly Icon _checkmarkIcon = Icon.FromType<Icons.Regular.Size20.CheckmarkCircle>();
-    private static readonly Icon _typeSectionIcon = Icon.FromType<Icons.Regular.Size24.Document>();
-    private static readonly Icon _gradingSectionIcon = Icon.FromType<Icons.Regular.Size24.CheckmarkCircle>();
-    private static readonly Icon _audienceSectionIcon = Icon.FromType<Icons.Regular.Size24.People>();
-    private static readonly Icon _detailsSectionIcon = Icon.FromType<Icons.Regular.Size24.DocumentEdit>();
-    private static readonly Icon _reviewSectionIcon = Icon.FromType<Icons.Regular.Size24.Eye>();
-
     private FluentWizard? _wizard;
     private int _stepIndex;
     private readonly FormModel _model = new();
@@ -395,7 +382,7 @@
             var req = new CreateAssignmentRequest(
                 _model.Title!,
                 _model.Description,
-                _selectedType.Value,
+                _selectedType ?? AssignmentTypeDto.Manual,
                 _selectedGradingFormat,
                 _selectedTargetAudience,
                 _model.SubjectCodedValueId,
@@ -420,6 +407,9 @@
             if (!_disposed) _saving = false;
         }
     }
+
+    private Task GoToStepAsync(int stepIndex) =>
+        _wizard?.GoToStepAsync(stepIndex) ?? Task.CompletedTask;
 
     private void Cancel() => Nav.NavigateTo("/assignments");
 

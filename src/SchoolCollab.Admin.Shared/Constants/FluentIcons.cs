@@ -16,4 +16,8 @@ public static class FluentIcons
     public static readonly Icon SlideText = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.SlideText();
     public static readonly Icon Book = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Book();
     public static readonly Icon Calendar = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Calendar();
+    public static readonly Icon CheckmarkCircleFilled = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Filled.Size24.CheckmarkCircle();
+    public static readonly Icon ArrowLeft = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowLeft();
+    public static readonly Icon ArrowRight = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowRight();
+    public static readonly Icon Save = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Save();
 }

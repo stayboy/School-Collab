@@ -97,6 +97,82 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                     b.ToTable("coded_values", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.CodedValues.Core.Domain.TenantCodedValueAttributeOverride", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("AttributeKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("attribute_key");
+
+                    b.Property<Guid>("CodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("coded_value_id");
+
+                    b.Property<string>("CustomValue")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("custom_value");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tenant_coded_value_attribute_overrides");
+
+                    b.HasIndex("TenantId", "CodedValueId", "AttributeKey")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_coded_value_attribute_overrides_tenant_id_coded_valu");
+
+                    b.ToTable("tenant_coded_value_attribute_overrides", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.CodedValues.Core.Domain.TenantCodedValueOverride", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("code");
+
+                    b.Property<Guid>("CodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("coded_value_id");
+
+                    b.Property<bool?>("IsDisabled")
+                        .HasColumnType("boolean")
+                        .HasColumnName("is_disabled");
+
+                    b.Property<string>("Name")
+                        .HasMaxLength(255)
+                        .HasColumnType("character varying(255)")
+                        .HasColumnName("name");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tenant_coded_value_overrides");
+
+                    b.HasIndex("TenantId", "CodedValueId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_coded_value_overrides_tenant_id_coded_value_id");
+
+                    b.ToTable("tenant_coded_value_overrides", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.CodedValues.Core.Messaging.OutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
@@ -140,6 +216,38 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                         .HasFilter("dispatched_at IS NULL");
 
                     b.ToTable("outbox_messages", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Core.Identity.User", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("email");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("external_id");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("role");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.HasKey("Id")
+                        .HasName("pk_users");
+
+                    b.ToTable("users", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.CodedValues.Core.Domain.CodedValue", b =>

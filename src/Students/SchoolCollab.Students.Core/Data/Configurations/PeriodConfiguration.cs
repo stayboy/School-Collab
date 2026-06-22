@@ -1,17 +1,18 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class PeriodConfiguration : IEntityTypeConfiguration<Period>
+internal sealed class PeriodConfiguration : EntityTypeConfigurationBase<Period>
 {
-    public void Configure(EntityTypeBuilder<Period> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<Period> builder)
     {
         builder.ToTable("periods");
 
-        builder.HasKey(x => x.Id);
-        builder.Property(x => x.Id).ValueGeneratedNever();
+        builder.ConfigureAuditProperties();
+        builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.Name)
             .IsRequired()
@@ -30,14 +31,6 @@ internal sealed class PeriodConfiguration : IEntityTypeConfiguration<Period>
 
         builder.Property(x => x.NextPeriodId);
 
-        builder.Property(x => x.RowVersion)
-            .HasColumnName("xmin")
-            .HasColumnType("xid")
-            .ValueGeneratedOnAddOrUpdate()
-            .IsRowVersion();
-
-        builder.Property(x => x.CreatedAt).IsRequired();
-        builder.Property(x => x.UpdatedAt).IsRequired();
 
         builder.HasIndex(x => x.Status)
             .HasDatabaseName("ix_periods_status");

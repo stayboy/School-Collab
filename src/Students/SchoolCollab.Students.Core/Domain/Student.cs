@@ -1,8 +1,10 @@
+using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class Student
+public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
@@ -16,7 +18,12 @@ public sealed class Student
     public Guid? GenderCodedValueId { get; private set; }
     public string ContactEmail { get; private set; } = default!;
     public string? ContactPhone { get; private set; }
+
+    // Multi-tenancy: each student belongs to a tenant (e.g., school)
+    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
+    public Guid TenantId { get; private set; }
     public bool IsDeleted { get; private set; }
+    public DateTimeOffset? DeletedAt { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -43,6 +50,7 @@ public sealed class Student
             GenderCodedValueId = genderCodedValueId,
             ContactEmail = contactEmail.Trim(),
             ContactPhone = contactPhone?.Trim(),
+            // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             IsDeleted = false,
             CreatedAt = now,
             UpdatedAt = now
@@ -74,6 +82,7 @@ public sealed class Student
     {
         if (IsDeleted) return;
         IsDeleted = true;
+        DeletedAt = DateTimeOffset.UtcNow;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new StudentDeletedEvent(Id, StudentNumber));
     }
@@ -82,6 +91,7 @@ public sealed class Student
     {
         if (!IsDeleted) return;
         IsDeleted = false;
+        DeletedAt = null;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
