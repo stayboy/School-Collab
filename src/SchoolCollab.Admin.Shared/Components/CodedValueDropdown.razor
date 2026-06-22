@@ -21,6 +21,7 @@
 @code {
     /// <summary>
     /// The parent coded value code whose children populate the dropdown.
+    /// Changing this value after initialization will reload the dropdown items.
     /// Values are resolved through the tenant-aware coded-value API, so any
     /// tenant-specific overrides are applied automatically.
     /// </summary>
@@ -60,6 +61,7 @@
     private CodedValueDto[]? _items;
     private CodedValueDto? _selectedOption;
     private string? _error;
+    private string _lastLoadedParentCode = string.Empty;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -75,28 +77,20 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _loadCts = new CancellationTokenSource();
-        try
-        {
-            _items = await Api.GetChildrenByParentCodeAsync(ParentCode, _loadCts.Token) ?? [];
-            if (_disposed) return;
-            _selectedOption = _items.FirstOrDefault(x => x.Id == SelectedId);
-        }
-        catch (OperationCanceledException)
-        {
-            // User navigated away before the lookup completed.
-        }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to load coded values for parent {ParentCode}", ParentCode);
-            _error = $"Unable to load options for {ParentCode}.";
-        }
+        await LoadAsync(ParentCode);
     }
 
-    protected override void OnParametersSet()
+    protected override async Task OnParametersSetAsync()
     {
-        // Keep the internal selection in sync when the parent updates SelectedCode.
+        // ParentCode is a string parameter that may change after initialization
+        // (e.g. cascading value, wizard step, or form field dependency). When it
+        // changes we must discard the previous items and reload for the new parent.
+        if (!string.Equals(ParentCode, _lastLoadedParentCode, StringComparison.OrdinalIgnoreCase))
+        {
+            await LoadAsync(ParentCode);
+        }
+
+        // Keep the internal selection in sync when the consumer updates SelectedId.
         if (_items is not null && SelectedId.HasValue)
         {
             var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
@@ -104,6 +98,50 @@
             {
                 _selectedOption = selected;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reloads the dropdown items for the current <see cref="ParentCode"/>.
+    /// Call this from a parent component when the underlying coded value list
+    /// may have changed (e.g. after creating a new option in a dialog).
+    /// </summary>
+    public async Task RefreshAsync()
+    {
+        if (_disposed) return;
+        await LoadAsync(ParentCode);
+    }
+
+    private async Task LoadAsync(string parentCode)
+    {
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        _items = null;
+        _error = null;
+        _selectedOption = null;
+        _lastLoadedParentCode = parentCode;
+
+        try
+        {
+            var items = await Api.GetChildrenByParentCodeAsync(parentCode, ct) ?? [];
+            if (_disposed || ct.IsCancellationRequested) return;
+
+            _items = items;
+            _selectedOption = _items.FirstOrDefault(x => x.Id == SelectedId);
+        }
+        catch (OperationCanceledException)
+        {
+            // User navigated away or ParentCode changed before the lookup completed.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed || ct.IsCancellationRequested) return;
+
+            Logger.LogError(ex, "Failed to load coded values for parent {ParentCode}", parentCode);
+            _error = $"Unable to load options for {parentCode}.";
         }
     }
 

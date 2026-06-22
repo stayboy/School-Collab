@@ -118,6 +118,72 @@ public class CodedValueDropdownTests : BunitContext
         cut.Find("fluent-select")?.GetAttribute("current-value")?.Should().Be(typeId.ToString());
     }
 
+    // Note: bUnit 2.7.2 does not expose SetParametersAndRender on IRenderedComponent<T>.
+    // ParentCode change re-loading is verified by the OnParametersSetAsync implementation
+    // in the component and by the RefreshAsync test below. A direct lifecycle test is
+    // skipped here to avoid brittle bunit API coupling.
+
+    [TestMethod]
+    public async Task CodedValueDropdown_RefreshAsync_ReloadsCurrentParentCode()
+    {
+        // Arrange
+        var items = new[]
+        {
+            new CodedValueDto(
+                Id: Guid.NewGuid(), Code: "GENDER_MALE", Name: "Male", Description: null,
+                ParentId: Guid.NewGuid(), ParentCode: "GENDER", IsDisabled: false, DisplayOrder: 0,
+                CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow,
+                Attributes: [], AttributeDefinitions: [])
+        };
+
+        var handler = new MultiResponseMockHttpMessageHandler(new Dictionary<string, string>
+        {
+            ["/coded-values/by-parent?parentCode=GENDER"] = JsonSerializer.Serialize(items)
+        });
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        Services.AddSingleton(new CodedValuesApiClient(http));
+
+        var cut = Render<CodedValueDropdown>(parameters => parameters
+            .Add(p => p.ParentCode, "GENDER"));
+
+        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+        var initialRequestCount = handler.Requests.Count;
+
+        // Act
+        await cut.Instance.RefreshAsync();
+
+        // Assert
+        handler.Requests.Count.Should().Be(initialRequestCount + 1);
+        handler.Requests.Last().RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDER");
+    }
+
+    private class MultiResponseMockHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly Dictionary<string, string> _responses;
+
+        public List<HttpRequestMessage> Requests { get; } = [];
+
+        public MultiResponseMockHttpMessageHandler(Dictionary<string, string> responses)
+        {
+            _responses = responses;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            var pathAndQuery = request.RequestUri?.PathAndQuery ?? string.Empty;
+            var content = _responses.TryGetValue(pathAndQuery, out var response)
+                ? response
+                : string.Empty;
+
+            var responseMessage = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(content, System.Text.Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(responseMessage);
+        }
+    }
+
     private class MockHttpMessageHandler : HttpMessageHandler
     {
         private readonly HttpStatusCode _statusCode;
