@@ -11,6 +11,8 @@ public sealed class GradeLevel : IEntity, IAuditableEntity, IHasRowVersion
 
     public Guid Id { get; private set; }
     public Guid CodedValueId { get; private set; }
+    // The following are kept for performance/indexing, but the source of truth
+    // for metadata should be the CodedValue system + Tenant Overrides.
     public int Level { get; private set; }
     public string Name { get; private set; } = default!;
     public int DisplayOrder { get; private set; }

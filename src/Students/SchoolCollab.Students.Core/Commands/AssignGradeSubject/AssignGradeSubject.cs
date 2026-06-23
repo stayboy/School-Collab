@@ -5,4 +5,6 @@ namespace SchoolCollab.Students.Core.Commands.AssignGradeSubject;
 public sealed record AssignGradeSubject(
     Guid GradeLevelId,
     Guid SubjectId,
-    Guid PeriodId) : ICommand;
+    Guid PeriodId,
+    Guid? SubjectStrandId = null,
+    Guid? SubjectLessonId = null) : ICommand;

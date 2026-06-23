@@ -15,6 +15,7 @@ internal sealed class GradeSubjectAssignmentRepository(StudentsDbContext db)
             .OrderBy(x => x.GradeLevelId).ThenBy(x => x.SubjectId)
             .Select(x => new GradeSubjectAssignmentDto(
                 x.Id, x.GradeLevelId, x.SubjectId, x.PeriodId,
+                x.SubjectStrandId, x.SubjectLessonId,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 
@@ -25,6 +26,7 @@ internal sealed class GradeSubjectAssignmentRepository(StudentsDbContext db)
             .OrderBy(x => x.SubjectId)
             .Select(x => new GradeSubjectAssignmentDto(
                 x.Id, x.GradeLevelId, x.SubjectId, x.PeriodId,
+                x.SubjectStrandId, x.SubjectLessonId,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 }

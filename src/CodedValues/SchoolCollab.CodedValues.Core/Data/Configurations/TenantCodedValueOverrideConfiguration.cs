@@ -1,26 +1,28 @@
-using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
-using SchoolCollab.CodedValues.Core.Data;
-using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.Core.Data;
+using SchoolCollab.CodedValues.Core.Domain;
 
 namespace SchoolCollab.CodedValues.Core.Data.Configurations;
 
-public sealed class TenantCodedValueOverrideConfiguration
-    : TenantEntityTypeConfigurationBase<TenantCodedValueOverride>
+internal sealed class TenantCodedValueOverrideConfiguration : EntityTypeConfigurationBase<TenantCodedValueOverride>
 {
-    public TenantCodedValueOverrideConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
-
-    protected override void ConfigureTenantEntity(EntityTypeBuilder<TenantCodedValueOverride> builder)
+    protected override void ConfigureEntity(EntityTypeBuilder<TenantCodedValueOverride> builder)
     {
         builder.ToTable("tenant_coded_value_overrides");
 
-        builder.Property(x => x.CodedValueId).IsRequired();
+        builder.ConfigureAuditProperties();
+        
+        builder.Property(x => x.TenantId).IsRequired();
+        builder.Property(x => x.GlobalCodedValueId).IsRequired();
+        builder.Property(x => x.OverriddenName).HasMaxLength(200);
+        builder.Property(x => x.OverriddenDescription).HasMaxLength(1000);
 
-        builder.HasIndex(x => new { x.TenantId, x.CodedValueId }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.GlobalCodedValueId })
+            .IsUnique()
+            .HasDatabaseName("ix_tenant_coded_value_overrides_unique");
 
-        builder.Property(x => x.Code).HasMaxLength(100);
-        builder.Property(x => x.Name).HasMaxLength(255);
+        builder.HasIndex(x => x.TenantId)
+            .HasDatabaseName("ix_tenant_coded_value_overrides_tenant");
     }
 }

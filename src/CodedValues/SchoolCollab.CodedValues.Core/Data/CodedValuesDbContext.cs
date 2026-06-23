@@ -25,7 +25,7 @@ public sealed class CodedValuesDbContext(DbContextOptions<CodedValuesDbContext> 
         // available to tenant-aware configuration base classes. Do not use
         // ApplyConfigurationsFromAssembly here because it cannot inject arguments.
         modelBuilder.ApplyConfiguration(new CodedValueConfiguration());
-        modelBuilder.ApplyConfiguration(new TenantCodedValueOverrideConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TenantCodedValueOverrideConfiguration());
         modelBuilder.ApplyConfiguration(new TenantCodedValueAttributeOverrideConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
     }

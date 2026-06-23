@@ -6,5 +6,7 @@ public sealed record GradeLevelDto(
     int Level,
     string Name,
     int DisplayOrder,
+    int SubjectCount,
+    int StudentCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

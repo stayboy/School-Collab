@@ -39,6 +39,8 @@ public sealed class GetGradeLevelByIdHandler(
                     gradeLevel.Level,
                     gradeLevel.Name,
                     gradeLevel.DisplayOrder,
+                    0,
+                    0,
                     gradeLevel.CreatedAt,
                     gradeLevel.UpdatedAt);
             },

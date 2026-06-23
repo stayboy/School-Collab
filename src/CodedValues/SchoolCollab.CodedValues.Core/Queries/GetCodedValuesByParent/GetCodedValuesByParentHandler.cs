@@ -62,7 +62,13 @@ public sealed class GetCodedValuesByParentHandler(
                         .Select(x => (Guid?)x.Id)
                         .SingleOrDefaultAsync(ct);
 
+                    if (parentId == null) return [];
+
                     q = q.Where(x => x.ParentId == parentId);
+                }
+                else
+                {
+                    q = q.Where(x => x.ParentId == null);
                 }
 
                 if (query.AttributeFilters is { Count: > 0 })

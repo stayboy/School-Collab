@@ -5,5 +5,7 @@ public sealed record GradeSubjectAssignmentDto(
     Guid GradeLevelId,
     Guid SubjectId,
     Guid PeriodId,
+    Guid? SubjectStrandId,
+    Guid? SubjectLessonId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

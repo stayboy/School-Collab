@@ -28,6 +28,18 @@ public sealed class ListGradeLevelsHandler(
                 var results = await db.GradeLevels
                     .AsNoTracking()
                     .OrderBy(x => x.Level)
+                    .Select(gl => new
+                    {
+                        gl.Id,
+                        gl.CodedValueId,
+                        gl.Level,
+                        gl.Name,
+                        gl.DisplayOrder,
+                        gl.CreatedAt,
+                        gl.UpdatedAt,
+                        SubjectCount = db.GradeSubjectAssignments.Count(ga => ga.GradeLevelId == gl.Id),
+                        StudentCount = db.StudentEnrollments.Count(se => se.GradeLevelId == gl.Id)
+                    })
                     .ToArrayAsync(ct);
 
                 return results.Select(gl => new GradeLevelDto(
@@ -36,6 +48,8 @@ public sealed class ListGradeLevelsHandler(
                     gl.Level,
                     gl.Name,
                     gl.DisplayOrder,
+                    gl.SubjectCount,
+                    gl.StudentCount,
                     gl.CreatedAt,
                     gl.UpdatedAt)).ToArray();
             },

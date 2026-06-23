@@ -27,12 +27,24 @@
             {
                 <div class="grid-container">
                     <FluentDataGrid Items="@_items.AsQueryable()"
-                                    GridTemplateColumns="80px minmax(200px,2fr) 120px 140px minmax(160px,1fr)"
+                                    GridTemplateColumns="80px minmax(200px,2fr) 120px 100px 100px 140px minmax(160px,1fr)"
                                     MultiLine="true"
                                     TGridItem="GradeLevelDto">
                         <PropertyColumn Property="@(x => x.Level)" Sortable="true" Title="Level" />
                         <PropertyColumn Property="@(x => x.Name)" Sortable="true" Title="Name" />
                         <PropertyColumn Property="@(x => x.DisplayOrder)" Sortable="true" Title="Display Order" />
+                        <TemplateColumn Title="Subjects">
+                            <FluentAnchor Appearance="Appearance.Lightweight" 
+                                          Href="@($"/students/grade-subjects/by-grade/{context.Id}")">
+                                @context.SubjectCount
+                            </FluentAnchor>
+                        </TemplateColumn>
+                        <TemplateColumn Title="Students">
+                            <FluentAnchor Appearance="Appearance.Lightweight" 
+                                          Href="@($"/students/enrollments/by-grade/{context.Id}")">
+                                @context.StudentCount
+                            </FluentAnchor>
+                        </TemplateColumn>
                         <TemplateColumn Title="CodedValueId">
                             <code>@context.CodedValueId.ToString()[..8]…</code>
                         </TemplateColumn>

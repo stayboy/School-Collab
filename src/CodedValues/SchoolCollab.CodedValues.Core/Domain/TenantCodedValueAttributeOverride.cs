@@ -4,16 +4,16 @@ namespace SchoolCollab.CodedValues.Core.Domain;
 
 public sealed class TenantCodedValueAttributeOverride : BaseTenantEntity
 {
-    public Guid CodedValueId { get; private set; }
+    public Guid GlobalCodedValueId { get; private set; }
     public string AttributeKey { get; private set; } = default!;
     public string CustomValue { get; private set; } = default!;
 
     private TenantCodedValueAttributeOverride() { }
 
-    internal TenantCodedValueAttributeOverride(Guid tenantId, Guid codedValueId, string attributeKey, string customValue)
+    internal TenantCodedValueAttributeOverride(Guid tenantId, Guid globalCodedValueId, string attributeKey, string customValue)
     {
         TenantId = tenantId;
-        CodedValueId = codedValueId;
+        GlobalCodedValueId = globalCodedValueId;
         AttributeKey = attributeKey;
         CustomValue = customValue;
     }

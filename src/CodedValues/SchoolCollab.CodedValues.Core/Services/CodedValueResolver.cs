@@ -13,12 +13,12 @@ public sealed class CodedValueResolver(ICodedValueRepository repository) : ICode
 {
     public async Task<CodedValueDto> ResolveAsync(CodedValue cv, Guid tenantId, CancellationToken ct = default)
     {
-        // 1. Resolve Basic Properties (Code, Name, IsDisabled)
+        // 1. Resolve Basic Properties (Code, Name, Description)
         var overrideValue = await repository.GetOverrideAsync(tenantId, cv.Id, ct);
         
-        string finalCode = overrideValue?.Code ?? cv.Code;
-        string finalName = overrideValue?.Name ?? cv.Name;
-        bool finalIsDisabled = overrideValue?.IsDisabled ?? cv.IsDisabled;
+        string finalCode = cv.Code; // Code is generally global/immutable
+        string finalName = overrideValue?.OverriddenName ?? cv.Name;
+        string? finalDescription = overrideValue?.OverriddenDescription ?? cv.Description;
 
         // 2. Resolve Attributes (Child attributes)
         var resolvedAttributes = new List<CodedValueAttributeDto>();
@@ -39,10 +39,10 @@ public sealed class CodedValueResolver(ICodedValueRepository repository) : ICode
             cv.Id,
             finalCode,
             finalName,
-            cv.Description,
+            finalDescription,
             cv.ParentId,
             parentCode,
-            finalIsDisabled,
+            cv.IsDisabled,
             cv.DisplayOrder,
             cv.CreatedAt,
             cv.UpdatedAt,

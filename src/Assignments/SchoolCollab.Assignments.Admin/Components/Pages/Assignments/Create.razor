@@ -218,12 +218,12 @@
                             <FluentStack Orientation="Orientation.Vertical" Gap="1rem" class="details-form-fields">
                                 <FluentTextField @bind-Value="_model.Title" Label="Title *" Placeholder="e.g. Chapter 5 Quiz" class="full-width required-field" Required />
                                 <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="4" Placeholder="Assignment instructions…" class="full-width" />
-                                <CodedValueDropdown ParentCode="SUBJECTS"
+                                <CodedValueDropdown Parent="CodedValueParent.Subjects"
                                                     Label="Subject *"
                                                     Placeholder="Select a subject"
                                                     @bind-SelectedId="_model.SubjectCodedValueId"
                                                     class="full-width" />
-                                <CodedValueDropdown ParentCode="GRADES"
+                                <CodedValueDropdown Parent="CodedValueParent.Grades"
                                                     Label="Grade"
                                                     Placeholder="Select a grade (optional)"
                                                     @bind-SelectedId="_model.GradeCodedValueId"

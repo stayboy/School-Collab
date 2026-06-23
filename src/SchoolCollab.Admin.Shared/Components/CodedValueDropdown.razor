@@ -1,3 +1,6 @@
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+
 @inject CodedValuesApiClient Api
 @inject ILogger<CodedValueDropdown> Logger
 @implements IDisposable
@@ -13,20 +16,22 @@
               SelectedOptionChanged="@OnSelectedOptionChanged"
               OptionText="@(o => o.Name)"
               OptionValue="@(o => o.Id.ToString())"
-              Label="@Label"
-              Placeholder="@EffectivePlaceholder"
+              Label="@Label"              
+              Placeholder="@EffectivePlaceholder"              
               Disabled="@IsDisabled"
-              class="coded-value-dropdown" />
+              class="@EffectiveClass" />
 
 @code {
     /// <summary>
-    /// The parent coded value code whose children populate the dropdown.
+    /// The parent coded value category.
     /// Changing this value after initialization will reload the dropdown items.
     /// Values are resolved through the tenant-aware coded-value API, so any
     /// tenant-specific overrides are applied automatically.
     /// </summary>
     [Parameter, EditorRequired]
-    public string ParentCode { get; set; } = default!;
+    public CodedValueParent Parent { get; set; }
+
+    private string ParentCode => Parent.ToCode();
 
     /// <summary>
     /// Label shown above the dropdown.
@@ -39,6 +44,12 @@
     /// </summary>
     [Parameter]
     public string? Placeholder { get; set; } = "Select…";
+
+    /// <summary>
+    /// CSS class to apply to the dropdown component.
+    /// </summary>
+    [Parameter]
+    public string? Class { get; set; }
 
     /// <summary>
     /// The currently selected coded value id (two-way bindable).
@@ -65,7 +76,7 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    private bool IsDisabled => Disabled || _items is null || _items.Length == 0 || _error is not null;
+    private bool IsDisabled => Disabled || _items is null || _error is not null;
 
     private string EffectivePlaceholder => _error is not null
         ? "—"
@@ -75,6 +86,10 @@
                 ? "No options available"
                 : (Placeholder ?? "Select…");
 
+    private string EffectiveClass => string.IsNullOrWhiteSpace(Class) 
+        ? "coded-value-dropdown" 
+        : $"{Class} coded-value-dropdown";
+
     protected override async Task OnInitializedAsync()
     {
         await LoadAsync(ParentCode);
@@ -82,10 +97,10 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        // ParentCode is a string parameter that may change after initialization
+        // Parent is an enum parameter that may change after initialization
         // (e.g. cascading value, wizard step, or form field dependency). When it
         // changes we must discard the previous items and reload for the new parent.
-        if (!string.Equals(ParentCode, _lastLoadedParentCode, StringComparison.OrdinalIgnoreCase))
+        if (ParentCode != _lastLoadedParentCode)
         {
             await LoadAsync(ParentCode);
         }

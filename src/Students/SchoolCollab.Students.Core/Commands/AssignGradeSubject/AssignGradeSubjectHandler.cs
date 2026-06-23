@@ -18,7 +18,9 @@ public sealed class AssignGradeSubjectHandler(
         var assignment = GradeSubjectAssignment.Create(
             command.GradeLevelId,
             command.SubjectId,
-            command.PeriodId);
+            command.PeriodId,
+            command.SubjectStrandId,
+            command.SubjectLessonId);
 
         await repository.AddAsync(assignment, cancellationToken);
         assignment.ClearDomainEvents();

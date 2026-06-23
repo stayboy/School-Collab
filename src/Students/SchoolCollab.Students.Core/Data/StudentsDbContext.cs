@@ -17,6 +17,8 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<StudentEnrollment> StudentEnrollments => Set<StudentEnrollment>();
     public DbSet<GradeSubjectAssignment> GradeSubjectAssignments => Set<GradeSubjectAssignment>();
     public DbSet<StudentSubjectAssignment> StudentSubjectAssignments => Set<StudentSubjectAssignment>();
+    public DbSet<SubjectStrand> SubjectStrands => Set<SubjectStrand>();
+    public DbSet<SubjectLesson> SubjectLessons => Set<SubjectLesson>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -33,6 +35,8 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new StudentEnrollmentConfiguration());
         modelBuilder.ApplyConfiguration(new GradeSubjectAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new StudentSubjectAssignmentConfiguration());
+        modelBuilder.ApplyConfiguration(new SubjectStrandConfiguration());
+        modelBuilder.ApplyConfiguration(new SubjectLessonConfiguration());
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
     }
 }

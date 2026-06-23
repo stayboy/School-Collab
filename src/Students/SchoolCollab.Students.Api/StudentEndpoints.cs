@@ -3,22 +3,30 @@ using SchoolCollab.Students.Core;
 using SchoolCollab.Students.Core.CQRS;
 using SchoolCollab.Students.Core.Commands.ActivatePeriod;
 using SchoolCollab.Students.Core.Commands.AssignGradeSubject;
+using SchoolCollab.Students.Core.Commands.AssignLessonStrand;
 using SchoolCollab.Students.Core.Commands.AssignStudentSubject;
 using SchoolCollab.Students.Core.Commands.CompletePeriod;
 using SchoolCollab.Students.Core.Commands.CreateGradeLevel;
 using SchoolCollab.Students.Core.Commands.CreatePeriod;
 using SchoolCollab.Students.Core.Commands.CreateStudent;
 using SchoolCollab.Students.Core.Commands.CreateSubject;
+using SchoolCollab.Students.Core.Commands.CreateSubjectLesson;
+using SchoolCollab.Students.Core.Commands.CreateSubjectStrand;
 using SchoolCollab.Students.Core.Commands.DeleteStudent;
 using SchoolCollab.Students.Core.Commands.EnrollStudent;
 using SchoolCollab.Students.Core.Commands.RecoverStudent;
 using SchoolCollab.Students.Core.Commands.RemoveGradeSubject;
 using SchoolCollab.Students.Core.Commands.RemoveStudentSubject;
+using SchoolCollab.Students.Core.Commands.RemoveSubjectLesson;
+using SchoolCollab.Students.Core.Commands.RemoveSubjectStrand;
 using SchoolCollab.Students.Core.Commands.TransferStudent;
 using SchoolCollab.Students.Core.Commands.UpdateGradeLevel;
 using SchoolCollab.Students.Core.Commands.UpdatePeriod;
 using SchoolCollab.Students.Core.Commands.UpdateStudent;
 using SchoolCollab.Students.Core.Commands.UpdateSubject;
+using SchoolCollab.Students.Core.Commands.UpdateSubjectLesson;
+using SchoolCollab.Students.Core.Commands.UpdateSubjectStrand;
+using SchoolCollab.Students.Core.Commands.UpdateGradeSubjectTags;
 using SchoolCollab.Students.Core.Commands.WithdrawStudent;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -36,6 +44,8 @@ using SchoolCollab.Students.Core.Queries.ListGradeLevels;
 using SchoolCollab.Students.Core.Queries.ListGradeSubjectAssignmentsByGradeLevel;
 using SchoolCollab.Students.Core.Queries.ListGradeSubjectAssignmentsByPeriod;
 using SchoolCollab.Students.Core.Queries.ListPeriods;
+using SchoolCollab.Students.Core.Queries.ListSubjectLessons;
+using SchoolCollab.Students.Core.Queries.ListSubjectStrands;
 using SchoolCollab.Students.Core.Queries.ListStudentSubjectAssignmentsByPeriod;
 using SchoolCollab.Students.Core.Queries.ListStudentSubjectAssignmentsByStudent;
 using SchoolCollab.Students.Core.Queries.ListStudents;
@@ -209,7 +219,7 @@ public static class StudentEndpoints
         });
 
         // ── Subjects ──────────────────────────────────────────────────────────────
-
+        
         studentsGroup.MapGet("/subjects", async (
             [FromServices] IQueryHandler<ListSubjects, SubjectDto[]> handler,
             CancellationToken ct) =>
@@ -267,6 +277,124 @@ public static class StudentEndpoints
             catch (ConcurrencyException ex)
             {
                 return Results.Conflict(new { ex.Message });
+            }
+        });
+
+        // ── Subject Strands ──────────────────────────────────────────────────────────
+
+        studentsGroup.MapGet("/subjects/{subjectId:guid}/strands", async (
+            Guid subjectId,
+            [FromServices] IQueryHandler<ListSubjectStrands, SubjectStrandDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListSubjectStrands(subjectId), ct)));
+
+        studentsGroup.MapPost("/subjects/strands", async (
+            [FromBody] CreateSubjectStrand command,
+            [FromServices] ICommandHandler<CreateSubjectStrand, SubjectStrandDto> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(command, ct);
+            return Results.Created($"/subjects/strands/{result.Id}", result);
+        });
+
+        studentsGroup.MapPut("/subjects/strands/{id:guid}", async (
+            Guid id,
+            [FromBody] UpdateSubjectStrandRequest req,
+            [FromServices] ICommandHandler<UpdateSubjectStrand, SubjectStrandDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new UpdateSubjectStrand(id, req.Name, req.Description, req.DisplayOrder), ct);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        studentsGroup.MapDelete("/subjects/strands/{id:guid}", async (
+            Guid id,
+            [FromServices] ICommandHandler<RemoveSubjectStrand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new RemoveSubjectStrand(id), ct);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        // ── Subject Lessons ──────────────────────────────────────────────────────────
+
+        studentsGroup.MapGet("/subjects/{subjectId:guid}/lessons", async (
+            Guid subjectId,
+            Guid? strandId,
+            [FromServices] IQueryHandler<ListSubjectLessons, SubjectLessonDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListSubjectLessons(subjectId, strandId), ct)));
+
+        studentsGroup.MapPost("/subjects/lessons", async (
+            [FromBody] CreateSubjectLesson command,
+            [FromServices] ICommandHandler<CreateSubjectLesson, SubjectLessonDto> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(command, ct);
+            return Results.Created($"/subjects/lessons/{result.Id}", result);
+        });
+
+        studentsGroup.MapPut("/subjects/lessons/{id:guid}", async (
+            Guid id,
+            [FromBody] UpdateSubjectLessonRequest req,
+            [FromServices] ICommandHandler<UpdateSubjectLesson, SubjectLessonDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new UpdateSubjectLesson(id, req.Name, req.Description, req.StartDate, req.EndDate, req.DisplayOrder), ct);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        studentsGroup.MapPost("/subjects/lessons/{id:guid}/strand", async (
+            Guid id,
+            [FromBody] AssignLessonStrandRequest req,
+            [FromServices] ICommandHandler<AssignLessonStrand, SubjectLessonDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new AssignLessonStrand(id, req.StrandId), ct);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        studentsGroup.MapDelete("/subjects/lessons/{id:guid}", async (
+            Guid id,
+            [FromServices] ICommandHandler<RemoveSubjectLesson> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new RemoveSubjectLesson(id), ct);
+                return Results.NoContent();
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
             }
         });
 
@@ -457,6 +585,23 @@ public static class StudentEndpoints
             return Results.Created($"/grade-subjects/{id}", new { id });
         });
 
+        studentsGroup.MapPut("/grade-subjects/{id:guid}/tags", async (
+            Guid id,
+            [FromBody] UpdateGradeSubjectTagsRequest req,
+            [FromServices] ICommandHandler<UpdateGradeSubjectTags, GradeSubjectAssignmentDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new UpdateGradeSubjectTags(id, req.SubjectStrandId, req.SubjectLessonId), ct);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
         studentsGroup.MapDelete("/grade-subjects/{id:guid}", async (
             Guid id,
             [FromServices] ICommandHandler<RemoveGradeSubject> handler,
@@ -520,6 +665,10 @@ public static class StudentEndpoints
 internal record UpdateStudentRequest(string FirstName, string LastName, DateOnly? DateOfBirth, Guid? GenderCodedValueId, string ContactEmail, string? ContactPhone);
 internal record UpdateGradeLevelRequest(int Level, string Name, int DisplayOrder);
 internal record UpdateSubjectRequest(string Name, int DisplayOrder);
+internal record UpdateSubjectStrandRequest(string Name, string? Description, int DisplayOrder);
+internal record UpdateSubjectLessonRequest(string Name, string? Description, DateOnly? StartDate, DateOnly? EndDate, int DisplayOrder);
+internal record AssignLessonStrandRequest(Guid? StrandId);
+internal record UpdateGradeSubjectTagsRequest(Guid? SubjectStrandId, Guid? SubjectLessonId);
 internal record UpdatePeriodRequest(string Name, DateOnly StartDate, DateOnly EndDate, bool AllowSubjectOverrides);
 internal record TransferStudentRequest(Guid NewGradeLevelId, DateOnly? TransferDate);
 internal record WithdrawStudentRequest(DateOnly? ExitDate);

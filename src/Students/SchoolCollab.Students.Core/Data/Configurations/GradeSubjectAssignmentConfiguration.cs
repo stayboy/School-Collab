@@ -17,6 +17,18 @@ internal sealed class GradeSubjectAssignmentConfiguration : EntityTypeConfigurat
         builder.Property(x => x.GradeLevelId).IsRequired();
         builder.Property(x => x.SubjectId).IsRequired();
         builder.Property(x => x.PeriodId).IsRequired();
+        builder.Property(x => x.SubjectStrandId);
+        builder.Property(x => x.SubjectLessonId);
+
+        builder.HasOne<SubjectStrand>()
+            .WithMany()
+            .HasForeignKey(x => x.SubjectStrandId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasOne<SubjectLesson>()
+            .WithMany()
+            .HasForeignKey(x => x.SubjectLessonId)
+            .OnDelete(DeleteBehavior.SetNull);
 
 
         builder.HasIndex(x => new { x.GradeLevelId, x.SubjectId, x.PeriodId })

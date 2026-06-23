@@ -1,29 +1,42 @@
-using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.CodedValues.Core.Domain;
 
-public sealed class TenantCodedValueOverride : BaseTenantEntity
+public sealed class TenantCodedValueOverride : IEntity, IAuditableEntity
 {
-    public Guid CodedValueId { get; private set; }
-    public string? Code { get; private set; }
-    public string? Name { get; private set; }
-    public bool? IsDisabled { get; private set; }
-
     private TenantCodedValueOverride() { }
 
-    internal TenantCodedValueOverride(Guid tenantId, Guid codedValueId, string? code = null, string? name = null, bool? isDisabled = null)
+    public Guid Id { get; private set; }
+    public Guid TenantId { get; private set; }
+    public Guid GlobalCodedValueId { get; private set; }
+    public string? OverriddenName { get; private set; }
+    public string? OverriddenDescription { get; private set; }
+    public DateTimeOffset CreatedAt { get; private set; }
+    public DateTimeOffset UpdatedAt { get; private set; }
+
+    public static TenantCodedValueOverride Create(
+        Guid tenantId, 
+        Guid globalCodedValueId, 
+        string? name, 
+        string? description)
     {
-        TenantId = tenantId;
-        CodedValueId = codedValueId;
-        Code = code;
-        Name = name;
-        IsDisabled = isDisabled;
+        var now = DateTimeOffset.UtcNow;
+        return new TenantCodedValueOverride
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            GlobalCodedValueId = globalCodedValueId,
+            OverriddenName = name,
+            OverriddenDescription = description,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
     }
 
-    public void Update(string? code, string? name, bool? isDisabled)
+    public void Update(string? name, string? description)
     {
-        Code = code;
-        Name = name;
-        IsDisabled = isDisabled;
+        OverriddenName = name;
+        OverriddenDescription = description;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 }
