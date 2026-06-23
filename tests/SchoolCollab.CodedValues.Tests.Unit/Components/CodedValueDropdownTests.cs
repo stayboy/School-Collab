@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Admin.Shared.Constants;
 using SchoolCollab.Admin.Shared.Services;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Components;
@@ -68,13 +69,13 @@ public class CodedValueDropdownTests : BunitContext
 
         // Act
         var cut = Render<CodedValueDropdown>(parameters => parameters
-            .Add(p => p.ParentCode, "GENDER"));
+            .Add(p => p.Parent, CodedValueParent.Genders));
 
         cut.WaitForState(() => cut.Find("fluent-select") is not null);
 
         // Assert
         cut.Find("fluent-select").Should().NotBeNull();
-        handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDER");
+        handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDERS");
     }
 
     [TestMethod]
@@ -108,7 +109,7 @@ public class CodedValueDropdownTests : BunitContext
 
         // Act
         var cut = Render<CodedValueDropdown>(parameters => parameters
-            .Add(p => p.ParentCode, "ASSIGNMENT_TYPE")
+            .Add(p => p.Parent, CodedValueParent.Subjects)
             .Add(p => p.SelectedId, typeId)
             .Add(p => p.SelectedIdChanged, EventCallback.Factory.Create<Guid?>(this, value => selectedId = value)));
 
@@ -144,7 +145,7 @@ public class CodedValueDropdownTests : BunitContext
         Services.AddSingleton(new CodedValuesApiClient(http));
 
         var cut = Render<CodedValueDropdown>(parameters => parameters
-            .Add(p => p.ParentCode, "GENDER"));
+            .Add(p => p.Parent, CodedValueParent.Genders));
 
         cut.WaitForState(() => cut.Find("fluent-select") is not null);
         var initialRequestCount = handler.Requests.Count;
@@ -154,7 +155,7 @@ public class CodedValueDropdownTests : BunitContext
 
         // Assert
         handler.Requests.Count.Should().Be(initialRequestCount + 1);
-        handler.Requests.Last().RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDER");
+        handler.Requests.Last().RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDERS");
     }
 
     private class MultiResponseMockHttpMessageHandler : HttpMessageHandler

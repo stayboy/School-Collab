@@ -25,7 +25,8 @@
         @if (Step == 1)
         {
             <FluentStack Orientation="Orientation.Vertical" vertical-gap="20">
-                <CodedValueDropdown Parent="CodedValueParent.Grades" Label="Grade Level" @bind-SelectedId="_codedValueIdNullable" />
+                <CodedValueDropdown Parent="CodedValueParent.Grades" Label="Grade Level" SelectedId="_codedValueIdNullable" SelectedIdChanged="OnCodedValueChanged" />
+                <FluentTextField Label="Name" @bind-Value="_name" Required />
                 <FluentNumberField Label="Level" @bind-Value="_level" />
                 <FluentNumberField Label="Display Order" @bind-Value="_displayOrder" />
             </FluentStack>
@@ -111,13 +112,17 @@
         }
         @if (Step < 4)
         {
-            <FluentButton Appearance="Appearance.Accent" OnClick="NextStep">Next</FluentButton>
+            <FluentButton Appearance="Appearance.Accent" OnClick="NextStep" Disabled="!CanAdvance">Next</FluentButton>
         }
         else
         {
-            <FluentButton Appearance="Appearance.Accent" OnClick="SaveAll">Save and Finish</FluentButton>
+            <FluentButton Appearance="Appearance.Accent" OnClick="SaveAll" Disabled="!CanFinish">Save and Finish</FluentButton>
         }
     </div>
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_errorMessage</FluentMessageBar>
+    }
 </FluentStack>
 
 <style>
@@ -161,18 +166,48 @@
 
 @code {
     private int Step = 1;
-    private Guid? _codedValueIdNullable = Guid.Empty;
+    private Guid? _codedValueIdNullable = null;
     private string _name = "";
     private int _level;
     private int _displayOrder;
+    private string? _errorMessage;
+
+    private bool CanAdvance => Step switch
+    {
+        1 => !string.IsNullOrWhiteSpace(_name) && _codedValueIdNullable.HasValue,
+        _ => true
+    };
+
+    private bool CanFinish => CanAdvance && _level >= 0 && _displayOrder >= 0;
 
     private SchoolCollab.Students.Core.DTOs.SubjectDto[] _availableSubjects = [];
     private List<SchoolCollab.Students.Core.DTOs.SubjectDto> _assignedSubjects = new();
     private SchoolCollab.Students.Core.DTOs.StudentDto[] _availableStudents = [];
     private List<SchoolCollab.Students.Core.DTOs.StudentDto> _assignedStudents = new();
 
-    private void NextStep() => Step++;
-    private void PrevStep() => Step--;
+    private void NextStep()
+    {
+        _errorMessage = null;
+        Step++;
+    }
+
+    private void PrevStep()
+    {
+        _errorMessage = null;
+        Step--;
+    }
+
+    private async Task OnCodedValueChanged(Guid? id)
+    {
+        _codedValueIdNullable = id;
+        _errorMessage = null;
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            // Try to seed the name from the selected coded value if it hasn't been manually entered yet.
+            var items = await Api.ListGradeLevelsAsync();
+            _name = items?.FirstOrDefault(x => x.CodedValueId == id)?.Name ?? string.Empty;
+        }
+    }
 
     private async Task LoadStepData()
     {
@@ -181,23 +216,25 @@
             var subjects = await Api.ListSubjectsAsync() ?? [];
             _availableSubjects = subjects.Select(s => new SchoolCollab.Students.Core.DTOs.SubjectDto(
                 s.Id, s.CodedValueId, s.Code, s.Name, s.DisplayOrder, s.CreatedAt, s.UpdatedAt
-            )).ToArray();
-            _availableSubjects = _availableSubjects.Where(s => !_assignedSubjects.Contains(s)).ToArray();
+            )).Where(s => !_assignedSubjects.Contains(s)).ToArray();
         }
         else if (Step == 3)
         {
             var students = await Api.ListStudentsAsync() ?? [];
             _availableStudents = students.Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
                 s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt
-            )).ToArray();
-            _availableStudents = _availableStudents.Where(s => !_assignedStudents.Contains(s)).ToArray();
+            )).Where(s => !_assignedStudents.Contains(s)).ToArray();
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (firstRender) return;
-        await LoadStepData();
+        // Only reload data when landing on subjects/students steps for the first time this render.
+        if ((Step == 2 && !_availableSubjects.Any()) || (Step == 3 && !_availableStudents.Any()))
+        {
+            await LoadStepData();
+        }
     }
 
     private void AddSubject(SchoolCollab.Students.Core.DTOs.SubjectDto subject)
@@ -209,8 +246,10 @@
     private async Task RemoveSubject(SchoolCollab.Students.Core.DTOs.SubjectDto subject)
     {
         _assignedSubjects.Remove(subject);
-        _availableSubjects = await Api.ListSubjectsAsync() ?? []; // Refresh
-        _availableSubjects = _availableSubjects.Where(s => !_assignedSubjects.Contains(s)).ToArray();
+        var subjects = await Api.ListSubjectsAsync() ?? []; // Refresh
+        _availableSubjects = subjects.Select(s => new SchoolCollab.Students.Core.DTOs.SubjectDto(
+            s.Id, s.CodedValueId, s.Code, s.Name, s.DisplayOrder, s.CreatedAt, s.UpdatedAt
+        )).Where(s => !_assignedSubjects.Contains(s)).ToArray();
     }
 
     private void AddStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
@@ -222,8 +261,10 @@
     private async Task RemoveStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
     {
         _assignedStudents.Remove(student);
-        _availableStudents = await Api.ListStudentsAsync() ?? []; // Refresh
-        _availableStudents = _availableStudents.Where(s => !_assignedStudents.Contains(s)).ToArray();
+        var students = await Api.ListStudentsAsync() ?? []; // Refresh
+        _availableStudents = students.Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
+            s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt
+        )).Where(s => !_assignedStudents.Contains(s)).ToArray();
     }
 
     private void OpenCreateSubjectDialog()
@@ -235,10 +276,24 @@
 
     private async Task SaveAll()
     {
+        _errorMessage = null;
+
+        if (!_codedValueIdNullable.HasValue)
+        {
+            _errorMessage = "Please select a grade level coded value.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            _errorMessage = "Grade level name is required.";
+            return;
+        }
+
         try
         {
             // 1. Create Grade Level using the selected CodedValueId
-            var gradeId = await Api.CreateGradeLevelAsync(new CreateGradeLevelRequest(_codedValueIdNullable ?? Guid.Empty, _level, _name, _displayOrder));
+            var gradeId = await Api.CreateGradeLevelAsync(new CreateGradeLevelRequest(_codedValueIdNullable.Value, _level, _name, _displayOrder));
 
             // 2. Assign Subjects (requires PeriodId, assuming a default or active period for this example)
             var periods = await Api.ListPeriodsAsync();
@@ -266,6 +321,7 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error saving grade level wizard");
+            _errorMessage = $"Failed to save grade level: {ex.Message}";
         }
     }
 }
