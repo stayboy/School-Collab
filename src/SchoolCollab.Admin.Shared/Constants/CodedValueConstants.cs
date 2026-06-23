@@ -13,11 +13,11 @@ public static class CodedValueParentExtensions
 {
     public static string ToCode(this CodedValueParent parent) => parent switch
     {
-        CodedValueParent.Genders => "GENDERS",
+        CodedValueParent.Genders => "GENDER",
         CodedValueParent.Status => "STATUS",
         CodedValueParent.AiModels => "AI-MODELS",
-        CodedValueParent.Subjects => "SUBJECTS",
-        CodedValueParent.Grades => "GRADES",
+        CodedValueParent.Subjects => "SUBJECT",
+        CodedValueParent.Grades => "GRADE",
         _ => throw new ArgumentOutOfRangeException(nameof(parent))
     };
 }

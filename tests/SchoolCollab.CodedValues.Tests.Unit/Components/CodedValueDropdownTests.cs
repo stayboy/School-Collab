@@ -75,7 +75,7 @@ public class CodedValueDropdownTests : BunitContext
 
         // Assert
         cut.Find("fluent-select").Should().NotBeNull();
-        handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDERS");
+        handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDER");
     }
 
     [TestMethod]
@@ -117,6 +117,7 @@ public class CodedValueDropdownTests : BunitContext
 
         // Assert
         cut.Find("fluent-select")?.GetAttribute("current-value")?.Should().Be(typeId.ToString());
+        handler.LastRequest?.RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=SUBJECT");
     }
 
     // Note: bUnit 2.7.2 does not expose SetParametersAndRender on IRenderedComponent<T>.
@@ -155,7 +156,7 @@ public class CodedValueDropdownTests : BunitContext
 
         // Assert
         handler.Requests.Count.Should().Be(initialRequestCount + 1);
-        handler.Requests.Last().RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDERS");
+        handler.Requests.Last().RequestUri?.PathAndQuery.Should().Be("/coded-values/by-parent?parentCode=GENDER");
     }
 
     private class MultiResponseMockHttpMessageHandler : HttpMessageHandler
