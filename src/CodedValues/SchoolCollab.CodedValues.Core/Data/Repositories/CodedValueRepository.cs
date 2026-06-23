@@ -115,11 +115,11 @@ internal sealed class CodedValueRepository(CodedValuesDbContext db) : ICodedValu
     public async Task<TenantCodedValueOverride?> GetOverrideAsync(Guid tenantId, Guid codedValueId, CancellationToken cancellationToken = default) =>
         await db.TenantCodedValueOverrides
             .IgnoreQueryFilters()
-            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.CodedValueId == codedValueId, cancellationToken);
+            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.GlobalCodedValueId == codedValueId, cancellationToken);
 
     public async Task UpsertOverrideAsync(TenantCodedValueOverride overrideValue, CancellationToken cancellationToken = default)
     {
-        var existing = await GetOverrideAsync(overrideValue.TenantId, overrideValue.CodedValueId, cancellationToken);
+        var existing = await GetOverrideAsync(overrideValue.TenantId, overrideValue.GlobalCodedValueId, cancellationToken);
         if (existing is not null)
         {
             db.TenantCodedValueOverrides.Remove(existing);
@@ -141,11 +141,11 @@ internal sealed class CodedValueRepository(CodedValuesDbContext db) : ICodedValu
     public async Task<TenantCodedValueAttributeOverride?> GetAttributeOverrideAsync(Guid tenantId, Guid codedValueId, string key, CancellationToken cancellationToken = default) =>
         await db.TenantCodedValueAttributeOverrides
             .IgnoreQueryFilters()
-            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.CodedValueId == codedValueId && x.AttributeKey == key, cancellationToken);
+            .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.GlobalCodedValueId == codedValueId && x.AttributeKey == key, cancellationToken);
 
     public async Task UpsertAttributeOverrideAsync(TenantCodedValueAttributeOverride attributeOverride, CancellationToken cancellationToken = default)
     {
-        var existing = await GetAttributeOverrideAsync(attributeOverride.TenantId, attributeOverride.CodedValueId, attributeOverride.AttributeKey, cancellationToken);
+        var existing = await GetAttributeOverrideAsync(attributeOverride.TenantId, attributeOverride.GlobalCodedValueId, attributeOverride.AttributeKey, cancellationToken);
         if (existing is not null)
         {
             db.TenantCodedValueAttributeOverrides.Remove(existing);

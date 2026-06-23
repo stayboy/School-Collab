@@ -163,8 +163,8 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         value.SetAttribute("region", "Global Region");
         _db.CodedValues.Add(value);
         _db.TenantCodedValueOverrides.AddRange(
-            new TenantCodedValueOverride(tenantAId, value.Id, "A_CODE", "Tenant A Name", false),
-            new TenantCodedValueOverride(tenantBId, value.Id, "B_CODE", "Tenant B Name", true));
+            TenantCodedValueOverride.Create(tenantAId, value.Id, "Tenant A Name", null),
+            TenantCodedValueOverride.Create(tenantBId, value.Id, "Tenant B Name", null));
         _db.TenantCodedValueAttributeOverrides.AddRange(
             new TenantCodedValueAttributeOverride(tenantAId, value.Id, "region", "Tenant A Region"),
             new TenantCodedValueAttributeOverride(tenantBId, value.Id, "region", "Tenant B Region"));
@@ -175,7 +175,7 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         var tenantAResult = await _handler.HandleAsync(new GetCodedValueByCode("tenant_code"));
 
         tenantAResult.Should().NotBeNull();
-        tenantAResult!.Code.Should().Be("A_CODE");
+        tenantAResult!.Code.Should().Be("TENANT_CODE");
         tenantAResult.Name.Should().Be("Tenant A Name");
         tenantAResult.IsDisabled.Should().BeFalse();
         tenantAResult.Attributes.Should().ContainSingle(a => a.Key == "region" && a.Value == "Tenant A Region");
@@ -185,9 +185,9 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         var tenantBResult = await _handler.HandleAsync(new GetCodedValueByCode("tenant_code"));
 
         tenantBResult.Should().NotBeNull();
-        tenantBResult!.Code.Should().Be("B_CODE");
+        tenantBResult!.Code.Should().Be("TENANT_CODE");
         tenantBResult.Name.Should().Be("Tenant B Name");
-        tenantBResult.IsDisabled.Should().BeTrue();
+        tenantBResult.IsDisabled.Should().BeFalse();
         tenantBResult.Attributes.Should().ContainSingle(a => a.Key == "region" && a.Value == "Tenant B Region");
     }
 

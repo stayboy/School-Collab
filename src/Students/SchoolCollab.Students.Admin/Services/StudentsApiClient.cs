@@ -25,6 +25,8 @@ public sealed record GradeLevelDto(
     int Level,
     string Name,
     int DisplayOrder,
+    int SubjectCount,
+    int StudentCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -211,11 +213,11 @@ public sealed class StudentsApiClient
     // ── Grade Levels ─────────────────────────────────────────────────────────
 
     public async Task<GradeLevelDto[]?> ListGradeLevelsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GradeLevelDto[]>("/grade-levels", ct);
+        await _http.GetFromJsonAsync<GradeLevelDto[]>("/students/grade-levels", ct);
 
     public async Task<GradeLevelDto?> GetGradeLevelByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/grade-levels/{id}", ct);
+        var response = await _http.GetAsync($"/students/grade-levels/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<GradeLevelDto>(ct);
@@ -223,23 +225,23 @@ public sealed class StudentsApiClient
 
     public async Task<Guid> CreateGradeLevelAsync(CreateGradeLevelRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/grade-levels", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/grade-levels", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task UpdateGradeLevelAsync(Guid id, UpdateGradeLevelRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/grade-levels/{id}", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PutAsJsonAsync($"/students/grade-levels/{id}", req, ct)).EnsureSuccessStatusCode();
 
     // ── Subjects ─────────────────────────────────────────────────────────────
 
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<SubjectDto[]>("/subjects", ct);
+        await _http.GetFromJsonAsync<SubjectDto[]>("/students/subjects", ct);
 
     public async Task<SubjectDto?> GetSubjectByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/subjects/{id}", ct);
+        var response = await _http.GetAsync($"/students/subjects/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<SubjectDto>(ct);
@@ -247,23 +249,23 @@ public sealed class StudentsApiClient
 
     public async Task<Guid> CreateSubjectAsync(CreateSubjectRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/subjects", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/subjects", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task UpdateSubjectAsync(Guid id, UpdateSubjectRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/subjects/{id}", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PutAsJsonAsync($"/students/subjects/{id}", req, ct)).EnsureSuccessStatusCode();
 
     // ── Periods ──────────────────────────────────────────────────────────────
 
     public async Task<PeriodDto[]?> ListPeriodsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<PeriodDto[]>("/periods", ct);
+        await _http.GetFromJsonAsync<PeriodDto[]>("/students/periods", ct);
 
     public async Task<PeriodDto?> GetPeriodByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/periods/{id}", ct);
+        var response = await _http.GetAsync($"/students/periods/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<PeriodDto>(ct);
@@ -271,80 +273,80 @@ public sealed class StudentsApiClient
 
     public async Task<Guid> CreatePeriodAsync(CreatePeriodRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/periods", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/periods", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task UpdatePeriodAsync(Guid id, UpdatePeriodRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/periods/{id}", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PutAsJsonAsync($"/students/periods/{id}", req, ct)).EnsureSuccessStatusCode();
 
     public async Task ActivatePeriodAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/periods/{id}/activate", null, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsync($"/students/periods/{id}/activate", null, ct)).EnsureSuccessStatusCode();
 
     public async Task CompletePeriodAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/periods/{id}/complete", null, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsync($"/students/periods/{id}/complete", null, ct)).EnsureSuccessStatusCode();
 
     // ── Enrollments ───────────────────────────────────────────────────────────
 
     public async Task<StudentEnrollmentDto[]?> ListEnrollmentsByStudentAsync(Guid studentId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentEnrollmentDto[]>($"/enrollments/by-student/{studentId}", ct);
+        await _http.GetFromJsonAsync<StudentEnrollmentDto[]>($"/students/enrollments/by-student/{studentId}", ct);
 
     public async Task<StudentEnrollmentDto[]?> ListEnrollmentsByPeriodAsync(Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentEnrollmentDto[]>($"/enrollments/by-period/{periodId}", ct);
+        await _http.GetFromJsonAsync<StudentEnrollmentDto[]>($"/students/enrollments/by-period/{periodId}", ct);
 
     public async Task<Guid> EnrollStudentAsync(EnrollStudentRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/enrollments", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/enrollments", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task TransferStudentAsync(Guid enrollmentId, TransferStudentRequest req, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/enrollments/{enrollmentId}/transfer", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/students/enrollments/{enrollmentId}/transfer", req, ct)).EnsureSuccessStatusCode();
 
     public async Task WithdrawStudentAsync(Guid enrollmentId, WithdrawStudentRequest req, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/enrollments/{enrollmentId}/withdraw", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/students/enrollments/{enrollmentId}/withdraw", req, ct)).EnsureSuccessStatusCode();
 
     // ── Grade Subject Assignments ─────────────────────────────────────────────
 
     public async Task<GradeSubjectAssignmentDto[]?> ListGradeSubjectsByPeriodAsync(Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>($"/grade-subjects/by-period/{periodId}", ct);
+        await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>($"/students/grade-subjects/by-period/{periodId}", ct);
 
     public async Task<GradeSubjectAssignmentDto[]?> ListGradeSubjectsByGradeAsync(Guid gradeLevelId, Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>($"/grade-subjects/by-grade/{gradeLevelId}/period/{periodId}", ct);
+        await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>($"/students/grade-subjects/by-grade/{gradeLevelId}/period/{periodId}", ct);
 
     public async Task<Guid> AssignGradeSubjectAsync(AssignGradeSubjectRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/grade-subjects", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/grade-subjects", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task RemoveGradeSubjectAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/grade-subjects/{id}", ct)).EnsureSuccessStatusCode();
+        (await _http.DeleteAsync($"/students/grade-subjects/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Student Subject Assignments ──────────────────────────────────────────
 
     public async Task<StudentSubjectAssignmentDto[]?> ListStudentSubjectsByStudentAsync(Guid studentId, Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentSubjectAssignmentDto[]>($"/student-subjects/by-student/{studentId}/period/{periodId}", ct);
+        await _http.GetFromJsonAsync<StudentSubjectAssignmentDto[]>($"/students/student-subjects/by-student/{studentId}/period/{periodId}", ct);
 
     public async Task<StudentSubjectAssignmentDto[]?> ListStudentSubjectsByPeriodAsync(Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentSubjectAssignmentDto[]>($"/student-subjects/by-period/{periodId}", ct);
+        await _http.GetFromJsonAsync<StudentSubjectAssignmentDto[]>($"/students/student-subjects/by-period/{periodId}", ct);
 
     public async Task<Guid> AssignStudentSubjectAsync(AssignStudentSubjectRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/student-subjects", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/student-subjects", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task RemoveStudentSubjectAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/student-subjects/{id}", ct)).EnsureSuccessStatusCode();
+        (await _http.DeleteAsync($"/students/student-subjects/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Helper ───────────────────────────────────────────────────────────────
 

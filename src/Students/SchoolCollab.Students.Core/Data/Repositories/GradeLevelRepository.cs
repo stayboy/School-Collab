@@ -27,6 +27,7 @@ internal sealed class GradeLevelRepository(StudentsDbContext db)
             .OrderBy(x => x.Level)
             .Select(x => new GradeLevelDto(
                 x.Id, x.CodedValueId, x.Level, x.Name, x.DisplayOrder,
+                0, 0,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 }

@@ -100,7 +100,6 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
             modelBuilder.Entity("SchoolCollab.CodedValues.Core.Domain.TenantCodedValueAttributeOverride", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
@@ -110,15 +109,15 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                         .HasColumnType("character varying(100)")
                         .HasColumnName("attribute_key");
 
-                    b.Property<Guid>("CodedValueId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("coded_value_id");
-
                     b.Property<string>("CustomValue")
                         .IsRequired()
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
                         .HasColumnName("custom_value");
+
+                    b.Property<Guid>("GlobalCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("global_coded_value_id");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -127,9 +126,9 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
                     b.HasKey("Id")
                         .HasName("pk_tenant_coded_value_attribute_overrides");
 
-                    b.HasIndex("TenantId", "CodedValueId", "AttributeKey")
+                    b.HasIndex("TenantId", "GlobalCodedValueId", "AttributeKey")
                         .IsUnique()
-                        .HasDatabaseName("ix_tenant_coded_value_attribute_overrides_tenant_id_coded_valu");
+                        .HasDatabaseName("ix_tenant_coded_value_attribute_overrides_tenant_id_global_cod");
 
                     b.ToTable("tenant_coded_value_attribute_overrides", (string)null);
                 });
@@ -137,38 +136,44 @@ namespace SchoolCollab.CodedValues.Core.Data.Migrations
             modelBuilder.Entity("SchoolCollab.CodedValues.Core.Domain.TenantCodedValueOverride", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("Code")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("code");
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
 
-                    b.Property<Guid>("CodedValueId")
+                    b.Property<Guid>("GlobalCodedValueId")
                         .HasColumnType("uuid")
-                        .HasColumnName("coded_value_id");
+                        .HasColumnName("global_coded_value_id");
 
-                    b.Property<bool?>("IsDisabled")
-                        .HasColumnType("boolean")
-                        .HasColumnName("is_disabled");
+                    b.Property<string>("OverriddenDescription")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("overridden_description");
 
-                    b.Property<string>("Name")
-                        .HasMaxLength(255)
-                        .HasColumnType("character varying(255)")
-                        .HasColumnName("name");
+                    b.Property<string>("OverriddenName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("overridden_name");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
 
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
                     b.HasKey("Id")
                         .HasName("pk_tenant_coded_value_overrides");
 
-                    b.HasIndex("TenantId", "CodedValueId")
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_tenant_coded_value_overrides_tenant");
+
+                    b.HasIndex("TenantId", "GlobalCodedValueId")
                         .IsUnique()
-                        .HasDatabaseName("ix_tenant_coded_value_overrides_tenant_id_coded_value_id");
+                        .HasDatabaseName("ix_tenant_coded_value_overrides_unique");
 
                     b.ToTable("tenant_coded_value_overrides", (string)null);
                 });

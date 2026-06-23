@@ -16,10 +16,10 @@ public sealed class TenantCodedValueAttributeOverrideConfiguration
     {
         builder.ToTable("tenant_coded_value_attribute_overrides");
 
-        builder.Property(x => x.CodedValueId).IsRequired();
+        builder.Property(x => x.GlobalCodedValueId).IsRequired();
         builder.Property(x => x.AttributeKey).IsRequired().HasMaxLength(100);
         builder.Property(x => x.CustomValue).IsRequired().HasMaxLength(1000);
 
-        builder.HasIndex(x => new { x.TenantId, x.CodedValueId, x.AttributeKey }).IsUnique();
+        builder.HasIndex(x => new { x.TenantId, x.GlobalCodedValueId, x.AttributeKey }).IsUnique();
     }
 }

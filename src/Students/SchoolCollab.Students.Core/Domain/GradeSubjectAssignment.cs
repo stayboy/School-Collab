@@ -13,6 +13,8 @@ public sealed class GradeSubjectAssignment : IEntity, IAuditableEntity, IHasRowV
     public Guid GradeLevelId { get; private set; }
     public Guid SubjectId { get; private set; }
     public Guid PeriodId { get; private set; }
+    public Guid? SubjectStrandId { get; private set; }
+    public Guid? SubjectLessonId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -22,7 +24,9 @@ public sealed class GradeSubjectAssignment : IEntity, IAuditableEntity, IHasRowV
     public static GradeSubjectAssignment Create(
         Guid gradeLevelId,
         Guid subjectId,
-        Guid periodId)
+        Guid periodId,
+        Guid? subjectStrandId = null,
+        Guid? subjectLessonId = null)
     {
         var now = DateTimeOffset.UtcNow;
         var assignment = new GradeSubjectAssignment
@@ -31,12 +35,23 @@ public sealed class GradeSubjectAssignment : IEntity, IAuditableEntity, IHasRowV
             GradeLevelId = gradeLevelId,
             SubjectId = subjectId,
             PeriodId = periodId,
+            SubjectStrandId = subjectStrandId,
+            SubjectLessonId = subjectLessonId,
             CreatedAt = now,
             UpdatedAt = now
         };
 
         assignment._domainEvents.Add(new GradeSubjectAssignedEvent(assignment.Id, gradeLevelId, subjectId, periodId));
         return assignment;
+    }
+
+    public void UpdateTags(Guid? strandId, Guid? lessonId)
+    {
+        if (SubjectStrandId == strandId && SubjectLessonId == lessonId) return;
+        
+        SubjectStrandId = strandId;
+        SubjectLessonId = lessonId;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void ClearDomainEvents() => _domainEvents.Clear();

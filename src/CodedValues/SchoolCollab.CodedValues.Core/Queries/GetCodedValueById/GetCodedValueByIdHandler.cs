@@ -26,12 +26,18 @@ public sealed class GetCodedValueByIdHandler(
             static async (state, ct) =>
             {
                 var (db, id) = state;
+                var tenantId = db.CurrentTenantId;
+
                 var cv = await db.CodedValues
                     .AsNoTracking()
                     .SingleOrDefaultAsync(x => x.Id == id, ct);
 
                 if (cv is null)
                     return null;
+
+                var overrideVal = await db.TenantCodedValueOverrides
+                    .AsNoTracking()
+                    .SingleOrDefaultAsync(x => x.GlobalCodedValueId == id && x.TenantId == tenantId, ct);
 
                 string? parentCode = cv.ParentId.HasValue
                     ? await db.CodedValues.AsNoTracking()
@@ -43,8 +49,8 @@ public sealed class GetCodedValueByIdHandler(
                 return new CodedValueDto(
                     cv.Id,
                     cv.Code,
-                    cv.Name,
-                    cv.Description,
+                    overrideVal?.OverriddenName ?? cv.Name,
+                    overrideVal?.OverriddenDescription ?? cv.Description,
                     cv.ParentId,
                     parentCode,
                     cv.IsDisabled,

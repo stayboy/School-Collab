@@ -50,7 +50,7 @@ public class CodedValueResolverTests
         var cv = CodedValue.Create("CODE1", "Name1", "Desc1", null, 0);
         cv.SetAttribute("Key1", "Val1");
 
-        var overrideValue = new TenantCodedValueOverride(tenantId, cv.Id, "CODE_OVERRIDE", "Name Override", true);
+        var overrideValue = TenantCodedValueOverride.Create(tenantId, cv.Id, "Name Override", "Description Override");
         var attrOverride = new TenantCodedValueAttributeOverride(tenantId, cv.Id, "Key1", "Val Override");
 
         _repoMock.Setup(r => r.GetOverrideAsync(tenantId, cv.Id, It.IsAny<CancellationToken>()))
@@ -62,9 +62,10 @@ public class CodedValueResolverTests
         var result = await _resolver.ResolveAsync(cv, tenantId);
 
         // Assert
-        result.Code.Should().Be("CODE_OVERRIDE");
+        result.Code.Should().Be("CODE1");
         result.Name.Should().Be("Name Override");
-        result.IsDisabled.Should().BeTrue();
+        result.Description.Should().Be("Description Override");
+        result.IsDisabled.Should().BeFalse();
         result.Attributes.Should().ContainSingle(a => a.Key == "Key1" && a.Value == "Val Override");
     }
 
@@ -75,7 +76,7 @@ public class CodedValueResolverTests
         var tenantId = Guid.NewGuid();
         var cv = CodedValue.Create("CODE1", "Name1", "Desc1", null, 0);
         
-        var overrideValue = new TenantCodedValueOverride(tenantId, cv.Id, null, "Only Name Override", null);
+        var overrideValue = TenantCodedValueOverride.Create(tenantId, cv.Id, "Only Name Override", null);
 
         _repoMock.Setup(r => r.GetOverrideAsync(tenantId, cv.Id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(overrideValue);

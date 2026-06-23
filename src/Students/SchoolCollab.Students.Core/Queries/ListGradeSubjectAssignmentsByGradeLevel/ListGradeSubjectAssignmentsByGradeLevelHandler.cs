@@ -37,6 +37,8 @@ public sealed class ListGradeSubjectAssignmentsByGradeLevelHandler(
                     a.GradeLevelId,
                     a.SubjectId,
                     a.PeriodId,
+                    a.SubjectStrandId,
+                    a.SubjectLessonId,
                     a.CreatedAt,
                     a.UpdatedAt)).ToArray();
             },
