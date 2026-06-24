@@ -1,9 +1,10 @@
 @using Microsoft.Extensions.AI
 @using SchoolCollab.AI
+@using SchoolCollab.AI.Services
 @implements IAsyncDisposable
 
 @inject AiChatClient AiChatClient
-@inject CodedValuesApiClient Api
+@inject IConfiguration Configuration
 @inject ILogger<CodedValuesChat> Logger
 @inject NavigationManager Nav
 
@@ -60,37 +61,43 @@
                 }
             </div>
 
-            <ul class="input-area">
-                <li>
-                    <FluentSelect Items="@_models"
-                                 @bind-SelectedOption="@_selectedModel"
-                                 OptionText="@(m => $"{m!.Label} (w:{m!.Weight})")"
-                                 OptionValue="@(m => m!.Value)"
-                                 class="model-label"
-                                 aria-label="AI model" />
-                </li>
-                <li>
-                    <div class="input-row">
-                        <div class="input-field-wrapper">
-                            <FluentTextArea @ref="_inputRef"
-                                           @bind-Value="_inputText"
-                                           Placeholder="Ask me to create coded values..."
-                                           class="full-width"
-                                           Rows="2"
-                                           aria-label="Chat input"
-                                           OnKeyDown="HandleKeyDown" />
-                        </div>
-                        <FluentButton Appearance="Appearance.Accent"
-                                     OnClick="SendAsync"
-                                     Disabled="@_isStreaming"
-                                     aria-label="Send message">
-                            ➤
-                        </FluentButton>
+            <div class="input-area">
+                <div class="input-row">
+                    <div class="input-field-wrapper">
+                        <FluentTextArea @ref="_inputRef"
+                                       @bind-Value="_inputText"
+                                       Placeholder="Ask me to create coded values..."
+                                       class="full-width"
+                                       Rows="2"
+                                       aria-label="Chat input"
+                                       OnKeyDown="HandleKeyDown" />
                     </div>
-                </li>
-            </ul>
+                    <FluentButton Appearance="Appearance.Accent"
+                                 OnClick="SendAsync"
+                                 Disabled="@_isStreaming"
+                                 aria-label="Send message">
+                        ➤
+                    </FluentButton>
+                </div>
+            </div>
+            <div class="action-bar">
+                <FluentStack Orientation="Orientation.Horizontal">
+                    <FluentButton Appearance="Appearance.Accent"
+                                 OnClick="SendAsync"
+                                 Disabled="@_isStreaming"
+                                 aria-label="Send message">
+                        Send
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Stealth"
+                                 OnClick="ClearAsync"
+                                 Disabled="@_isStreaming"
+                                 aria-label="Clear chat">
+                        Clear
+                    </FluentButton>
+                </FluentStack>
+            </div>
             <div class="model-info">
-                <span class="model-label-text">Model: @_selectedModel?.Value</span>
+                <span class="model-label-text">Model: @EffectiveModel (@_provider)</span>
             </div>
         </ChildContent>
         <ErrorContent Context="ex">
@@ -113,108 +120,30 @@
     private List<ToolCallDisplay>? _activeToolCalls;
     private FluentTextArea? _inputRef;
     private CancellationTokenSource? _sendCts;
-    private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    private record ModelOption(string Value, string Label, decimal Weight = 0m);
+    private string _provider = ChatClientFactory.Providers.Ollama;
+    private string _effectiveModel = ChatModelResolver.DefaultOllamaModel;
 
-    private static readonly ModelOption[] _fallbackModels =
-    [
-        new("llama3.1:8b", "Llama 3.1 8B", 1.0m),
-        new("llama3.2:3b", "Llama 3.2 3B", 0.4m),
-        new("phi3.5:3.8b", "Phi 3.5 3.8B", 0.5m),
-        new("mistral:7b", "Mistral 7B", 0.9m),
-        new("qwen2.5:7b", "Qwen 2.5 7B", 0.9m),
-        new("gemma2:9b", "Gemma 2 9B", 1.2m),
-        new("openai/gpt-4o-mini", "GPT-4o Mini", 1.5m),
-        new("openai/gpt-4o", "GPT-4o", 2.0m),
-        new("anthropic/claude-3.5-haiku", "Claude 3.5 Haiku", 1.5m),
-        new("anthropic/claude-sonnet-4", "Claude Sonnet 4", 2.5m),
-        new("google/gemini-2.0-flash-001", "Gemini 2.0 Flash", 1.3m),
-        new("deepseek/deepseek-chat", "DeepSeek V3", 1.0m)
-    ];
-
-    private ModelOption[] _models = [];
-    private ModelOption? _selectedModel;
-    private string _defaultProvider = "ollama";
+    /// <summary>
+    /// The model that will actually be sent to the AI API, resolved from configuration.
+    /// </summary>
+    private string EffectiveModel => _effectiveModel;
 
     private static string GetMessageClass(ChatRole role) =>
         role == ChatRole.User ? "message-user" : "message-assistant";
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        _loadCts = new CancellationTokenSource();
-        try
-        {
-            // Fetch default provider and model list in parallel
-            var providerTask = AiChatClient.GetDefaultProviderAsync(_loadCts.Token);
-            var parentTask = Api.GetByCodeAsync("AI-MODELS", ct: _loadCts.Token);
-            await Task.WhenAll(providerTask, parentTask);
-
-            if (_disposed) return;
-
-            _defaultProvider = await providerTask;
-            var parent = await parentTask;
-            if (parent is null)
-            {
-                ApplyFallbackModels();
-                return;
-            }
-
-            var children = await Api.GetChildrenAsync(parent.Id, _loadCts.Token);
-            if (_disposed || children is null || children.Length == 0)
-            {
-                ApplyFallbackModels();
-                return;
-            }
-
-            // Determine the model-name attribute key based on the default provider
-            var modelNameKey = _defaultProvider.Equals("openrouter", StringComparison.OrdinalIgnoreCase)
-                ? "openrouterModelName"
-                : "ollamaModelName";
-
-            var models = children
-                .Where(c => !c.IsDisabled && !c.IsDeleted)
-                .OrderBy(c => c.Attributes.FirstOrDefault(a => a.Key == "weight") is { } wAttr
-                    ? decimal.TryParse(wAttr.Value, out var w) ? w : decimal.MaxValue
-                    : decimal.MaxValue)
-                .ThenBy(c => c.DisplayOrder)
-                .Select(c =>
-                {
-                    var weightAttr = c.Attributes.FirstOrDefault(a => a.Key == "weight");
-                    var weight = weightAttr is not null && decimal.TryParse(weightAttr.Value, out var w) ? w : 0m;
-                    var modelName = c.Attributes.FirstOrDefault(a => a.Key == modelNameKey)?.Value
-                                     ?? c.Name;
-                    return new ModelOption(modelName, c.Name, weight);
-                })
-                .ToArray();
-
-            if (models.Length > 0)
-            {
-                _models = models;
-                _selectedModel = models[0];
-                Logger.LogInformation("Loaded {Count} AI models from coded values (provider: {Provider}, attribute: {Attr})",
-                    models.Length, _defaultProvider, modelNameKey);
-            }
-            else
-            {
-                ApplyFallbackModels();
-            }
-        }
-        catch (OperationCanceledException) { /* user navigated away */ }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogWarning(ex, "Failed to load AI models from API, using fallback list");
-            ApplyFallbackModels();
-        }
+        (_provider, _effectiveModel) = ResolveModelFromConfiguration();
+        Logger.LogInformation("AI chat configured with provider {Provider} and model {Model}", _provider, _effectiveModel);
     }
 
-    private void ApplyFallbackModels()
-    {
-        _models = _fallbackModels;
-        _selectedModel = _fallbackModels[0];
-    }
+    private (string Provider, string Model) ResolveModelFromConfiguration()
+        => ChatModelResolver.Resolve(
+            Configuration["codedvalue-ai-provider"],
+            Configuration["Ollama:DefaultModel"],
+            Configuration["OpenRouter:DefaultModel"]);
 
     private async Task SendAsync()
     {
@@ -241,7 +170,9 @@
 
         try
         {
-            await foreach (var update in AiChatClient.ChatAsync(history, _selectedModel?.Value ?? _fallbackModels[0].Value, _sendCts.Token))
+            Logger.LogInformation("Sending AI prompt with provider {Provider} and model {Model}", _provider, EffectiveModel);
+
+            await foreach (var update in AiChatClient.ChatAsync(history, EffectiveModel, _sendCts.Token))
             {
                 if (_disposed) return;
 
@@ -323,12 +254,20 @@
         }
     }
 
+    private async Task ClearAsync()
+    {
+        if (_isStreaming || _disposed) return;
+
+        _messages.Clear();
+        _streamingText = string.Empty;
+        _activeToolCalls = null;
+        await InvokeAsync(StateHasChanged);
+        Logger.LogInformation("Coded-values AI chat cleared");
+    }
+
     public async ValueTask DisposeAsync()
     {
         _disposed = true;
-        _loadCts?.Cancel();
-        _loadCts?.Dispose();
-        _loadCts = null;
         _sendCts?.Cancel();
         _sendCts?.Dispose();
         _sendCts = null;

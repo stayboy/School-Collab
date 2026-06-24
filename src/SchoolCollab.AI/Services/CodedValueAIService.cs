@@ -1,4 +1,6 @@
 using System.ComponentModel;
+using System.ClientModel;
+using System.Net;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -162,6 +164,7 @@ public sealed class CodedValueAIService
             // Collect ToolCallStart events to yield outside the try/catch (C# forbids yield in try with catch)
             var pendingStarts = new List<ChatUpdate.ToolCallStart>();
             bool streamCancelled = false;
+            Exception? streamError = null;
 
             try
             {
@@ -212,6 +215,14 @@ public sealed class CodedValueAIService
                 _logger.LogInformation("AI chat streaming canceled by user or system.");
                 streamCancelled = true;
             }
+            catch (ClientResultException ex)
+            {
+                // The AI provider returned an HTTP error (e.g. 401 Unauthorized, 429 rate
+                // limited, 5xx). Report it gracefully as a ChatUpdate.Error rather than letting
+                // it propagate and crash the /api/ai/chat endpoint as an HTTP 500.
+                _logger.LogError(ex, "AI provider returned an error (Status: {Status}).", ex.Status);
+                streamError = ex;
+            }
             catch (IOException ex)
             {
                 _logger.LogWarning(ex, "I/O operation aborted during AI chat streaming. This usually indicates the connection was closed unexpectedly.");
@@ -222,10 +233,22 @@ public sealed class CodedValueAIService
                 _logger.LogWarning(ex, "Socket error during AI chat streaming (SocketErrorCode={SocketErrorCode}). Treating as stream completion.", ex.SocketErrorCode);
                 streamCancelled = true;
             }
-            catch (HttpRequestException) when (ct.IsCancellationRequested)
+            catch (HttpRequestException ex) when (ct.IsCancellationRequested)
             {
                 _logger.LogInformation("AI chat streaming cancelled (HttpRequestException during cancellation)");
                 streamCancelled = true;
+            }
+            catch (HttpRequestException ex)
+            {
+                // Non-cancellation HTTP failure (DNS resolution, connection refused, etc.)
+                _logger.LogError(ex, "HTTP failure during AI chat streaming.");
+                streamError = ex;
+            }
+            catch (Exception ex)
+            {
+                // Last-resort: never let a provider/transport error crash the chat endpoint.
+                _logger.LogError(ex, "Unexpected error during AI chat streaming.");
+                streamError = ex;
             }
 
             // Yield any pending ToolCallStart events (must be outside try/catch for yield)
@@ -234,6 +257,14 @@ public sealed class CodedValueAIService
 
             if (streamCancelled)
                 yield break;
+
+            // If the provider returned an error (auth failure, rate limit, 5xx, transport),
+            // surface it as a structured ChatUpdate.Error instead of throwing an HTTP 500.
+            if (streamError is not null)
+            {
+                yield return new ChatUpdate.Error(FormatProviderError(streamError));
+                yield break;
+            }
 
             // Re-throw unexpected errors that were NOT caught above
             // (The catch blocks above only handle cancellation, I/O, and socket errors)
@@ -472,6 +503,28 @@ public sealed class CodedValueAIService
 
     private static string CleanForHistory(string text) => AiTextCleaner.CleanForHistory(text);
     private static string CleanForDisplay(string text) => AiTextCleaner.CleanForDisplay(text);
+
+    /// <summary>
+    /// Formats a provider/transport exception into a concise, user-facing message,
+    /// mapping common HTTP statuses (401/403/429/5xx) to actionable guidance.
+    /// </summary>
+    private static string FormatProviderError(Exception ex)
+    {
+        var status = ex switch
+        {
+            ClientResultException cre => (int?)cre.Status,
+            HttpRequestException hre => (int?)hre.StatusCode,
+            _ => null
+        };
+
+        return status switch
+        {
+            401 or 403 => "The AI provider rejected the request as unauthorised. Please check that a valid OpenRouter API key is configured (OpenRouter:ApiKey).",
+            429 => "The AI provider rate-limited the request. Please wait a moment and try again.",
+            >= 500 => $"The AI provider returned a server error (HTTP {status}). Please try again in a moment.",
+            _ => $"The AI chat could not be completed: {ex.Message}"
+        };
+    }
 
     private static string GetFriendlyToolName(string toolName) =>
         FriendlyToolNames.TryGetValue(toolName, out var friendly) ? friendly : toolName;
