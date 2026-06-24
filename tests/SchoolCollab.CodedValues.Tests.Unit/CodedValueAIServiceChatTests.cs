@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using FluentAssertions;
@@ -927,6 +928,51 @@ public class CodedValueAIServiceChatTests
         updates.Should().NotContain(u => u is ChatUpdate.Error, "no errors should occur");
     }
 
+    /// <summary>
+    /// Verifies that when the AI provider returns an authentication error (HTTP 401),
+    /// <see cref="CodedValueAIService.ChatAsync"/> yields a graceful
+    /// <see cref="ChatUpdate.Error"/> instead of letting the <see cref="ClientResultException"/>
+    /// propagate and crash the /api/ai/chat endpoint as an HTTP 500.
+    /// Regression test for the "failing in app" 401 → 500 failure.
+    /// </summary>
+    [TestMethod]
+    public async Task ChatAsync_ProviderAuthError_YieldsErrorInsteadOfThrowing()
+    {
+        var mockApi = new Mock<ICodedValuesApiClient>();
+        // The chat client throws an HTTP 401, exactly as OpenRouter does when authenticated
+        // with an invalid/placeholder API key. (HttpRequestException carries the status code
+        // that FormatProviderError maps to an actionable auth message.)
+        var chatClient = new ThrowingChatClient(new HttpRequestException("Unauthorized", null, HttpStatusCode.Unauthorized));
+
+        var mockFactory = new Mock<IChatClientFactory>();
+        mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
+
+        var mockEnv = new Mock<IHostEnvironment>();
+        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
+
+        var service = new CodedValueAIService(
+            mockFactory.Object,
+            mockApi.Object,
+            new TestLogger<CodedValueAIService>(),
+            mockEnv.Object);
+
+        var history = new List<ChatMessage> { new(ChatRole.User, "hello") };
+
+        // Act — must NOT throw; the provider error must be yielded as a ChatUpdate.Error.
+        var updates = new List<ChatUpdate>();
+        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+            updates.Add(update);
+
+        // Assert — a single graceful ChatUpdate.Error is yielded.
+        updates.Should().ContainSingle(u => u is ChatUpdate.Error,
+            "the auth failure should be surfaced as a ChatUpdate.Error");
+        updates.OfType<ChatUpdate.TextChunk>().Should().BeEmpty("no text should be streamed when the provider rejects the request");
+
+        var error = updates.OfType<ChatUpdate.Error>().Single();
+        error.Message.Should().Contain("unauthorised", "a 401 should map to an actionable auth message");
+        error.Message.Should().Contain("OpenRouter:ApiKey", "the message should hint at the likely fix");
+    }
+
     // --- Helpers ---
 
     /// <summary>
@@ -972,6 +1018,37 @@ public class CodedValueAIServiceChatTests
 
         public object? GetService(Type serviceType, object? serviceKey = null) =>
             serviceType == typeof(IChatClient) ? this : null;
+
+        public void Dispose() { }
+    }
+
+    /// <summary>
+    /// Mock IChatClient that throws a fixed exception from GetStreamingResponseAsync,
+    /// simulating a provider error (e.g. HTTP 401 from an invalid API key).
+    /// </summary>
+    private class ThrowingChatClient : IChatClient
+    {
+        private readonly Exception _exception;
+        public ThrowingChatClient(Exception exception) => _exception = exception;
+
+        public ChatClientMetadata Metadata => new("throwing", new Uri("http://localhost"), "mock-model");
+
+        public Task<ChatResponse> GetResponseAsync(IEnumerable<ChatMessage> chatMessages, ChatOptions? options = null, CancellationToken cancellationToken = default)
+            => throw _exception;
+
+        public async IAsyncEnumerable<ChatResponseUpdate> GetStreamingResponseAsync(
+            IEnumerable<ChatMessage> chatMessages,
+            ChatOptions? options = null,
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await Task.Yield();
+            if (_exception is not null)
+                throw _exception;
+            yield break;
+        }
+
+        public object? GetService(Type serviceType, object? serviceKey = null)
+            => serviceType == typeof(IChatClient) ? this : null;
 
         public void Dispose() { }
     }

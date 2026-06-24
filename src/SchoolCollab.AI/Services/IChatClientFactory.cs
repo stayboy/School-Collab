@@ -4,7 +4,7 @@ namespace SchoolCollab.AI.Services;
 
 /// <summary>
 /// Routes chat requests to the correct <see cref="IChatClient"/> based on configuration.
-/// The default provider is set via <c>AI:DefaultProvider</c> configuration.
+/// The default provider is set via <c>codedvalue-ai-provider</c> configuration.
 /// </summary>
 public interface IChatClientFactory
 {

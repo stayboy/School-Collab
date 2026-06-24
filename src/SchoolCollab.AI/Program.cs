@@ -9,7 +9,7 @@ builder.AddServiceDefaults();
 
 // ── Ollama (local) IChatClient registration ──
 var ollamaEndpoint = builder.Configuration["Ollama:Endpoint"] ?? "http://localhost:11434/v1";
-var ollamaModel = builder.Configuration["Ollama:Model"] ?? "llama3.1:8b";
+var ollamaModel = builder.Configuration["Ollama:DefaultModel"] ?? ChatModelResolver.DefaultOllamaModel;
 
 builder.Services.AddKeyedSingleton<IChatClient>("ollama", (sp, _) =>
 {
@@ -26,7 +26,7 @@ builder.Services.AddKeyedSingleton<IChatClient>("ollama", (sp, _) =>
 // ── OpenRouter (cloud) IChatClient registration ──
 var openRouterEndpoint = builder.Configuration["OpenRouter:Endpoint"] ?? "https://openrouter.ai/api/v1";
 var openRouterApiKey = builder.Configuration["OpenRouter:ApiKey"];
-var openRouterDefaultModel = builder.Configuration["OpenRouter:DefaultModel"] ?? "openai/gpt-4o-mini";
+var openRouterDefaultModel = builder.Configuration["OpenRouter:DefaultModel"] ?? ChatModelResolver.DefaultOpenRouterModel;
 
 builder.Services.AddKeyedSingleton<IChatClient>("openrouter", (sp, _) =>
 {
@@ -51,7 +51,7 @@ builder.Services.AddKeyedSingleton<IChatClient>("openrouter", (sp, _) =>
 });
 
 // ── ChatClientFactory: routes requests by explicit provider name ──
-var defaultProvider = builder.Configuration["AI:DefaultProvider"] ?? "ollama";
+var defaultProvider = builder.Configuration["codedvalue-ai-provider"] ?? "ollama";
 
 builder.Services.AddSingleton<IChatClientFactory>(sp =>
 {
