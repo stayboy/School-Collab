@@ -1,7 +1,6 @@
 @using Microsoft.Extensions.AI
 @using SchoolCollab.AI
 @implements IAsyncDisposable
-@implements IDialogContentComponent<CodedValuesChatData>
 
 @inject AiChatClient AiChatClient
 @inject ILogger<CodedValuesChat> Logger
@@ -201,9 +200,6 @@
     /// side drawer so the user can follow the response without losing context.
     /// </summary>
     [Parameter] public EventCallback OnPromptSent { get; set; }
-
-    /// <summary>Required by <see cref="IDialogContentComponent{TData}"/>. Not used.</summary>
-    [Parameter] public CodedValuesChatData Content { get; set; } = new();
 
     /// <summary>
     /// Optional external message list. When set, the chat renders from this

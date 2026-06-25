@@ -1,4 +1,6 @@
 @page "/coded-values"
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
@@ -199,6 +201,8 @@
                              OnMessageAdded="@OnMessageAddedAsync"
                              OnStreamingStateChanged="@OnStreamingStateChangedAsync"
                              OnCleared="@OnClearedAsync" />
+
+            <CodedValuesChatPanel @bind-Open="_chatDrawerOpen" />
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
@@ -213,6 +217,7 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+    private bool _chatDrawerOpen;
 
     // Search state
     private string _searchText = string.Empty;
@@ -276,42 +281,19 @@
     /// chat's <see cref="CodedValuesChat.OnPromptSent"/> event so the drawer
     /// surfaces whenever the user sends a prompt from the page.
     ///
-    /// The drawer is hosted by <c>FluentDialog</c> with
-    /// <c>DialogType.Panel</c> — the dialog service renders the slide-in
-    /// shell, header, dismiss button, and backdrop; <see cref="CodedValuesChatPanel"/>
-    /// is just the body content (a single read-only <see cref="CodedValuesChat"/>
-    /// bound to <see cref="CodedValuesChatHub"/>). The drawer is read-only:
-    /// the user prompts from the inline chat on the page and the drawer
-    /// surfaces the streamed responses and final messages.
+    /// The drawer is owned by <see cref="CodedValuesChatPanel"/> via the shared
+    /// <see cref="SideDrawer"/> component: it renders a right-anchored panel
+    /// with a header (title + dismiss button), a backdrop, and Escape-to-close,
+    /// hosting a single read-only <see cref="CodedValuesChat"/> bound to
+    /// <see cref="CodedValuesChatHub"/>. The drawer is read-only: the user
+    /// prompts from the inline chat on the page and the drawer surfaces the
+    /// streamed responses and final messages.
     /// </summary>
-    private async Task OpenChatDrawerAsync()
+    private Task OpenChatDrawerAsync()
     {
-        if (_disposed) return;
-        try
-        {
-            await DialogService.ShowDialogAsync<CodedValuesChatPanel, CodedValuesChatData>(
-                new CodedValuesChatData(),
-                new DialogParameters
-                {
-                    Title = "✨ AI Assistant",
-                    DialogType = DialogType.Panel,
-                    Alignment = HorizontalAlignment.Right,
-                    Width = "420px",
-                    ShowDismiss = true,
-                    Modal = false,
-                    // Hide the OK / Cancel footer buttons — the drawer is a
-                    // passive transcript view, not a confirmation dialog.
-                    // Empty strings make FluentDialog's internal ShowPrimaryAction /
-                    // ShowSecondaryAction checks evaluate false and skip the footer.
-                    PrimaryAction = string.Empty,
-                    SecondaryAction = string.Empty,
-                });
-        }
-        catch (Exception ex)
-        {
-            // Don't let a drawer-open failure break the inline chat experience.
-            Logger.LogWarning(ex, "Failed to open AI assistant drawer.");
-        }
+        if (_disposed) return Task.CompletedTask;
+        _chatDrawerOpen = true;
+        return InvokeAsync(StateHasChanged);
     }
 
     /// <summary>

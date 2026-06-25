@@ -1,0 +1,177 @@
+@implements IAsyncDisposable
+
+@* Self-contained slide-in panel. Renders an overlay + right-anchored
+   drawer with a header (title + dismiss button), a scrollable body, and
+   an optional footer with Cancel/Submit buttons. No dialog service required.
+
+   Usage:
+       <SideDrawer @bind-Open="_open" Title="Edit item" Width="420px"
+                   ShowSubmit="true" ShowCancel="true"
+                   SubmitText="Save" OnSubmitAsync="SaveAsync">
+           <ChildContent>...</ChildContent>
+       </SideDrawer>
+
+   Closes on: × button, backdrop click, Escape key, Cancel click, or after
+   OnSubmitAsync completes successfully. *@
+
+@if (_open)
+{
+    <div class="side-drawer-backdrop" @onclick="RequestClose" role="presentation"></div>
+
+    <aside class="side-drawer-panel"
+           style="width:@Width"
+           role="dialog"
+           aria-modal="true"
+           aria-label="@Title"
+           @onkeydown="OnKeyDown"
+           tabindex="-1"
+           @ref="_panel">
+
+        <header class="side-drawer-header">
+            <h3 class="side-drawer-title">@Title</h3>
+            <button type="button"
+                    class="side-drawer-dismiss"
+                    aria-label="Close drawer"
+                    @onclick="RequestClose">
+                ✕
+            </button>
+        </header>
+
+        <div class="side-drawer-body">
+            @ChildContent
+        </div>
+
+        @if (ShowSubmit || ShowCancel)
+        {
+            <footer class="side-drawer-footer">
+                @if (ShowCancel)
+                {
+                    <button type="button"
+                            class="side-drawer-btn side-drawer-btn-cancel"
+                            disabled="@_busy"
+                            @onclick="RequestClose">
+                        @CancelText
+                    </button>
+                }
+                @if (ShowSubmit)
+                {
+                    <button type="button"
+                            class="side-drawer-btn side-drawer-btn-submit"
+                            disabled="@_busy"
+                            @onclick="HandleSubmitAsync">
+                        @if (_busy)
+                        {
+                            <span class="side-drawer-spinner" aria-hidden="true"></span>
+                        }
+                        @SubmitText
+                    </button>
+                }
+            </footer>
+        }
+    </aside>
+}
+
+@code {
+    /// <summary>Whether the drawer is visible. Two-way bindable.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>Fires when the consumer should toggle <see cref="Open"/>.</summary>
+    [Parameter]
+    public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Header text shown at the top of the drawer.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Drawer width. Any valid CSS length. Default: 420px.</summary>
+    [Parameter]
+    public string Width { get; set; } = "420px";
+
+    /// <summary>Drawer body content.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Show the Submit (primary) button in the footer. Default: false.</summary>
+    [Parameter]
+    public bool ShowSubmit { get; set; }
+
+    /// <summary>Submit button label. Default: "Submit".</summary>
+    [Parameter]
+    public string SubmitText { get; set; } = "Submit";
+
+    /// <summary>
+    /// Invoked when the Submit button is clicked. While running, both
+    /// footer buttons are disabled and a spinner is shown. If the callback
+    /// returns true the drawer closes automatically; if it returns false
+    /// (or throws) the drawer stays open.
+    /// </summary>
+    [Parameter]
+    public Func<Task<bool>>? OnSubmitAsync { get; set; }
+
+    /// <summary>Show the Cancel (secondary) button in the footer. Default: false.</summary>
+    [Parameter]
+    public bool ShowCancel { get; set; }
+
+    /// <summary>Cancel button label. Default: "Cancel".</summary>
+    [Parameter]
+    public string CancelText { get; set; } = "Cancel";
+
+    private ElementReference _panel;
+    private bool _open;
+    private bool _busy;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Open && !_open)
+        {
+            _open = true;
+            await InvokeAsync(StateHasChanged);
+            try { await _panel.FocusAsync(); }
+            catch { /* element not yet rendered — non-fatal */ }
+        }
+        else if (!Open && _open)
+        {
+            _open = false;
+        }
+    }
+
+    private async Task RequestClose()
+    {
+        if (_busy) return;
+        _open = false;
+        await OpenChanged.InvokeAsync(false);
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !_busy)
+        {
+            await RequestClose();
+        }
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        if (_busy || OnSubmitAsync is null) return;
+        _busy = true;
+        try
+        {
+            var ok = await OnSubmitAsync.Invoke();
+            if (ok)
+            {
+                _open = false;
+                await OpenChanged.InvokeAsync(false);
+            }
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        await ValueTask.CompletedTask;
+    }
+}
