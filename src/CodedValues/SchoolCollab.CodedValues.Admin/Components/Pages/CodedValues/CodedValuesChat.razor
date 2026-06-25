@@ -28,8 +28,9 @@
     @* Intro is decoupled from the header block so ShowIntro can surface the
        hint in any non-header context (InputOnly inline bar, or the drawer's
        DisplayOnly chat which supplies its own header via the SideDrawer).
-       Full mode always shows it. *@
-    @if (Mode == CodedValuesChatMode.Full || ShowIntro)
+       Full mode shows it by default unless HideHeader is set (HideHeader
+       suppresses both the heading and the intro in Full mode). *@
+    @if ((Mode == CodedValuesChatMode.Full && !HideHeader) || ShowIntro)
     {
         <p class="chat-intro">
             Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
