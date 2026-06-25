@@ -54,7 +54,7 @@
                                 <code>@context.Code</code>
                             </TemplateColumn>
                            <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                               <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
+                               <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
                                    @context.Name
                                </FluentAnchor>
                            </TemplateColumn>
@@ -81,13 +81,13 @@
                             <TemplateColumn Title="Actions">
                                 @if (context.IsDisabled)
                                 {
-                                    <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))" class="link-action">Enable</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))">Enable</FluentAnchor>
                                 }
                                 else
                                 {
-                                    <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))" class="link-action">Disable</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))">Disable</FluentAnchor>
                                 }
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
                             </TemplateColumn>
                         </FluentDataGrid>
                     </div>
@@ -138,7 +138,7 @@
                             <code>@context.Code</code>
                         </TemplateColumn>
                        <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                           <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="name-link">
+                           <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
                                @context.Name
                            </FluentAnchor>
                        </TemplateColumn>
@@ -170,13 +170,13 @@
                         <TemplateColumn Title="Actions">
                             @if (context.IsDisabled)
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))" class="link-action">Enable</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))">Enable</FluentAnchor>
                             }
                             else
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))" class="link-action">Disable</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))">Disable</FluentAnchor>
                             }
-                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
                 </div>

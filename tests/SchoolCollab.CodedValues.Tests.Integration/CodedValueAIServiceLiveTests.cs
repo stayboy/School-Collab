@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -35,19 +36,36 @@ public class CodedValueAIServiceLiveTests
 
     /// <summary>
     /// Loads the OpenRouter settings from the AI appsettings.json (copied to the test
-    /// output as ai-appsettings.json by the integration test project).
+    /// output as ai-appsettings.json by the integration test project) plus the standard
+    /// .NET configuration sources for secrets:
+    ///   1. <c>appsettings.json</c> for the endpoint and default model
+    ///   2. Environment variables (e.g. <c>OpenRouter__ApiKey</c>) for the API key
+    ///   3. User secrets (UserSecretsId <c>schoolcollab-ai-api</c>) for local dev keys
+    ///
+    /// The API key is intentionally NOT read from <c>appsettings.json</c> to keep it out
+    /// of source control — see <c>.github/copilot/rules/ai-services.md</c>.
     /// </summary>
     private static OpenRouterSettings LoadOpenRouterSettings()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "ai-appsettings.json");
         File.Exists(path).Should().BeTrue($"ai-appsettings.json should be copied to the test output (looked for {path})");
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        var or = doc.RootElement.GetProperty("OpenRouter");
-        return new OpenRouterSettings(
-            or.GetProperty("Endpoint").GetString()!,
-            or.GetProperty("ApiKey").GetString()!,
-            or.GetProperty("DefaultModel").GetString()!);
+        var config = new ConfigurationBuilder()
+            .AddJsonFile(path, optional: false)
+            .AddEnvironmentVariables()
+            .AddUserSecrets("schoolcollab-ai-api")
+            .Build();
+
+        var endpoint = config["OpenRouter:Endpoint"]
+            ?? throw new InvalidOperationException("OpenRouter:Endpoint not configured (expected in ai-appsettings.json).");
+        var model = config["OpenRouter:DefaultModel"]
+            ?? throw new InvalidOperationException("OpenRouter:DefaultModel not configured (expected in ai-appsettings.json).");
+        var apiKey = config["OpenRouter:ApiKey"]
+            ?? throw new InvalidOperationException(
+                "OpenRouter:ApiKey not configured. Set it via `dotnet user-secrets set OpenRouter:ApiKey \"<key>\"` " +
+                "or the OpenRouter__ApiKey environment variable.");
+
+        return new OpenRouterSettings(endpoint, apiKey, model);
     }
 
     /// <summary>
@@ -76,11 +94,18 @@ public class CodedValueAIServiceLiveTests
         var mockEnv = new Mock<IHostEnvironment>();
         mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
 
+        // Load the AI service appsettings so CodedValueAIService.ResolveDefaultModel
+        // picks up the same OpenRouter model the live client uses.
+        var config = new ConfigurationBuilder()
+            .AddJsonFile("ai-appsettings.json", optional: false)
+            .Build();
+
         return new AI.Services.CodedValueAIService(
             mockFactory.Object,
             mockApi.Object,
             new NullLogger<AI.Services.CodedValueAIService>(),
-            mockEnv.Object);
+            mockEnv.Object,
+            config);
     }
 
     // =====================================================================
@@ -362,7 +387,7 @@ public class CodedValueAIServiceLiveTests
 
         try
         {
-            await foreach (var update in service.ChatAsync(history, null, cts.Token).WithCancellation(cts.Token))
+            await foreach (var update in service.ChatAsync(history, cts.Token).WithCancellation(cts.Token))
                 updates.Add(update);
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)

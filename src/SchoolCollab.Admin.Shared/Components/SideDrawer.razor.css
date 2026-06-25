@@ -1,0 +1,150 @@
+/* Full-viewport backdrop and right-anchored slide-in panel.
+   Scoped to the component; deep selectors are not needed because the
+   drawer owns its overlay + panel markup directly. */
+
+.side-drawer-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.32);
+    z-index: 1000;
+    animation: side-drawer-fade-in 120ms ease-out;
+}
+
+.side-drawer-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    max-width: 100vw;
+    background: var(--neutral-layer-1, #fff);
+    color: var(--neutral-foreground-1, #1f1f1f);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+    z-index: 1001;
+    display: flex;
+    flex-direction: column;
+    animation: side-drawer-slide-in 180ms ease-out;
+    outline: none;
+}
+
+.side-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    flex: 0 0 auto;
+}
+
+.side-drawer-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.side-drawer-dismiss {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+
+.side-drawer-dismiss:hover {
+    background: var(--neutral-stroke-subtle, rgba(0, 0, 0, 0.06));
+}
+
+.side-drawer-dismiss:focus-visible {
+    outline: 2px solid var(--accent-fill-rest, #0078d4);
+    outline-offset: 1px;
+}
+
+.side-drawer-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.side-drawer-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    flex: 0 0 auto;
+}
+
+.side-drawer-btn {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0.4rem 0.9rem;
+    font: inherit;
+    line-height: 1.2;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 80px;
+    justify-content: center;
+}
+
+.side-drawer-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.side-drawer-btn:focus-visible {
+    outline: 2px solid var(--accent-fill-rest, #0078d4);
+    outline-offset: 1px;
+}
+
+.side-drawer-btn-cancel {
+    background: transparent;
+    color: var(--neutral-foreground-1, #1f1f1f);
+    border-color: var(--neutral-stroke-rest, #c0c0c0);
+}
+
+.side-drawer-btn-cancel:hover:not(:disabled) {
+    background: var(--neutral-stroke-subtle, rgba(0, 0, 0, 0.06));
+}
+
+.side-drawer-btn-submit {
+    background: var(--accent-fill-rest, #0078d4);
+    color: var(--neutral-foreground-on-accent, #ffffff);
+}
+
+.side-drawer-btn-submit:hover:not(:disabled) {
+    background: var(--accent-fill-hover, #106ebe);
+}
+
+.side-drawer-spinner {
+    width: 0.9em;
+    height: 0.9em;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: side-drawer-spin 0.7s linear infinite;
+}
+
+@keyframes side-drawer-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes side-drawer-slide-in {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+}
+
+@keyframes side-drawer-spin {
+    to { transform: rotate(360deg); }
+}

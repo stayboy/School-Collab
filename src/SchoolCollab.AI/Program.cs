@@ -76,10 +76,16 @@ app.UseSerilogRequestLogging();
 
 app.MapDefaultEndpoints();
 
-// Configuration endpoint — returns the default AI provider name
-app.MapGet("/api/ai/config", (IChatClientFactory factory) =>
+// Configuration endpoint — returns the default AI provider and model so that
+// admin clients can display the active configuration without re-implementing
+// provider/model resolution on their side.
+app.MapGet("/api/ai/config", (IConfiguration configuration) =>
 {
-    return Results.Ok(new { defaultProvider = factory.DefaultProvider });
+    var (provider, model) = ChatModelResolver.Resolve(
+        configuration["codedvalue-ai-provider"],
+        configuration["Ollama:DefaultModel"],
+        configuration["OpenRouter:DefaultModel"]);
+    return Results.Ok(new { defaultProvider = provider, defaultModel = model });
 });
 
 // SSE streaming chat endpoint
@@ -103,7 +109,7 @@ app.MapPost("/api/ai/chat", async (HttpContext context, CodedValueAIService aiSe
             m.Text ?? string.Empty))
         .ToList();
 
-    await foreach (var update in aiService.ChatAsync(history, request.Model, context.RequestAborted))
+    await foreach (var update in aiService.ChatAsync(history, context.RequestAborted))
     {
         var (eventType, payload) = update switch
         {

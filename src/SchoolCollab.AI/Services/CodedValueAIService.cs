@@ -20,6 +20,7 @@ public sealed class CodedValueAIService
     private readonly ICodedValuesApiClient _api;
     private readonly ILogger<CodedValueAIService> _logger;
     private readonly IHostEnvironment _hostEnv;
+    private readonly IConfiguration _config;
 
     private readonly List<AITool> _tools;
 
@@ -40,12 +41,13 @@ public sealed class CodedValueAIService
         ["set_attribute"] = "Set Attribute"
     };
 
-    public CodedValueAIService(IChatClientFactory chatClientFactory, ICodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv)
+    public CodedValueAIService(IChatClientFactory chatClientFactory, ICodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv, IConfiguration config)
     {
         _chatClientFactory = chatClientFactory;
         _api = api;
         _logger = logger;
         _hostEnv = hostEnv;
+        _config = config;
 
         _tools =
         [
@@ -138,10 +140,10 @@ public sealed class CodedValueAIService
     /// </summary>
     public async IAsyncEnumerable<ChatUpdate> ChatAsync(
         IReadOnlyList<ChatMessage> history,
-        string? model = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        _logger.LogInformation("Processing AI chat with {Count} history messages, model {Model}", history.Count, model ?? "(default)");
+        var effectiveModel = ResolveDefaultModel();
+        _logger.LogInformation("Processing AI chat with {Count} history messages, model {Model}", history.Count, effectiveModel);
 
         var chatClient = _chatClientFactory.GetClient();
 
@@ -149,9 +151,7 @@ public sealed class CodedValueAIService
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(history);
 
-        var options = model is not null
-            ? new ChatOptions { Tools = _tools, ModelId = model }
-            : new ChatOptions { Tools = _tools };
+        var options = new ChatOptions { Tools = _tools, ModelId = effectiveModel };
 
         var totalToolCalls = 0;
         const int maxToolCallRounds = 10;
@@ -233,7 +233,7 @@ public sealed class CodedValueAIService
                 _logger.LogWarning(ex, "Socket error during AI chat streaming (SocketErrorCode={SocketErrorCode}). Treating as stream completion.", ex.SocketErrorCode);
                 streamCancelled = true;
             }
-            catch (HttpRequestException ex) when (ct.IsCancellationRequested)
+            catch (HttpRequestException) when (ct.IsCancellationRequested)
             {
                 _logger.LogInformation("AI chat streaming cancelled (HttpRequestException during cancellation)");
                 streamCancelled = true;
@@ -320,6 +320,18 @@ public sealed class CodedValueAIService
         }
 
         _logger.LogInformation("AI chat completed with {ToolCalls} tool calls", totalToolCalls);
+    }
+
+    private string ResolveDefaultModel()
+    {
+        // ChatModelResolver.Resolve returns the (provider, model) tuple resolved from
+        // configuration. We only need the model here; ChatAsync always uses the model
+        // that the active provider is configured with.
+        var (_, model) = ChatModelResolver.Resolve(
+            _config["codedvalue-ai-provider"],
+            _config["Ollama:DefaultModel"],
+            _config["OpenRouter:DefaultModel"]);
+        return model;
     }
 
     private static IDictionary<string, object?> ParseArgumentsDictionary(string? args)

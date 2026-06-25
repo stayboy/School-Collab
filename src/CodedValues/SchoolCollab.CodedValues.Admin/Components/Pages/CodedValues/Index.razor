@@ -1,8 +1,12 @@
 @page "/coded-values"
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues
+@using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
 @inject IDialogService DialogService
+@inject CodedValuesChatHub ChatHub
 @implements IDisposable
 
 <PageTitle>Coded Values</PageTitle>
@@ -19,13 +23,23 @@
                 </FluentButton>
                 <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
                 <div class="spacer"></div>
-                <FluentTextField Id="search-root"
-                                Placeholder="Search categories…"
-                                class="search-box"
-                                Immediate="true"
-                                ImmediateDelay="300"
-                                ValueChanged="@OnSearchValueChanged"
-                                OnClear="@(() => OnSearchClear())" />
+                <div class="action-bar-right">
+                    <FluentTextField Id="search-root"
+                                    Placeholder="Search categories…"
+                                    class="search-box"
+                                    Immediate="true"
+                                    ImmediateDelay="300"
+                                    ValueChanged="@OnSearchValueChanged"
+                                    OnClear="@(() => OnSearchClear())" />
+                    @* Opens the AI assistant side drawer without sending a prompt,
+                       so users can re-read prior responses or follow an ongoing
+                       stream. Mirrors the drawer-open path used by OnPromptSent. *@
+                    <FluentButton Appearance="Appearance.Neutral"
+                                  Title="Open AI assistant"
+                                  OnClick="OpenChatDrawerAsync">
+                        ✨ Chat
+                    </FluentButton>
+                </div>
             </div>
             @if (_showDeleted && _deletedItems is not null)
             {
@@ -45,8 +59,8 @@
                             @(context.DeletedAt?.ToLocalTime().ToString("g") ?? "—")
                         </TemplateColumn>
                         <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.Code))" class="link-action">Recover</FluentAnchor>
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="link-action ms-2">View</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.Code))">Recover</FluentAnchor>
+                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="ms-2">View</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
                 }
@@ -77,7 +91,7 @@
                                 <code>@context.Code</code>
                             </TemplateColumn>
                             <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="name-link">
+                                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">
                                     @context.Name (@context.ChildrenCount)
                                 </FluentAnchor>
                             </TemplateColumn>
@@ -105,14 +119,14 @@
                             <TemplateColumn Title="Actions">
                                 @if (context.IsDisabled)
                                 {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action">Enable</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))">Enable</FluentAnchor>
                                 }
                                 else
                                 {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action">Disable</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))">Disable</FluentAnchor>
                                 }
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action ms-2">Edit</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="ms-2">Edit</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
                             </TemplateColumn>
                         </FluentDataGrid>
                     </div>
@@ -139,7 +153,7 @@
                             <code>@context.Code</code>
                         </TemplateColumn>
                         <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="name-link">
+                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">
                                 @context.Name (@context.ChildrenCount)
                             </FluentAnchor>
                         </TemplateColumn>
@@ -167,14 +181,14 @@
                         <TemplateColumn Title="Actions">
                             @if (context.IsDisabled)
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))" class="link-action">Enable</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))">Enable</FluentAnchor>
                             }
                             else
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))" class="link-action">Disable</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))">Disable</FluentAnchor>
                             }
-                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="link-action ms-2">Edit</FluentAnchor>
-                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="ms-2">Edit</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
                 </div>
@@ -185,8 +199,26 @@
                 <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
             }
 
-            @* -- Chat pinned to bottom -- *@
-            <CodedValuesChat />
+            @* -- Chat pinned to bottom. InputOnly keeps just the input bar on the
+               page; the conversation and streaming responses are mirrored into the
+               shared CodedValuesChatHub and read by the drawer's display-only chat,
+               so the page stays compact while the drawer is the place to read
+               responses.
+               OnMessageAdded mirrors every prompt and response into the shared
+               CodedValuesChatHub so the drawer chat stays in sync.
+               OnStreamingStateChanged mirrors the live typing progress.
+               OnPromptSent opens the drawer on the first send.
+               (OnCleared is not wired here: InputOnly hides the inline Clear
+               button, so clearing is handled inside the drawer panel via the
+               hub.) -- *@
+            <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
+                             ShowIntro="true"
+                             OnPromptSending="@OnPromptSendingAsync"
+                             OnPromptSent="@OpenChatDrawerAsync"
+                             OnMessageAdded="@OnMessageAddedAsync"
+                             OnStreamingStateChanged="@OnStreamingStateChangedAsync" />
+
+            <CodedValuesChatPanel @bind-Open="_chatDrawerOpen" />
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
@@ -201,6 +233,7 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+    private bool _chatDrawerOpen;
 
     // Search state
     private string _searchText = string.Empty;
@@ -257,6 +290,71 @@
                 _error = ex.Message;
             }
         }
+    }
+
+    /// <summary>
+    /// Opens the side drawer that hosts the AI assistant chat. Wired to the inline
+    /// chat's <see cref="CodedValuesChat.OnPromptSent"/> event so the drawer
+    /// surfaces whenever the user sends a prompt from the page.
+    ///
+    /// The drawer is owned by <see cref="CodedValuesChatPanel"/> via the shared
+    /// <see cref="SideDrawer"/> component: it renders a right-anchored panel
+    /// with a header (title + dismiss button), a backdrop, and Escape-to-close,
+    /// hosting a single read-only <see cref="CodedValuesChat"/> bound to
+    /// <see cref="CodedValuesChatHub"/>. The drawer is read-only: the user
+    /// prompts from the inline chat on the page and the drawer surfaces the
+    /// streamed responses and final messages.
+    /// </summary>
+    private Task OpenChatDrawerAsync()
+    {
+        if (_disposed) return Task.CompletedTask;
+        Logger.LogInformation("OpenChatDrawerAsync fired — opening drawer (was open={WasOpen})", _chatDrawerOpen);
+        _chatDrawerOpen = true;
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Mirror handler for the inline chat's <c>OnPromptSending</c> event. Fires before
+    /// the new prompt is added, so we clear the mirrored display hub and the
+    /// drawer panel resets to show only the upcoming exchange instead of
+    /// stacking every prior turn. The inline chat's own conversation history
+    /// (sent to the AI for multi-turn context) is untouched — only the
+    /// mirrored display surface is reset.
+    /// </summary>
+    private Task OnPromptSendingAsync()
+    {
+        if (_disposed) return Task.CompletedTask;
+        ChatHub.Clear();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Mirror handler for the inline chat's <c>OnMessageAdded</c> event. Each
+    /// new prompt and AI response is appended to <see cref="CodedValuesChatHub"/>,
+    /// which the drawer panel's display chat reads via its
+    /// <see cref="CodedValuesChat.ExternalMessages"/> parameter. Subscribing
+    /// to the hub instead of pushing to a child via @ref is necessary because
+    /// the drawer chat lives inside a <see cref="FluentDialog"/> that the
+    /// page can't reach with a component reference.
+    /// </summary>
+    private Task OnMessageAddedAsync(CodedValuesChat.ChatMessageItem message)
+    {
+        if (_disposed) return Task.CompletedTask;
+        ChatHub.AddMessage(message);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Mirror handler for the inline chat's <c>OnStreamingStateChanged</c>
+    /// event. Pushes the live streaming snapshot into the hub on every chunk
+    /// so the drawer's display chat renders the same "AI is typing…" indicator
+    /// and the partial response text as the inline chat.
+    /// </summary>
+    private Task OnStreamingStateChangedAsync(CodedValuesChat.ChatStreamingState state)
+    {
+        if (_disposed) return Task.CompletedTask;
+        ChatHub.SetStreamingState(state);
+        return Task.CompletedTask;
     }
 
     private async Task OnRecoverAsync(Guid id, string code)

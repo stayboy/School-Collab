@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using OpenAI;
 
@@ -35,26 +36,42 @@ public class ChatProviderLiveTests
 
     /// <summary>
     /// Loads the AI appsettings.json (copied to the test output as ai-appsettings.json)
-    /// and extracts the Ollama and OpenRouter provider settings.
+    /// plus the standard .NET configuration sources for secrets, and extracts the
+    /// Ollama and OpenRouter provider settings.
+    ///
+    /// Non-secret values (endpoint, default model) come from <c>appsettings.json</c>.
+    /// The OpenRouter API key is intentionally NOT read from <c>appsettings.json</c>
+    /// to keep it out of source control — see <c>.github/copilot/rules/ai-services.md</c>.
+    /// The key is resolved from environment variables and user secrets instead.
     /// </summary>
     private static ProviderSettings LoadSettings(string provider)
     {
         var path = Path.Combine(AppContext.BaseDirectory, "ai-appsettings.json");
         File.Exists(path).Should().BeTrue($"ai-appsettings.json should be copied to the test output (looked for {path})");
 
-        using var doc = JsonDocument.Parse(File.ReadAllText(path));
-        var root = doc.RootElement;
+        var config = new ConfigurationBuilder()
+            .AddJsonFile(path, optional: false)
+            .AddEnvironmentVariables()
+            .AddUserSecrets("schoolcollab-ai-api")
+            .Build();
 
         return provider switch
         {
             "ollama" => new ProviderSettings(
-                root.GetProperty("Ollama").GetProperty("Endpoint").GetString()!,
+                config["Ollama:Endpoint"]
+                    ?? throw new InvalidOperationException("Ollama:Endpoint not configured (expected in ai-appsettings.json)."),
                 ApiKey: "ollama",
-                Model: root.GetProperty("Ollama").GetProperty("DefaultModel").GetString()!),
+                Model: config["Ollama:DefaultModel"]
+                    ?? throw new InvalidOperationException("Ollama:DefaultModel not configured (expected in ai-appsettings.json).")),
             "openrouter" => new ProviderSettings(
-                root.GetProperty("OpenRouter").GetProperty("Endpoint").GetString()!,
-                ApiKey: root.GetProperty("OpenRouter").GetProperty("ApiKey").GetString()!,
-                Model: root.GetProperty("OpenRouter").GetProperty("DefaultModel").GetString()!),
+                config["OpenRouter:Endpoint"]
+                    ?? throw new InvalidOperationException("OpenRouter:Endpoint not configured (expected in ai-appsettings.json)."),
+                ApiKey: config["OpenRouter:ApiKey"]
+                    ?? throw new InvalidOperationException(
+                        "OpenRouter:ApiKey not configured. Set it via `dotnet user-secrets set OpenRouter:ApiKey \"<key>\"` " +
+                        "or the OpenRouter__ApiKey environment variable."),
+                Model: config["OpenRouter:DefaultModel"]
+                    ?? throw new InvalidOperationException("OpenRouter:DefaultModel not configured (expected in ai-appsettings.json).")),
             _ => throw new ArgumentException($"Unknown provider: {provider}", nameof(provider))
         };
     }

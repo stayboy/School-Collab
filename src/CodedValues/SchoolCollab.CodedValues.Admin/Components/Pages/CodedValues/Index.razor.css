@@ -30,12 +30,13 @@
 
 ::deep .search-box {
     width: 260px;
-    margin-left: auto;
 }
 
-.name-link {
-    font-weight: 600;
-    text-decoration: none;
+.action-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
 }
 
 /* Loading / empty states */
@@ -51,9 +52,4 @@
     min-height: 0;
     overflow: auto;
     width: 100%;
-}
-
-/* Action links */
-.delete-link {
-    color: var(--error);
 }

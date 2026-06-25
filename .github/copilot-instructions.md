@@ -51,6 +51,7 @@ guidance instead of duplicating it.
 | Entity Framework Core migrations | `.github/copilot/rules/ef-migrations.md` |
 | Logging and Aspire observability | `.github/copilot/rules/logging-aspire.md` |
 | Testing (MTP Standard) | `.github/copilot/rules/testing.md` |
+| AI services (`SchoolCollab.AI`, chat clients, tool calls) | `.github/copilot/rules/ai-services.md` |
 | Fluent UI icons | `.github/skills/fluentui-icons/SKILL.md` |
 | Fluent UI component props | `.github/skills/fluentui-component-props/SKILL.md` |
 | Bounded context creation | `.github/skills/bounded-context/SKILL.md` |
@@ -95,6 +96,30 @@ Whenever a new feature or architectural change is requested:
 - **Entity Framework Core migrations:** `.github/copilot/rules/ef-migrations.md`
 - **CSS isolation and styling:** `.github/copilot/rules/blazor-components.md#blazor-css-isolation-and-styling`
 - **Testing:** `.github/copilot/rules/testing.md`
+- **AI services (`SchoolCollab.AI`, chat clients, tool calls):** `.github/copilot/rules/ai-services.md`
+
+## Build verification (during development)
+
+This rule applies **inside a coding session**, every time production or test code
+is changed — distinct from the PR-time `dotnet build` check in the pre-flight
+section below.
+
+- **Run `dotnet build` after every code change** (every `edit` / `write` that
+  touches a `.cs`, `.razor`, `.csproj`, `Directory.Packages.props`,
+  `Directory.Build.props`, or `appsettings*.json`). Build before reporting the
+  change as done.
+- **Fix compiler errors before continuing.** If the build fails, treat the
+  failures as the next task — do not move on to feature work, do not mark the
+  step complete, and do not commit.
+- **Targets:** run `dotnet build SchoolCollab.sln` from the repo root. Tests
+  aren't required for the in-session check unless the change touches test
+  files directly.
+- **Locks (MSB3021 / MSB3027).** `dotnet build` can fail because a previous
+  `dotnet run` (AppHost, API, or worker) is still holding output binaries.
+  When this happens: stop the running service (close the terminal that
+  launched it, or `Get-Process dotnet` / `pkill dotnet` from a new shell),
+  then rerun the build. Don't retry the build in a loop — surface the lock to
+  the user and let them choose how to stop the offending process.
 
 ## Central Package Management (CPM)
 
