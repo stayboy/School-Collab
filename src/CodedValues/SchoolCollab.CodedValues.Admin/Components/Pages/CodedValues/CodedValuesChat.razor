@@ -1,10 +1,12 @@
 @using Microsoft.Extensions.AI
+@using Microsoft.JSInterop
 @using SchoolCollab.AI
 @implements IAsyncDisposable
 
 @inject AiChatClient AiChatClient
 @inject ILogger<CodedValuesChat> Logger
 @inject NavigationManager Nav
+@inject IJSRuntime JS
 
 @*
     Three render modes:
@@ -21,13 +23,18 @@
     @if (Mode != CodedValuesChatMode.InputOnly && !HideHeader)
     {
         <h3 class="chat-heading">✨ AI Assistant</h3>
-        @if (Mode == CodedValuesChatMode.Full)
-        {
-            <p class="chat-intro">
-                Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
-                Try: "Create a Country coded value with code CNTRY" or "Add countries to CNTRY"
-            </p>
-        }
+    }
+
+    @* Intro is decoupled from the header block so ShowIntro can surface the
+       hint in any non-header context (InputOnly inline bar, or the drawer's
+       DisplayOnly chat which supplies its own header via the SideDrawer).
+       Full mode always shows it. *@
+    @if (Mode == CodedValuesChatMode.Full || ShowIntro)
+    {
+        <p class="chat-intro">
+            Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
+            Try: "Create a Country coded value with code CNTRY" or "Add countries to CNTRY"
+        </p>
     }
 
     <ErrorBoundary>
@@ -87,11 +94,20 @@
                     <div class="input-field-wrapper">
                         <FluentTextArea @ref="_inputRef"
                                        @bind-Value="_inputText"
+                                       @bind-Value:after="OnInputChanged"
+                                       Id="@_inputId"
                                        Placeholder="Ask me to create coded values..."
                                        class="full-width"
                                        Rows="2"
-                                       aria-label="Chat input"
-                                       OnKeyDown="HandleKeyDown" />
+                                       Immediate="true"
+                                       aria-label="Chat input" />
+                        @* Key handling is wired from JS (chatInput.js#attachKeydownHandler)
+                           because FluentTextArea has no OnKeyDown EventCallback and wraps
+                           the <fluent-text-area> web component — a Blazor @onkeydown
+                           handler can't be wired reliably, and conditional preventDefault
+                           (only on plain Enter / history-nav arrows) isn't possible with
+                           the static @onkeydown:preventDefault directive. The JS listener
+                           forwards actions to the DotNetObjectReference below. *@
                     </div>
                     <FluentButton Appearance="Appearance.Accent"
                                  OnClick="SendAsync"
@@ -156,6 +172,16 @@
     [Parameter] public bool HideHeader { get; set; }
 
     /// <summary>
+    /// When true (and the header is visible), renders the introductory
+    /// paragraph that explains what the AI assistant can do. By default
+    /// the intro only appears in <see cref="CodedValuesChatMode.Full"/>;
+    /// set this flag to also surface it in <see cref="CodedValuesChatMode.DisplayOnly"/>
+    /// — useful for the drawer panel where the header is supplied by the
+    /// outer <c>SideDrawer</c> but the chat still benefits from the hint.
+    /// </summary>
+    [Parameter] public bool ShowIntro { get; set; }
+
+    /// <summary>
     /// When true, the chat does not render messages locally. Useful when this
     /// chat is the "launcher" surface (e.g. inline on a page) and the response
     /// should appear in another surface such as a drawer. The AI request still
@@ -193,6 +219,18 @@
     /// inline chat.
     /// </summary>
     [Parameter] public EventCallback<ChatStreamingState> OnStreamingStateChanged { get; set; }
+
+    /// <summary>
+    /// Fires right before a prompt is added to the conversation — before
+    /// <see cref="OnMessageAdded"/> mirrors the user's message and before
+    /// <see cref="OnPromptSent"/> signals dispatch. Use this to reset any
+    /// mirrored display surface (e.g. clear the shared
+    /// <see cref="Services.CodedValuesChatHub"/>) so the surface shows
+    /// only the upcoming exchange instead of accumulating every prior turn.
+    /// The component's own conversation history is untouched, so multi-turn
+    /// context sent to the AI is preserved.
+    /// </summary>
+    [Parameter] public EventCallback OnPromptSending { get; set; }
 
     /// <summary>
     /// Fires after a prompt is successfully sent (i.e. the chat request was
@@ -273,6 +311,29 @@
     private string _provider = "ollama";
     private string _effectiveModel = string.Empty;
 
+    // History navigation for ArrowUp / ArrowDown through previously-sent
+    // prompts. _historyIndex = -1 means "the user is editing a fresh draft";
+    // >= 0 means "showing _promptHistory[index]". While navigating, we stash
+    // whatever the user had typed before pressing Up so they can recover it
+    // by pressing Down past the newest entry.
+    private readonly List<string> _promptHistory = [];
+    private int _historyIndex = -1;
+    private string _draftBeforeHistory = string.Empty;
+
+    private readonly string _inputId = $"chat-input-{Guid.NewGuid():N}";
+
+    // JS module imported lazily on first render. The module is shipped as a
+    // static asset of the CodedValues.Admin RCL and loaded via the standard
+    // Blazor "import" pattern — see OnAfterRenderAsync. Cached so subsequent
+    // calls don't re-fetch the module on every keystroke.
+    private IJSObjectReference? _chatInputModule;
+
+    // Reference to this component instance handed to chatInput.js so the JS
+    // keydown listener can call back into .NET (SubmitFromKeyAsync /
+    // NavigateHistoryFromKeyAsync). Created on first render and disposed in
+    // DisposeAsync to avoid leaking the circuit-pinned reference.
+    private DotNetObjectReference<CodedValuesChat>? _dotNetRef;
+
     /// <summary>
     /// The model that will actually be sent to the AI API, resolved from configuration.
     /// </summary>
@@ -300,6 +361,42 @@
         Logger.LogInformation("AI chat configured with provider {Provider} and model {Model}", _provider, _effectiveModel);
     }
 
+    /// <summary>
+    /// Lazily imports the chatInput JS module on first render, then attaches a
+    /// native keydown listener that forwards Enter / ArrowUp / ArrowDown actions
+    /// back to this component via a DotNetObjectReference (see SubmitFromKeyAsync
+    /// / NavigateHistoryFromKeyAsync). FluentTextArea has no OnKeyDown parameter
+    /// and wraps the <fluent-text-area> web component, so a Blazor @onkeydown handler
+    /// can't be wired reliably and conditional preventDefault isn't possible —
+    /// hence the JS listener. The module is owned by the CodedValues.Admin RCL
+    /// and served as a static asset at
+    /// <c>_content/SchoolCollab.CodedValues.Admin/js/chatInput.js</c>. JS interop
+    /// calls during the brief window before first render fall through silently
+    /// (the user can't type before the textarea exists anyway).
+    /// </summary>
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _disposed || _chatInputModule is not null) return;
+        try
+        {
+            _chatInputModule = await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/SchoolCollab.CodedValues.Admin/js/chatInput.js");
+
+            // Wire the keydown listener. The DotNetObjectReference lets the
+            // JS handler call back into this component instance. Keep the ref
+            // so we can dispose it (and detach the listener) in DisposeAsync.
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await _chatInputModule.InvokeVoidAsync("attachKeydownHandler", _inputId, _dotNetRef);
+        }
+        catch (Exception ex)
+        {
+            // Module load failed — the Enter-to-submit + history-nav shortcuts
+            // will be no-ops, but the rest of the chat (the Send button, basic
+            // send) keeps working. Log so the regression is visible.
+            Logger.LogError(ex, "Failed to load chatInput JS module");
+        }
+    }
+
     private async Task SendAsync()
     {
         if (string.IsNullOrWhiteSpace(_inputText) || _isStreaming || _disposed) return;
@@ -307,6 +404,23 @@
         var prompt = _inputText.Trim();
         _inputText = string.Empty;
         StateHasChanged();
+
+        // Record the prompt in history. Skip duplicates of the most recent
+        // entry so the user doesn't have to press Down through repeats.
+        if (_promptHistory.Count == 0 || _promptHistory[^1] != prompt)
+        {
+            _promptHistory.Add(prompt);
+        }
+        _historyIndex = -1;
+        _draftBeforeHistory = string.Empty;
+
+        // Let mirror surfaces (e.g. the drawer's display chat via the shared
+        // hub) reset before the new exchange is mirrored in, so the panel
+        // shows only this turn rather than every prior turn stacked up.
+        if (OnPromptSending.HasDelegate)
+        {
+            await OnPromptSending.InvokeAsync();
+        }
 
         _messages.Add(new(ChatRole.User, prompt));
         await NotifyMessageAddedAsync(_messages[^1]);
@@ -416,12 +530,66 @@
         if (!_disposed) StateHasChanged();
     }
 
-    private async Task HandleKeyDown(FluentKeyCodeEventArgs e)
+    /// <summary>
+    /// JS-invokable entry point called by chatInput.js when the user presses
+    /// plain Enter (no Shift/Ctrl/Alt/Meta). Forwards to <see cref="SendAsync"/>,
+    /// which dispatches the prompt to the AI. The JS listener already called
+    /// preventDefault so no newline is inserted.
+    /// </summary>
+    [JSInvokable]
+    public Task SubmitFromKeyAsync() => SendAsync();
+
+    /// <summary>
+    /// JS-invokable entry point called by chatInput.js when the user presses
+    /// ArrowUp (-1) or ArrowDown (+1) from the top/bottom edge (or an empty
+    /// input). The caret-edge condition is checked in JS so preventDefault is
+    /// applied synchronously; here we just apply the history navigation.
+    /// </summary>
+    [JSInvokable]
+    public Task NavigateHistoryFromKeyAsync(int delta) => ApplyHistoryNavigationAsync(delta);
+
+    /// <summary>
+    /// Fires after Blazor updates <see cref="_inputText"/> from the textarea's
+    /// value. Tracks the in-progress draft so a Down press past the newest
+    /// history entry can restore it.
+    /// </summary>
+    private void OnInputChanged()
     {
-        if (e.Key == KeyCode.Enter && !e.ShiftKey)
+        if (_historyIndex == -1)
         {
-            await SendAsync();
+            _draftBeforeHistory = _inputText;
         }
+    }
+
+    /// <summary>
+    /// Walks the prompt history by <paramref name="delta"/> positions and updates
+    /// <see cref="_inputText"/> to the selected entry (or restores the saved
+    /// draft when navigating past the newest entry). The caret-edge guard is
+    /// performed in JS (see attachKeydownHandler) before this is called, so the
+    /// in-draft editing case never reaches here.
+    /// </summary>
+    private Task ApplyHistoryNavigationAsync(int delta)
+    {
+        if (_promptHistory.Count == 0 || _disposed) return Task.CompletedTask;
+
+        var next = _historyIndex + delta;
+        if (next < -1 || next >= _promptHistory.Count) return Task.CompletedTask;
+
+        _historyIndex = next;
+
+        if (_historyIndex == -1)
+        {
+            // Past the newest entry — restore whatever the user had typed
+            // before they started scrolling through history.
+            _inputText = _draftBeforeHistory;
+        }
+        else
+        {
+            _inputText = _promptHistory[_historyIndex];
+        }
+
+        StateHasChanged();
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -478,6 +646,44 @@
         _sendCts?.Cancel();
         _sendCts?.Dispose();
         _sendCts = null;
+
+        if (_chatInputModule is not null)
+        {
+            try
+            {
+                // Detach the JS keydown listener before releasing the module
+                // and the .NET reference so a stale listener can't call back
+                // into a disposed component.
+                await _chatInputModule.InvokeVoidAsync("detachKeydownHandler", _inputId);
+            }
+            catch (JSDisconnectedException)
+            {
+            }
+            catch (TaskCanceledException)
+            {
+            }
+
+            try
+            {
+                await _chatInputModule.DisposeAsync();
+            }
+            catch (JSDisconnectedException)
+            {
+                // Server-side Blazor: circuit can be lost between the dispose
+                // call and the awaited disposal — safe to swallow.
+            }
+            catch (TaskCanceledException)
+            {
+                // Disposal in flight when the circuit closed — same deal.
+            }
+            _chatInputModule = null;
+        }
+
+        // Release the .NET reference handed to chatInput.js so the circuit
+        // can be collected and the JS listener (already detached above)
+        // can't call back into this component.
+        _dotNetRef?.Dispose();
+        _dotNetRef = null;
     }
 
     /// <summary>

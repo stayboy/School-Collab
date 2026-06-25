@@ -5,7 +5,8 @@
     min-height: 0;
 }
 
-.chat-container-full {
+.chat-container-full,
+.chat-container-inputonly {
     border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1);
     padding-top: 0.75rem;
     flex-shrink: 0;

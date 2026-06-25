@@ -30,6 +30,12 @@
 
 ::deep .search-box {
     width: 260px;
+}
+
+.action-bar-right {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
     margin-left: auto;
 }
 

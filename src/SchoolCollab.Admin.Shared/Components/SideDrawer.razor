@@ -123,16 +123,22 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        if (Open && !_open)
+        // Always sync the internal mirror to the parameter value. The previous
+        // version only flipped on transitions, which left the drawer stuck if
+        // the internal state ever desynced from the parameter (e.g. if a
+        // parent's OpenChanged callback fired twice for the same value).
+        // Re-rendering is cheap when nothing changed, and this guarantees
+        // every Open=true arrives as an opening action.
+        if (Open == _open) return;
+
+        _open = Open;
+
+        if (_open)
         {
-            _open = true;
+            // Ensure the panel DOM exists before we try to focus it.
             await InvokeAsync(StateHasChanged);
             try { await _panel.FocusAsync(); }
             catch { /* element not yet rendered — non-fatal */ }
-        }
-        else if (!Open && _open)
-        {
-            _open = false;
         }
     }
 
