@@ -43,10 +43,6 @@ a:hover, fluent-anchor:hover {
     text-decoration: underline;
 }
 
-.link-action {
-    cursor: pointer;
-}
-
 h1:focus {
     outline: none;
 }

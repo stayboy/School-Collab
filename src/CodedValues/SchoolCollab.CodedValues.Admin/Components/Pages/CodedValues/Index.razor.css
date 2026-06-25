@@ -33,11 +33,6 @@
     margin-left: auto;
 }
 
-.name-link {
-    font-weight: 600;
-    text-decoration: none;
-}
-
 /* Loading / empty states */
 .spinner-container {
     flex: 1;
@@ -51,9 +46,4 @@
     min-height: 0;
     overflow: auto;
     width: 100%;
-}
-
-/* Action links */
-.delete-link {
-    color: var(--error);
 }

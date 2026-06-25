@@ -24,15 +24,24 @@ public sealed class AiChatClient(HttpClient http, ILogger<AiChatClient> logger)
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     /// <summary>
-    /// Returns the default AI provider name from the AI API configuration.
+    /// Returns the active AI provider and model from the AI API configuration.
+    /// Used by admin pages to display the current configuration without
+    /// re-implementing provider/model resolution locally.
     /// </summary>
-    public async Task<string> GetDefaultProviderAsync(CancellationToken ct = default)
+    public async Task<AiConfiguration> GetConfigurationAsync(CancellationToken ct = default)
     {
-        var result = await http.GetFromJsonAsync<DefaultProviderResponse>("/api/ai/config", ct);
-        return result?.DefaultProvider ?? "ollama";
+        var result = await http.GetFromJsonAsync<AiConfigurationResponse>("/api/ai/config", ct);
+        return result is null
+            ? new AiConfiguration("ollama", string.Empty)
+            : new AiConfiguration(result.DefaultProvider, result.DefaultModel);
     }
 
-    private record DefaultProviderResponse(string DefaultProvider);
+    private record AiConfigurationResponse(string DefaultProvider, string DefaultModel);
+
+    /// <summary>
+    /// Snapshot of the active AI configuration as reported by the AI API.
+    /// </summary>
+    public sealed record AiConfiguration(string DefaultProvider, string DefaultModel);
 
     /// <summary>
     /// Sends conversation history to the AI API and yields structured updates.

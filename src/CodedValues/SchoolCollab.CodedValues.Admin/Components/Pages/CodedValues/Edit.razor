@@ -80,8 +80,8 @@
                             @context.SourceCode
                         </TemplateColumn>
                         <TemplateColumn Title="">
-                            <FluentAnchor Href="#" OnClick="@(() => EditDefinitionDialog(context))" class="link-action">Edit</FluentAnchor>
-                            <FluentAnchor Href="#" OnClick="@(() => RemoveDefinitionAsync(context.Key))" class="link-action ms-2">Remove</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => EditDefinitionDialog(context))">Edit</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => RemoveDefinitionAsync(context.Key))" class="ms-2">Remove</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
                 }
@@ -105,12 +105,12 @@
                         <TemplateColumn Title="">
                             @if (_editingAttrKey == context.Key)
                             {
-                                <FluentAnchor Href="#" OnClick="CancelAttributeEdit" class="link-action cancel-link">Cancel</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="CancelAttributeEdit">Cancel</FluentAnchor>
                             }
                             else
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => StartEditAttribute(context))" class="link-action">Edit</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => RemoveAttributeAsync(context.Key))" class="link-action ms-2">Remove</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => StartEditAttribute(context))">Edit</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => RemoveAttributeAsync(context.Key))" class="ms-2">Remove</FluentAnchor>
                             }
                         </TemplateColumn>
                     </FluentDataGrid>

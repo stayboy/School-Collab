@@ -56,7 +56,7 @@
                                         MultiLine="true"
                                         TGridItem="AssignmentSummaryDto">
                             <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
-                                <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
+                                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
                             </TemplateColumn>
                             <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
                                 @EnumHelper.GetDescription(context.AssignmentType)
@@ -83,18 +83,18 @@
                             <TemplateColumn Title="Actions">
                                 @if (context.Status == AssignmentStatusDto.Draft)
                                 {
-                                    <FluentAnchor Href="@($"/assignments/{context.Id}/edit")" class="link-action">Edit</FluentAnchor>
-                                    <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="link-action ms-2">Publish</FluentAnchor>
-                                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                                    <FluentAnchor Href="@($"/assignments/{context.Id}/edit")">Edit</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="ms-2">Publish</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="ms-2">Delete</FluentAnchor>
                                 }
                                 else if (context.Status == AssignmentStatusDto.Published)
                                 {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))" class="link-action">Unpublish</FluentAnchor>
-                                    <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="link-action ms-2">Close</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))">Unpublish</FluentAnchor>
+                                    <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="ms-2">Close</FluentAnchor>
                                 }
                                 else if (context.Status == AssignmentStatusDto.Closed)
                                 {
-                                    <FluentAnchor Href="@($"/assignments/{context.Id}")" class="link-action">Review</FluentAnchor>
+                                    <FluentAnchor Href="@($"/assignments/{context.Id}")">Review</FluentAnchor>
                                 }
                             </TemplateColumn>
                         </FluentDataGrid>
@@ -120,7 +120,7 @@
                                     MultiLine="true"
                                     TGridItem="AssignmentSummaryDto">
                         <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
-                            <FluentAnchor Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
+                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
                         </TemplateColumn>
                         <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
                             @EnumHelper.GetDescription(context.AssignmentType)
@@ -147,18 +147,18 @@
                         <TemplateColumn Title="Actions">
                             @if (context.Status == AssignmentStatusDto.Draft)
                             {
-                                <FluentAnchor Href="@($"/assignments/{context.Id}/edit")" class="link-action">Edit</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="link-action ms-2">Publish</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                                <FluentAnchor Href="@($"/assignments/{context.Id}/edit")">Edit</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="ms-2">Publish</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="ms-2">Delete</FluentAnchor>
                             }
                             else if (context.Status == AssignmentStatusDto.Published)
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))" class="link-action">Unpublish</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="link-action ms-2">Close</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))">Unpublish</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="ms-2">Close</FluentAnchor>
                             }
                             else if (context.Status == AssignmentStatusDto.Closed)
                             {
-                                <FluentAnchor Href="@($"/assignments/{context.Id}")" class="link-action">Review</FluentAnchor>
+                                <FluentAnchor Href="@($"/assignments/{context.Id}")">Review</FluentAnchor>
                             }
                         </TemplateColumn>
                     </FluentDataGrid>

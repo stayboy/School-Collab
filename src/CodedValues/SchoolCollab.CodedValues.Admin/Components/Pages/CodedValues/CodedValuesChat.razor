@@ -1,66 +1,88 @@
 @using Microsoft.Extensions.AI
 @using SchoolCollab.AI
-@using SchoolCollab.AI.Services
 @implements IAsyncDisposable
+@implements IDialogContentComponent<CodedValuesChatData>
 
 @inject AiChatClient AiChatClient
-@inject IConfiguration Configuration
 @inject ILogger<CodedValuesChat> Logger
 @inject NavigationManager Nav
 
-<div class="chat-container">
-    <h3 class="chat-heading">✨ AI Assistant</h3>
-    <p class="chat-intro">
-        Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
-        Try: "Create a Country coded value with code CNTRY" or "Add countries to CNTRY"
-    </p>
+@*
+    Three render modes:
+    - Full (default):  Header + scrollable messages + input + action bar + model info.
+                       Used inline on the landing page.
+    - DisplayOnly:     Header + scrollable messages (no input). Used inside the
+                       drawer to show chat responses above the input bar.
+    - InputOnly:       Just the input area + model info (no header, no messages).
+                       Used inside the drawer, absolutely positioned at the
+                       bottom, for follow-up prompts.
+*@
+
+<div class="chat-container chat-container-@Mode.ToString().ToLowerInvariant()">
+    @if (Mode != CodedValuesChatMode.InputOnly && !HideHeader)
+    {
+        <h3 class="chat-heading">✨ AI Assistant</h3>
+        @if (Mode == CodedValuesChatMode.Full)
+        {
+            <p class="chat-intro">
+                Ask me to create or explore coded values. I'll guide you through picking a parent, setting codes &amp; descriptions, and optionally adding attributes.
+                Try: "Create a Country coded value with code CNTRY" or "Add countries to CNTRY"
+            </p>
+        }
+    }
 
     <ErrorBoundary>
         <ChildContent>
-            <div class="chat-messages">
-                @foreach (var msg in _messages)
-                {
-                    <div class="chat-message @GetMessageClass(msg.Role)">
-                        @if (msg.Role == ChatRole.User)
-                        {
-                            <strong>You:</strong>
-                        }
-                        else
-                        {
+            @if (Mode != CodedValuesChatMode.InputOnly && !SuppressResponseDisplay)
+            {
+                <div class="chat-messages">
+                    @foreach (var msg in RenderMessages)
+                    {
+                        <div class="chat-message @GetMessageClass(msg.Role)">
+                            @if (msg.Role == ChatRole.User)
+                            {
+                                <strong>You:</strong>
+                            }
+                            else
+                            {
+                                <strong>AI:</strong>
+                            }
+                            <div class="message-text">@msg.Text</div>
+                            @if (msg.ToolCalls is { Count: > 0 })
+                            {
+                                <div class="tool-call-summary">
+                                    @GetToolCallSummary(msg.ToolCalls)
+                                </div>
+                            }
+                        </div>
+                    }
+                    @if (IsStreaming)
+                    {
+                        <div class="chat-message streaming-container">
                             <strong>AI:</strong>
-                        }
-                        <div class="message-text">@msg.Text</div>
-                        @if (msg.ToolCalls is { Count: > 0 })
-                        {
-                            <div class="tool-call-summary">
-                                @GetToolCallSummary(msg.ToolCalls)
-                            </div>
-                        }
-                    </div>
-                }
-                @if (_isStreaming)
-                {
-                    <div class="chat-message streaming-container">
-                        <strong>AI:</strong>
-                        @if (!string.IsNullOrEmpty(_streamingText))
-                        {
-                            <div class="streaming-text">@_streamingText</div>
-                        }
-                        @if (_activeToolCalls is { Count: > 0 })
-                        {
-                            <div class="tool-call-summary tool-call-progress">
+                            @if (!string.IsNullOrEmpty(StreamingText))
+                            {
+                                <div class="streaming-text">@StreamingText</div>
+                            }
+                            @if (ActiveToolCalls is { Count: > 0 })
+                            {
+                                <div class="tool-call-summary tool-call-progress">
+                                    <FluentProgressRing class="progress-ring-small" />
+                                    <span>Working…</span>
+                                </div>
+                            }
+                            @if (string.IsNullOrEmpty(StreamingText) && (ActiveToolCalls is null || ActiveToolCalls.Count == 0))
+                            {
                                 <FluentProgressRing class="progress-ring-small" />
-                                <span>Working…</span>
-                            </div>
-                        }
-                        @if (string.IsNullOrEmpty(_streamingText) && (_activeToolCalls is null || _activeToolCalls.Count == 0))
-                        {
-                            <FluentProgressRing class="progress-ring-small" />
-                        }
-                    </div>
-                }
-            </div>
+                            }
+                        </div>
+                    }
+                </div>
+            }
 
+            <div class="model-info">
+                <span class="model-label-text">@EffectiveModel (@_provider)</span>
+            </div>
             <div class="input-area">
                 <div class="input-row">
                     <div class="input-field-wrapper">
@@ -76,29 +98,23 @@
                                  OnClick="SendAsync"
                                  Disabled="@_isStreaming"
                                  aria-label="Send message">
-                        ➤
+                        Send
                     </FluentButton>
                 </div>
             </div>
-            <div class="action-bar">
-                <FluentStack Orientation="Orientation.Horizontal">
-                    <FluentButton Appearance="Appearance.Accent"
-                                 OnClick="SendAsync"
-                                 Disabled="@_isStreaming"
-                                 aria-label="Send message">
-                        Send
-                    </FluentButton>
-                    <FluentButton Appearance="Appearance.Stealth"
-                                 OnClick="ClearAsync"
-                                 Disabled="@_isStreaming"
-                                 aria-label="Clear chat">
-                        Clear
-                    </FluentButton>
-                </FluentStack>
-            </div>
-            <div class="model-info">
-                <span class="model-label-text">Model: @EffectiveModel (@_provider)</span>
-            </div>
+            @if (Mode != CodedValuesChatMode.InputOnly)
+            {
+                <div class="action-bar">
+                    <FluentStack Orientation="Orientation.Horizontal">
+                        <FluentButton Appearance="Appearance.Stealth"
+                                     OnClick="ClearAsync"
+                                     Disabled="@_isStreaming"
+                                     aria-label="Clear chat">
+                            Clear
+                        </FluentButton>
+                    </FluentStack>
+                </div>
+            }
         </ChildContent>
         <ErrorContent Context="ex">
             <FluentMessageBar Intent="MessageIntent.Error">
@@ -109,9 +125,145 @@
 </div>
 
 @code {
-    private record ToolCallDisplay(string CallId, string FriendlyName, string ArgsSummary, string? ResultSummary = null, bool? Success = null);
+    /// <summary>
+    /// Controls which parts of the chat UI are rendered. Used to embed the chat
+    /// in different layouts (inline on a page, split between display + input
+    /// areas inside a drawer, etc.).
+    /// </summary>
+    public enum CodedValuesChatMode
+    {
+        /// <summary>Header + messages + input — the full standalone chat.</summary>
+        Full,
 
-    private record ChatMessageItem(ChatRole Role, string Text, List<ToolCallDisplay>? ToolCalls = null);
+        /// <summary>Header + messages only — read-only view of the conversation.</summary>
+        DisplayOnly,
+
+        /// <summary>Just the input area — no header, no message history.</summary>
+        InputOnly,
+    }
+
+    [Parameter] public CodedValuesChatMode Mode { get; set; } = CodedValuesChatMode.Full;
+
+    /// <summary>
+    /// When true, the inner header (the "✨ AI Assistant" heading and the
+    /// intro paragraph) is not rendered. Use this when the chat is hosted
+    /// inside a container that already supplies its own title — e.g. a
+    /// <c>SideDrawer</c> whose header carries the same text. The
+    /// <see cref="CodedValuesChatMode.InputOnly"/> mode already hides the
+    /// header; this flag additionally suppresses it in
+    /// <see cref="CodedValuesChatMode.Full"/> and
+    /// <see cref="CodedValuesChatMode.DisplayOnly"/>.
+    /// </summary>
+    [Parameter] public bool HideHeader { get; set; }
+
+    /// <summary>
+    /// When true, the chat does not render messages locally. Useful when this
+    /// chat is the "launcher" surface (e.g. inline on a page) and the response
+    /// should appear in another surface such as a drawer. The AI request still
+    /// fires and <see cref="_messages"/> is still populated (so the AI sees the
+    /// full conversation history); only the local render is suppressed.
+    /// Pair with <see cref="OnMessageAdded"/> to mirror the conversation into
+    /// the drawer.
+    /// </summary>
+    [Parameter] public bool SuppressResponseDisplay { get; set; }
+
+    /// <summary>
+    /// Fires after a new message is added to the conversation. Use this to
+    /// mirror the conversation into another <see cref="CodedValuesChat"/>
+    /// instance (e.g. the display-only chat inside a drawer) or to open the
+    /// drawer on the first prompt. The payload is the freshly-added
+    /// <see cref="ChatMessageItem"/> — both user prompts and assistant
+    /// responses are emitted, in order.
+    /// </summary>
+    [Parameter] public EventCallback<ChatMessageItem> OnMessageAdded { get; set; }
+
+    /// <summary>
+    /// Fires after the user clears the conversation (via the "Clear" button).
+    /// Use this to mirror the clear into another surface — e.g. the drawer
+    /// chat — so all visible surfaces reset together. Cleared <see cref="_messages"/>
+    /// locally first; the callback fires after the local state is updated.
+    /// </summary>
+    [Parameter] public EventCallback OnCleared { get; set; }
+
+    /// <summary>
+    /// Fires whenever the streaming state changes — once when streaming starts
+    /// (IsStreaming=true, empty text), on every chunk / tool-call update while
+    /// streaming, and once when streaming ends (IsStreaming=false). Use this to
+    /// mirror the live streaming indicator into another surface (e.g. the
+    /// drawer chat), so users see the same "AI is typing…" progress as the
+    /// inline chat.
+    /// </summary>
+    [Parameter] public EventCallback<ChatStreamingState> OnStreamingStateChanged { get; set; }
+
+    /// <summary>
+    /// Fires after a prompt is successfully sent (i.e. the chat request was
+    /// dispatched to the AI service). The landing page uses this to open the
+    /// side drawer so the user can follow the response without losing context.
+    /// </summary>
+    [Parameter] public EventCallback OnPromptSent { get; set; }
+
+    /// <summary>Required by <see cref="IDialogContentComponent{TData}"/>. Not used.</summary>
+    [Parameter] public CodedValuesChatData Content { get; set; } = new();
+
+    /// <summary>
+    /// Optional external message list. When set, the chat renders from this
+    /// list instead of its internal <see cref="_messages"/>. Used by the
+    /// drawer to display the conversation mirrored from the inline chat via
+    /// <see cref="CodedValuesChatHub"/>.
+    ///
+    /// When set, the AI-request history and Clear behaviour still operate on
+    /// <see cref="_messages"/>; the inline chat uses its own internal state
+    /// for AI history while the drawer chat uses this parameter for rendering
+    /// only.
+    /// </summary>
+    [Parameter] public IReadOnlyList<ChatMessageItem>? ExternalMessages { get; set; }
+
+    /// <summary>
+    /// Optional external streaming state. When set, the chat renders the
+    /// streaming indicator (typing progress, partial text, in-flight tool
+    /// calls) from this state instead of its internal fields. Used by the
+    /// drawer to display the same live progress the inline chat sees.
+    /// </summary>
+    [Parameter] public ChatStreamingState? ExternalStreamingState { get; set; }
+
+    /// <summary>
+    /// The list the UI iterates over. Falls back to the internal message list
+    /// when no external source has been supplied.
+    /// </summary>
+    private IReadOnlyList<ChatMessageItem> RenderMessages =>
+        ExternalMessages ?? _messages;
+
+    /// <summary>Effective streaming flag — external source wins when set.</summary>
+    private bool IsStreaming => ExternalStreamingState?.IsStreaming ?? _isStreaming;
+
+    /// <summary>Effective streaming text — external source wins when set.</summary>
+    private string StreamingText => ExternalStreamingState?.StreamingText ?? _streamingText;
+
+    /// <summary>Effective active tool calls — external source wins when set.</summary>
+    private IReadOnlyList<ToolCallDisplay>? ActiveToolCalls =>
+        ExternalStreamingState?.ActiveToolCalls ?? _activeToolCalls;
+
+    /// <summary>
+    /// Compact display of a tool call. Public so it can be embedded in the
+    /// public <see cref="ChatMessageItem"/> record.
+    /// </summary>
+    public record ToolCallDisplay(string CallId, string FriendlyName, string ArgsSummary, string? ResultSummary = null, bool? Success = null);
+
+    /// <summary>
+    /// One turn in the conversation. Public so it can be the payload of the
+    /// public <see cref="OnMessageAdded"/> event callback.
+    /// </summary>
+    public record ChatMessageItem(ChatRole Role, string Text, List<ToolCallDisplay>? ToolCalls = null);
+
+    /// <summary>
+    /// Live snapshot of the AI streaming state. Bundles the is-streaming flag,
+    /// the partial text emitted so far, and the in-flight tool calls so they
+    /// can travel together through one event/parameter rather than three.
+    /// </summary>
+    public record ChatStreamingState(
+        bool IsStreaming,
+        string StreamingText,
+        IReadOnlyList<ToolCallDisplay>? ActiveToolCalls);
 
     private readonly List<ChatMessageItem> _messages = [];
     private string _inputText = string.Empty;
@@ -122,8 +274,8 @@
     private CancellationTokenSource? _sendCts;
     private volatile bool _disposed;
 
-    private string _provider = ChatClientFactory.Providers.Ollama;
-    private string _effectiveModel = ChatModelResolver.DefaultOllamaModel;
+    private string _provider = "ollama";
+    private string _effectiveModel = string.Empty;
 
     /// <summary>
     /// The model that will actually be sent to the AI API, resolved from configuration.
@@ -133,17 +285,24 @@
     private static string GetMessageClass(ChatRole role) =>
         role == ChatRole.User ? "message-user" : "message-assistant";
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
-        (_provider, _effectiveModel) = ResolveModelFromConfiguration();
+        // Ask the AI API for its active provider/model rather than re-implementing
+        // resolution locally. Keeps the modular boundary intact: the AI service
+        // is the single source of truth for its own configuration.
+        try
+        {
+            var config = await AiChatClient.GetConfigurationAsync();
+            _provider = config.DefaultProvider;
+            _effectiveModel = config.DefaultModel;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to read AI configuration; displaying placeholder values.");
+        }
+
         Logger.LogInformation("AI chat configured with provider {Provider} and model {Model}", _provider, _effectiveModel);
     }
-
-    private (string Provider, string Model) ResolveModelFromConfiguration()
-        => ChatModelResolver.Resolve(
-            Configuration["codedvalue-ai-provider"],
-            Configuration["Ollama:DefaultModel"],
-            Configuration["OpenRouter:DefaultModel"]);
 
     private async Task SendAsync()
     {
@@ -154,9 +313,11 @@
         StateHasChanged();
 
         _messages.Add(new(ChatRole.User, prompt));
+        await NotifyMessageAddedAsync(_messages[^1]);
         _isStreaming = true;
         _streamingText = string.Empty;
         _activeToolCalls = null;
+        await NotifyStreamingStateChangedAsync();
         _sendCts?.Cancel();
         _sendCts?.Dispose();
         _sendCts = new CancellationTokenSource();
@@ -166,13 +327,21 @@
             .Select(m => new ChatMessage(m.Role, m.Text))
             .ToList();
 
+        // Notify the host page (e.g. landing page) that a prompt was sent so it
+        // can surface the drawer. The drawer hosts its own chat instance for
+        // follow-up prompts, so this event is purely about UX feedback.
+        if (OnPromptSent.HasDelegate)
+        {
+            await OnPromptSent.InvokeAsync();
+        }
+
         var toolCalls = new List<ToolCallDisplay>();
 
         try
         {
             Logger.LogInformation("Sending AI prompt with provider {Provider} and model {Model}", _provider, EffectiveModel);
 
-            await foreach (var update in AiChatClient.ChatAsync(history, EffectiveModel, _sendCts.Token))
+            await foreach (var update in AiChatClient.ChatAsync(history, model: null, _sendCts.Token))
             {
                 if (_disposed) return;
 
@@ -202,6 +371,9 @@
                 }
 
                 await InvokeAsync(StateHasChanged);
+                // Mirror the live streaming state to the drawer (and any other
+                // mirror surface) so the user sees the same progress indicator.
+                await NotifyStreamingStateChangedAsync();
             }
         }
         catch (OperationCanceledException)
@@ -226,6 +398,7 @@
         if (!_disposed)
         {
             _messages.Add(new(ChatRole.Assistant, _streamingText, toolCalls.Count > 0 ? toolCalls : null));
+            await NotifyMessageAddedAsync(_messages[^1]);
 
             // Navigate to children page after successful bulk creation
             var bulkCall = toolCalls.FirstOrDefault(tc =>
@@ -243,6 +416,7 @@
         _streamingText = string.Empty;
         _activeToolCalls = null;
         _isStreaming = false;
+        await NotifyStreamingStateChangedAsync();
         if (!_disposed) StateHasChanged();
     }
 
@@ -251,6 +425,37 @@
         if (e.Key == KeyCode.Enter && !e.ShiftKey)
         {
             await SendAsync();
+        }
+    }
+
+    /// <summary>
+    /// Raises <see cref="OnMessageAdded"/> for the just-added message so the
+    /// host page can mirror the conversation into another surface (e.g. a
+    /// drawer). Silently no-ops when no delegate is bound.
+    /// </summary>
+    private async Task NotifyMessageAddedAsync(ChatMessageItem msg)
+    {
+        if (_disposed) return;
+        if (OnMessageAdded.HasDelegate)
+        {
+            await OnMessageAdded.InvokeAsync(msg);
+        }
+    }
+
+    /// <summary>
+    /// Raises <see cref="OnStreamingStateChanged"/> with a fresh snapshot of
+    /// <see cref="_isStreaming"/>, <see cref="_streamingText"/>, and
+    /// <see cref="_activeToolCalls"/>. Called at streaming start, after every
+    /// streamed chunk / tool-call event, and at streaming end. Mirrored surfaces
+    /// (drawer) use this to render the live "AI is typing…" progress.
+    /// </summary>
+    private async Task NotifyStreamingStateChangedAsync()
+    {
+        if (_disposed) return;
+        if (OnStreamingStateChanged.HasDelegate)
+        {
+            await OnStreamingStateChanged.InvokeAsync(
+                new ChatStreamingState(_isStreaming, _streamingText, _activeToolCalls));
         }
     }
 
@@ -263,6 +468,12 @@
         _activeToolCalls = null;
         await InvokeAsync(StateHasChanged);
         Logger.LogInformation("Coded-values AI chat cleared");
+
+        // Notify mirror surfaces (drawer) so they reset in lockstep.
+        if (OnCleared.HasDelegate)
+        {
+            await OnCleared.InvokeAsync();
+        }
     }
 
     public async ValueTask DisposeAsync()

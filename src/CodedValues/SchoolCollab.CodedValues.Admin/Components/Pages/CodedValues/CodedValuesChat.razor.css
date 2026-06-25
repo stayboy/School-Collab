@@ -1,8 +1,19 @@
 /* Chat container */
 .chat-container {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.chat-container-full {
     border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1);
     padding-top: 0.75rem;
     flex-shrink: 0;
+}
+
+.chat-container-displayonly {
+    height: 100%;
+    min-height: 0;
 }
 
 .chat-heading {
@@ -17,10 +28,37 @@
 
 /* Message area */
 .chat-messages {
-    max-height: 400px;
+    flex: 1;
+    min-height: 0;
     overflow-y: auto;
     margin-bottom: 1rem;
     padding: 0.5rem;
+    border: 1px solid var(--neutral-stroke-rest, #d1d1d1);
+    border-radius: 4px;
+    background: var(--neutral-fill-layer-rest, #fafafa);
+}
+
+/*
+ * In the drawer, the parent flex container pins the input bar to the bottom
+ * and lets the message list grow to fill the remaining space. We rely on
+ * flex: 1 + min-height: 0 above to make the messages area scroll rather
+ * than overflow the panel.
+ */
+.chat-container-displayonly .chat-messages {
+    border: none;
+    background: transparent;
+    padding: 0.25rem 0.5rem;
+}
+
+/*
+ * Safety net: clip any overflow on the x-axis so a stray long word in a
+ * message, an oversized button, or a min-width on a FluentUI child control
+ * can't push the panel beyond its declared width and create a horizontal
+ * scrollbar on the drawer.
+ */
+.chat-container {
+    overflow-x: hidden;
+    max-width: 100%;
 }
 
 .chat-message {
@@ -95,10 +133,12 @@
 
 .input-field-wrapper {
     flex: 1;
+    min-width: 0;
 }
 
 ::deep .full-width {
     width: 100%;
+    min-width: 0;
 }
 
 /* Action bar */
@@ -109,12 +149,12 @@
     margin-top: 0.25rem;
 }
 
-/* Model info */
+/* Model info — pinned to the right of its row, above the input. */
 .model-info {
     display: flex;
     justify-content: flex-end;
     align-items: center;
-    margin-top: 0.25rem;
+    margin-bottom: 0.25rem;
 }
 
 .model-label-text {

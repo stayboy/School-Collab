@@ -312,8 +312,13 @@ Only add styles to `wwwroot/app.css` when they are truly application-wide:
 | Theme / colour variables | Toolbar actions, button bars |
 | `fluent-data-grid` global parts | Spinner / loading containers |
 | `.grid-sticky-cols` (shared grid pattern) | Form field layouts |
-| `.link-action`, `.brand*` | Dialog / chat bubble styles |
+| `.brand*` | Dialog / chat bubble styles |
 | Responsive breakpoints for `.brand*` | Any style used by exactly one component |
+
+The global `app.css` already styles bare `<a>` and `fluent-anchor` as accent-coloured
+inline links with hover underlines (see the `a, .btn-link, fluent-anchor` rule
+below). Don't reintroduce `.link-action` or similar wrappers — use `class="ms-2"` for
+spacing only.
 
 If a style is used by two or more components, consider whether it should be a shared
 CSS class in `app.css` (e.g. utility classes) or duplicated in each isolated file
@@ -331,6 +336,88 @@ layout on `<Fluent*>` components:
 
 When FluentUI provides a parameter (e.g. `Appearance`, `Gap`, `Orientation`), use it
 instead of replicating the same effect in CSS.
+
+### FluentAnchor patterns in grids
+
+`<FluentAnchor>` inside a `<FluentDataGrid>` falls into two roles, each with its own
+convention:
+
+| Role | Example columns | Markup |
+|---|---|---|
+| Identity / navigation link (the row's primary identifier — Name, Title, Code) | `<TemplateColumn Title="Name">`, `<TemplateColumn Title="Title">` | `<FluentAnchor Appearance="Appearance.Hypertext" Href="...">...</FluentAnchor>` |
+| Action verb (Enable, Disable, Edit, Delete, Recover) | `<TemplateColumn Title="Actions">` | `<FluentAnchor Href="..." OnClick="...">Enable</FluentAnchor>` |
+
+**Identity / navigation link**: use `Appearance="Appearance.Hypertext"` so the link is
+visually unambiguous as the row's primary navigable target (accent colour, underlined).
+
+**Action verb**: do **not** set `Appearance` — leave it at FluentUI's default so it
+inherits the global `fluent-anchor` styling from `app.css` (accent-coloured inline
+text, underline on hover). Do not add custom CSS classes such as `.link-action`,
+`.delete-link`, or `.cancel-link`; the browser's default `cursor: pointer` on `<a>`
+is enough.
+
+For destructive actions, do not colour the link red — the confirmation dialog already
+gates the action, and the label text (`Delete`) conveys the semantics.
+
+### Side-panel drawers (`FluentDialog` + `DialogType.Panel`)
+
+FluentUI Blazor has no standalone `Drawer` component. Use `FluentDialog` with
+`DialogType.Panel` instead — that's its purpose-built side-drawer primitive.
+There is a project precedent in `CodedValuesChatPanel.razor` (the AI assistant
+drawer on the coded-values landing page).
+
+API:
+
+```razor
+@inject IDialogService DialogService
+
+<FluentButton OnClick="OpenDrawerAsync">Open panel</FluentButton>
+
+@code {
+    private async Task OpenDrawerAsync()
+    {
+        await DialogService.ShowDialogAsync<MyDrawer, MyDrawerData>(
+            new MyDrawerData(...),
+            new DialogParameters
+            {
+                Title = "My Panel",
+                DialogType = DialogType.Panel,                 // <-- drawer mode
+                Alignment = HorizontalAlignment.Right,         // Left | Right | Center
+                Width = "420px",                               // panel width
+                ShowDismiss = true,                            // show × button
+                Modal = false,                                 // let user still click page behind
+            });
+    }
+}
+```
+
+For the dialog body to be accepted by `ShowDialogAsync<TDialog, TData>`, the
+component must implement `IDialogContentComponent<TData>`:
+
+```razor
+@implements IDialogContentComponent<MyDrawerData>
+@code {
+    [Parameter] public MyDrawerData Content { get; set; } = default!;
+}
+```
+
+For the common pattern of a chat-style panel with **scrollable content above +
+pinned input bar below**, compose two children in a flex column. Don't use
+`position: absolute` for the input — make it a flex item with `flex: 0 0 auto`
+so it participates in layout and never overlaps content.
+
+### Mirroring a page-side component into a drawer
+
+When the drawer needs to show the **same live state** as a component on the
+hosting page (e.g. an inline chat → side-drawer chat), `@ref` does not work —
+the drawer content lives in a separate render tree behind
+`DialogService.ShowDialogAsync`. Use a **scoped service** as a pub/sub bridge.
+Project precedent: `CodedValuesChatHub` (scoped), injected by the inline
+`<CodedValuesChat>` on the landing page and by `CodedValuesChatPanel` inside
+the drawer. The inline chat emits `OnMessageAdded` events; the page handler
+appends to the hub; the drawer's display chat reads from the hub via its
+`ExternalMessages` parameter and re-renders when the hub's `Changed` event
+fires.
 
 ### Edit form layout with FluentUI
 

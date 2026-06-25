@@ -51,8 +51,8 @@
                             <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
                         </TemplateColumn>
                         <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="link-action">Recover</FluentAnchor>
-                            <FluentAnchor Href="@($"/students/{context.Id}")" class="link-action ms-2">View</FluentAnchor>
+                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))">Recover</FluentAnchor>
+                            <FluentAnchor Href="@($"/students/{context.Id}")" class="ms-2">View</FluentAnchor>
                         </TemplateColumn>
                     </FluentDataGrid>
                 }
@@ -100,14 +100,14 @@
                             }
                         </TemplateColumn>
                         <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="@($"/students/{context.Id}")" class="link-action">View</FluentAnchor>
+                            <FluentAnchor Href="@($"/students/{context.Id}")">View</FluentAnchor>
                             @if (!context.IsDeleted)
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="link-action delete-link ms-2">Delete</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="ms-2">Delete</FluentAnchor>
                             }
                             else
                             {
-                                <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="link-action ms-2">Recover</FluentAnchor>
+                                <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="ms-2">Recover</FluentAnchor>
                             }
                         </TemplateColumn>
                     </FluentDataGrid>

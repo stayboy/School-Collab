@@ -1,0 +1,24 @@
+/*
+ * Drawer body layout for the AI assistant. A single chat instance fills the
+ * whole drawer:
+ *
+ *   ┌─────────────────────────────────────┐
+ *   │  ✨ AI Assistant                     │
+ *   │  ──────────────────────────────────  │
+ *   │  [scrollable message history]        │  DisplayOnly: height: 100%
+ *   │  [typing indicator + partial text]   │  (see CodedValuesChat.razor.css)
+ *   │  ...                                 │
+ *   │  Model: gemma4 (ollama)              │
+ *   └─────────────────────────────────────┘
+ *
+ * The chat's .chat-container-displayonly sets height: 100% and uses
+ * flexbox internally (with .chat-messages having flex: 1, min-height: 0,
+ * overflow-y: auto) so the messages area scrolls when content overflows
+ * the drawer height. No external flex layout is needed here — the chat
+ * already self-sizes to fill its parent.
+ */
+.chat-panel {
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+}

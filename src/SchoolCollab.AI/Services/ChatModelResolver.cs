@@ -1,5 +1,3 @@
-using Microsoft.Extensions.Configuration;
-
 namespace SchoolCollab.AI.Services;
 
 /// <summary>
@@ -22,21 +20,11 @@ public static class ChatModelResolver
     public const string DefaultOpenRouterModel = "google/gemma-4-26b-a4b-it";
 
     /// <summary>
-    /// Resolves the provider and model from application configuration.
-    /// Reads <c>codedvalue-ai-provider</c>, <c>Ollama:DefaultModel</c>,
-    /// and <c>OpenRouter:DefaultModel</c>.
-    /// </summary>
-    public static (string Provider, string Model) Resolve(IConfiguration configuration)
-        => Resolve(
-            configuration["codedvalue-ai-provider"],
-            configuration["Ollama:DefaultModel"],
-            configuration["OpenRouter:DefaultModel"]);
-
-    /// <summary>
-    /// Pure resolution core. Normalises the provider name and selects the
-    /// configured model, falling back to the provider's default model when
-    /// the configured value is missing or blank. Any unrecognised provider
-    /// resolves to Ollama.
+    /// Resolves the provider and model from three raw configuration values.
+    /// Pure function — kept free of <see cref="IConfiguration"/> so callers can
+    /// pull values from any source (appsettings, user-secrets, environment,
+    /// or in-memory dictionaries in tests) without coupling to a specific
+    /// configuration provider.
     /// </summary>
     public static (string Provider, string Model) Resolve(
         string? provider,

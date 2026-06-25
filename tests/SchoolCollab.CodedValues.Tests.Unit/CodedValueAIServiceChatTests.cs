@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,35 @@ namespace SchoolCollab.CodedValues.Tests.Unit;
 [TestClass]
 public class CodedValueAIServiceChatTests
 {
+    /// <summary>
+    /// Builds a <see cref="CodedValueAIService"/> with the supplied mocks and a default
+    /// <see cref="IConfiguration"/>. Tests don't depend on which model is resolved
+    /// because <see cref="IChatClientFactory.GetClient"/> is mocked to return the
+    /// deterministic <see cref="MockChatClient"/> under test.
+    /// </summary>
+    private static CodedValueAIService BuildService(
+        Mock<IChatClientFactory> mockFactory,
+        Mock<ICodedValuesApiClient> mockApi)
+    {
+        var mockEnv = new Mock<IHostEnvironment>();
+        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["codedvalue-ai-provider"] = "ollama",
+                ["Ollama:DefaultModel"] = "test-model",
+                ["OpenRouter:DefaultModel"] = "test-model"
+            })
+            .Build();
+
+        return new CodedValueAIService(
+            mockFactory.Object,
+            mockApi.Object,
+            new TestLogger<CodedValueAIService>(),
+            mockEnv.Object,
+            config);
+    }
     /// <summary>
     /// Simulates the prompt "Add hospitals to code values under HSPTL code".
     /// The AI should call get_coded_value_by_code, then create_bulk_values,
@@ -82,14 +112,7 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage>
         {
@@ -98,7 +121,7 @@ public class CodedValueAIServiceChatTests
 
         // Act
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -164,19 +187,12 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage> { new(ChatRole.User, "show me categories") };
 
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -210,19 +226,12 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage> { new(ChatRole.User, "show hospitals") };
 
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -295,14 +304,7 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage>
         {
@@ -311,7 +313,7 @@ public class CodedValueAIServiceChatTests
 
         // Act
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -391,14 +393,7 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage>
         {
@@ -407,7 +402,7 @@ public class CodedValueAIServiceChatTests
 
         // Act
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -487,14 +482,7 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage>
         {
@@ -503,7 +491,7 @@ public class CodedValueAIServiceChatTests
 
         // Act
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -635,14 +623,7 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage>
         {
@@ -651,7 +632,7 @@ public class CodedValueAIServiceChatTests
 
         // Act
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -879,14 +860,7 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage>
         {
@@ -895,7 +869,7 @@ public class CodedValueAIServiceChatTests
 
         // Act
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
         {
             updates.Add(update);
         }
@@ -947,20 +921,13 @@ public class CodedValueAIServiceChatTests
         var mockFactory = new Mock<IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
 
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var service = new CodedValueAIService(
-            mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object);
+        var service = BuildService(mockFactory, mockApi);
 
         var history = new List<ChatMessage> { new(ChatRole.User, "hello") };
 
         // Act — must NOT throw; the provider error must be yielded as a ChatUpdate.Error.
         var updates = new List<ChatUpdate>();
-        await foreach (var update in service.ChatAsync(history, null, CancellationToken.None))
+        await foreach (var update in service.ChatAsync(history, CancellationToken.None))
             updates.Add(update);
 
         // Assert — a single graceful ChatUpdate.Error is yielded.

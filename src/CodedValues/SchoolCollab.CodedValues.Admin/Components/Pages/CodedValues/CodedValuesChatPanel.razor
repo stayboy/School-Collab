@@ -1,0 +1,66 @@
+@implements IDialogContentComponent<CodedValuesChatData>
+@implements IDisposable
+
+@using SchoolCollab.CodedValues.Admin.Services
+@inject CodedValuesChatHub ChatHub
+
+@*
+    Drawer body for the AI assistant chat, hosted inside a
+    <c>FluentDialog</c> opened via <c>IDialogService.ShowDialogAsync</c>
+    with <c>DialogType.Panel</c>. The dialog service renders the slide-in
+    shell, header, dismiss (×) button, and modal backdrop; this component
+    is just the body.
+
+    The body renders a single <see cref="CodedValuesChat"/> in
+    <c>DisplayOnly</c> mode bound to <see cref="CodedValuesChatHub"/>: the
+    inline chat on the landing page (SuppressResponseDisplay=true) pushes
+    each new prompt and response into the hub via its OnMessageAdded
+    event, and updates the streaming snapshot on every chunk via
+    OnStreamingStateChanged. The display chat re-renders in response to
+    either change.
+
+    The drawer is read-only: users prompt from the inline chat on the
+    page; the drawer surfaces the responses. There is no second input
+    area in the drawer.
+*@
+
+<div class="chat-panel">
+    <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.DisplayOnly"
+                    HideHeader="true"
+                    ExternalMessages="@_mirroredMessages"
+                    ExternalStreamingState="@_mirroredStreamingState" />
+</div>
+
+@code {
+    /// <summary>Required by <see cref="IDialogContentComponent{T}"/>. Not used.</summary>
+    [Parameter] public CodedValuesChatData Content { get; set; } = new();
+
+    private IReadOnlyList<CodedValuesChat.ChatMessageItem> _mirroredMessages = [];
+    private CodedValuesChat.ChatStreamingState _mirroredStreamingState =
+        new(IsStreaming: false, StreamingText: string.Empty, ActiveToolCalls: null);
+
+    protected override void OnInitialized()
+    {
+        // Snapshot whatever has already been pushed before the drawer opened.
+        // Subsequent changes arrive via the Changed event below.
+        _mirroredMessages = ChatHub.Messages;
+        _mirroredStreamingState = ChatHub.StreamingState;
+        ChatHub.Changed += HandleHubChanged;
+    }
+
+    private void HandleHubChanged()
+    {
+        // Hand off to the renderer so the re-render runs on the sync context.
+        _ = InvokeAsync(() =>
+        {
+            _mirroredMessages = ChatHub.Messages;
+            _mirroredStreamingState = ChatHub.StreamingState;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        ChatHub.Changed -= HandleHubChanged;
+    }
+}

@@ -62,12 +62,3 @@
 .flex-field {
     flex: 1;
 }
-
-/* Action links */
-.delete-link {
-    color: var(--error);
-}
-
-.cancel-link {
-    font-size: 0.85em;
-}

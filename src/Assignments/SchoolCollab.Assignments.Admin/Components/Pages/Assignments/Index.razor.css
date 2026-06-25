@@ -50,8 +50,3 @@
     overflow: auto;
     width: 100%;
 }
-
-/* Action links */
-.delete-link {
-    color: var(--error);
-}
