@@ -18,6 +18,10 @@
 
 .action-bar {
     flex-shrink: 0;
+    /* FluentStack (page-container) doesn't stretch children to full width
+       by default, so the flex row + margin-left:auto below had no width to
+       push against. Force the bar to fill the stack's cross axis. */
+    width: 100%;
     display: flex;
     align-items: center;
     gap: 0.75rem;
@@ -26,17 +30,26 @@
 
 .spacer {
     flex-grow: 1;
+    flex-basis: auto;
 }
 
 ::deep .search-box {
-    width: 260px;
+    /* Fill available space inside the right group instead of a fixed width,
+       so the textbox + Chat button always hug the right edge together. */
+    flex: 1 1 auto;
+    min-width: 180px;
+    max-width: 320px;
+    width: 100%;
 }
 
 .action-bar-right {
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    /* Push the group to the right edge of the full-width action bar. The
+       spacer above is a backstop; margin-left:auto wins when there's room. */
     margin-left: auto;
+    flex-shrink: 0;
 }
 
 /* Loading / empty states */

@@ -35,24 +35,33 @@ public class CodedValuesChatTests : BunitContext
     }
 
     [TestMethod]
-    public void CodedValuesChat_FullMode_ShowsHeaderAndActionBar()
+    public void CodedValuesChat_FullMode_ShowsHeaderAndClearControl()
     {
         var cut = Render<CodedValuesChat>(parameters => parameters
             .Add(p => p.Mode, CodedValuesChat.CodedValuesChatMode.Full));
 
         cut.Find(".chat-heading").TextContent.Should().Be("✨ AI Assistant");
-        cut.Find(".action-bar").Should().NotBeNull();
+        // The Clear control now lives in the model-info row above the input
+        // area, rendered as a Hypertext FluentAnchor (not a button).
+        cut.Find(".model-info").Should().NotBeNull();
+        cut.FindAll("fluent-anchor").Should().Contain(a => a.TextContent.Trim() == "Clear");
     }
 
     [TestMethod]
-    public void CodedValuesChat_DisplayOnlyMode_ShowsActionBarButNoHeader()
+    public void CodedValuesChat_DisplayOnlyMode_ShowsClearControlButNoHeader()
     {
         var cut = Render<CodedValuesChat>(parameters => parameters
             .Add(p => p.Mode, CodedValuesChat.CodedValuesChatMode.DisplayOnly));
 
-        // The action bar must be visible — users can type into the input area
-        // even in DisplayOnly mode and need a Send button to submit.
-        cut.Find(".action-bar").Should().NotBeNull();
+        // DisplayOnly is the read-only view used by the drawer panel: it shows
+        // the mirrored conversation and a Clear control (now in the model-info
+        // row) but NO input area. A dead, unwired textbox here was the source
+        // of "I type in the drawer and nothing happens" reports — users must
+        // prompt from the inline InputOnly chat on the page, which mirrors
+        // into this surface.
+        cut.FindAll("fluent-anchor").Should().Contain(a => a.TextContent.Trim() == "Clear");
+        cut.FindAll(".input-area").Should().BeEmpty();
+        cut.FindAll("fluent-button").Should().NotContain(b => b.TextContent.Trim() == "Send");
     }
 
     [TestMethod]
@@ -75,8 +84,8 @@ public class CodedValuesChatTests : BunitContext
 
         cut.FindAll(".chat-heading").Should().BeEmpty();
         cut.FindAll(".chat-intro").Should().BeEmpty();
-        // Action bar should still render — HideHeader only affects the header.
-        cut.Find(".action-bar").Should().NotBeNull();
+        // Clear control should still render — HideHeader only affects the header.
+        cut.FindAll("fluent-anchor").Should().Contain(a => a.TextContent.Trim() == "Clear");
     }
 
     [TestMethod]
@@ -90,13 +99,14 @@ public class CodedValuesChatTests : BunitContext
     }
 
     [TestMethod]
-    public void CodedValuesChat_InputOnlyMode_HidesHeaderAndActionBar()
+    public void CodedValuesChat_InputOnlyMode_HidesHeaderAndClearControl()
     {
         var cut = Render<CodedValuesChat>(parameters => parameters
             .Add(p => p.Mode, CodedValuesChat.CodedValuesChatMode.InputOnly));
 
         cut.FindAll(".chat-heading").Should().BeEmpty();
-        cut.FindAll(".action-bar").Should().BeEmpty();
+        // InputOnly is the compact inline bar — no Clear control.
+        cut.FindAll("fluent-anchor").Should().BeEmpty();
         // Input area is always rendered (except in InputOnly? no — even InputOnly has the input).
         cut.Find(".input-area").Should().NotBeNull();
     }
