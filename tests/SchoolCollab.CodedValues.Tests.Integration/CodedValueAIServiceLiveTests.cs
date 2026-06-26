@@ -17,7 +17,7 @@ namespace SchoolCollab.CodedValues.Tests.Integration;
 
 /// <summary>
 /// Live tests for <see cref="AI.Services.CodedValueAIService.ChatAsync"/> against the real
-/// OpenRouter endpoint, using the configured model (<c>google/gemma-4-26b-a4b-it</c>).
+/// OpenRouter endpoint, using the configured model (<c>google/gemma-4-31b-it:free</c>).
 ///
 /// These build the <see cref="IChatClient"/> exactly as <c>SchoolCollab.AI/Program.cs</c>
 /// does, wire it through a mock <see cref="AI.Services.IChatClientFactory"/>, and drive the real
@@ -60,10 +60,18 @@ public class CodedValueAIServiceLiveTests
             ?? throw new InvalidOperationException("OpenRouter:Endpoint not configured (expected in ai-appsettings.json).");
         var model = config["OpenRouter:DefaultModel"]
             ?? throw new InvalidOperationException("OpenRouter:DefaultModel not configured (expected in ai-appsettings.json).");
-        var apiKey = config["OpenRouter:ApiKey"]
-            ?? throw new InvalidOperationException(
+        var apiKey = config["OpenRouter:ApiKey"];
+        // The OpenRouter API key is a secret kept out of source control, so it is
+        // only available where user secrets / the OpenRouter__ApiKey env var have
+        // been set. In environments where it is absent (notably CI), skip the live
+        // test as Inconclusive rather than throwing — see the class doc comment.
+        if (string.IsNullOrWhiteSpace(apiKey))
+        {
+            Assert.Inconclusive(
                 "OpenRouter:ApiKey not configured. Set it via `dotnet user-secrets set OpenRouter:ApiKey \"<key>\"` " +
                 "or the OpenRouter__ApiKey environment variable.");
+            return null!; // unreachable; Assert.Inconclusive throws
+        }
 
         return new OpenRouterSettings(endpoint, apiKey, model);
     }
@@ -74,7 +82,9 @@ public class CodedValueAIServiceLiveTests
     private static IChatClient BuildOpenRouterClient()
     {
         var s = LoadOpenRouterSettings();
-        s.Model.Should().Be("google/gemma-4-26b-a4b-it", "the live ChatAsync test must use the working non-free OpenRouter model");
+        // Pins the model configured in src/SchoolCollab.AI/appsettings.json so
+        // the live ChatAsync test exercises the same model the service will use.
+        s.Model.Should().Be("google/gemma-4-31b-it:free", "the live ChatAsync test must use the configured OpenRouter model");
 
         var openAiClient = new OpenAIClient(
             new ApiKeyCredential(s.ApiKey),
@@ -144,6 +154,14 @@ public class CodedValueAIServiceLiveTests
         // If ChatAsync broke, 'error' holds the exception — surface it as a failure.
         error.Should().BeNull("ChatAsync must not throw with OpenRouter as the provider");
 
+        // Free-tier (:free) models surface OpenRouter rate-limiting as a ChatUpdate.Error
+        // rather than a thrown exception. Skip as Inconclusive so CI stays green when the
+        // free tier is throttled — the live path is still verified when the tier is healthy.
+        if (ContainsRateLimitError(updates))
+        {
+            Assert.Inconclusive("OpenRouter rate-limited the request. Skipping live verification.");
+            return;
+        }
         updates.Should().NotContain(u => u is AI.ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
 
         var text = string.Concat(updates.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
@@ -226,6 +244,11 @@ public class CodedValueAIServiceLiveTests
         // If ChatAsync broke during the tool-call loop, surface the exception as a failure.
         error.Should().BeNull("ChatAsync must not throw during the tool-call loop with OpenRouter");
 
+        if (ContainsRateLimitError(updates))
+        {
+            Assert.Inconclusive("OpenRouter rate-limited the request during the tool-call loop. Skipping live verification.");
+            return;
+        }
         updates.Should().NotContain(u => u is AI.ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
 
         // The model should have emitted a list_coded_value_categories function call that
@@ -306,6 +329,11 @@ public class CodedValueAIServiceLiveTests
             return;
         }
         error1.Should().BeNull("ChatAsync must not throw on the proposal turn");
+        if (ContainsRateLimitError(updates1))
+        {
+            Assert.Inconclusive("OpenRouter rate-limited the request on the proposal turn. Skipping live verification.");
+            return;
+        }
         updates1.Should().NotContain(u => u is AI.ChatUpdate.Error, "no error should occur on the proposal turn");
 
         var proposalText = string.Concat(updates1.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
@@ -332,6 +360,11 @@ public class CodedValueAIServiceLiveTests
             return;
         }
         error2.Should().BeNull("ChatAsync must not throw on the confirm turn");
+        if (ContainsRateLimitError(updates2))
+        {
+            Assert.Inconclusive("OpenRouter rate-limited the request on the confirm turn. Skipping live verification.");
+            return;
+        }
         updates2.Should().NotContain(u => u is AI.ChatUpdate.Error, "no error should occur on the confirm turn");
 
         // Some models create immediately in turn 1 (skipping the confirm gate); others wait
@@ -410,7 +443,24 @@ public class CodedValueAIServiceLiveTests
     private static bool IsTransientProviderError(Exception ex) =>
         ex is ArgumentOutOfRangeException || // OpenAI SDK: no choices in response
         (ex is HttpRequestException hre && (int?)hre.StatusCode is 429 or 503) ||
-        IsConnectionFailure(ex);
+        // OpenAI/System.ClientModel wraps 429/503 from OpenRouter in a ClientResultException.
+        (ex is ClientResultException cre && cre.Status is 429 or 503) ||
+        IsConnectionFailure(ex) ||
+        IsRateLimitMessage(ex.Message);
+
+    /// <summary>
+    /// True when the streamed updates contain a <see cref="AI.ChatUpdate.Error"/> whose
+    /// message indicates OpenRouter rate-limiting. The free-tier model surfaces 429s
+    /// this way rather than throwing, so the caller should skip as Inconclusive.
+    /// </summary>
+    private static bool ContainsRateLimitError(IEnumerable<AI.ChatUpdate> updates) =>
+        updates.OfType<AI.ChatUpdate.Error>().Any(e => IsRateLimitMessage(e.Message));
+
+    private static bool IsRateLimitMessage(string? message) => !string.IsNullOrWhiteSpace(message) &&
+        (message.Contains("rate-limit", StringComparison.OrdinalIgnoreCase) ||
+         message.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+         message.Contains("rate-limited", StringComparison.OrdinalIgnoreCase) ||
+         message.Contains("too many requests", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsConnectionFailure(Exception ex) =>
         ex is System.Net.Sockets.SocketException ||

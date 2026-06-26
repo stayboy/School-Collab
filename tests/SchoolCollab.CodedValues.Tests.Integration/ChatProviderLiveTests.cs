@@ -66,8 +66,13 @@ public class ChatProviderLiveTests
             "openrouter" => new ProviderSettings(
                 config["OpenRouter:Endpoint"]
                     ?? throw new InvalidOperationException("OpenRouter:Endpoint not configured (expected in ai-appsettings.json)."),
+                // The OpenRouter API key is a secret kept out of source control,
+                // so it is only available where user secrets / the OpenRouter__ApiKey
+                // env var have been set (e.g. a developer machine). In environments
+                // where it is absent (notably CI), skip the live test as Inconclusive
+                // rather than failing the whole suite — see the class doc comment.
                 ApiKey: config["OpenRouter:ApiKey"]
-                    ?? throw new InvalidOperationException(
+                    ?? Inconclusive<string>(
                         "OpenRouter:ApiKey not configured. Set it via `dotnet user-secrets set OpenRouter:ApiKey \"<key>\"` " +
                         "or the OpenRouter__ApiKey environment variable."),
                 Model: config["OpenRouter:DefaultModel"]
@@ -80,6 +85,19 @@ public class ChatProviderLiveTests
     /// Builds an <see cref="IChatClient"/> for the given provider, mirroring
     /// the construction in <c>SchoolCollab.AI/Program.cs</c>.
     /// </summary>
+    /// <summary>
+    /// Reports <paramref name="message"/> as Inconclusive and never returns.
+    /// Used so that a missing optional secret (e.g. OpenRouter:ApiKey) skips the
+    /// live test instead of throwing an exception that MSTest counts as a failure.
+    /// <see cref="Assert.Inconclusive"/> throws <c>AssertInconclusiveException</c>,
+    /// which the test runner reports as skipped, not failed.
+    /// </summary>
+    private static T Inconclusive<T>(string message)
+    {
+        Assert.Inconclusive(message);
+        throw new InvalidOperationException(message); // unreachable; satisfies the compiler
+    }
+
     private static IChatClient BuildClient(string provider)
     {
         var s = LoadSettings(provider);
@@ -110,7 +128,9 @@ public class ChatProviderLiveTests
     public async Task OpenRouterProvider_WithGoogleGemma4_RespondsToSimplePrompt()
     {
         var settings = LoadSettings("openrouter");
-        settings.Model.Should().Be("google/gemma-4-26b-a4b-it", "the OpenRouter default model must be the working gemma4 model");
+        // Pins the model configured in src/SchoolCollab.AI/appsettings.json so
+        // drift between the live test and the deployed default is caught here.
+        settings.Model.Should().Be("google/gemma-4-31b-it:free", "the OpenRouter default model must match the configured gemma4 model");
 
         await AssertProviderRespondsAsync("openrouter");
     }
@@ -146,9 +166,22 @@ public class ChatProviderLiveTests
                 $"or is invalid. This proves the chat client is NOT authenticating with OpenRouter:ApiKey.");
             return;
         }
+        catch (ClientResultException ex) when (ex.Status is 401 or 403)
+        {
+            // Same auth failure as above, but wrapped by the OpenAI SDK in a ClientResultException.
+            Assert.Fail(
+                $"OpenRouter rejected the request with HTTP {ex.Status} — the API key is not being used " +
+                $"or is invalid. This proves the chat client is NOT authenticating with OpenRouter:ApiKey.");
+            return;
+        }
         catch (HttpRequestException ex) when (IsConnectionFailure(ex) || IsRateLimited(ex))
         {
             Assert.Inconclusive($"OpenRouter endpoint not reachable or rate-limited. Skipping. Error: {ex.Message}");
+            return;
+        }
+        catch (ClientResultException ex) when (ex.Status is 429 or 503 || IsRateLimitMessage(ex.Message))
+        {
+            Assert.Inconclusive($"OpenRouter rate-limited the request (HTTP {ex.Status}). Skipping live verification. Error: {ex.Message}");
             return;
         }
         catch (OperationCanceledException) when (cts.IsCancellationRequested)
@@ -236,6 +269,21 @@ public class ChatProviderLiveTests
                     $"(model '{settings.Model}'). Skipping live verification. Error: {ex.Message}");
                 return;
             }
+            catch (ClientResultException ex) when (ex.Status is 429 or 503 || IsRateLimitMessage(ex.Message))
+            {
+                // OpenRouter free-tier 429/503 comes back wrapped in a ClientResultException,
+                // not an HttpRequestException. Retry once, then skip as Inconclusive.
+                lastFailure = ex;
+                if (attempt < maxAttempts)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(3), CancellationToken.None);
+                    continue;
+                }
+                Assert.Inconclusive(
+                    $"Provider '{provider}' (model '{settings.Model}') was rate-limited or temporarily unavailable (HTTP {ex.Status}). " +
+                    $"Skipping live verification. Error: {ex.Message}");
+                return;
+            }
             catch (TaskCanceledException ex) when (!cts.IsCancellationRequested)
             {
                 Assert.Inconclusive(
@@ -267,6 +315,13 @@ public class ChatProviderLiveTests
 
     private static bool IsRateLimited(HttpRequestException ex) =>
         (int?)ex.StatusCode is 429 or 503;
+
+    private static bool IsRateLimitMessage(string? message) =>
+        !string.IsNullOrWhiteSpace(message) &&
+        (message.Contains("rate-limit", StringComparison.OrdinalIgnoreCase) ||
+         message.Contains("rate limit", StringComparison.OrdinalIgnoreCase) ||
+         message.Contains("rate-limited", StringComparison.OrdinalIgnoreCase) ||
+         message.Contains("too many requests", StringComparison.OrdinalIgnoreCase));
 
     private static bool IsConnectionFailureMessage(string? message) =>
         !string.IsNullOrWhiteSpace(message) &&
