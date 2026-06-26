@@ -46,6 +46,13 @@ jobs:
           --report-trx
           --report-trx-filename integration-results.trx
           --results-directory ./test-results
+        # The OpenRouter live integration tests resolve the API key from the
+        # OpenRouter__ApiKey environment variable (and user secrets locally).
+        # Inject the GitHub Actions secret here so CI exercises the real
+        # provider. When the secret is absent (e.g. forked PRs), the key is
+        # empty and the live tests self-skip as Inconclusive rather than fail.
+        env:
+          OpenRouter__ApiKey: ${{ secrets.OPENROUTER_API_KEY }}
         continue-on-error: false
 
       - name: Publish test results

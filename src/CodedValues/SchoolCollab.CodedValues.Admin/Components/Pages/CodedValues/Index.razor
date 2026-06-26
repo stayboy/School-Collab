@@ -213,7 +213,6 @@
                hub.) -- *@
             <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
                              ShowIntro="true"
-                             OnPromptSending="@OnPromptSendingAsync"
                              OnPromptSent="@OpenChatDrawerAsync"
                              OnMessageAdded="@OnMessageAddedAsync"
                              OnStreamingStateChanged="@OnStreamingStateChangedAsync" />
@@ -314,28 +313,11 @@
     }
 
     /// <summary>
-    /// Mirror handler for the inline chat's <c>OnPromptSending</c> event. Fires before
-    /// the new prompt is added, so we clear the mirrored display hub and the
-    /// drawer panel resets to show only the upcoming exchange instead of
-    /// stacking every prior turn. The inline chat's own conversation history
-    /// (sent to the AI for multi-turn context) is untouched — only the
-    /// mirrored display surface is reset.
-    /// </summary>
-    private Task OnPromptSendingAsync()
-    {
-        if (_disposed) return Task.CompletedTask;
-        ChatHub.Clear();
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Mirror handler for the inline chat's <c>OnMessageAdded</c> event. Each
-    /// new prompt and AI response is appended to <see cref="CodedValuesChatHub"/>,
-    /// which the drawer panel's display chat reads via its
-    /// <see cref="CodedValuesChat.ExternalMessages"/> parameter. Subscribing
-    /// to the hub instead of pushing to a child via @ref is necessary because
-    /// the drawer chat lives inside a <see cref="FluentDialog"/> that the
-    /// page can't reach with a component reference.
+    /// Mirror handler for the inline chat's <see cref="CodedValuesChat.OnMessageAdded"/> event. Each
+    /// new prompt and AI response is appended to <see cref="CodedValuesChatHub"/>, which the drawer
+    /// panel's chat reads via its <see cref="CodedValuesChat.ExternalMessages"/> parameter. Both the
+    /// inline page chat and the drawer chat push into the same hub so the conversation stays in
+    /// sync regardless of which surface the user prompts from.
     /// </summary>
     private Task OnMessageAddedAsync(CodedValuesChat.ChatMessageItem message)
     {

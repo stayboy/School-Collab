@@ -21,11 +21,13 @@
             CancelText="Close"
             OnSubmitAsync="@OnSubmitAsync">
     <div class="chat-panel">
-        <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.DisplayOnly"
+        <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.Full"
                         HideHeader="true"
                         ShowIntro="true"
                         ExternalMessages="@_mirroredMessages"
                         ExternalStreamingState="@_mirroredStreamingState"
+                        OnMessageAdded="OnMessageAddedAsync"
+                        OnStreamingStateChanged="OnStreamingStateChangedAsync"
                         OnCleared="OnPanelClearedAsync" />
     </div>
 </SideDrawer>
@@ -57,18 +59,43 @@
 
     /// <summary>
     /// Clears the mirrored conversation held in <see cref="ChatHub"/> so the
-    /// drawer's display-only chat empties. Wired to the display chat's
-    /// <see cref="CodedValuesChat.OnCleared"/> event — the inline landing-page
-    /// chat runs in <see cref="CodedValuesChat.CodedValuesChatMode.InputOnly"/>
-    /// and no longer renders its own Clear button, so the drawer's Clear
-    /// button is the single place users reset the conversation. Clearing the
-    /// hub raises <see cref="CodedValuesChatHub.Changed"/>, which
-    /// <see cref="HandleHubChanged"/> picks up to refresh
+    /// drawer's chat empties. Wired to the chat's
+    /// <see cref="CodedValuesChat.OnCleared"/> event (the drawer's Clear
+    /// button). Clearing the hub raises <see cref="CodedValuesChatHub.Changed"/>,
+    /// which <see cref="HandleHubChanged"/> picks up to refresh
     /// <see cref="_mirroredMessages"/> and <see cref="_mirroredStreamingState"/>.
     /// </summary>
     private Task OnPanelClearedAsync()
     {
         ChatHub.Clear();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Mirror handler for the drawer chat's <see cref="CodedValuesChat.OnMessageAdded"/>
+    /// event. The drawer chat renders from <see cref="CodedValuesChatHub.Messages"/>
+    /// via <c>ExternalMessages</c> but keeps its own <c>_messages</c> for AI
+    /// multi-turn history; this callback pushes each added prompt/response into
+    /// the shared hub so the rendered view (and the inline page chat) stays in
+    /// sync. Without it, typing into the drawer would add to the chat's private
+    /// history (sent to the AI) but never appear on screen.
+    /// </summary>
+    private Task OnMessageAddedAsync(CodedValuesChat.ChatMessageItem message)
+    {
+        ChatHub.AddMessage(message);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Mirror handler for the drawer chat's
+    /// <see cref="CodedValuesChat.OnStreamingStateChanged"/> event. Pushes the
+    /// live streaming snapshot into the hub on every chunk so the drawer (and
+    /// the inline page chat) renders the same "AI is typing…" indicator and
+    /// partial response text.
+    /// </summary>
+    private Task OnStreamingStateChangedAsync(CodedValuesChat.ChatStreamingState state)
+    {
+        ChatHub.SetStreamingState(state);
         return Task.CompletedTask;
     }
 
@@ -85,16 +112,26 @@
 
     protected override void OnInitialized()
     {
-        _mirroredMessages = ChatHub.Messages;
+        _mirroredMessages = ChatHub.Messages.ToList();
         _mirroredStreamingState = ChatHub.StreamingState;
         ChatHub.Changed += HandleHubChanged;
     }
 
     private void HandleHubChanged()
     {
+        // Snapshot the hub's messages into a fresh list on every change.
+        // CodedValuesChatHub.Messages returns the hub's internal List<T> by
+        // reference, and AddMessage mutates that list in place — so reading
+        // it directly never produces a new reference. Blazor's renderer uses
+        // reference equality to decide whether a child component's
+        // reference-type parameters changed; if the ExternalMessages
+        // reference is identical to the previous render, the renderer skips
+        // calling SetParametersAsync on the child chat and the new message
+        // is never displayed. ToList() gives each update a brand-new list
+        // reference so the child chat re-renders and shows the latest turn.
         _ = InvokeAsync(() =>
         {
-            _mirroredMessages = ChatHub.Messages;
+            _mirroredMessages = ChatHub.Messages.ToList();
             _mirroredStreamingState = ChatHub.StreamingState;
             StateHasChanged();
         });

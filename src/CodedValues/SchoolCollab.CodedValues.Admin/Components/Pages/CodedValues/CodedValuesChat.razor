@@ -87,9 +87,37 @@
                 </div>
             }
 
+            @* The model-info row sits directly above the input area. In
+               non-InputOnly modes the Clear control lives here too, on the
+               left edge, so it reads as a header for the input area rather
+               than a footer below it. The model name stays pinned right.
+               FluentAnchor (Hypertext) is used instead of a button so the
+               control reads as a lightweight inline link, matching the rest
+               of the admin UI's link styling. *@
             <div class="model-info">
+                @if (Mode != CodedValuesChatMode.InputOnly)
+                {
+                    <FluentAnchor Appearance="Appearance.Hypertext"
+                                 Href="#"
+                                 OnClick="ClearAsync"
+                                 Disabled="@_isStreaming"
+                                 aria-label="Clear chat">
+                        Clear
+                    </FluentAnchor>
+                }
                 <span class="model-label-text">@EffectiveModel (@_provider)</span>
             </div>
+            @* The input area is gated out of DisplayOnly mode. DisplayOnly is
+               used by the CodedValuesChatPanel drawer to surface the mirrored
+               conversation read-only; rendering an input + Send button there
+               produced a dead textbox whose SendAsync wrote to the child's
+               own (never-rendered) _messages and fired none of the mirror
+               callbacks, so typing into the drawer appeared to do nothing.
+               Users prompt from the inline InputOnly chat on the page; the
+               drawer only displays responses. Full and InputOnly modes keep
+               the input. *@
+            @if (Mode != CodedValuesChatMode.DisplayOnly)
+            {
             <div class="input-area">
                 <div class="input-row">
                     <div class="input-field-wrapper">
@@ -118,18 +146,6 @@
                     </FluentButton>
                 </div>
             </div>
-            @if (Mode != CodedValuesChatMode.InputOnly)
-            {
-                <div class="action-bar">
-                    <FluentStack Orientation="Orientation.Horizontal">
-                        <FluentButton Appearance="Appearance.Stealth"
-                                     OnClick="ClearAsync"
-                                     Disabled="@_isStreaming"
-                                     aria-label="Clear chat">
-                            Clear
-                        </FluentButton>
-                    </FluentStack>
-                </div>
             }
         </ChildContent>
         <ErrorContent Context="ex">

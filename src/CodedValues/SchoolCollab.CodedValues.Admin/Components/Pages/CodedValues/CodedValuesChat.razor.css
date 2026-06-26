@@ -5,11 +5,28 @@
     min-height: 0;
 }
 
-.chat-container-full,
+/*
+ * InputOnly is the compact inline bar pinned to the bottom of the page —
+ * it must not stretch, just sit at its natural height.
+ */
 .chat-container-inputonly {
     border-top: 2px solid var(--neutral-stroke-rest, #d1d1d1);
     padding-top: 0.75rem;
     flex-shrink: 0;
+}
+
+/*
+ * Full mode lives inside the drawer's .chat-panel (height: 100%) and must
+ * fill that height so the internal flex column can pin the input area to
+ * the bottom while .chat-messages (flex: 1) stretches to fill the rest.
+ * Without filling the parent, the flex column collapses to content height
+ * and the input floats up immediately under the last message instead of
+ * anchoring to the drawer bottom.
+ */
+.chat-container-full {
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
 }
 
 .chat-container-displayonly {
@@ -142,20 +159,22 @@
     min-width: 0;
 }
 
-/* Action bar */
-.action-bar {
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
-    margin-top: 0.25rem;
-}
-
-/* Model info — pinned to the right of its row, above the input. */
+/* Model info row — sits directly above the input area. The Clear link
+   (rendered only in non-InputOnly modes) anchors to the left edge while
+   the model name stays pinned right, so the row reads as a header for the
+   input area. */
 .model-info {
     display: flex;
-    justify-content: flex-end;
+    justify-content: space-between;
     align-items: center;
+    gap: 0.5rem;
     margin-bottom: 0.25rem;
+}
+
+/* When there's no Clear link (InputOnly mode), keep the model name on the
+   right as before. */
+.chat-container-inputonly .model-info {
+    justify-content: flex-end;
 }
 
 .model-label-text {
