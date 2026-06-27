@@ -25,7 +25,7 @@
                         <FluentTextField @bind-Value="_createName" Label="Name" Required />
                         <FluentTextField @bind-Value="_createStartDate" Label="Start Date (yyyy-MM-dd)" Required Placeholder="e.g. 2026-01-01" />
                         <FluentTextField @bind-Value="_createEndDate" Label="End Date (yyyy-MM-dd)" Required Placeholder="e.g. 2026-06-30" />
-                        <FluentCheckbox @bind-Checked="_createAllowOverrides" Label="Allow subject overrides" />
+                        <FluentCheckbox @bind-Value="_createAllowOverrides" Label="Allow subject overrides" />
                         <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem">
                             <FluentButton Appearance="Appearance.Accent" OnClick="@OnCreateAsync">Create</FluentButton>
                             <FluentButton Appearance="Appearance.Outline" OnClick="@HideCreatePanel">Cancel</FluentButton>

@@ -21,7 +21,7 @@
                 <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
                     + New Category
                 </FluentButton>
-                <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
+                <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged" Label="Show deleted" />
                 <div class="spacer"></div>
                 <div class="action-bar-right">
                     <FluentTextField Id="search-root"
@@ -267,9 +267,8 @@
         }
     }
 
-    private async Task OnShowDeletedChanged(bool isChecked)
+    private async Task OnShowDeletedChanged()
     {
-        _showDeleted = isChecked;
         if (_showDeleted && _deletedItems is null)
         {
             try

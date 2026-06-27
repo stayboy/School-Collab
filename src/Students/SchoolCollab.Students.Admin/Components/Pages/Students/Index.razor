@@ -18,7 +18,7 @@
                 <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/students/create")'>
                     + New Student
                 </FluentButton>
-                <FluentCheckbox @bind-Checked="@_showDeleted" Label="Show deleted" OnCheckedChanged="@((bool v) => OnShowDeletedChanged(v))" />
+                <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged" Label="Show deleted" />
                 <div class="spacer"></div>
                 <FluentTextField Placeholder="Search students…"
                                  class="search-box"
@@ -177,9 +177,8 @@
         }
     }
 
-    private async Task OnShowDeletedChanged(bool isChecked)
+    private async Task OnShowDeletedChanged()
     {
-        _showDeleted = isChecked;
         if (_showDeleted && _deletedItems is null)
         {
             try
