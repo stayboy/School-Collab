@@ -81,9 +81,8 @@ Present these inferred attributes alongside the coded values in the confirmation
    - An explicit name that implies a code: "add countries" → `CNTRY`, "school subjects" → `SUBJ`
    - A category name or abbreviation in the request context
 
-2. **If the parent code is clear**, look it up using the available tools:
-   - If found → proceed immediately to Step 2. Do NOT announce "Found it" or "It exists". Just proceed silently.
-   - If NOT found → proceed to create a new parent (Step 1b). Do NOT say "Not found, I'll create it". Just create it.
+2. **If the parent code is clear**, you usually do NOT need to look it up before proposing — `create_bulk_values` resolves the parent code itself and skips any codes that already exist. Go straight to Step 2 using the code the user gave. Only call `get_coded_value_by_code` if you are unsure whether the parent exists or you need its current children/attributes.
+   - If you do look it up and it is NOT found → proceed to create a new parent (Step 1b). Do NOT say "Not found, I'll create it". Just create it.
 
 3. **If the parent code is ambiguous or missing**, ask the user:
    - "What parent code should these values be added to?"
@@ -104,15 +103,18 @@ When the parent does not exist, build it from context as follows:
 
 ### Step 2: Present the proposed values as a table
 
-Using your built-in knowledge (or web search if needed), extract the values into
+Using your built-in knowledge, extract the values into
 Code/Name/Description/DisplayOrder, apply any attributes from user context,
 and **present the full table immediately** — do not pause to ask whether to search
 or what attributes to add. Infer attributes from the user's request context.
 
-**Always include descriptions** in the table when a meaningful description can be
-inferred from your knowledge (e.g., ISO numeric codes for countries, language families,
-subject descriptions). An empty description should only appear when no reasonable
-description exists.
+**Be fast.** Do NOT web-search for standard reference data (countries, languages,
+currencies, time zones, ISO codes) — use your knowledge. Do not pre-check for
+duplicates; `create_bulk_values` skips codes that already exist and reports them.
+
+Include a description when one is obvious, but **for large sets (more than ~20
+values) keep descriptions to a few words or omit them** to keep the table short.
+An empty description is fine.
 
 Example table format:
 
@@ -132,6 +134,16 @@ When the user gives affirmative confirmation (e.g., "yes", "go ahead", "create t
 - Create all children at once using the bulk creation capability.
 - Set any attribute values on children as needed.
 
+**Go straight to the creation calls — no preamble text.** The parent code and the proposed
+values are already in the conversation history (the table you just presented); reuse them
+exactly. Do not re-derive the values and do not call `get_coded_value_by_code` again this turn.
+Prefer a single `create_bulk_values` call for all children. `create_bulk_values` resolves
+the parent code and skips existing codes, so that one call is enough — add
+`create_coded_value` for the parent only if it does not yet exist, and
+`set_attribute_definition` only when attribute definitions were requested. Call
+`set_attribute` per child only when the user explicitly asked for attribute values, and
+prefer the fewest tool calls that get the job done.
+
 **Important:** Do not just acknowledge the user's confirmation — you MUST actually
 invoke the creation capabilities to persist the coded values. A text-only response
 will not create anything.
@@ -149,6 +161,8 @@ When a user asks to update or change coded values, follow this workflow:
 ### Step 1: Identify the target value
 
 The user may refer to a value by **code** (e.g., "update HSPTL") or by **name** (e.g., "update hospital types", "change the diseases category").
+
+**If the user gives both the code and the exact change in one message** (e.g., "rename CNTRY to Countries"), skip presenting current values and call `update_coded_value` directly — it resolves the code and preserves any fields you don't specify. Only retrieve/present current values first if the user asks to see them or the change is ambiguous.
 
 - **If the user provides a code** → use `get_coded_value_by_code` directly.
 - **If the user provides a name but no code** → derive the likely code from the name:
@@ -172,7 +186,8 @@ Then ask: **"What would you like to change?"**
 
 ### Step 3: Apply the update
 
-When the user specifies the changes:
+When the user specifies the changes, reuse the target code from the message you just showed
+(do not re-look it up unless the user changed it):
 - **Rename** → use `update_coded_value` with the code and the new name.
 - **Change description** → use `update_coded_value` with the code and the new description.
 - **Reorder** → use `update_coded_value` with the code and the new displayOrder.
@@ -213,5 +228,7 @@ Default to Text (0) when uncertain.
 - Attribute definitions live on PARENTS. Attribute values live on CHILDREN.
 - A definition must exist on the parent before values can be set on children.
 - **After the user confirms, immediately create the coded values** — use the bulk creation tool to create all children at once.
+- **Carry context across turns.** On a confirmation turn, the parent code and proposed values are already in the conversation history (your previous message). Reuse them — do not re-ask the user for the parent code, and do not call read-only lookups again; go straight to the creation/update calls.
+- **Minimize round trips.** `create_bulk_values` and `update_coded_value` resolve the parent/target code themselves and skip duplicate codes, so you usually do NOT need a `get_coded_value_by_code` lookup before proposing or creating. Use model knowledge (never web-search for standard reference data). Keep descriptions short for large sets. One `create_bulk_values` call per parent; `set_attribute` per child only when attribute values were requested. If the user gives a code plus the exact change, call `update_coded_value` directly without a prior lookup.
 - **Use model knowledge first**, web search only when necessary.
 - **DisplayOrder must follow the natural reference data order** (1, 2, 3, …).

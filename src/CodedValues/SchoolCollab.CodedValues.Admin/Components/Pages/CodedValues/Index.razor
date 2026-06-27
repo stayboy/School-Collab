@@ -29,11 +29,11 @@
                                     class="search-box"
                                     Immediate="true"
                                     ImmediateDelay="300"
-                                    ValueChanged="@OnSearchValueChanged"
-                                    OnClear="@(() => OnSearchClear())" />
+                                    ValueChanged="@OnSearchValueChanged" />
                     @* Opens the AI assistant side drawer without sending a prompt,
                        so users can re-read prior responses or follow an ongoing
-                       stream. Mirrors the drawer-open path used by OnPromptSent. *@
+                       stream. (Sending a prompt opens the drawer via
+                       OnPromptSubmittedAsync instead.) *@
                     <FluentButton Appearance="Appearance.Neutral"
                                   Title="Open AI assistant"
                                   OnClick="OpenChatDrawerAsync">
@@ -199,25 +199,20 @@
                 <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
             }
 
-            @* -- Chat pinned to bottom. InputOnly keeps just the input bar on the
-               page; the conversation and streaming responses are mirrored into the
-               shared CodedValuesChatHub and read by the drawer's display-only chat,
-               so the page stays compact while the drawer is the place to read
-               responses.
-               OnMessageAdded mirrors every prompt and response into the shared
-               CodedValuesChatHub so the drawer chat stays in sync.
-               OnStreamingStateChanged mirrors the live typing progress.
-               OnPromptSent opens the drawer on the first send.
-               (OnCleared is not wired here: InputOnly hides the inline Clear
-               button, so clearing is handled inside the drawer panel via the
-               hub.) -- *@
+            @* -- Chat pinned to bottom. The inline chat is InputOnly: a pure
+               launcher that never calls the AI. It forwards the user's text via
+               OnPromptSubmitted; this handler clears the shared hub for a fresh
+               conversation (when the drawer is closed), opens the drawer, and
+               feeds the text to the drawer's Full-mode chat via the Prompt
+               parameter. The drawer is the single AI-calling surface and owns
+               the conversation history. -- *@
             <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
                              ShowIntro="true"
-                             OnPromptSent="@OpenChatDrawerAsync"
-                             OnMessageAdded="@OnMessageAddedAsync"
-                             OnStreamingStateChanged="@OnStreamingStateChangedAsync" />
+                             OnPromptSubmitted="@OnPromptSubmittedAsync" />
 
-            <CodedValuesChatPanel @bind-Open="_chatDrawerOpen" />
+            <CodedValuesChatPanel Open="_chatDrawerOpen"
+                                    OpenChanged="@OnDrawerOpenChangedAsync"
+                                    Prompt="@_pendingPrompt" />
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
@@ -292,17 +287,15 @@
     }
 
     /// <summary>
-    /// Opens the side drawer that hosts the AI assistant chat. Wired to the inline
-    /// chat's <see cref="CodedValuesChat.OnPromptSent"/> event so the drawer
-    /// surfaces whenever the user sends a prompt from the page.
+    /// Opens the side drawer that hosts the AI assistant chat. Wired to the
+    /// page's ✨ Chat button so users can re-read prior responses or follow an
+    /// ongoing stream without sending a new prompt.
     ///
     /// The drawer is owned by <see cref="CodedValuesChatPanel"/> via the shared
-    /// <see cref="SideDrawer"/> component: it renders a right-anchored panel
-    /// with a header (title + dismiss button), a backdrop, and Escape-to-close,
-    /// hosting a single read-only <see cref="CodedValuesChat"/> bound to
-    /// <see cref="CodedValuesChatHub"/>. The drawer is read-only: the user
-    /// prompts from the inline chat on the page and the drawer surfaces the
-    /// streamed responses and final messages.
+    /// <see cref="SideDrawer"/> component. Its inner Full-mode
+    /// <see cref="CodedValuesChat"/> is the single AI-calling surface; the inline
+    /// InputOnly chat on the page only forwards text to it (see
+    /// <see cref="OnPromptSubmittedAsync"/>).
     /// </summary>
     private Task OpenChatDrawerAsync()
     {
@@ -313,29 +306,51 @@
     }
 
     /// <summary>
-    /// Mirror handler for the inline chat's <see cref="CodedValuesChat.OnMessageAdded"/> event. Each
-    /// new prompt and AI response is appended to <see cref="CodedValuesChatHub"/>, which the drawer
-    /// panel's chat reads via its <see cref="CodedValuesChat.ExternalMessages"/> parameter. Both the
-    /// inline page chat and the drawer chat push into the same hub so the conversation stays in
-    /// sync regardless of which surface the user prompts from.
+    /// The prompt forwarded from the inline InputOnly chat, passed down to the
+    /// drawer's chat via <see cref="CodedValuesChatPanel.Prompt"/>. When the drawer's
+    /// inner chat receives a new value it runs one AI turn with it.
     /// </summary>
-    private Task OnMessageAddedAsync(CodedValuesChat.ChatMessageItem message)
+    private string? _pendingPrompt;
+
+    /// <summary>
+    /// Handler for the inline InputOnly chat's <see cref="CodedValuesChat.OnPromptSubmitted"/>
+    /// callback. The inline chat never calls the AI — it only forwards the user's
+    /// text here. When the drawer is closed this is a new conversation, so clear
+    /// the shared <see cref="CodedValuesChatHub"/> (fresh message list + fresh AI
+    /// history; the prior accumulation caused long delays/timeouts on the
+    /// confirmation turn). Then open the drawer and feed the text to the drawer's
+    /// Full-mode chat via <see cref="_pendingPrompt"/>, which triggers the actual
+    /// ChatAsync. Follow-ups sent while the drawer is already open keep the
+    /// current conversation (prompt + proposal) for the AI.
+    /// </summary>
+    private Task OnPromptSubmittedAsync(string prompt)
     {
         if (_disposed) return Task.CompletedTask;
-        ChatHub.AddMessage(message);
-        return Task.CompletedTask;
+        if (!_chatDrawerOpen)
+        {
+            ChatHub.Clear();
+        }
+        _pendingPrompt = prompt;
+        _chatDrawerOpen = true;
+        return InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
-    /// Mirror handler for the inline chat's <c>OnStreamingStateChanged</c>
-    /// event. Pushes the live streaming snapshot into the hub on every chunk
-    /// so the drawer's display chat renders the same "AI is typing…" indicator
-    /// and the partial response text as the inline chat.
+    /// Handles the drawer's open/close transitions. On close, drops the stale
+    /// forwarded prompt (<see cref="_pendingPrompt"/>) so that re-opening the
+    /// drawer via the ✨ Chat button does NOT re-fire the last prompt. The
+    /// <see cref="SideDrawer"/> unmounts the inner chat on close (resetting its
+    /// consumed-prompt tracker), so a stale <see cref="_pendingPrompt"/> would
+    /// otherwise be treated as a brand-new prompt on remount.
     /// </summary>
-    private Task OnStreamingStateChangedAsync(CodedValuesChat.ChatStreamingState state)
+    private Task OnDrawerOpenChangedAsync(bool open)
     {
         if (_disposed) return Task.CompletedTask;
-        ChatHub.SetStreamingState(state);
+        _chatDrawerOpen = open;
+        if (!open)
+        {
+            _pendingPrompt = null;
+        }
         return Task.CompletedTask;
     }
 
@@ -480,15 +495,6 @@
             _isSearching = false;
         }
 
-        StateHasChanged();
-    }
-
-    private void OnSearchClear()
-    {
-        _searchText = string.Empty;
-        _searchResults = null;
-        _isSearching = false;
-        _searchCts?.Cancel();
         StateHasChanged();
     }
 

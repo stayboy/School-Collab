@@ -24,6 +24,7 @@
         <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.Full"
                         HideHeader="true"
                         ShowIntro="true"
+                        Prompt="@Prompt"
                         ExternalMessages="@_mirroredMessages"
                         ExternalStreamingState="@_mirroredStreamingState"
                         OnMessageAdded="OnMessageAddedAsync"
@@ -36,6 +37,16 @@
     /// <summary>Whether the drawer is visible. Two-way bindable.</summary>
     [Parameter]
     public bool Open { get; set; }
+
+    /// <summary>
+    /// A prompt forwarded into the drawer's chat (e.g. from the inline
+    /// InputOnly chat on the page, which never calls the AI itself). When set
+    /// to a new non-empty value, the inner <see cref="CodedValuesChat"/> runs
+    /// one AI turn with it. The page clears the shared hub first (for a fresh
+    /// conversation) when the drawer was closed.
+    /// </summary>
+    [Parameter]
+    public string? Prompt { get; set; }
 
     /// <summary>Fires when the drawer requests to close (× button, backdrop, Esc).</summary>
     [Parameter]
