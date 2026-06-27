@@ -143,6 +143,34 @@
     margin: 0;
 }
 
+/* chat-input-block wraps the model-info row and the input area.
+   - Full / DisplayOnly: a column (model-info reads as a header above the input).
+   - InputOnly: a single row, top-aligned, so the textbox's top aligns with the
+     selected model name's top (the inline bar is compact). The input area
+     grows to fill the left; the model name sits on the right. */
+.chat-input-block {
+    display: flex;
+    flex-direction: column;
+}
+
+.chat-input-block-inputonly {
+    flex-direction: row-reverse;
+    align-items: flex-start;
+    gap: 0.75rem;
+}
+
+.chat-input-block-inputonly .input-area {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.chat-input-block-inputonly .model-info {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    margin-bottom: 0;
+    padding-top: 0.125rem;
+}
+
 .input-row {
     display: flex;
     gap: 0.5rem;
@@ -152,11 +180,20 @@
 .input-field-wrapper {
     flex: 1;
     min-width: 0;
+    display: flex;
 }
 
+/* fluent-text-area's web component locks its host to a default pixel width
+   and even resists width:100%. Making the wrapper a flex container and the
+   host a flex item (flex:1 1 0%) is what actually grows it to fill the wrapper;
+   the width/max-width !important defeat the component's own width so it doesn't
+   cap at 700px. Without this the Send button ends up far from the textarea
+   when the bar is stretched. */
 ::deep .full-width {
-    width: 100%;
+    width: 100% !important;
+    max-width: 100% !important;
     min-width: 0;
+    flex: 1 1 0%;
 }
 
 /* Model info row — sits directly above the input area. The Clear link
