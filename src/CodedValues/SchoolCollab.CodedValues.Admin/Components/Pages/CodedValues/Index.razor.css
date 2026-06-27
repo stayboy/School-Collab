@@ -1,8 +1,15 @@
-/* Page layout */
-.page-container {
-    height: 100%;
-    gap: 0;
-}
+/* Coded Values landing page.
+
+   The shared layout (SchoolCollabLayout) owns the height chain and provides
+   three pinned slots via Blazor sections:
+     - page-toolbar  : this page publishes title-row + action-bar here (pinned top)
+     - page-scroll    : everything else renders here via @Body — the SOLE scroll region
+     - page-footer    : this page publishes the InputOnly chat launcher here (pinned bottom)
+
+   So this page no longer manages its own height or scroll. The rules below only
+   style the page's own pieces. The spinner uses flex:1 so it fills and centers in
+   the scroll region during load; the grid-container is left at natural height so
+   the scroll region (not the grid) scrolls and the grid's sticky header sticks to it. */
 
 .title-row {
     flex-shrink: 0;
@@ -18,9 +25,6 @@
 
 .action-bar {
     flex-shrink: 0;
-    /* FluentStack (page-container) doesn't stretch children to full width
-       by default, so the flex row + margin-left:auto below had no width to
-       push against. Force the bar to fill the stack's cross axis. */
     width: 100%;
     display: flex;
     align-items: center;
@@ -34,8 +38,6 @@
 }
 
 ::deep .search-box {
-    /* Fill available space inside the right group instead of a fixed width,
-       so the textbox + Chat button always hug the right edge together. */
     flex: 1 1 auto;
     min-width: 180px;
     max-width: 320px;
@@ -46,23 +48,23 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    /* Push the group to the right edge of the full-width action bar. The
-       spacer above is a backstop; margin-left:auto wins when there's room. */
     margin-left: auto;
     flex-shrink: 0;
 }
 
-/* Loading / empty states */
+/* Loading state: fill the scroll region and center the spinner. */
 .spinner-container {
-    flex: 1;
+    flex: 1 1 0;
+    min-height: 0;
     display: flex;
     align-items: center;
     justify-content: center;
 }
 
+/* The grid sits in the layout's scroll region; it must NOT be a scroll context
+   itself (no overflow:auto, no bounded flex height), otherwise the grid's sticky
+   header would stick to a non-scrolling grid-container and scroll out of view.
+   Natural height lets the scroll region scroll and the sticky header stick to it. */
 .grid-container {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
     width: 100%;
 }

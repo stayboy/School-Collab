@@ -1,5 +1,6 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Microsoft.AspNetCore.Components.Sections
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components.Theme
 @implements IDisposable
@@ -34,18 +35,23 @@
         </FluentStack>
     </FluentHeader>
 
-    <FluentStack Orientation="Orientation.Horizontal"
-                 HorizontalGap="0"
-                 class="layout-body">
-
+    <div class="layout-body">
         @SidebarContent
 
-        <FluentBodyContent class="layout-content">
+        <div class="layout-content">
             <article class="content">
-                @Body
+                <div class="page-toolbar-slot">
+                    <SectionOutlet SectionName="page-toolbar" />
+                </div>
+                <div class="page-scroll">
+                    @Body
+                </div>
+                <div class="page-footer-slot">
+                    <SectionOutlet SectionName="page-footer" />
+                </div>
             </article>
-        </FluentBodyContent>
-    </FluentStack>
+        </div>
+    </div>
 </FluentLayout>
 
 <div id="blazor-error-ui" data-nosnippet>

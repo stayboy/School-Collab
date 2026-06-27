@@ -13,7 +13,7 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+        <SectionContent SectionName="page-toolbar">
             <div class="title-row">
                 <h1 class="page-title">Coded Values</h1>
             </div>
@@ -41,6 +41,7 @@
                     </FluentButton>
                 </div>
             </div>
+        </SectionContent>
             @if (_showDeleted && _deletedItems is not null)
             {
                 @if (_deletedItems.Length == 0)
@@ -85,6 +86,7 @@
                     <div class="grid-container">
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
                                         GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                        GenerateHeader="GenerateHeaderOption.Sticky"
                                         MultiLine="true"
                                         TGridItem="CodedValueDto">
                             <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
@@ -147,6 +149,7 @@
                 <div class="grid-container">
                     <FluentDataGrid Items="@_items.AsQueryable()"
                                    GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+                                    GenerateHeader="GenerateHeaderOption.Sticky"
                                     MultiLine="true"
                                     TGridItem="CodedValueDto">
                         <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
@@ -206,14 +209,15 @@
                feeds the text to the drawer's Full-mode chat via the Prompt
                parameter. The drawer is the single AI-calling surface and owns
                the conversation history. -- *@
-            <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
-                             ShowIntro="true"
-                             OnPromptSubmitted="@OnPromptSubmittedAsync" />
+            <SectionContent SectionName="page-footer">
+                <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
+                                 ShowIntro="true"
+                                 OnPromptSubmitted="@OnPromptSubmittedAsync" />
+            </SectionContent>
 
             <CodedValuesChatPanel Open="_chatDrawerOpen"
                                     OpenChanged="@OnDrawerOpenChangedAsync"
                                     Prompt="@_pendingPrompt" />
-        </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
