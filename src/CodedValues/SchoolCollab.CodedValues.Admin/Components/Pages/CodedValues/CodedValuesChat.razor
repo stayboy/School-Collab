@@ -1,12 +1,23 @@
 @using Microsoft.Extensions.AI
 @using Microsoft.JSInterop
 @using SchoolCollab.AI
+@using SchoolCollab.CodedValues.Admin.Services
 @implements IAsyncDisposable
 
 @inject AiChatClient AiChatClient
 @inject ILogger<CodedValuesChat> Logger
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@* The shared CodedValuesChatHub is the single source of truth for the
+   conversation across BOTH chat surfaces (the inline InputOnly chat on the
+   page and the Full-mode chat inside the drawer). Each surface mirrors its
+   turns into the hub via OnMessageAdded; the AI history is built from the hub
+   so a follow-up sent from the drawer still carries the full context of the
+   inline chat's earlier turns (and vice-versa). Without this, the drawer
+   chat's own _messages started empty, so a "yes" confirmation sent from the
+   drawer reached the AI with no prior proposal — "AI has no idea of the
+   results." *@
+@inject CodedValuesChatHub ChatHub
 
 @*
     Three render modes:
@@ -238,14 +249,16 @@
     [Parameter] public EventCallback<ChatStreamingState> OnStreamingStateChanged { get; set; }
 
     /// <summary>
-    /// Fires right before a prompt is added to the conversation — before
-    /// <see cref="OnMessageAdded"/> mirrors the user's message and before
-    /// <see cref="OnPromptSent"/> signals dispatch. Use this to reset any
-    /// mirrored display surface (e.g. clear the shared
-    /// <see cref="Services.CodedValuesChatHub"/>) so the surface shows
-    /// only the upcoming exchange instead of accumulating every prior turn.
-    /// The component's own conversation history is untouched, so multi-turn
-    /// context sent to the AI is preserved.
+    /// Fires at the very start of <see cref="SendAsync"/>, before the prompt
+    /// is added and before the AI history is snapshotted from the shared
+    /// <see cref="Services.CodedValuesChatHub"/>. Hosts use this to clear the
+    /// hub for a fresh conversation (e.g. when a new prompt opens the drawer),
+    /// so both the mirrored display and the AI history start clean. Without
+    /// this, the hub accumulated every turn forever and the confirmation turn
+    /// sent the entire session history to the AI — the cause of the long
+    /// delays/timeouts on "yes". Follow-ups sent while the drawer is already
+    /// open do not clear the hub, so the current conversation (prompt +
+    /// proposal) is preserved for the AI.
     /// </summary>
     [Parameter] public EventCallback OnPromptSending { get; set; }
 
@@ -255,6 +268,26 @@
     /// side drawer so the user can follow the response without losing context.
     /// </summary>
     [Parameter] public EventCallback OnPromptSent { get; set; }
+
+    /// <summary>
+    /// Fires with the user's text when this chat is in
+    /// <see cref="CodedValuesChatMode.InputOnly"/> mode and the user submits a
+    /// prompt. An InputOnly chat never calls the AI itself — it is a pure
+    /// launcher. The host is expected to feed this text to a Full-mode chat
+    /// (via <see cref="Prompt"/>) that performs the actual ChatAsync call.
+    /// This keeps a single AI-calling surface and a single conversation history.
+    /// </summary>
+    [Parameter] public EventCallback<string> OnPromptSubmitted { get; set; }
+
+    /// <summary>
+    /// A prompt forwarded into this chat (e.g. from an InputOnly launcher on
+    /// the page). When set to a new non-empty value, the chat runs one AI turn
+    /// with that text via <see cref="RunAiTurnAsync"/>. Only Full/Display chats
+    /// drive the AI; InputOnly chats ignore this (they only forward text out
+    /// via <see cref="OnPromptSubmitted"/>). The last consumed value is tracked
+    /// so a re-render with the same <see cref="Prompt"/> does not re-fire.
+    /// </summary>
+    [Parameter] public string? Prompt { get; set; }
 
     /// <summary>
     /// Optional external message list. When set, the chat renders from this
@@ -431,13 +464,102 @@
         _historyIndex = -1;
         _draftBeforeHistory = string.Empty;
 
-        // Let mirror surfaces (e.g. the drawer's display chat via the shared
-        // hub) reset before the new exchange is mirrored in, so the panel
-        // shows only this turn rather than every prior turn stacked up.
+        // InputOnly mode is a pure launcher: it never calls the AI itself.
+        // It forwards the user's text to the host via OnPromptSubmitted; the
+        // host feeds it to a Full-mode chat (via the Prompt parameter) that
+        // performs the actual ChatAsync. This keeps a single AI-calling
+        // surface and a single conversation history.
+        if (Mode == CodedValuesChatMode.InputOnly)
+        {
+            if (OnPromptSubmitted.HasDelegate)
+            {
+                await OnPromptSubmitted.InvokeAsync(prompt);
+            }
+            return;
+        }
+
+        await RunAiTurnAsync(prompt);
+    }
+
+    /// <summary>
+    /// Tracks the last prompt consumed via the <see cref="Prompt"/> parameter
+    /// so a re-render with the same value does not re-fire the AI turn.
+    /// </summary>
+    private string? _consumedPrompt;
+
+    /// <summary>
+    /// When a prompt is supplied via the <see cref="Prompt"/> parameter (e.g.
+    /// forwarded from an InputOnly launcher), run one AI turn with it. Only
+    /// Full/Display chats drive the AI; InputOnly chats only forward text out.
+    /// We track the last consumed value so repeated renders with the same
+    /// Prompt don't re-fire, and guard against re-entry while streaming. The
+    /// turn is dispatched via <see cref="InvokeAsync"/> because
+    /// <see cref="OnParametersSet"/> is synchronous.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (Mode != CodedValuesChatMode.InputOnly
+            && !string.IsNullOrWhiteSpace(Prompt)
+            && Prompt != _consumedPrompt
+            && !_disposed)
+        {
+            // Mark consumed immediately so a re-render during streaming doesn't
+            // re-queue / re-fire the same prompt.
+            _consumedPrompt = Prompt;
+
+            if (_isStreaming)
+            {
+                // A follow-up arrived while a turn is still streaming. Don't drop
+                // it (the user's "yes" would vanish silently — the most common
+                // cause of "history missing / AI ignored my follow-up" with slow
+                // models). Queue it and run it when the current turn finishes.
+                _queuedPrompt = Prompt;
+            }
+            else
+            {
+                _ = InvokeAsync(() => RunAiTurnAsync(Prompt!));
+            }
+        }
+    }
+
+    /// <summary>
+    /// A prompt that arrived via <see cref="Prompt"/> while a turn was still
+    /// streaming. Drained at the end of <see cref="RunAiTurnAsync"/> so the
+    /// follow-up is processed once the current turn (and its history) completes.
+    /// </summary>
+    private string? _queuedPrompt;
+
+    /// <summary>
+    /// Runs one AI turn for the supplied prompt: snapshots the shared
+    /// conversation history, mirrors the prompt in, streams the AI response,
+    /// and records the assistant reply. Used both by <see cref="SendAsync"/>
+    /// (when the user types into this Full-mode chat) and by the
+    /// <see cref="Prompt"/> parameter path (when a prompt is forwarded in,
+    /// e.g. from the inline InputOnly chat).
+    /// </summary>
+    private async Task RunAiTurnAsync(string prompt)
+    {
+        // Let mirror surfaces reset BEFORE we snapshot the AI history. The
+        // host page clears the shared hub when a new prompt opens the drawer
+        // (a fresh conversation), so the AI history must be snapshotted AFTER
+        // that reset — otherwise stale, accumulated history would be sent
+        // (the cause of long delays/timeouts on the confirmation turn).
+        // Follow-ups sent while the drawer is already open do not clear the
+        // hub, so the current conversation (prompt + proposal) is preserved.
         if (OnPromptSending.HasDelegate)
         {
             await OnPromptSending.InvokeAsync();
         }
+
+        // Snapshot the SHARED conversation (CodedValuesChatHub) AFTER any
+        // reset, so a fresh start yields an empty history and a follow-up
+        // retains the current conversation. We snapshot before mirroring the
+        // current prompt in so it is never double-counted; the current prompt
+        // is appended below. This is what lets a follow-up sent from the
+        // drawer carry the inline chat's earlier proposal.
+        var history = ChatHub.Messages
+            .Select(m => new ChatMessage(m.Role, m.Text))
+            .ToList();
 
         _messages.Add(new(ChatRole.User, prompt));
         await NotifyMessageAddedAsync(_messages[^1]);
@@ -449,10 +571,9 @@
         _sendCts?.Dispose();
         _sendCts = new CancellationTokenSource();
 
-        // Build conversation history for multi-turn context
-        var history = _messages
-            .Select(m => new ChatMessage(m.Role, m.Text))
-            .ToList();
+        // Append the current prompt to the shared-conversation history
+        // (snapshotted above, before it was mirrored into the hub).
+        history.Add(new ChatMessage(ChatRole.User, prompt));
 
         // Notify the host page (e.g. landing page) that a prompt was sent so it
         // can surface the drawer. The drawer hosts its own chat instance for
@@ -545,6 +666,16 @@
         _isStreaming = false;
         await NotifyStreamingStateChangedAsync();
         if (!_disposed) StateHasChanged();
+
+        // Drain a follow-up that was queued while this turn was streaming.
+        // The hub now contains this turn's prompt + assistant response, so the
+        // queued follow-up will carry the full conversation history.
+        var queued = _queuedPrompt;
+        _queuedPrompt = null;
+        if (!_disposed && !string.IsNullOrWhiteSpace(queued))
+        {
+            await RunAiTurnAsync(queued!);
+        }
     }
 
     /// <summary>

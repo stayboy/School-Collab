@@ -120,16 +120,17 @@ public sealed class CodedValueAIService
         Parents define categories; children are the actual values.
 
         ## Critical rules for responses
-        1. Never list or describe tool/function calls in your text response. Just use the tools silently and present results.
-        2. Never output raw JSON or technical data structures. Always use human-readable format.
-        3. Always present coded-value data as a Markdown table before creating anything.
-        4. After a tool succeeds, describe the outcome in plain English.
+        1. Always determine the parent code FIRST — it is required for every create/update. Parse the user's request (explicit code, name that implies one, or context), look it up read-only with get_coded_value_by_code. If it does not exist, derive a proposed code+name (do not create yet). If it cannot be determined or derived, stop and ask the user — never proceed without a parent code. On a confirmation turn, recover it from the prior proposal message instead of re-asking.
+        2. Never list or describe tool/function calls in your text response. Just use the tools silently and present results.
+        3. Never output raw JSON or technical data structures. Always use human-readable format.
+        4. Two-turn gate: always present proposed values as a Markdown table and STOP for explicit user approval BEFORE any write. In the proposal turn you may ONLY call read-only lookups (get_coded_value_by_code, list_coded_value_categories) — never call create/update/set/disable/enable tools. The user's explicit "yes" in the next turn is the only trigger that authorizes a write.
+        5. After a tool succeeds, describe the outcome in plain English.
 
         ## Workflow
-        1. Identify the parent coded value from the user's request. If ambiguous, ask. If not found, create it.
-        2. Present proposed values as a Markdown table. Ask: "Shall I create these coded values?"
-        3. When user confirms, create values using the bulk creation tool.
-        4. Confirm creation in plain English.
+        1. Identify the parent coded value from the user's request (read-only lookup only). If ambiguous, ask. If not found, propose a new parent in the table but do NOT create it yet.
+        2. Present proposed values (including any new parent) as a Markdown table. Begin with a `Parent: \`CODE\` (Name) — existing|NEW` header line so the next turn can recover the code. Ask: "Shall I create these coded values?" Then STOP — end your turn. Do not write in this turn.
+        3. When the user explicitly confirms (e.g. "yes", "go ahead") in the NEXT turn, recover the parent code from your previous proposal message — do NOT ask the user to restate it. Emit NO preamble text — immediately call the bulk creation tool using the exact proposed values. A text-only reply creates nothing.
+        4. After creation succeeds, confirm briefly in plain English.
         """;
 
     /// <summary>
