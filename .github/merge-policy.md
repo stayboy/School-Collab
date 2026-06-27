@@ -10,7 +10,8 @@ Feature flags are centralized in `SchoolCollab.Config`. Consuming services load 
 
 1. Create a feature/fix branch from `main`.
 2. Add or update tests for behavioural changes.
-3. Commit locally on the branch.
+3. Commit locally on the branch only after the user explicitly says
+   "commit" (see Local commit hold below).
 4. Push only after the user explicitly instructs to push:
    ```bash
    SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>

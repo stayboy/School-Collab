@@ -237,30 +237,39 @@ creating the PR.
 `main` is a protected delivery branch in process. Do not push or merge directly to
 `main` from ad-hoc work.
 
-Required workflow:
+Required workflow (every commit/push/PR/merge action is gated — "create a
+branch" or "fix X" authorizes only the local change, not committing,
+pushing, opening a PR, or merging; each of those needs its own explicit
+user instruction):
 
 1. Create a feature or fix branch from `main`.
 2. Add/update tests for behavioural changes.
-3. Commit locally on the branch.
+3. Commit locally on the branch only after the user explicitly says
+   "commit" — do not commit automatically after steps 1–2.
 4. Push only after the user explicitly instructs to push:
    ```bash
    SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>
    ```
-
-   **Do not commit or push working-tree changes without an explicit user request.**
-   Keep changes uncommitted until the user says "commit" or "push". When the user asks to commit, stop after creating the local commit and wait for an explicit push instruction before pushing to `origin`.
-
-5. Open a PR targeting `main`.
+5. Open a PR targeting `main` only after the user asks to open/create a PR.
 6. Wait for the GitHub Actions `Build & Test` check to pass.
-7. Merge with squash merge by default:
+7. Merge with squash merge by default only after the user asks to merge:
    ```bash
    gh pr merge <pr-number> --squash --delete-branch
    ```
-6. Switch to `main` and pull the merged result:
+8. Switch to `main` and pull the merged result:
    ```bash
    git checkout main
    git pull origin main
    ```
+
+**Local commit/push hold (the enforcement layer for commits):** Do not
+commit, push, open a PR, or merge without an explicit user instruction
+("commit", "push", "open a PR", "merge"). When the user asks to commit,
+create the commit and STOP — do not push unless they then explicitly ask
+to push. Keep working-tree changes uncommitted by default. The
+`.githooks/pre-push` hook enforces the push half mechanically; this
+instruction is the enforcement layer for the commit half, since commits
+are local and cannot be blocked server-side.
 
 Do not merge a PR while required status checks are still running or failing. If
 CI fails, fix the branch and wait for a green workflow before merging.
