@@ -120,7 +120,7 @@ files only carry values that genuinely belong to that single service
 | `ollama-endpoint` | Aspire parameter | `http://localhost:11434/v1` | Local Ollama OpenAI-compatible endpoint. Injected as `Ollama__Endpoint`. |
 | `ollama-default-model` | Aspire parameter | `gemma4:31b-cloud` | Model name to use when provider is `ollama`. Injected as `Ollama__DefaultModel`. |
 | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
-| `openrouter-default-model` | Aspire parameter | `google/gemma-3-12b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
+| `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
 | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
 | `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `coded-values-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
 
@@ -135,7 +135,7 @@ for non-secret defaults — open it, change the value, re-run the AppHost:
     "postgres-password": "<set via user-secrets or env-var>",
     "rabbitmq-password": "<set via user-secrets or env-var>",
     "ai-default-provider": "openrouter",
-    "openrouter-default-model": "google/gemma-3-12b-it"
+    "openrouter-default-model": "google/gemma-4-31b-it"
   }
 }
 ```
@@ -436,7 +436,7 @@ AppHost — see §2 for the parameter names):
 | `Ollama:Endpoint` | `http://localhost:11434/v1` | Local Ollama OpenAI-compatible endpoint. |
 | `Ollama:DefaultModel` | `gemma4:31b-cloud` | Model name to use when provider is `ollama`. Falls back to `ChatModelResolver.DefaultOllamaModel` when absent. |
 | `OpenRouter:Endpoint` | `https://openrouter.ai/api/v1` | OpenRouter API base URL. |
-| `OpenRouter:DefaultModel` | `google/gemma-3-12b-it` | Model name to use when provider is `openrouter`. Falls back to `ChatModelResolver.DefaultOpenRouterModel` when absent. Default is the paid, stable Google Gemma 3 12B IT model — deliberately **not** the `:free` tag, which is heavily rate-limited and intermittently returns empty responses or non-rate-limit-formatted errors that the live integration tests can't classify. |
+| `OpenRouter:DefaultModel` | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Falls back to `ChatModelResolver.DefaultOpenRouterModel` when absent. Default is the paid, stable Google Gemma 4 31B IT model — deliberately **not** the `:free` tag, which is heavily rate-limited and intermittently returns empty responses or non-rate-limit-formatted errors that the live integration tests can't classify. |
 | `OpenRouter:ApiKey` | _none — optional, supplied via `Parameters:openrouter-api-key`_ | OpenRouter API key. When absent, the provider logs a warning and the `openrouter` client is still registered but every request will fail at the provider. |
 
 **Switching provider / model at runtime** — change the relevant
