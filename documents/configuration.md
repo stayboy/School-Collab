@@ -6,7 +6,7 @@ School-Collab platform. It covers:
 
 - The Aspire AppHost (infrastructure resources + shared secrets)
 - Every bounded-context API and worker (per-service options)
-- The centralised `SchoolCollab.Config` service
+- The feature-flag system (centralised in the AppHost)
 - The AI provider stack
 - Authentication, feature flags, and logging
 - Local-development defaults and production overrides
@@ -58,14 +58,14 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
                                                │
             ┌──────────┬─────────────┬─────────┼─────────┬─────────────┬─────────────┐
             ▼          ▼             ▼         ▼         ▼             ▼             ▼
-       postgres    rabbitmq       redis    migrator    config      (UI / APIs)
+       postgres    rabbitmq       redis    migrator  (UI / APIs)
             │          │             │         │         │             │             │
             │          │             │         │         │             ▼             ▼
             │          │             │         │         │      coded-values-api   assignments-api
             │          │             │         │         │      coded-values-ai    students-api
             │          │             │         │         │      students-worker    admin
             │          │             │         │         │
-            ▼          ▼             ▼         ▼         ▼
+            ▼          ▼             ▼         ▼
         coded-values-db        (RabbitMQ exchanges per bounded context)
         assignments-db
         students-db
@@ -78,7 +78,6 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
 | `postgres` | Container (`postgres`) | The three DBs |
 | `rabbitmq` | Container (`rabbitmq`) | All APIs + Students.Worker |
 | `cache` | Container (`redis`) | APIs + Worker |
-| `config` | Project | All APIs + Admin |
 | `migrator` | Project | (one-shot) |
 | `coded-values-db` | Postgres database | migrator, coded-values-api |
 | `assignments-db` | Postgres database | migrator, assignments-api |
@@ -123,6 +122,7 @@ files only carry values that genuinely belong to that single service
 | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
 | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it:free` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
 | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
+| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `coded-values-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
 
 **Where to set them:**
 
@@ -276,52 +276,48 @@ every request as a test user — intended for local development only.
 
 ---
 
-## 5. `FeatureFlags` — central configuration service
+## 5. `FeatureFlags` — AppHost Parameters
 
-SchoolCollab has **two** feature-flag surfaces:
+Feature flags are **centralised in the AppHost** under
+`Parameters:feature-flag-*` and fanned out to each consumer via
+`WithEnvironment("FeatureFlags__FEATURE__...", param)`. There is no
+separate `SchoolCollab.Config` service and no HTTP overlay —
+consumers read flags directly from `IConfiguration` via
+`SchoolCollab.Core.Features.FeatureFlagService` (registered by
+`AddAuthAndTenancy`).
 
-1. **Local config** (in-process) — read from the `FeatureFlags` section of
-   the running service's `appsettings.json`.
-2. **Remote config** — fetched from the `SchoolCollab.Config` service
-   (`GET /api/features`) and merged into `IConfiguration` at startup via
-   `builder.Configuration.AddRemoteFeatureFlags("https+http://config")`.
-
-> **Order matters.** The remote `FeatureFlags` overlay is added *before*
-> any module's `appsettings.json` is built, so locally-defined flags take
-> precedence when both are set. This lets you override a remote value
-> during local dev.
-
-The `SchoolCollab.Config` service has **no own `appsettings.json`**
-(only `appsettings.Development.json`) and serves whatever its own
-`FeatureFlags` section contains. The Admin + every API register the
-remote overlay.
+This is the same pattern used for outbox exchanges (§3) and AI
+provider configuration (§7): one source of truth in the AppHost, no
+duplication across per-service `appsettings.json` files, and no
+runtime indirection.
 
 ### Introduced flags
 
-| Flag | Purpose | Default | Consumers |
-| :--- | :--- | :--- | :--- |
-| `FEATURE:DisableOIDCAuth` | Replace Keycloak OIDC with `TestAuthHandler` for local development. | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.CodedValues.Api`, `SchoolCollab.Students.Api` |
+| Flag | Default | Consumers |
+| :--- | :--- | :--- |
+| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.CodedValues.Api`, `SchoolCollab.Students.Api` |
 
-### Configuring flags
+### Setting a flag
 
-Flags are read from the `FeatureFlags` section. **Set them in the
-`SchoolCollab.Config/appsettings.Development.json` (local)** or pass
-through the central API.
+In a developer / CI environment, override the AppHost `Parameters:`
+value via user-secrets (preferred) or env-var:
 
-**Example** — `src/SchoolCollab.Config/appsettings.Development.json`:
-
-```json
-{
-  "FeatureFlags": {
-    "FEATURE:DisableOIDCAuth": "true"
-  }
-}
+```bash
+cd src/AppHost/SchoolCollab.AppHost
+# dev-only override
+dotnet user-secrets set "Parameters:feature-flag-disable-oidc-auth" "true"
 ```
 
-> 📝 The `:` in the key is intentional. `FeatureFlagService.CollectFlags`
+Or directly edit the default in
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:`.
+That file is the canonical record of every flag's default value and
+**must** be updated in the same PR that adds a new flag — see
+[`.github/copilot/rules/configuration-documentation.md`](../.github/copilot/rules/configuration-documentation.md).
+
+> 📝 The `:` in the flag key is intentional. `FeatureFlagService.CollectFlags`
 > recurses into nested sections, so `FEATURE:DisableOIDCAuth` surfaces as
-> the dotted key `FEATURE:DisableOIDCAuth` in `GET /api/features` — keep the
-> colon when adding new flags.
+> the dotted key `FEATURE:DisableOIDCAuth` — keep the colon when adding new
+> flags.
 
 ### Using a flag in code
 
@@ -350,7 +346,37 @@ if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
 }
 ```
 
-See `src/SchoolCollab.Config/README.md` for the full flag catalogue.
+### Adding a new flag
+
+1. Add a `Parameters:feature-flag-<name>` entry to
+   `src/AppHost/SchoolCollab.AppHost/appsettings.json` (with the default
+   value).
+2. In `src/AppHost/SchoolCollab.AppHost/Program.cs`, declare the
+   parameter with `builder.AddParameter("feature-flag-<name>")` and
+   wire it onto every consumer with
+   `.WithEnvironment("FeatureFlags__FEATURE__<FlagName>", param)`.
+3. Add the flag to the **Introduced flags** table in this section.
+4. Update §2 (parameters table), §11 (env-var reference), and §12
+   (production checklist) in the same PR.
+
+### Why no `SchoolCollab.Config` service?
+
+Earlier revisions routed feature flags through a separate
+`SchoolCollab.Config` service via `AddRemoteFeatureFlags`, which fetched
+`GET /api/features` at startup and overlaid the JSON into
+`IConfiguration`. That design was retired (see
+[`solution/centralized-feature-flags-implementation.superseded.md`](./solution/centralized-feature-flags-implementation.superseded.md))
+because:
+
+- The Config service was a thin proxy over its own local JSON file — the
+  HTTP indirection did not provide any of the properties that justify a
+  real central config service (caching, change notifications, per-tenant
+  overrides, audit trail).
+- The synchronous HTTP call added a 10-second worst-case startup delay to
+  every API and Admin on every cold start.
+- Using the same `Parameters:` pattern as outbox exchanges and AI config
+  gives one mental model for "how a cross-service value gets
+  distributed".
 
 ---
 
@@ -527,8 +553,10 @@ dotnet user-secrets set "Parameters:rabbitmq-password" "rabbit"
 
 ### 3. (Optional) Disable OIDC for local dev
 
-`src/SchoolCollab.Config/appsettings.Development.json` already has
-`FEATURE:DisableOIDCAuth=true` so Keycloak is not required.
+Edit `Parameters:feature-flag-disable-oidc-auth` in
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` from `"false"` to
+`"true"` (or override via the AppHost's user-secrets — see §5). With
+this on, Keycloak is not required for local dev.
 
 ### 4. (Optional) Configure an AI provider
 
@@ -562,8 +590,8 @@ Aspire launches the dashboard and starts every project in dependency order.
 ### 6. Verify
 
 ```bash
-# Feature flags (central config)
-curl http://localhost:<config-port>/api/features
+# Feature flags (env-var-injected; same value the host already saw at startup)
+echo $FeatureFlags__FEATURE__DisableOIDCAuth
 
 # AI provider
 curl http://localhost:<ai-port>/api/ai/config
@@ -592,6 +620,7 @@ matching env-var form:
 | `Parameters:openrouter-endpoint` | `Parameters__openrouter_endpoint` |
 | `Parameters:openrouter-default-model` | `Parameters__openrouter_default_model` |
 | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
+| `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
 | `Outbox:ExchangeName` | `Outbox__ExchangeName` |
 | `Outbox:BatchSize` | `Outbox__BatchSize` |
 | `Outbox:PollInterval` | `Outbox__PollInterval` |
@@ -631,7 +660,9 @@ Before deploying, verify:
       `Parameters:postgres-password`, `Parameters:rabbitmq-password`,
       `Parameters:openrouter-api-key`.
 - [ ] **`Auth:Keycloak:ClientSecret`** is sourced from a secret store.
-- [ ] **`FEATURE:DisableOIDCAuth`** is `false` (or omitted) in production.
+- [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
+      (or omitted) in production. The flag is sourced from the AppHost
+      `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
 - [ ] **OIDC `Authority`** points to the production Keycloak realm.
 - [ ] **Outbox `ExchangeName`** values match the consumer subscriptions
       for each bounded context (`Parameters:outbox-exchange-*`).
@@ -663,12 +694,12 @@ Before deploying, verify:
   destructive-migration deployment order.
 - [`solution/auth-tenancy-pattern.md`](./solution/auth-tenancy-pattern.md)
   — the OIDC + tenant wiring used by `AddAuthAndTenancy`.
-- [`solution/centralized-feature-flags-implementation.md`](./solution/centralized-feature-flags-implementation.md)
-  — the `SchoolCollab.Config` service architecture.
+- [`solution/centralized-feature-flags-implementation.superseded.md`](./solution/centralized-feature-flags-implementation.superseded.md)
+  — the retired `SchoolCollab.Config` HTTP overlay design, retained for
+  historical context. Feature flags now use the AppHost `Parameters:`
+  pattern described in §5.
 - [`solution/feature-flag-workflow.md`](./solution/feature-flag-workflow.md)
   — adding + retiring feature flags.
-- `src/SchoolCollab.Config/README.md` — the flag catalogue and the
-  `GET /api/features` endpoint.
 - `tests/SchoolCollab.ArchitectureTests.Unit/OutboxArchitectureTests.cs`
   — the regression guard that enforces the shared-kernel + outbox
   patterns at build time.

@@ -180,7 +180,7 @@ All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
   Scrutor assembly scanning.
 - Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.
 - **API Endpoint Grouping**: All API endpoints must be grouped using an extension method (e.g., `MapStudentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)`). Do not define routes inline in `Program.cs`. Authorization requirements on these groups should be conditional based on `IFeatureFlagService` (e.g., `FEATURE:DisableOIDCAuth`).
-- **Feature Flags**: Feature flags are centralized in `SchoolCollab.Config`. Consuming services read flags from the Config API via `ConfigFeatureFlagConfigurationProvider` at startup. Do not scatter flag values across individual service `appsettings.Development.json` files; set them once in `src/SchoolCollab.Config/appsettings.Development.json`.
+- **Feature Flags**: Feature flags are centralized in the AppHost's `Parameters:` block (see `src/AppHost/SchoolCollab.AppHost/appsettings.json`) and fanned out to consumers via `WithEnvironment("FeatureFlags__FEATURE__...", param)`. Each flag should also be mapped onto the consumer sites in `documents/configuration.md` §2. Do not scatter flag values across individual service `appsettings.json` files or rely on the `SchoolCollab.Config` HTTP overlay (it was removed — see `documents/solution/centralized-feature-flags-implementation.superseded.md`).
 
 ## Pre-flight review & PR creation
 

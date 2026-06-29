@@ -8,8 +8,6 @@ using SchoolCollab.Core.Features;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Configuration.AddRemoteFeatureFlags("https+http://config");
-
 builder.AddServiceDefaults();
 
 // Auth + tenancy (OIDC via Keycloak for the unified admin host)
@@ -47,7 +45,10 @@ if (!disableOIDC)
 
 app.UseAntiforgery();
 
-// Feature Flags API removed from Admin, now served by SchoolCollab.Config
+// FEATURE:DisableOIDCAuth and the other feature flags are injected by the
+// AppHost via WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", param);
+// see src/AppHost/SchoolCollab.AppHost/Program.cs and documents/configuration.md
+// \xA72.
 app.MapStaticAssets();
 app.MapDefaultEndpoints();
 
