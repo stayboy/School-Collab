@@ -1,6 +1,5 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Assignments.Core.Data;
 
 namespace SchoolCollab.Assignments.Core.Messaging;

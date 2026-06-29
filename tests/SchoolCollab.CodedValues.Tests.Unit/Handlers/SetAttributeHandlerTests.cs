@@ -1,10 +1,10 @@
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Hybrid;
 using Moq;
-using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttribute;
-using SchoolCollab.CodedValues.Core.Commands.RemoveCodedValueAttributeDefinition;
-using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttribute;
-using SchoolCollab.CodedValues.Core.Commands.SetCodedValueAttributeDefinition;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Commands.RemoveCodedValueAttribute;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Commands.RemoveCodedValueAttributeDefinition;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Commands.SetCodedValueAttribute;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Commands.SetCodedValueAttributeDefinition;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;

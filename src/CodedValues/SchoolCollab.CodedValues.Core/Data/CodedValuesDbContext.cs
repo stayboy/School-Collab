@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.CodedValues.Core.Data.Configurations;
 using SchoolCollab.CodedValues.Core.Domain;
-using SchoolCollab.CodedValues.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Identity;
 using SchoolCollab.Core.Tenancy;

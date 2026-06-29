@@ -4,7 +4,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Core.Data;
 using SchoolCollab.CodedValues.Core.Data;
-using SchoolCollab.CodedValues.Core.Queries.SearchCodedValues;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Queries.SearchCodedValues;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 

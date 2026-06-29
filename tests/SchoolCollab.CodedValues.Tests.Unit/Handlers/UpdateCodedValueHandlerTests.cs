@@ -2,11 +2,11 @@ using FluentAssertions;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using Moq;
-using SchoolCollab.CodedValues.Core.Commands.UpdateCodedValue;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Commands.UpdateCodedValue;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
-using SchoolCollab.CodedValues.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 

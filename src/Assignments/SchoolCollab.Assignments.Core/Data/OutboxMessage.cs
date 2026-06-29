@@ -1,4 +1,3 @@
-using SchoolCollab.Assignments.Core.CQRS;
 using SchoolCollab.Core.Data;
 
 namespace SchoolCollab.Assignments.Core.Messaging;

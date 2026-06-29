@@ -5,6 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
+using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Students.Core.Messaging;
 
 namespace SchoolCollab.Students.Core;
@@ -46,17 +48,17 @@ public static class Extensions
         var assembly = typeof(Extensions).Assembly;
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.ICommandHandler<>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(ICommandHandler<>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.ICommandHandler<,>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(ICommandHandler<,>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.IQueryHandler<,>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(IQueryHandler<,>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
 

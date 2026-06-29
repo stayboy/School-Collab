@@ -6,7 +6,7 @@ using Microsoft.Extensions.Options;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Events;
-using SchoolCollab.Students.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.Students.Worker.Services;
 

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Students.Core.Data;
 
 namespace SchoolCollab.Students.Core.Messaging;

@@ -3,7 +3,7 @@ using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Configurations;
 using SchoolCollab.Students.Core.Domain;
-using SchoolCollab.Students.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.Students.Core.Data;
 

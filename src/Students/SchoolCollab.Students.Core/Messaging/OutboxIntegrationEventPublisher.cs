@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Students.Core.Data;
 
 namespace SchoolCollab.Students.Core.Messaging;

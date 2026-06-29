@@ -1,12 +1,12 @@
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Hybrid;
 using Moq;
-using SchoolCollab.CodedValues.Core.Commands.DisableCodedValue;
-using SchoolCollab.CodedValues.Core.Commands.EnableCodedValue;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Commands.DisableCodedValue;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Commands.EnableCodedValue;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.Domain.Exceptions;
-using SchoolCollab.CodedValues.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;
 

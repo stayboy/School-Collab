@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
-using SchoolCollab.CodedValues.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.CodedValues.Core.Data.Configurations;
 
