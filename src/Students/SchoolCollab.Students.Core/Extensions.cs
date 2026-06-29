@@ -7,7 +7,6 @@ using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Messaging;
-using SchoolCollab.Students.Core.Messaging;
 
 namespace SchoolCollab.Students.Core;
 
@@ -24,7 +23,7 @@ public static class Extensions
             ?? configuration["ConnectionStrings:students-db"]
             ?? "Host=localhost;Port=5432;Database=schoolcollab_students;Username=postgres;Password=postgres";
 
-        services.AddDbContext<StudentsDbContext>(opts =>
+        services.AddDbContextFactory<StudentsDbContext>(opts =>
             opts.UseNpgsql(connectionString)
                 .UseSnakeCaseNamingConvention());
 
@@ -62,8 +61,7 @@ public static class Extensions
             .AsImplementedInterfaces()
             .WithTransientLifetime());
 
-        services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
-        services.AddHostedService<OutboxDispatcher>();
+        services.AddOutbox<StudentsDbContext>(configuration);
 
         return services;
     }

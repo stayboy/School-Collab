@@ -224,7 +224,8 @@ payload column and a partial index on `OccurredAt`).
 ### Plan for further consolidation
 
 `OutboxIntegrationEventPublisher` and `OutboxDispatcher` are now shared
-(Phases 1+2 of [`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md)).
+and used by Students + CodedValues (Phases 1+2 of
+[`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md)).
 Phase 3 (migrating Assignments to the shared contract) is the remaining
 work. Until that lands, Assignments keeps its local
 `Messaging/IIntegrationEventPublisher.cs`,

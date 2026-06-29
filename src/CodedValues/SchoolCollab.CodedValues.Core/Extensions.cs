@@ -4,7 +4,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
-using SchoolCollab.CodedValues.Core.Messaging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.CodedValues.Core.Services;
@@ -25,7 +24,7 @@ public static class Extensions
             ?? configuration["ConnectionStrings:coded-values-db"]
             ?? "Host=localhost;Port=5432;Database=schoolcollab_coded_values;Username=postgres;Password=postgres";
 
-        services.AddDbContext<CodedValuesDbContext>(opts =>
+        services.AddDbContextFactory<CodedValuesDbContext>(opts =>
             opts.UseNpgsql(connectionString)
                 .UseSnakeCaseNamingConvention());
 
@@ -58,8 +57,7 @@ public static class Extensions
             .AsImplementedInterfaces()
             .WithTransientLifetime());
 
-        services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
-        services.AddHostedService<OutboxDispatcher>();
+        services.AddOutbox<CodedValuesDbContext>(configuration);
 
         return services;
     }

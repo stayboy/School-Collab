@@ -1,7 +1,7 @@
 # Messaging Consolidation Plan
 
-Status: **Phase 1 complete** (shared primitives in place). Phases 2–6
-remain.
+Status: **Phases 1 and 2 complete** (shared primitives in place;
+Students and CodedValues migrated to use them). Phases 3–6 remain.
 
 This plan supersedes the "known domain-specific variants" note in
 [`shared-kernel-extraction-pattern.md`](./shared-kernel-extraction-pattern.md)
