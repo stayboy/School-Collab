@@ -105,6 +105,7 @@
                FluentAnchor (Hypertext) is used instead of a button so the
                control reads as a lightweight inline link, matching the rest
                of the admin UI's link styling. *@
+            <div class="chat-input-block chat-input-block-@Mode.ToString().ToLowerInvariant()">
             <div class="model-info">
                 @if (Mode != CodedValuesChatMode.InputOnly)
                 {
@@ -158,6 +159,7 @@
                 </div>
             </div>
             }
+            </div>
         </ChildContent>
         <ErrorContent Context="ex">
             <FluentMessageBar Intent="MessageIntent.Error">

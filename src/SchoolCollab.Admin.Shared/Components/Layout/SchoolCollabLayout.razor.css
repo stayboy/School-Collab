@@ -1,4 +1,29 @@
-/* Layout structure */
+/* Layout structure
+
+   The body region is a plain <div> (not FluentStack) and the content region is
+   a plain <div> (not FluentBodyContent) so that Blazor tags them with THIS
+   component's CSS-isolation scope attribute. A component's rendered root
+   element receives the *child component's* scope attribute, not the layout's,
+   which means scoped rules targeting a FluentStack/FluentBodyContent div would
+   never match. Plain divs authored here get the layout scope, so the rules below
+   actually apply and the height chain becomes viewport-driven instead of
+   content-driven.
+
+   Height chain:
+     FluentLayout root (.layout)  : height:100% of <body> (= viewport), flex column
+     .layout-body                 : flex:1 1 0, min-height:0  -> fills viewport - header
+     .layout-content              : flex:1, flex column, overflow:hidden
+     article.content              : flex:1 1 0, flex column, overflow:hidden (global app.css)
+       .page-toolbar-slot         : flex-shrink:0  -> pinned top (page toolbar via section)
+       .page-scroll               : flex:1 1 0, min-height:0, overflow:auto  -> SOLE scroll region
+       .page-footer-slot          : flex-shrink:0  -> pinned bottom (page footer via section)
+
+   Pages publish a pinned toolbar with <SectionContent SectionName="page-toolbar"> and
+   a pinned footer (e.g. an inline chat launcher) with <SectionContent
+   SectionName="page-footer">. Everything else a page renders flows into @Body, which
+   lives in .page-scroll — the only region that scrolls. So grid/list overgrowth
+   can never push the toolbar out of view or scroll the footer off the page. */
+
 .layout-header-stack {
     height: 100%;
     padding-left: 1rem;
@@ -6,12 +31,34 @@
 }
 
 .layout-body {
-    height: calc(100vh - 50px);
+    flex: 1 1 0;
+    min-height: 0;
     width: 100%;
+    display: flex;
+    flex-direction: row;
 }
 
-::deep .layout-content {
+.layout-content {
     flex: 1;
     min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
     overflow: hidden;
+}
+
+.page-toolbar-slot {
+    flex-shrink: 0;
+}
+
+.page-scroll {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.page-footer-slot {
+    flex-shrink: 0;
 }

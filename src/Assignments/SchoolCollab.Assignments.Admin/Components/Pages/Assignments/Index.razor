@@ -11,7 +11,7 @@
 
 <ErrorBoundary>
     <ChildContent>
-        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+        <SectionContent SectionName="page-toolbar">
             <div class="title-row">
                 <h1 class="page-title">Assignments</h1>
             </div>
@@ -34,6 +34,7 @@
                                 ValueChanged="@OnSearchValueChanged"
                                 OnClear="@(() => OnSearchClear())" />
             </div>
+        </SectionContent>
 
             @* Search results view *@
             @if (_isSearching && _searchResults is null)
@@ -53,6 +54,7 @@
                     <div class="grid-container">
                         <FluentDataGrid Items="@_searchResults.AsQueryable()"
                                         GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto"
+                                        GenerateHeader="GenerateHeaderOption.Sticky"
                                         MultiLine="true"
                                         TGridItem="AssignmentSummaryDto">
                             <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
@@ -117,6 +119,7 @@
                 <div class="grid-container">
                     <FluentDataGrid Items="@_items.AsQueryable()"
                                     GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto"
+                                    GenerateHeader="GenerateHeaderOption.Sticky"
                                     MultiLine="true"
                                     TGridItem="AssignmentSummaryDto">
                         <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
@@ -169,7 +172,6 @@
             {
                 <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
             }
-        </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>

@@ -11,7 +11,6 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues;
 using SchoolCollab.CodedValues.Admin.Services;
-using IndexPage = SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues.Index;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Components;
 
@@ -55,7 +54,7 @@ public class CodedValuesIndexChatMirrorTests : BunitContext
     [TestMethod]
     public async Task InlineSubmit_UserPromptAppearsInDrawer()
     {
-        var cut = Render<IndexPage>();
+        var cut = Render<CodedValuesPageHost>();
         cut.WaitForElement(".input-area");
 
         var inlineChat = cut.FindComponent<CodedValuesChat>();
@@ -80,7 +79,7 @@ public class CodedValuesIndexChatMirrorTests : BunitContext
     [TestMethod]
     public async Task InlineSubmit_AiResponseAppearsInDrawer()
     {
-        var cut = Render<IndexPage>();
+        var cut = Render<CodedValuesPageHost>();
         cut.WaitForElement(".input-area");
 
         var inlineChat = cut.FindComponent<CodedValuesChat>();
@@ -105,7 +104,7 @@ public class CodedValuesIndexChatMirrorTests : BunitContext
     [TestMethod]
     public async Task DrawerInput_UserPromptAndAiResponseAppearInDrawer()
     {
-        var cut = Render<IndexPage>();
+        var cut = Render<CodedValuesPageHost>();
         cut.WaitForElement(".input-area");
 
         // Open the drawer via the page's ✨ Chat button (no prompt yet).

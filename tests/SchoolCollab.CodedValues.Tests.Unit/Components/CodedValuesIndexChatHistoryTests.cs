@@ -10,7 +10,6 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues;
 using SchoolCollab.CodedValues.Admin.Services;
-using IndexPage = SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues.Index;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Components;
 
@@ -44,7 +43,7 @@ public class CodedValuesIndexChatHistoryTests : BunitContext
     [TestMethod]
     public async Task SubsequentPrompt_IncludesPriorPromptAndAssistantResponseInHistory()
     {
-        var cut = Render<IndexPage>();
+        var cut = Render<CodedValuesPageHost>();
         cut.WaitForElement(".input-area");
 
         var inlineChat = cut.FindComponent<CodedValuesChat>();
@@ -87,7 +86,7 @@ public class CodedValuesIndexChatHistoryTests : BunitContext
         // its consumed-prompt tracker. A stale _pendingPrompt would otherwise be
         // re-fired as a brand-new prompt when the drawer is reopened via the ✨
         // Chat button. Index must clear _pendingPrompt on close.
-        var cut = Render<IndexPage>();
+        var cut = Render<CodedValuesPageHost>();
         cut.WaitForElement(".input-area");
 
         var inlineChat = cut.FindComponent<CodedValuesChat>();
