@@ -200,17 +200,19 @@ introduces it.
 - `OutboxMessage` — the outbox row entity (`IEntity`, with `OccurredAt`,
   `DispatchedAt`, `Attempts`, `LastError`).
 
-### Known domain-specific variants (intentionally NOT shared)
-- `SchoolCollab.Assignments.Core/Messaging/IIntegrationEventPublisher` —
-  local variant with `PublishAsync(object, CancellationToken)` signature,
-  used by Assignments handlers.
-- `SchoolCollab.Assignments.Core/Data/OutboxMessage` — local variant with
-  `CreatedAt` / `ProcessedAt` fields and no `Attempts` / `LastError`.
+### Outbox dispatcher and publisher (in flight)
 
-If a future PR needs to consume the Assignments outbox from another
-module, the right path is to **align Assignments with the shared
-contract** (not the other way around) and delete the local variants.
-Track that as a follow-up issue.
+The `OutboxIntegrationEventPublisher`, `OutboxDispatcher`, and the
+configuration wiring are **not yet shared** — each `<Domain>.Core`
+project still has its own near-identical copy. The full plan to
+consolidate them is in
+[`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md).
+
+Until that plan lands, treat the local `Messaging/Outbox*.cs` files
+in each `<Domain>.Core` as **temporarily tolerated duplication** with
+a planned removal date. New `<Domain>.Core` projects must **not**
+copy them — they should call `services.AddOutbox<TContext>(...)` from
+the kernel (added in Phase 1 of the plan) instead.
 
 ## 10. Worked Example: CQRS Abstractions
 
