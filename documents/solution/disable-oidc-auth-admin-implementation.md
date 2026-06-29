@@ -6,7 +6,14 @@
 - `AddAuthAndTenancy` switches to `TestAuthHandler` when `FEATURE:DisableOIDCAuth` is enabled. With this change, the flag is now the **sole** determiner for disabling auth; it is no longer coupled to a specific environment name such as `Testing`.
 - Per `.github/copilot-instructions.md`, authorization requirements on endpoint groups should be conditional based on `IFeatureFlagService`.
 - Per `.github/copilot/rules/testing.md`, feature flags that guard auth must be tested for both states: enabled and disabled.
-- The Admin project did not have its own `appsettings.Development.json`. The `IFeatureFlagService` in the Admin host reads from the Admin's local `IConfiguration`, not from the `SchoolCollab.Config` API at startup. Therefore, the flag must be set in the Admin project's own configuration for it to take effect.
+- The original implementation set the flag via each host's local
+  `appsettings.Development.json` (Admin + the three APIs). That has since
+  been superseded: the flag is now owned by the AppHost
+  `Parameters:feature-flag-disable-oidc-auth` row and fanned out via
+  `WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", param)` —
+  see [`../configuration.md` §5](../configuration.md#5-featureflags--apphost-parameters)
+  and [`feature-flag-workflow.md`](./feature-flag-workflow.md). The body
+  below is retained for the original implementation record.
 
 ## Implementation Steps
 

@@ -5,8 +5,8 @@ default changed MUST be documented in `documents/configuration.md` in the
 same PR.**
 
 This rule applies to every project in the repository — APIs, workers, the
-AppHost, the AI service, the central config service, and the admin host.
-It is the sibling of [`testing.md`](./testing.md) and
+AppHost, the AI service, and the admin host. It is the sibling of
+[`testing.md`](./testing.md) and
 [`ef-migrations.md`](./ef-migrations.md): like those rules, it is enforced
 during the PR pre-flight review (see
 [`.github/copilot-instructions.md`](../../copilot-instructions.md) §"Pre-flight

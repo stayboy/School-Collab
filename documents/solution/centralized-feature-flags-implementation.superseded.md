@@ -1,5 +1,16 @@
 # Centralized Feature Flags — Findings & Implementation
 
+> ⚠️ **Superseded.** This document describes the original design that routed
+> feature flags through a separate `SchoolCollab.Config` service via
+> `AddRemoteFeatureFlags`. That HTTP overlay was removed in the
+> `feature/centralize-outbox-ai-config-in-apphost` branch because the Config
+> service was a placeholder (it just proxied a local JSON file) and the cost
+> of a synchronous HTTP call at every API/Admin startup was not justified by
+> a single dev-only flag. Feature flags now use the same AppHost
+> `Parameters:` pattern as outbox exchanges and AI config; see
+> [`../configuration.md` §2](../configuration.md#2-aspire-apphost--shared-infrastructure)
+> for the current design. The original notes are retained below for context.
+
 ## Findings
 
 The repository intended `SchoolCollab.Config` to be the single source of truth for feature flags. It exposes `IFeatureFlagService`, a `FeatureFlagService` implementation that reads the `FeatureFlags` configuration section, and a `GET /api/features` endpoint that returns all configured flags.

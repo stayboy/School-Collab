@@ -35,51 +35,73 @@ public class ChatProviderLiveTests
     private sealed record ProviderSettings(string Endpoint, string ApiKey, string Model);
 
     /// <summary>
-    /// Loads the AI appsettings.json (copied to the test output as ai-appsettings.json)
-    /// plus the standard .NET configuration sources for secrets, and extracts the
-    /// Ollama and OpenRouter provider settings.
+    /// Loads the AI provider settings from the AppHost's centralised
+    /// configuration so the test reads the same source of truth as the running
+    /// AI host (and so a developer doesn't have to keep two files in sync).
     ///
-    /// Non-secret values (endpoint, default model) come from <c>appsettings.json</c>.
-    /// The OpenRouter API key is intentionally NOT read from <c>appsettings.json</c>
-    /// to keep it out of source control — see <c>.github/copilot/rules/ai-services.md</c>.
-    /// The key is resolved from environment variables and user secrets instead.
+    /// The AppHost's <c>appsettings.json</c> (linked to the test output as
+    /// <c>appHost-appsettings.json</c>) declares the non-secret AI values
+    /// under <c>Parameters:*</c>:
+    /// <list type="bullet">
+    ///   <item><c>ollama-endpoint</c> / <c>ollama-default-model</c></item>
+    ///   <item><c>openrouter-endpoint</c> / <c>openrouter-default-model</c></item>
+    ///   <item><c>ai-default-provider</c></item>
+    /// </list>
+    ///
+    /// The OpenRouter API key is a secret kept out of source control — it is
+    /// read from the AppHost's user-secrets store under
+    /// <c>Parameters:openrouter-api-key</c> (or the
+    /// <c>Parameters__openrouter_api_key</c> env-var). The AppHost
+    /// <c>UserSecretsId</c> is duplicated in this project's
+    /// <c>AppHostUserSecretsId</c> MSBuild property so the test binds to the
+    /// same store the developer sets with
+    /// <c>dotnet user-secrets --project src/AppHost/SchoolCollab.AppHost</c>.
     /// </summary>
     private static ProviderSettings LoadSettings(string provider)
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "ai-appsettings.json");
-        File.Exists(path).Should().BeTrue($"ai-appsettings.json should be copied to the test output (looked for {path})");
+        var path = Path.Combine(AppContext.BaseDirectory, "appHost-appsettings.json");
+        File.Exists(path).Should().BeTrue($"appHost-appsettings.json should be copied to the test output (looked for {path})");
 
         var config = new ConfigurationBuilder()
             .AddJsonFile(path, optional: false)
             .AddEnvironmentVariables()
-            .AddUserSecrets("schoolcollab-ai-api")
+            .AddUserSecrets(AppHostUserSecretsId)
             .Build();
 
         return provider switch
         {
             "ollama" => new ProviderSettings(
-                config["Ollama:Endpoint"]
-                    ?? throw new InvalidOperationException("Ollama:Endpoint not configured (expected in ai-appsettings.json)."),
+                config["Parameters:ollama-endpoint"]
+                    ?? throw new InvalidOperationException("Parameters:ollama-endpoint not configured (expected in appHost-appsettings.json)."),
                 ApiKey: "ollama",
-                Model: config["Ollama:DefaultModel"]
-                    ?? throw new InvalidOperationException("Ollama:DefaultModel not configured (expected in ai-appsettings.json).")),
+                Model: config["Parameters:ollama-default-model"]
+                    ?? throw new InvalidOperationException("Parameters:ollama-default-model not configured (expected in appHost-appsettings.json).")),
             "openrouter" => new ProviderSettings(
-                config["OpenRouter:Endpoint"]
-                    ?? throw new InvalidOperationException("OpenRouter:Endpoint not configured (expected in ai-appsettings.json)."),
+                config["Parameters:openrouter-endpoint"]
+                    ?? throw new InvalidOperationException("Parameters:openrouter-endpoint not configured (expected in appHost-appsettings.json)."),
                 // The OpenRouter API key is a secret kept out of source control,
-                // so it is only available where user secrets / the OpenRouter__ApiKey
+                // so it is only available where user secrets / the Parameters__openrouter_api_key
                 // env var have been set (e.g. a developer machine). In environments
                 // where it is absent (notably CI), skip the live test as Inconclusive
                 // rather than failing the whole suite — see the class doc comment.
-                ApiKey: config["OpenRouter:ApiKey"]
+                ApiKey: config["Parameters:openrouter-api-key"]
                     ?? Inconclusive<string>(
-                        "OpenRouter:ApiKey not configured. Set it via `dotnet user-secrets set OpenRouter:ApiKey \"<key>\"` " +
-                        "or the OpenRouter__ApiKey environment variable."),
-                Model: config["OpenRouter:DefaultModel"]
-                    ?? throw new InvalidOperationException("OpenRouter:DefaultModel not configured (expected in ai-appsettings.json).")),
+                        "Parameters:openrouter-api-key not configured. Set it via `dotnet user-secrets --project src/AppHost/SchoolCollab.AppHost set \"Parameters:openrouter-api-key\" \"<key>\"` " +
+                        "or the Parameters__openrouter_api_key environment variable."),
+                Model: config["Parameters:openrouter-default-model"]
+                    ?? throw new InvalidOperationException("Parameters:openrouter-default-model not configured (expected in appHost-appsettings.json).")),
             _ => throw new ArgumentException($"Unknown provider: {provider}", nameof(provider))
         };
     }
+
+    /// <summary>
+    /// AppHost's <c>UserSecretsId</c> (mirrors <c>src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj</c>
+    /// — see <c>.github/copilot/rules/configuration-documentation.md</c> §"Pre-flight checklist").
+    /// Tests read the OpenRouter API key from this store as
+    /// <c>Parameters:openrouter-api-key</c>.
+    /// </summary>
+    private const string AppHostUserSecretsId = "71bc1e6c-899e-4131-98f2-60199f7d3ba2";
+
 
     /// <summary>
     /// Builds an <see cref="IChatClient"/> for the given provider, mirroring

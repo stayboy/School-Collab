@@ -8,6 +8,15 @@
     <IsTestProject>true</IsTestProject>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      AppHost UserSecretsId. The integration tests load the AppHost's
+      user-secrets store for the OpenRouter API key (kept out of source
+      control via Parameters:openrouter-api-key). Centralising the secret
+      here lets a developer set it once for both the live AppHost dev run
+      and these live integration tests. Must match the
+      <UserSecretsId> in src/AppHost/SchoolCollab.AppHost/SchoolCollab.AppHost.csproj.
+    -->
+    <AppHostUserSecretsId>71bc1e6c-899e-4131-98f2-60199f7d3ba2</AppHostUserSecretsId>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\CodedValues\SchoolCollab.CodedValues.Api\SchoolCollab.CodedValues.Api.csproj" />
@@ -28,6 +37,18 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="..\..\src\SchoolCollab.AI\appsettings.json" Link="ai-appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+    <!--
+      Live AI configuration (provider, endpoints, default models) lives in the
+      AppHost project under Parameters:*, not in SchoolCollab.AI/appsettings.json
+      anymore (the AI host is fed the values via env vars by the AppHost). This
+      test project runs without the AppHost, so we link the AppHost's
+      appsettings.json to keep that single source of truth also discoverable
+      from tests. The OpenRouter API key remains a secret and is read from the
+      AppHost's UserSecretsId above so a developer setting
+      `Parameters:openrouter-api-key` once supplies both the AI host in dev
+      and the live integration tests. See documents/configuration.md §2 and §7
+      for the full picture.
+    -->
+    <None Include="..\..\src\AppHost\SchoolCollab.AppHost\appsettings.json" Link="appHost-appsettings.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

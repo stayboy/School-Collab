@@ -35,41 +35,52 @@ public class CodedValueAIServiceLiveTests
     private sealed record OpenRouterSettings(string Endpoint, string ApiKey, string Model);
 
     /// <summary>
-    /// Loads the OpenRouter settings from the AI appsettings.json (copied to the test
-    /// output as ai-appsettings.json by the integration test project) plus the standard
-    /// .NET configuration sources for secrets:
-    ///   1. <c>appsettings.json</c> for the endpoint and default model
-    ///   2. Environment variables (e.g. <c>OpenRouter__ApiKey</c>) for the API key
-    ///   3. User secrets (UserSecretsId <c>schoolcollab-ai-api</c>) for local dev keys
+    /// Loads the OpenRouter settings from the AppHost's centralised
+    /// configuration (linked to the test output as
+    /// <c>appHost-appsettings.json</c>) so the test reads the same source of
+    /// truth as the running AI host:
+    ///   1. AppHost <c>appsettings.json</c> for the endpoint and default model
+    ///      under <c>Parameters:openrouter-*</c>
+    ///   2. Environment variables (e.g. <c>Parameters__openrouter_api_key</c>)
+    ///   3. User secrets (AppHost <c>UserSecretsId</c>) for the local dev key
     ///
-    /// The API key is intentionally NOT read from <c>appsettings.json</c> to keep it out
-    /// of source control — see <c>.github/copilot/rules/ai-services.md</c>.
+    /// The API key is intentionally NOT read from <c>appsettings.json</c> to
+    /// keep it out of source control — see
+    /// <c>.github/copilot/rules/ai-services.md</c> and
+    /// <c>documents/configuration.md §2</c>. Centralising it on the AppHost
+    /// means the developer runs
+    /// <c>dotnet user-secrets --project src/AppHost/SchoolCollab.AppHost set
+    /// "Parameters:openrouter-api-key" "&lt;key&gt;"</c> once and both the
+    /// running AppHost and these live tests see the value.
     /// </summary>
+    private const string AppHostUserSecretsId = "71bc1e6c-899e-4131-98f2-60199f7d3ba2";
+
     private static OpenRouterSettings LoadOpenRouterSettings()
     {
-        var path = Path.Combine(AppContext.BaseDirectory, "ai-appsettings.json");
-        File.Exists(path).Should().BeTrue($"ai-appsettings.json should be copied to the test output (looked for {path})");
+        var path = Path.Combine(AppContext.BaseDirectory, "appHost-appsettings.json");
+        File.Exists(path).Should().BeTrue($"appHost-appsettings.json should be copied to the test output (looked for {path})");
 
         var config = new ConfigurationBuilder()
             .AddJsonFile(path, optional: false)
             .AddEnvironmentVariables()
-            .AddUserSecrets("schoolcollab-ai-api")
+            .AddUserSecrets(AppHostUserSecretsId)
             .Build();
 
-        var endpoint = config["OpenRouter:Endpoint"]
-            ?? throw new InvalidOperationException("OpenRouter:Endpoint not configured (expected in ai-appsettings.json).");
-        var model = config["OpenRouter:DefaultModel"]
-            ?? throw new InvalidOperationException("OpenRouter:DefaultModel not configured (expected in ai-appsettings.json).");
-        var apiKey = config["OpenRouter:ApiKey"];
-        // The OpenRouter API key is a secret kept out of source control, so it is
-        // only available where user secrets / the OpenRouter__ApiKey env var have
-        // been set. In environments where it is absent (notably CI), skip the live
-        // test as Inconclusive rather than throwing — see the class doc comment.
+        var endpoint = config["Parameters:openrouter-endpoint"]
+            ?? throw new InvalidOperationException("Parameters:openrouter-endpoint not configured (expected in appHost-appsettings.json).");
+        var model = config["Parameters:openrouter-default-model"]
+            ?? throw new InvalidOperationException("Parameters:openrouter-default-model not configured (expected in appHost-appsettings.json).");
+        var apiKey = config["Parameters:openrouter-api-key"];
+        // The OpenRouter API key is a secret kept out of source control, so it
+        // is only available where user secrets / the Parameters__openrouter_api_key
+        // env var have been set. In environments where it is absent (notably
+        // CI), skip the live test as Inconclusive rather than throwing — see
+        // the class doc comment.
         if (string.IsNullOrWhiteSpace(apiKey))
         {
             Assert.Inconclusive(
-                "OpenRouter:ApiKey not configured. Set it via `dotnet user-secrets set OpenRouter:ApiKey \"<key>\"` " +
-                "or the OpenRouter__ApiKey environment variable.");
+                "Parameters:openrouter-api-key not configured. Set it via `dotnet user-secrets --project src/AppHost/SchoolCollab.AppHost set \"Parameters:openrouter-api-key\" \"<key>\"` " +
+                "or the Parameters__openrouter_api_key environment variable.");
             return null!; // unreachable; Assert.Inconclusive throws
         }
 
@@ -104,10 +115,12 @@ public class CodedValueAIServiceLiveTests
         var mockEnv = new Mock<IHostEnvironment>();
         mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
 
-        // Load the AI service appsettings so CodedValueAIService.ResolveDefaultModel
-        // picks up the same OpenRouter model the live client uses.
+        // Load the AppHost's centralised appsettings so CodedValueAIService
+        // .ResolveDefaultModel picks up the same OpenRouter model the live
+        // client uses. Reading from the AppHost's Parameters:* section keeps
+        // this helper in lock-step with the running AI host.
         var config = new ConfigurationBuilder()
-            .AddJsonFile("ai-appsettings.json", optional: false)
+            .AddJsonFile("appHost-appsettings.json", optional: false)
             .Build();
 
         return new AI.Services.CodedValueAIService(

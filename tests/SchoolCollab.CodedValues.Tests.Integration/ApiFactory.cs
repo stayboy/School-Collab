@@ -57,5 +57,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
         // endpoints do not try to challenge against the unavailable OIDC authority.
         builder.UseSetting("FeatureFlags:FEATURE:DisableOIDCAuth", "true");
         builder.UseSetting("ConnectionStrings:rabbitmq", _rabbit.GetConnectionString());
+
+        // The AppHost fans out each cross-service value via WithEnvironment(...);
+        // WebApplicationFactory does not have Aspire AppHost wiring, so the test
+        // host must inject the same env-var equivalents itself. Without this,
+        // OutboxExtensions.AddOutbox<CodedValuesDbContext> validation fails with
+        // "ExchangeName must be set in the 'Outbox' configuration section." See
+        // src/AppHost/SchoolCollab.AppHost/Program.cs for the matching fan-out.
+        builder.UseSetting("Outbox:ExchangeName", "coded-values");
     }
 }

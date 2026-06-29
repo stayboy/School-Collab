@@ -6,7 +6,7 @@ School-Collab platform. It covers:
 
 - The Aspire AppHost (infrastructure resources + shared secrets)
 - Every bounded-context API and worker (per-service options)
-- The centralised `SchoolCollab.Config` service
+- The feature-flag system (centralised in the AppHost)
 - The AI provider stack
 - Authentication, feature flags, and logging
 - Local-development defaults and production overrides
@@ -58,14 +58,14 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
                                                │
             ┌──────────┬─────────────┬─────────┼─────────┬─────────────┬─────────────┐
             ▼          ▼             ▼         ▼         ▼             ▼             ▼
-       postgres    rabbitmq       redis    migrator    config      (UI / APIs)
+       postgres    rabbitmq       redis    migrator  (UI / APIs)
             │          │             │         │         │             │             │
             │          │             │         │         │             ▼             ▼
             │          │             │         │         │      coded-values-api   assignments-api
             │          │             │         │         │      coded-values-ai    students-api
             │          │             │         │         │      students-worker    admin
             │          │             │         │         │
-            ▼          ▼             ▼         ▼         ▼
+            ▼          ▼             ▼         ▼
         coded-values-db        (RabbitMQ exchanges per bounded context)
         assignments-db
         students-db
@@ -78,7 +78,6 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
 | `postgres` | Container (`postgres`) | The three DBs |
 | `rabbitmq` | Container (`rabbitmq`) | All APIs + Students.Worker |
 | `cache` | Container (`redis`) | APIs + Worker |
-| `config` | Project | All APIs + Admin |
 | `migrator` | Project | (one-shot) |
 | `coded-values-db` | Postgres database | migrator, coded-values-api |
 | `assignments-db` | Postgres database | migrator, assignments-api |
@@ -100,30 +99,56 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
 
 Defined in `src/AppHost/SchoolCollab.AppHost/Program.cs`.
 
+The AppHost is the **single source of truth** for every value the
+distributed application needs at launch: container credentials, outbox
+exchange names, AI provider configuration, and any other cross-service
+knob. Operators (and other developers on first clone) should be able to
+look at exactly **one file** —
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:` —
+to find every value they might need to set. Per-service `appsettings.json`
+files only carry values that genuinely belong to that single service
+(logging, per-feature overrides).
+
 | Key / parameter | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `postgres-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | Superuser password for the local Postgres container. **Pinned** so the persisted volume keeps working across runs. |
 | `rabbitmq-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | `RABBITMQ_DEFAULT_PASS` for the local RabbitMQ container. Pinned for the same reason as Postgres. |
+| `outbox-exchange-coded-values` | Aspire parameter | `coded-values` | Outbox topic exchange name for the CodedValues bounded context. Injected as `Outbox__ExchangeName` into `coded-values-api`. |
+| `outbox-exchange-assignments` | Aspire parameter | `assignments` | Outbox topic exchange name for the Assignments bounded context. Injected as `Outbox__ExchangeName` into `assignments-api`. |
+| `outbox-exchange-students` | Aspire parameter | `students` | Outbox topic exchange name for the Students bounded context. Injected as `Outbox__ExchangeName` into `students-api` and `students-worker`. |
+| `ai-default-provider` | Aspire parameter | `openrouter` | Active AI provider name — `ollama` (local) or `openrouter` (cloud). Injected as `codedvalue-ai-provider`. |
+| `ollama-endpoint` | Aspire parameter | `http://localhost:11434/v1` | Local Ollama OpenAI-compatible endpoint. Injected as `Ollama__Endpoint`. |
+| `ollama-default-model` | Aspire parameter | `gemma4:31b-cloud` | Model name to use when provider is `ollama`. Injected as `Ollama__DefaultModel`. |
+| `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
+| `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it:free` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
+| `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
+| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `coded-values-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
 
 **Where to set them:**
 
-`src/AppHost/SchoolCollab.AppHost/appsettings.json`:
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` is the canonical file
+for non-secret defaults — open it, change the value, re-run the AppHost:
 
 ```json
 {
   "Parameters": {
     "postgres-password": "<set via user-secrets or env-var>",
-    "rabbitmq-password": "<set via user-secrets or env-var>"
+    "rabbitmq-password": "<set via user-secrets or env-var>",
+    "ai-default-provider": "openrouter",
+    "openrouter-default-model": "google/gemma-4-31b-it:free"
   }
 }
 ```
 
-Or via the user-secrets store (preferred for local dev):
+For secrets (`postgres-password`, `rabbitmq-password`,
+`openrouter-api-key`) — do **not** commit them to source control. Use
+the AppHost's user-secrets store (preferred for local dev):
 
 ```bash
 cd src/AppHost/SchoolCollab.AppHost
 dotnet user-secrets set "Parameters:postgres-password" "postgres"
 dotnet user-secrets set "Parameters:rabbitmq-password" "rabbit"
+dotnet user-secrets set "Parameters:openrouter-api-key" "<your-key>"
 ```
 
 Or via env-vars (preferred for CI):
@@ -131,12 +156,28 @@ Or via env-vars (preferred for CI):
 ```bash
 export Parameters__postgres-password=postgres
 export Parameters__rabbitmq-password=rabbit
+export Parameters__openrouter-api-key=<your-key>
 ```
+
+Aspire's `AddParameter(name, secret: true)` flags secrets so that they are
+masked in the Aspire dashboard, prompted for on first `aspire run`, and
+treated as sensitive in any deployment manifest. The non-secret parameters
+above are visible in plain text.
 
 > ⚠️ **Why pinning matters.** Without a stable password, Aspire regenerates
 > one on every run; the persisted data volume keeps the *previous*
 > `postgres` / `guest` user, which silently breaks every connection with
 > `password authentication failed for user "postgres"` / `invalid credentials`.
+
+> 📌 **Why centralise in the AppHost?** A developer cloning the repo, a
+> new operator, and a CI pipeline should all be able to look at exactly
+> one file to discover every configurable value the application exposes.
+> Per-service `appsettings.json` files carry only what *that single
+> service* needs. The split reflects that some values are inherently
+> cross-cutting (exchange topology, AI provider) and others are local
+> (logging, retry policy). See
+> [`.github/copilot/rules/ai-services.md`](../.github/copilot/rules/ai-services.md)
+> for the AI side.
 
 ---
 
@@ -155,45 +196,42 @@ and is bound from the `Outbox` configuration section by
 | `BatchSize` | `100` | Max rows claimed per `FOR UPDATE SKIP LOCKED` batch. |
 | `PollInterval` | `00:00:01` | Idle delay between empty batches (TimeSpan, e.g. `00:00:05`). |
 
-### Per-service overrides
+### Per-app wiring
 
-Each bounded context that owns an `OutboxMessage` table sets its own
-`ExchangeName` in `appsettings.json`:
+Each bounded context that owns an `OutboxMessage` table relies on
+`Outbox.ExchangeName` being supplied to it as an env-var by the AppHost:
 
-| Project | Config file | Exchange name |
+| App | Injected env-var | Sourced from |
 | :--- | :--- | :--- |
-| `SchoolCollab.Students.Api` | `src/Students/SchoolCollab.Students.Api/appsettings.json` | `students` |
-| `SchoolCollab.Students.Worker` | `src/Students/SchoolCollab.Students.Worker/appsettings.json` | `students` |
-| `SchoolCollab.Assignments.Api` | `src/Assignments/SchoolCollab.Assignments.Api/appsettings.json` | `assignments` |
-| `SchoolCollab.CodedValues.Api` | `src/CodedValues/SchoolCollab.CodedValues.Api/appsettings.json` | `coded-values` |
+| `coded-values-api` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-coded-values` |
+| `assignments-api` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-assignments` |
+| `students-api` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-students` |
+| `students-worker` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-students` |
 
-**Example** — `src/Students/SchoolCollab.Students.Api/appsettings.json`:
-
-```json
-{
-  "Outbox": {
-    "ExchangeName": "students"
-  }
-}
-```
+Per-service `appsettings.json` files intentionally have **no `Outbox`
+section** — the value reaches every consumer exclusively through the
+AppHost-injected env-var. See `src/AppHost/SchoolCollab.AppHost/Program.cs`
+for the wiring.
 
 ### Adding a new bounded context
 
 To onboard a new `<Domain>.Core` (e.g. `SchoolCollab.Attendance.Core`):
 
-1. Add an `Outbox` section to the new API's `appsettings.json`:
-
-   ```json
-   "Outbox": {
-     "ExchangeName": "attendance"
-   }
-   ```
-
-2. Call `services.AddOutbox<AttendanceDbContext>(builder.Configuration)` once
-   during DI setup.
-3. (Optional) Override `BatchSize` / `PollInterval` in `appsettings.Production.json`
-   for production tuning.
-4. The ArchTests in `tests/SchoolCollab.ArchitectureTests.Unit` will
+1. Add an `outbox-exchange-<domain>` entry to
+   `src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:`.
+2. Declare the parameter in `AppHost/Program.cs` via
+   `builder.AddParameter("outbox-exchange-<domain>")` and wire it onto the
+   new API / Worker with
+   `.WithEnvironment("Outbox__ExchangeName", param)`.
+3. Call `services.AddOutbox<AttendanceDbContext>(builder.Configuration)`
+   once during DI setup in the new API / Worker.
+4. (Optional) Override `BatchSize` / `PollInterval` in the AppHost
+   `Parameters:` section (fan out as `Outbox__BatchSize`,
+   `Outbox__PollInterval`) for production tuning.
+5. Update §11 ("Environment-variable reference") and §12 ("Production
+   checklist") in the same PR. See
+   [`.github/copilot/rules/configuration-documentation.md`](../.github/copilot/rules/configuration-documentation.md).
+6. The ArchTests in `tests/SchoolCollab.ArchitectureTests.Unit` will
    automatically enforce that no local `Messaging/` folder reappears.
 
 See [`shared-kernel-extraction-pattern.md`](./solution/shared-kernel-extraction-pattern.md)
@@ -238,52 +276,48 @@ every request as a test user — intended for local development only.
 
 ---
 
-## 5. `FeatureFlags` — central configuration service
+## 5. `FeatureFlags` — AppHost Parameters
 
-SchoolCollab has **two** feature-flag surfaces:
+Feature flags are **centralised in the AppHost** under
+`Parameters:feature-flag-*` and fanned out to each consumer via
+`WithEnvironment("FeatureFlags__FEATURE__...", param)`. There is no
+separate `SchoolCollab.Config` service and no HTTP overlay —
+consumers read flags directly from `IConfiguration` via
+`SchoolCollab.Core.Features.FeatureFlagService` (registered by
+`AddAuthAndTenancy`).
 
-1. **Local config** (in-process) — read from the `FeatureFlags` section of
-   the running service's `appsettings.json`.
-2. **Remote config** — fetched from the `SchoolCollab.Config` service
-   (`GET /api/features`) and merged into `IConfiguration` at startup via
-   `builder.Configuration.AddRemoteFeatureFlags("https+http://config")`.
-
-> **Order matters.** The remote `FeatureFlags` overlay is added *before*
-> any module's `appsettings.json` is built, so locally-defined flags take
-> precedence when both are set. This lets you override a remote value
-> during local dev.
-
-The `SchoolCollab.Config` service has **no own `appsettings.json`**
-(only `appsettings.Development.json`) and serves whatever its own
-`FeatureFlags` section contains. The Admin + every API register the
-remote overlay.
+This is the same pattern used for outbox exchanges (§3) and AI
+provider configuration (§7): one source of truth in the AppHost, no
+duplication across per-service `appsettings.json` files, and no
+runtime indirection.
 
 ### Introduced flags
 
-| Flag | Purpose | Default | Consumers |
-| :--- | :--- | :--- | :--- |
-| `FEATURE:DisableOIDCAuth` | Replace Keycloak OIDC with `TestAuthHandler` for local development. | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.CodedValues.Api`, `SchoolCollab.Students.Api` |
+| Flag | Default | Consumers |
+| :--- | :--- | :--- |
+| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.CodedValues.Api`, `SchoolCollab.Students.Api` |
 
-### Configuring flags
+### Setting a flag
 
-Flags are read from the `FeatureFlags` section. **Set them in the
-`SchoolCollab.Config/appsettings.Development.json` (local)** or pass
-through the central API.
+In a developer / CI environment, override the AppHost `Parameters:`
+value via user-secrets (preferred) or env-var:
 
-**Example** — `src/SchoolCollab.Config/appsettings.Development.json`:
-
-```json
-{
-  "FeatureFlags": {
-    "FEATURE:DisableOIDCAuth": "true"
-  }
-}
+```bash
+cd src/AppHost/SchoolCollab.AppHost
+# dev-only override
+dotnet user-secrets set "Parameters:feature-flag-disable-oidc-auth" "true"
 ```
 
-> 📝 The `:` in the key is intentional. `FeatureFlagService.CollectFlags`
+Or directly edit the default in
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:`.
+That file is the canonical record of every flag's default value and
+**must** be updated in the same PR that adds a new flag — see
+[`.github/copilot/rules/configuration-documentation.md`](../.github/copilot/rules/configuration-documentation.md).
+
+> 📝 The `:` in the flag key is intentional. `FeatureFlagService.CollectFlags`
 > recurses into nested sections, so `FEATURE:DisableOIDCAuth` surfaces as
-> the dotted key `FEATURE:DisableOIDCAuth` in `GET /api/features` — keep the
-> colon when adding new flags.
+> the dotted key `FEATURE:DisableOIDCAuth` — keep the colon when adding new
+> flags.
 
 ### Using a flag in code
 
@@ -312,7 +346,37 @@ if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
 }
 ```
 
-See `src/SchoolCollab.Config/README.md` for the full flag catalogue.
+### Adding a new flag
+
+1. Add a `Parameters:feature-flag-<name>` entry to
+   `src/AppHost/SchoolCollab.AppHost/appsettings.json` (with the default
+   value).
+2. In `src/AppHost/SchoolCollab.AppHost/Program.cs`, declare the
+   parameter with `builder.AddParameter("feature-flag-<name>")` and
+   wire it onto every consumer with
+   `.WithEnvironment("FeatureFlags__FEATURE__<FlagName>", param)`.
+3. Add the flag to the **Introduced flags** table in this section.
+4. Update §2 (parameters table), §11 (env-var reference), and §12
+   (production checklist) in the same PR.
+
+### Why no `SchoolCollab.Config` service?
+
+Earlier revisions routed feature flags through a separate
+`SchoolCollab.Config` service via `AddRemoteFeatureFlags`, which fetched
+`GET /api/features` at startup and overlaid the JSON into
+`IConfiguration`. That design was retired (see
+[`solution/centralized-feature-flags-implementation.superseded.md`](./solution/centralized-feature-flags-implementation.superseded.md))
+because:
+
+- The Config service was a thin proxy over its own local JSON file — the
+  HTTP indirection did not provide any of the properties that justify a
+  real central config service (caching, change notifications, per-tenant
+  overrides, audit trail).
+- The synchronous HTTP call added a 10-second worst-case startup delay to
+  every API and Admin on every cold start.
+- Using the same `Parameters:` pattern as outbox exchanges and AI config
+  gives one mental model for "how a cross-service value gets
+  distributed".
 
 ---
 
@@ -349,45 +413,63 @@ and bound via `builder.Configuration.GetSection(PromotionOptions.SectionName)`.
 
 ## 7. AI provider configuration (`SchoolCollab.AI`)
 
-Defined in `src/SchoolCollab.AI/Program.cs`. Two providers are wired and
-selected by `codedvalue-ai-provider` at startup.
+> **Centralisation note.** All AI provider configuration is owned by the
+> AppHost — see [§2](#2-aspire-apphost--shared-infrastructure) for the
+> canonical table of `Parameters:ai-*` entries. This section now only
+> documents the **runtime contract** (which keys the AI host reads, and
+> how `ChatModelResolver` resolves them to a working `(provider, model)`
+> pair) — the *values* are no longer configured in
+> `src/SchoolCollab.AI/appsettings.json`.
+
+Two providers are wired in `src/SchoolCollab.AI/Program.cs` and selected
+by the `codedvalue-ai-provider` configuration key at startup (its value
+is sourced from the AppHost's `Parameters:ai-default-provider` parameter).
+The remaining keys come from the AppHost's `Ollama:*` /
+`OpenRouter:*` parameter block.
+
+**Runtime keys read by the AI host** (all injected as env vars by the
+AppHost — see §2 for the parameter names):
 
 | Key | Default | Description |
 | :--- | :--- | :--- |
-| `codedvalue-ai-provider` | `ollama` | Active provider name — `ollama` (local) or `openrouter` (cloud). |
+| `codedvalue-ai-provider` | `ollama` | Active provider name — `ollama` (local) or `openrouter` (cloud). Normalised by `ChatModelResolver.NormalizeProvider` (case-insensitive; unknown values fall back to `ollama`). |
 | `Ollama:Endpoint` | `http://localhost:11434/v1` | Local Ollama OpenAI-compatible endpoint. |
-| `Ollama:DefaultModel` | `gemma4:31b-cloud` | Model name to use when provider is `ollama`. |
+| `Ollama:DefaultModel` | `gemma4:31b-cloud` | Model name to use when provider is `ollama`. Falls back to `ChatModelResolver.DefaultOllamaModel` when absent. |
 | `OpenRouter:Endpoint` | `https://openrouter.ai/api/v1` | OpenRouter API base URL. |
-| `OpenRouter:DefaultModel` | `google/gemma-4-31b-it:free` | Model name to use when provider is `openrouter`. |
-| `OpenRouter:ApiKey` | _none — optional_ | OpenRouter API key. When absent, the provider logs a warning and the `openrouter` client is still registered but every request will fail at the provider. |
+| `OpenRouter:DefaultModel` | `google/gemma-4-31b-it:free` | Model name to use when provider is `openrouter`. Falls back to `ChatModelResolver.DefaultOpenRouterModel` when absent. |
+| `OpenRouter:ApiKey` | _none — optional, supplied via `Parameters:openrouter-api-key`_ | OpenRouter API key. When absent, the provider logs a warning and the `openrouter` client is still registered but every request will fail at the provider. |
 
-**Example** — `src/SchoolCollab.AI/appsettings.Development.json`:
+**Switching provider / model at runtime** — change the relevant
+`Parameters:*` entry in
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` (or override via env
+var / user-secrets / Azure App Configuration in deployment), then re-run
+the AppHost. Do **not** edit
+`src/SchoolCollab.AI/appsettings.json` — it no longer carries these
+keys.
 
-```json
-{
-  "codedvalue-ai-provider": "ollama",
-  "Ollama": {
-    "Endpoint": "http://localhost:11434/v1",
-    "DefaultModel": "gemma4:31b-cloud"
-  }
-}
-```
+**Production example — OpenRouter with Claude:**
 
-**Production** — `src/SchoolCollab.AI/appsettings.Production.json`:
+1. `src/AppHost/SchoolCollab.AppHost/appsettings.json` (or the
+   deployment-equivalent):
 
-```json
-{
-  "codedvalue-ai-provider": "openrouter",
-  "OpenRouter": {
-    "Endpoint": "https://openrouter.ai/api/v1",
-    "DefaultModel": "anthropic/claude-3.5-sonnet",
-    "ApiKey": "<from secret store>"
-  }
-}
-```
+   ```json
+   "Parameters": {
+     "ai-default-provider": "openrouter",
+     "openrouter-default-model": "anthropic/claude-3.5-sonnet"
+   }
+   ```
 
-> 🔐 **Never commit `OpenRouter:ApiKey`** — use user-secrets locally and
-> your platform's secret store in CI/production.
+2. AppHost user-secrets (or env-var in CI):
+
+   ```bash
+   dotnet user-secrets --project src/AppHost/SchoolCollab.AppHost set \
+     "Parameters:openrouter-api-key" "<key>"
+   ```
+
+> 🔐 **Never commit `Parameters:openrouter-api-key`** — use the AppHost's
+> user-secrets store (whose `UserSecretsId` is also embedded in the
+> integration test csproj as `<AppHostUserSecretsId>` so live tests pick
+> up the same key) or your platform's secret store in CI/production.
 
 ---
 
@@ -471,14 +553,30 @@ dotnet user-secrets set "Parameters:rabbitmq-password" "rabbit"
 
 ### 3. (Optional) Disable OIDC for local dev
 
-`src/SchoolCollab.Config/appsettings.Development.json` already has
-`FEATURE:DisableOIDCAuth=true` so Keycloak is not required.
+Edit `Parameters:feature-flag-disable-oidc-auth` in
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` from `"false"` to
+`"true"` (or override via the AppHost's user-secrets — see §5). With
+this on, Keycloak is not required for local dev.
 
 ### 4. (Optional) Configure an AI provider
 
-Edit `src/SchoolCollab.AI/appsettings.json` to switch
-`codedvalue-ai-provider` between `ollama` (default, local) and `openrouter`
-(cloud, requires `OpenRouter:ApiKey`).
+Non-secret AI defaults already live in
+`src/AppHost/SchoolCollab.AppHost/appsettings.json` under `Parameters:*`
+(see §2). To enable OpenRouter or switch the provider:
+
+```bash
+cd src/AppHost/SchoolCollab.AppHost
+# pick a cloud model
+dotnet user-secrets set "Parameters:openrouter-api-key" "<your-key>"
+# (optional) flip the active provider / model — only needed if you want a different combination
+# dotnet user-secrets set "Parameters:ai-default-provider" "openrouter"
+# dotnet user-secrets set "Parameters:openrouter-default-model" "anthropic/claude-3.5-sonnet"
+```
+
+Or keep the default `ai-default-provider=openrouter` and run Ollama
+locally instead — flip `Parameters:ai-default-provider` to `ollama` and
+edit `Parameters:ollama-endpoint` and `Parameters:ollama-default-model`
+if your local endpoint differs from `http://localhost:11434/v1`.
 
 ### 5. Run
 
@@ -492,8 +590,8 @@ Aspire launches the dashboard and starts every project in dependency order.
 ### 6. Verify
 
 ```bash
-# Feature flags (central config)
-curl http://localhost:<config-port>/api/features
+# Feature flags (env-var-injected; same value the host already saw at startup)
+echo $FeatureFlags__FEATURE__DisableOIDCAuth
 
 # AI provider
 curl http://localhost:<ai-port>/api/ai/config
@@ -504,12 +602,25 @@ curl http://localhost:<ai-port>/api/ai/config
 ## 11. Environment-variable reference
 
 ASP.NET Core maps `Section:Key` → `Section__Key` (double underscore).
-Every key in this document has a matching env-var form:
+Aspire additionally replaces `-` with `_` in `Parameters` config keys
+when forming their env-var name, so the canonical form is
+`Parameters__{name-with-underscores}`. Every key in this document has a
+matching env-var form:
 
 | Config key | Env-var |
 | :--- | :--- |
-| `Parameters:postgres-password` | `Parameters__postgres-password` |
-| `Parameters:rabbitmq-password` | `Parameters__rabbitmq-password` |
+| `Parameters:postgres-password` | `Parameters__postgres_password` |
+| `Parameters:rabbitmq-password` | `Parameters__rabbitmq_password` |
+| `Parameters:outbox-exchange-coded-values` | `Parameters__outbox_exchange_coded_values` |
+| `Parameters:outbox-exchange-assignments` | `Parameters__outbox_exchange_assignments` |
+| `Parameters:outbox-exchange-students` | `Parameters__outbox_exchange_students` |
+| `Parameters:ai-default-provider` | `Parameters__ai_default_provider` |
+| `Parameters:ollama-endpoint` | `Parameters__ollama_endpoint` |
+| `Parameters:ollama-default-model` | `Parameters__ollama_default_model` |
+| `Parameters:openrouter-endpoint` | `Parameters__openrouter_endpoint` |
+| `Parameters:openrouter-default-model` | `Parameters__openrouter_default_model` |
+| `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
+| `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
 | `Outbox:ExchangeName` | `Outbox__ExchangeName` |
 | `Outbox:BatchSize` | `Outbox__BatchSize` |
 | `Outbox:PollInterval` | `Outbox__PollInterval` |
@@ -546,13 +657,19 @@ Before deploying, verify:
       volumes are persistent; losing them loses all module data and any
       unprocessed outbox rows.
 - [ ] **AppHost secrets** are sourced from a secret store, not committed:
-      `Parameters:postgres-password`, `Parameters:rabbitmq-password`.
+      `Parameters:postgres-password`, `Parameters:rabbitmq-password`,
+      `Parameters:openrouter-api-key`.
 - [ ] **`Auth:Keycloak:ClientSecret`** is sourced from a secret store.
-- [ ] **`FEATURE:DisableOIDCAuth`** is `false` (or omitted) in production.
+- [ ] **`Parameters:feature-flag-disable-oidc-auth`** is `false`
+      (or omitted) in production. The flag is sourced from the AppHost
+      `Parameters:` block and fanned out as `FeatureFlags__FEATURE__DisableOIDCAuth`.
 - [ ] **OIDC `Authority`** points to the production Keycloak realm.
-- [ ] **Outbox `ExchangeName`** matches the consumer subscriptions for
-      each bounded context.
-- [ ] **AI provider keys** are sourced from a secret store (`OpenRouter:ApiKey`).
+- [ ] **Outbox `ExchangeName`** values match the consumer subscriptions
+      for each bounded context (`Parameters:outbox-exchange-*`).
+- [ ] **AI provider keys** are sourced from a secret store
+      (`Parameters:openrouter-api-key`), and the active provider
+      (`Parameters:ai-default-provider`) and model
+      (`Parameters:*-default-model`) match the intended deployment.
 - [ ] **Outbox migration safety** — when bumping `OutboxMessage` schema
       (e.g. the `ProcessedAt` → `DispatchedAt` rename in Phase 3), drain
       each service's outbox before applying the EF migration. See
@@ -577,12 +694,12 @@ Before deploying, verify:
   destructive-migration deployment order.
 - [`solution/auth-tenancy-pattern.md`](./solution/auth-tenancy-pattern.md)
   — the OIDC + tenant wiring used by `AddAuthAndTenancy`.
-- [`solution/centralized-feature-flags-implementation.md`](./solution/centralized-feature-flags-implementation.md)
-  — the `SchoolCollab.Config` service architecture.
+- [`solution/centralized-feature-flags-implementation.superseded.md`](./solution/centralized-feature-flags-implementation.superseded.md)
+  — the retired `SchoolCollab.Config` HTTP overlay design, retained for
+  historical context. Feature flags now use the AppHost `Parameters:`
+  pattern described in §5.
 - [`solution/feature-flag-workflow.md`](./solution/feature-flag-workflow.md)
   — adding + retiring feature flags.
-- `src/SchoolCollab.Config/README.md` — the flag catalogue and the
-  `GET /api/features` endpoint.
 - `tests/SchoolCollab.ArchitectureTests.Unit/OutboxArchitectureTests.cs`
   — the regression guard that enforces the shared-kernel + outbox
   patterns at build time.

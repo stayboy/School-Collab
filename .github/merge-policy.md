@@ -4,7 +4,12 @@ This repository uses pull requests as the only supported path for changes to `ma
 
 ## Feature flags
 
-Feature flags are centralized in `SchoolCollab.Config`. Consuming services load them from the Config API via `ConfigFeatureFlagConfigurationProvider` at startup. Do not duplicate flag values across service-level `appsettings.Development.json` files; define them once in `src/SchoolCollab.Config/appsettings.Development.json`.
+Feature flags are centralized in the AppHost's `Parameters:` block
+(see `src/AppHost/SchoolCollab.AppHost/appsettings.json`) and fanned out to
+consumers via `WithEnvironment("FeatureFlags__FEATURE__...", param)`. Do not
+duplicate flag values across service-level `appsettings.json` files, and do
+not reintroduce the deprecated `SchoolCollab.Config` HTTP overlay
+(`AddRemoteFeatureFlags`). See `documents/configuration.md` §2 and §5.
 
 ## Required merge path
 
