@@ -152,7 +152,7 @@ public class ChatProviderLiveTests
         var settings = LoadSettings("openrouter");
         // Pins the model configured in src/SchoolCollab.AI/appsettings.json so
         // drift between the live test and the deployed default is caught here.
-        settings.Model.Should().Be("google/gemma-4-31b-it:free", "the OpenRouter default model must match the configured gemma4 model");
+        settings.Model.Should().Be("google/gemma-3-12b-it", "the OpenRouter default model must match the configured gemma3 model");
 
         await AssertProviderRespondsAsync("openrouter");
     }

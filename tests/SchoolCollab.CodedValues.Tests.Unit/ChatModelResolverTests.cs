@@ -15,7 +15,10 @@ public class ChatModelResolverTests
 {
     // Working models configured per provider.
     private const string OllamaModel = "gemma4:31b-cloud";
-    private const string OpenRouterModel = "google/gemma-4-26b-a4b-it";
+    // Stable, paid OpenRouter model. Avoid the :free aliases — they are heavily
+    // rate-limited and intermittently return empty responses, which makes the
+    // live integration tests flake.
+    private const string OpenRouterModel = "google/gemma-3-12b-it";
 
     // =====================================================================
     // Constants
@@ -28,7 +31,7 @@ public class ChatModelResolverTests
     }
 
     [TestMethod]
-    public void DefaultOpenRouterModel_IsGoogleGemma4_31b_It_Free()
+    public void DefaultOpenRouterModel_IsGoogleGemma3_12b_It()
     {
         ChatModelResolver.DefaultOpenRouterModel.Should().Be(OpenRouterModel);
     }

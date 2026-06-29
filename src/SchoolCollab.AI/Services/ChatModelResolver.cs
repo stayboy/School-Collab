@@ -15,9 +15,15 @@ public static class ChatModelResolver
 
     /// <summary>
     /// Default model used for the cloud OpenRouter provider when
-    /// <c>OpenRouter:DefaultModel</c> is not configured.
+    /// <c>OpenRouter:DefaultModel</c> is not configured. Kept in lock-step
+    /// with <c>src/AppHost/SchoolCollab.AppHost/appsettings.json</c> under
+    /// <c>Parameters:openrouter-default-model</c> so the constant fallback
+    /// matches the default the AppHost injects. Avoid the <c>:free</c>-tagged
+    /// OpenRouter aliases here — they are heavily rate-limited, intermittently
+    /// return empty responses, and surface non-rate-limit-formatted errors
+    /// that confuse client-side retry logic.
     /// </summary>
-    public const string DefaultOpenRouterModel = "google/gemma-4-26b-a4b-it";
+    public const string DefaultOpenRouterModel = "google/gemma-3-12b-it";
 
     /// <summary>
     /// Resolves the provider and model from three raw configuration values.
