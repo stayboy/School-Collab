@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.CodedValues.Core.Data.Configurations;
 using SchoolCollab.CodedValues.Core.Domain;
+using SchoolCollab.Core.Data.Outbox;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Identity;
@@ -27,6 +28,6 @@ public sealed class CodedValuesDbContext(DbContextOptions<CodedValuesDbContext> 
         modelBuilder.ApplyConfiguration(new CodedValueConfiguration());
         modelBuilder.ApplyConfiguration(new TenantCodedValueOverrideConfiguration());
         modelBuilder.ApplyConfiguration(new TenantCodedValueAttributeOverrideConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<CodedValuesDbContext>()));
     }
 }

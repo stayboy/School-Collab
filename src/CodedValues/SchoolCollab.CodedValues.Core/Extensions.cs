@@ -57,7 +57,22 @@ public static class Extensions
             .AsImplementedInterfaces()
             .WithTransientLifetime());
 
-        services.AddOutbox<CodedValuesDbContext>(configuration);
+        services.AddOutbox<CodedValuesDbContext>(configuration, outbox =>
+        {
+            // CodedValues-specific outbox table shape:
+            // - 500-char Type (longer than the default 200 for
+            //   fully-qualified event names)
+            // - jsonb payload column (PostgreSQL native JSON)
+            // - default 0 on Attempts (lets the database apply the
+            //   default on insert)
+            // - partial index on OccurredAt WHERE DispatchedAt IS NULL
+            //   (keeps the dispatcher's SELECT cheap as old dispatched
+            //   rows accumulate)
+            outbox.SetTypeMaxLength(500)
+                  .UseJsonbPayload()
+                  .UseAttemptsDefaultZero()
+                  .UsePartialIndexOnOccurredAt();
+        });
 
         return services;
     }

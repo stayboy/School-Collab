@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Data.Outbox;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Configurations;
 using SchoolCollab.Students.Core.Domain;
@@ -37,6 +38,6 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new StudentSubjectAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new SubjectStrandConfiguration());
         modelBuilder.ApplyConfiguration(new SubjectLessonConfiguration());
-        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<StudentsDbContext>()));
     }
 }
