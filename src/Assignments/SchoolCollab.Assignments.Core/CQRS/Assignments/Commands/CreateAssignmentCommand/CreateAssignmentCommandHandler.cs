@@ -1,9 +1,10 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
-using SchoolCollab.Assignments.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
@@ -39,8 +40,11 @@ public sealed class CreateAssignmentCommandHandler(
 
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentCreatedEvent>())
         {
-            await publisher.PublishAsync(
-                new { assignment.Id, assignment.Title, assignment.CreatedAt },
+            await publisher.EnqueueAsync(
+                new AssignmentCreatedIntegrationEvent(
+                    assignment.Id,
+                    assignment.Title,
+                    assignment.CreatedAt),
                 cancellationToken);
         }
 

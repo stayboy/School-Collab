@@ -1,6 +1,6 @@
 # Messaging Consolidation Plan
 
-Status: **Phases 1 and 2 complete** (shared primitives in place; Students and CodedValues on the shared `IIntegrationEventPublisher` contract). The follow-on outbox-configuration consolidation plan is also complete — see [`outbox-message-configuration-consolidation-plan.md`](./outbox-message-configuration-consolidation-plan.md). Phase 3 (Assignments migration) remains — see §4 below.
+Status: **complete** (Phases 1–3 landed; Students, CodedValues, and Assignments are all on the shared `IIntegrationEventPublisher` contract, shared `OutboxMessage` entity, shared `OutboxDispatcher<TContext>`, and shared `OutboxMessageConfiguration`). The follow-on outbox-configuration consolidation plan is also complete — see [`outbox-message-configuration-consolidation-plan.md`](./outbox-message-configuration-consolidation-plan.md). Phases 4–6 (folder cleanup, doc updates, ArchTests) remain.
 
 This plan supersedes the "known domain-specific variants" note in
 [`shared-kernel-extraction-pattern.md`](./shared-kernel-extraction-pattern.md)

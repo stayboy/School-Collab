@@ -1,8 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using SchoolCollab.Assignments.Core.Data.Configurations;
 using SchoolCollab.Assignments.Core.Domain;
-using SchoolCollab.Assignments.Core.Messaging;
 using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Data.Outbox;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core.Data;
@@ -21,6 +22,6 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         // available to tenant-aware configuration base classes. Do not use
         // ApplyConfigurationsFromAssembly here because it cannot inject arguments.
         modelBuilder.ApplyConfiguration(new AssignmentConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration());
+        modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
     }
 }

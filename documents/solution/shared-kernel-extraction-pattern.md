@@ -215,36 +215,32 @@ introduces it.
 
 ### Per-domain EF configuration (consolidated)
 
-The `OutboxMessageConfiguration` is now shared in
+The `OutboxMessageConfiguration` is shared in
 `SchoolCollab.Core/Data/Outbox/OutboxMessageConfiguration.cs`. Each
 module passes its own `OutboxConfigurationFlags` via the fluent
 `IOutboxConfigurationBuilder` callback to
 `services.AddOutbox<TContext>(configuration, outbox => ...)`. The
-default flags match the common-case (Students today, Assignments
-after the field renames land); CodedValues overrides to set
-`jsonb` on the payload column, a larger `Type` max length, a `0`
-default on `Attempts`, and a partial index on `OccurredAt`. See
+default flags match the common-case (Students); CodedValues overrides
+to set `jsonb` on the payload column, a larger `Type` max length, a
+`0` default on `Attempts`, and a partial index on `OccurredAt`;
+Assignments opts in to the partial index only. See
 [`outbox-message-configuration-consolidation-plan.md`](./outbox-message-configuration-consolidation-plan.md)
 for the full rationale and the resolved design questions.
 
 ### Plan for further consolidation
 
-`OutboxIntegrationEventPublisher`, `OutboxDispatcher`, and
-`OutboxMessageConfiguration` are now shared and used by Students +
-CodedValues. Phase 3 of
-[`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md)
-(migrating Assignments to the shared contract) is the remaining
-work. Until that lands, Assignments keeps its local
-`Messaging/IIntegrationEventPublisher.cs`,
-`Messaging/OutboxIntegrationEventPublisher.cs`,
-`Messaging/OutboxDispatcher.cs`, `Data/OutboxMessage.cs`, and
-`Data/Configurations/OutboxMessageConfiguration.cs` — intentionally
-NOT shared because they predate the shared contract.
+`OutboxIntegrationEventPublisher`, `OutboxDispatcher`, `OutboxMessage`,
+and `OutboxMessageConfiguration` are now shared and used by
+Students, CodedValues, **and** Assignments. The
+[messaging-consolidation-plan](./messaging-consolidation-plan.md)
+Phases 1–3 are complete; Phases 4–6 (folder cleanup, doc updates,
+ArchTests) remain.
 
-New `<Domain>.Core` projects must **not** copy the Assignments
-files. They should call `services.AddOutbox<TContext>(configuration,
-outbox => ...)` from the kernel and rely on the shared
-`OutboxMessageConfiguration` plus the per-module flags.
+New `<Domain>.Core` projects must **not** copy any local
+`Messaging/` files. They should call
+`services.AddOutbox<TContext>(configuration, outbox => ...)` from the
+kernel and rely on the shared `OutboxMessageConfiguration` plus the
+per-module flags.
 
 ## 10. Worked Example: CQRS Abstractions
 
@@ -271,3 +267,87 @@ specialty sub-folders stay the same, e.g.
 Local `Extensions.cs` files in each `<Domain>.Core` were updated to use
 the unqualified type names (`ICommandHandler<>`, `IQueryHandler<,>`) and
 add `using SchoolCollab.Core.CQRS;` to their import list.
+
+## 11. Worked Example: Transactional Outbox
+
+The transactional outbox was extracted across three rounds (see the
+[messaging-consolidation-plan](./messaging-consolidation-plan.md)
+and the follow-on
+[outbox-message-configuration-consolidation-plan](./outbox-message-configuration-consolidation-plan.md))
+from local `Messaging/` folders in each `<Domain>.Core` into a
+single kernel group:
+
+```
+src/SchoolCollab.Core/Messaging/
+├── IIntegrationEventPublisher.cs                       (contract)
+├── OutboxMessage.cs                                    (entity)
+├── OutboxOptions.cs                                    (configuration)
+├── OutboxIntegrationEventPublisher.cs                  (default impl, generic over DbContext)
+├── OutboxDispatcher.cs                                 (BackgroundService, generic over DbContext)
+└── OutboxExtensions.cs                                 (AddOutbox<TContext>(IConfiguration) DI helper)
+
+src/SchoolCollab.Core/Data/Outbox/
+├── IOutboxConfigurationBuilder.cs                      (fluent per-module flags)
+├── OutboxConfigurationBuilder.cs                       (internal default impl)
+├── OutboxConfigurationFlags.cs                         (immutable record + Default)
+└── OutboxMessageConfiguration.cs                       (shared EF mapping)
+```
+
+After the migration, the local `Messaging/` folders in each
+`<Domain>.Core` were deleted entirely. Each bounded context now
+adds the outbox in **under 10 lines** in its `Extensions.cs`:
+
+```csharp
+services.AddOutbox<TContext>(configuration);                      // common-case
+services.AddOutbox<TContext>(configuration, outbox => outbox      // CodedValues
+    .SetTypeMaxLength(500)
+    .UseJsonbPayload()
+    .UseAttemptsDefaultZero()
+    .UsePartialIndexOnOccurredAt());
+```
+
+plus one entry in the module's `appsettings.json`:
+
+```json
+"Outbox": { "ExchangeName": "students" }
+```
+
+plus one `DbSet<OutboxMessage>` in the `DbContext` and one line in
+its `OnModelCreating`:
+
+```csharp
+modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<TContext>()));
+```
+
+The original Assignments implementation was on a different contract
+(local `PublishAsync(object)` instead of `EnqueueAsync<T>(T)`, local
+`OutboxMessage` with `CreatedAt`/`ProcessedAt` fields, per-scope
+`IConnectionFactory` rather than shared `IConnection`). Bringing
+it onto the shared contract was Phase 3 of the
+[messaging-consolidation-plan](./messaging-consolidation-plan.md)
+and required a destructive EF migration (column renames
+`processed_at` → `dispatched_at`, `error` → `last_error`,
+`created_at` → `occurred_at`; new `attempts` column with default
+`0`; new partial index on `occurred_at WHERE dispatched_at IS NULL`).
+
+## 12. Audit Checklist
+
+A `<Domain>.Core` project is **not** in compliance with this
+pattern if any of the following are present:
+
+- `Messaging/IIntegrationEventPublisher.cs` (local interface).
+- `Messaging/OutboxIntegrationEventPublisher.cs` (local default impl).
+- `Messaging/OutboxDispatcher.cs` (local `BackgroundService`).
+- `Data/OutboxMessage.cs` (local entity).
+- `Data/Configurations/OutboxMessageConfiguration.cs` (local EF
+  mapping for the outbox table).
+- A direct `using RabbitMQ.Client;` or `using IConnection;` /
+  `using IConnectionFactory;` reference in any `.cs` file.
+- A direct `<PackageReference Include="RabbitMQ.Client" />` or
+  `<PackageReference Include="Aspire.RabbitMQ.Client" />` in the
+  `<Domain>.Core.csproj`.
+
+The shared implementation in `SchoolCollab.Core/Messaging/` is the
+only authorised outbox plumbing. Phase 6 of the
+[messaging-consolidation-plan](./messaging-consolidation-plan.md)
+turns this checklist into an `ArchTests` regression guard.

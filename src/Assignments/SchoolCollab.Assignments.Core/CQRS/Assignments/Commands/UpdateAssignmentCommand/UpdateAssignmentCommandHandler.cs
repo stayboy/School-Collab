@@ -1,9 +1,10 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
-using SchoolCollab.Assignments.Core.Messaging;
+using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
 
@@ -36,8 +37,11 @@ public sealed class UpdateAssignmentCommandHandler(
 
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentUpdatedEvent>())
         {
-            await publisher.PublishAsync(
-                new { assignment.Id, assignment.Title, assignment.UpdatedAt },
+            await publisher.EnqueueAsync(
+                new AssignmentUpdatedIntegrationEvent(
+                    assignment.Id,
+                    assignment.Title,
+                    assignment.UpdatedAt),
                 cancellationToken);
         }
 
