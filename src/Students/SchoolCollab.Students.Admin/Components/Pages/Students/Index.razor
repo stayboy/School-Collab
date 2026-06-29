@@ -24,8 +24,7 @@
                                  class="search-box"
                                  Immediate="true"
                                  ImmediateDelay="300"
-                                 ValueChanged="@OnSearchValueChanged"
-                                 OnClear="@(() => OnSearchClear())" />
+                                 ValueChanged="@OnSearchValueChanged" />
             </div>
         </SectionContent>
             @if (_showDeleted && _deletedItems is not null)
@@ -266,12 +265,6 @@
     private void OnSearchValueChanged(string? text)
     {
         _searchText = text?.Trim() ?? string.Empty;
-        StateHasChanged();
-    }
-
-    private void OnSearchClear()
-    {
-        _searchText = string.Empty;
         StateHasChanged();
     }
 
