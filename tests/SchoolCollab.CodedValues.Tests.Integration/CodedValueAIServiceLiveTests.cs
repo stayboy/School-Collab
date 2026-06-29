@@ -17,7 +17,7 @@ namespace SchoolCollab.CodedValues.Tests.Integration;
 
 /// <summary>
 /// Live tests for <see cref="AI.Services.CodedValueAIService.ChatAsync"/> against the real
-/// OpenRouter endpoint, using the configured model (<c>google/gemma-4-31b-it:free</c>).
+/// OpenRouter endpoint, using the configured model (<c>google/gemma-3-12b-it</c>).
 ///
 /// These build the <see cref="IChatClient"/> exactly as <c>SchoolCollab.AI/Program.cs</c>
 /// does, wire it through a mock <see cref="AI.Services.IChatClientFactory"/>, and drive the real
@@ -26,6 +26,11 @@ namespace SchoolCollab.CodedValues.Tests.Integration;
 ///
 /// Purpose: verify that <c>ChatAsync</c> does not break with OpenRouter as the provider —
 /// both the plain streaming-text path and the multi-round function-calling path.
+///
+/// Note: we deliberately avoid the OpenRouter <c>:free</c>-tagged aliases here. They are
+/// heavily rate-limited and intermittently return empty responses or non-rate-limit-formatted
+/// errors that the live-test Inconclusive gating does not match, which causes unrelated
+/// flaky failures.
 /// </summary>
 [TestClass]
 public class CodedValueAIServiceLiveTests
@@ -95,7 +100,7 @@ public class CodedValueAIServiceLiveTests
         var s = LoadOpenRouterSettings();
         // Pins the model configured in src/SchoolCollab.AI/appsettings.json so
         // the live ChatAsync test exercises the same model the service will use.
-        s.Model.Should().Be("google/gemma-4-31b-it:free", "the live ChatAsync test must use the configured OpenRouter model");
+        s.Model.Should().Be("google/gemma-3-12b-it", "the live ChatAsync test must use the configured OpenRouter model");
 
         var openAiClient = new OpenAIClient(
             new ApiKeyCredential(s.ApiKey),
