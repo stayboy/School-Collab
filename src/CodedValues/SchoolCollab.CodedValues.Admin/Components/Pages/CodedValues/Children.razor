@@ -28,8 +28,7 @@
                                 class="search-box"
                                 Immediate="true"
                                 ImmediateDelay="300"
-                                ValueChanged="@OnSearchValueChanged"
-                                OnClear="@(() => OnSearchClear())" />
+                                ValueChanged="@OnSearchValueChanged" />
             </div>
             @if (_isSearching && _searchResults is null)
             {
@@ -387,15 +386,6 @@
             _isSearching = false;
         }
 
-        StateHasChanged();
-    }
-
-    private void OnSearchClear()
-    {
-        _searchText = string.Empty;
-        _searchResults = null;
-        _isSearching = false;
-        _searchCts?.Cancel();
         StateHasChanged();
     }
 
