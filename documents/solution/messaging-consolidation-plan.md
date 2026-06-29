@@ -1,7 +1,6 @@
 # Messaging Consolidation Plan
 
-Status: **Phases 1 and 2 complete** (shared primitives in place;
-Students and CodedValues migrated to use them). Phases 3–6 remain.
+Status: **Phases 1 and 2 complete** (shared primitives in place; Students and CodedValues on the shared `IIntegrationEventPublisher` contract). The follow-on outbox-configuration consolidation plan is also complete — see [`outbox-message-configuration-consolidation-plan.md`](./outbox-message-configuration-consolidation-plan.md). Phase 3 (Assignments migration) remains — see §4 below.
 
 This plan supersedes the "known domain-specific variants" note in
 [`shared-kernel-extraction-pattern.md`](./shared-kernel-extraction-pattern.md)

@@ -1,10 +1,6 @@
 # OutboxMessageConfiguration Consolidation Plan
 
-Status: **planning** — to be executed after the existing
-[messaging-consolidation-plan](./messaging-consolidation-plan.md) reaches
-Phase 3 (Assignments migration). Phase 3 leaves the three module-level
-`Data/Configurations/OutboxMessageConfiguration.cs` files in place; this
-plan removes them.
+Status: **complete** (Phases A, B, C landed in commit `16a2490`). Assignments migration remains a future deliverable — see `messaging-consolidation-plan.md` Phase 3.
 
 This plan is a follow-up to
 [`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md)
@@ -401,23 +397,25 @@ public sealed record OutboxConfigurationFlags(
   `OutboxMessageConfiguration.cs` for Assignments is updated in
   place; this plan deletes it.
 
-## 8. Open Questions for Reviewer
+## 8. Resolved Decisions
 
-1. **Is the fluent `IOutboxConfigurationBuilder` the right shape, or
-   would an `IOutboxConfigurationOptions` (bound from
-   configuration) be cleaner?** My current plan is the fluent
-   builder because the values are small and per-module — not
-   deployment-time configurable. If we want operators to be able to
-   flip a flag in `appsettings.json`, the options approach is
-   better.
-2. **Should the CodedValues-specific `jsonb` be the default and
-   Students/Assignments opt out?** Today it's the other way around.
-   Switching the default would mean a migration for Students and
-   Assignments (changing the column type from `text` to `jsonb`).
-   Not recommended.
-3. **Should we keep the local `OutboxMessageConfiguration` files
-   for now and remove them in a follow-up?** Plan A is to remove
-   them in the same PR, but a more conservative rollout is to keep
-   them as dead code (registered but no-op because the shared
-   config also applies) and remove them once the shared config has
-   been in production for a release.
+1. **Fluent builder** (`IOutboxConfigurationBuilder`) chosen over
+   `IOptions<>` from configuration. Values are per-module and small,
+   not deployment-time knobs. Operators do not need to flip
+   per-module outbox flags at runtime.
+2. **`jsonb` stays opt-in via `.UseJsonbPayload()`.** Not the
+   default. Students + Assignments continue to use the database's
+   default text type (`text` on PostgreSQL). Switching the default
+   would force a column-type migration on those tables, which is
+   out of scope here.
+3. **Local configs removed in the same PR** (Phases A+B+C in one
+   commit, `16a2490`). The shared config and the local config
+   cannot both apply at the same time — having both registered
+   would cause EF Core to call one or the other depending on the
+   ApplyConfiguration order, producing confusing behaviour. Land the
+   shared config first, verify the tests pass, then delete the
+   locals in the same change.
+
+## 9. Open Questions for Reviewer
+
+_(all resolved — see §8.)_

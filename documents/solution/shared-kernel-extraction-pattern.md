@@ -213,29 +213,38 @@ introduces it.
   — DI helper that wires the options, publisher, and dispatcher for a
   bounded context.
 
-### Per-domain EF configuration (intentionally local)
+### Per-domain EF configuration (consolidated)
 
-The `OutboxMessageConfiguration` class for each bounded context stays in
-the `<Domain>.Core/Data/Configurations/` folder, because it
-configures the same shared `OutboxMessage` entity with per-domain table
-column types and indexes (e.g. CodedValues uses `jsonb` for the
-payload column and a partial index on `OccurredAt`).
+The `OutboxMessageConfiguration` is now shared in
+`SchoolCollab.Core/Data/Outbox/OutboxMessageConfiguration.cs`. Each
+module passes its own `OutboxConfigurationFlags` via the fluent
+`IOutboxConfigurationBuilder` callback to
+`services.AddOutbox<TContext>(configuration, outbox => ...)`. The
+default flags match the common-case (Students today, Assignments
+after the field renames land); CodedValues overrides to set
+`jsonb` on the payload column, a larger `Type` max length, a `0`
+default on `Attempts`, and a partial index on `OccurredAt`. See
+[`outbox-message-configuration-consolidation-plan.md`](./outbox-message-configuration-consolidation-plan.md)
+for the full rationale and the resolved design questions.
 
 ### Plan for further consolidation
 
-`OutboxIntegrationEventPublisher` and `OutboxDispatcher` are now shared
-and used by Students + CodedValues (Phases 1+2 of
-[`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md)).
-Phase 3 (migrating Assignments to the shared contract) is the remaining
+`OutboxIntegrationEventPublisher`, `OutboxDispatcher`, and
+`OutboxMessageConfiguration` are now shared and used by Students +
+CodedValues. Phase 3 of
+[`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md)
+(migrating Assignments to the shared contract) is the remaining
 work. Until that lands, Assignments keeps its local
 `Messaging/IIntegrationEventPublisher.cs`,
 `Messaging/OutboxIntegrationEventPublisher.cs`,
-`Messaging/OutboxDispatcher.cs`, and `Data/OutboxMessage.cs` —
-intentionally NOT shared because they predate the shared contract.
+`Messaging/OutboxDispatcher.cs`, `Data/OutboxMessage.cs`, and
+`Data/Configurations/OutboxMessageConfiguration.cs` — intentionally
+NOT shared because they predate the shared contract.
 
-New `<Domain>.Core` projects must **not** copy the Assignments files.
-They should call `services.AddOutbox<TContext>(...)` from the kernel
-and add only the per-domain `OutboxMessageConfiguration`.
+New `<Domain>.Core` projects must **not** copy the Assignments
+files. They should call `services.AddOutbox<TContext>(configuration,
+outbox => ...)` from the kernel and rely on the shared
+`OutboxMessageConfiguration` plus the per-module flags.
 
 ## 10. Worked Example: CQRS Abstractions
 
