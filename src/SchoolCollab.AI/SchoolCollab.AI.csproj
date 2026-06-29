@@ -3,7 +3,16 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <UserSecretsId>schoolcollab-ai-api</UserSecretsId>
+    <UserSecretsId>54e1b07b-8094-4b26-b156-72630600713d</UserSecretsId>
+    <!--
+      No <UserSecretsId/> anymore. AI provider configuration
+      (codedvalue-ai-provider, Ollama:*, OpenRouter:*, OpenRouter:ApiKey) is
+      now centralised in src/AppHost/SchoolCollab.AppHost/appsettings.json
+      under Parameters:*, and fanned out as env vars by the AppHost. The
+      OpenRouter API key is set via the AppHost's UserSecretsId
+      (71bc1e6c-899e-4131-98f2-60199f7d3ba2) — see documents/configuration.md
+      §2 and §7.
+    -->
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="SchoolCollab.CodedValues.Tests.Unit" />

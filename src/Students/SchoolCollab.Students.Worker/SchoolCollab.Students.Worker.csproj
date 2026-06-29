@@ -17,4 +17,22 @@
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="EFCore.NamingConventions" />
   </ItemGroup>
+  <ItemGroup>
+    <!--
+      The Worker uses Microsoft.NET.Sdk (not Microsoft.NET.Sdk.Web), so
+      appsettings*.json are NOT auto-copied to the output directory. Without
+      this Content element, the Outbox.ExchangeName configuration (and any other
+      values in appsettings.json) silently disappear at runtime, producing
+      OptionsValidationException: "ExchangeName must be set in the 'Outbox'
+      configuration section." in any deployment scenario where the content
+      root is the published bin/ directory rather than the source tree.
+      See https://learn.microsoft.com/dotnet/core/extensions/configuration
+    -->
+    <Content Include="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="appsettings.*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
 </Project>

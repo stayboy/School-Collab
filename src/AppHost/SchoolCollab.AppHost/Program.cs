@@ -31,6 +31,33 @@ var redis = builder.AddRedis("cache");
 var config = builder.AddProject<Projects.SchoolCollab_Config>("config")
     .WithReference(redis);
 
+// Per-bounded-context outbox exchange names. Centralised in the AppHost's
+// appsettings.json under Parameters:outbox-exchange-* and fanned out to the
+// matching API/Worker via WithEnvironment("Outbox__ExchangeName", param), so
+// no per-service appsettings.json needs an Outbox section — the value reaches
+// every consumer exclusively through the env var Aspire injects at launch.
+// See OutboxExtensions.AddOutbox<TContext> for the consumer side.
+var codedValuesOutboxExchange = builder.AddParameter("outbox-exchange-coded-values");
+var assignmentsOutboxExchange  = builder.AddParameter("outbox-exchange-assignments");
+var studentsOutboxExchange     = builder.AddParameter("outbox-exchange-students");
+
+// AI provider configuration that the `coded-values-ai` host reads at startup.
+// Centralised here so an operator (or another developer on first clone) can
+// see every knob they may need to set in exactly one place — the AppHost's
+// appsettings.json under Parameters:. The values are fanned out as the exact
+// env-var names the AI host already binds (`Ollama:Endpoint`, etc.), so the
+// AI host itself no longer carries an Ollama/OpenRouter/codedvalue-ai-provider
+// section in its own appsettings.json. The OpenRouter API key is a secret
+// parameter — not committed here — supplied via the AppHost's user-secrets
+// store as `Parameters:openrouter-api-key` or env-var
+// `Parameters__openrouter_api_key`. See documents/configuration.md §2.
+var aiDefaultProvider       = builder.AddParameter("ai-default-provider");
+var ollamaEndpoint          = builder.AddParameter("ollama-endpoint");
+var ollamaDefaultModel      = builder.AddParameter("ollama-default-model");
+var openRouterEndpoint      = builder.AddParameter("openrouter-endpoint");
+var openRouterDefaultModel  = builder.AddParameter("openrouter-default-model");
+var openRouterApiKey        = builder.AddParameter("openrouter-api-key", secret: true);
+
 // ── Assignments bounded context ──
 
 var assignmentsDb = postgres.AddDatabase("assignments-db");
@@ -55,6 +82,7 @@ var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("
     .WithReference(rabbit)
     .WithReference(redis)
     .WithReference(config)
+    .WithEnvironment("Outbox__ExchangeName", codedValuesOutboxExchange)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitFor(config)
@@ -62,6 +90,18 @@ var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("
 
 var codedValuesAi = builder.AddProject<Projects.SchoolCollab_AI>("coded-values-ai")
     .WithReference(codedValuesApi)
+    // Env-var names use the double-underscore convention so that ASP.NET
+    // Core's EnvironmentVariablesConfigurationProvider maps `__` to `:`
+    // when reading them inside `coded-values-ai`. The `:` separator
+    // works on Windows but not on Linux/sh, so `__` is the cross-platform
+    // safe form here. See documents/configuration.md §11 and the .NET docs
+    // (https://learn.microsoft.com/aspnet/core/fundamentals/configuration).
+    .WithEnvironment("codedvalue-ai-provider", aiDefaultProvider)
+    .WithEnvironment("Ollama__Endpoint", ollamaEndpoint)
+    .WithEnvironment("Ollama__DefaultModel", ollamaDefaultModel)
+    .WithEnvironment("OpenRouter__Endpoint", openRouterEndpoint)
+    .WithEnvironment("OpenRouter__DefaultModel", openRouterDefaultModel)
+    .WithEnvironment("OpenRouter__ApiKey", openRouterApiKey)
     .WaitFor(codedValuesApi);
 
 var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
@@ -69,6 +109,7 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithReference(rabbit)
     .WithReference(redis)
     .WithReference(config)
+    .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitFor(config)
@@ -79,6 +120,7 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
     .WithReference(rabbit)
     .WithReference(redis)
     .WithReference(config)
+    .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitFor(config)
@@ -87,6 +129,7 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
 var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("students-worker")
     .WithReference(studentsDb)
     .WithReference(rabbit)
+    .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
     .WaitFor(rabbit)
     .WaitForCompletion(migrator);
 

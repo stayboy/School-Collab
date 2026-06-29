@@ -5,6 +5,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.Core.Data.Outbox;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.MigrationService.Seeding;
@@ -40,6 +42,23 @@ var studentsConnectionString = builder.Configuration.GetConnectionString("studen
 
 builder.Services.AddDbContext<StudentsDbContext>(opts =>
     opts.UseNpgsql(studentsConnectionString).UseSnakeCaseNamingConvention());
+
+// Seed the per-context outbox flags exactly as the runtime AddOutbox<TContext>
+// and design-time factories do. Without this, MigrateAsync fails with
+// "The model for context 'X' has pending changes" because the runtime model
+// built from AddDbContext reads default flags while the model snapshot was
+// generated with the per-module outbox flags applied.
+// Keep these three SetFlagsFor calls in lock-step with:
+//   * src/<Domain>/SchoolCollab.<Domain>.Core/Extensions.cs (runtime)
+//   * src/<Domain>/SchoolCollab.<Domain>.Core/Data/DesignTime*DbContextFactory.cs (design-time)
+OutboxMapping.SetFlagsFor<CodedValuesDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
+    .SetTypeMaxLength(500)
+    .UseJsonbPayload()
+    .UseAttemptsDefaultZero()
+    .UsePartialIndexOnOccurredAt()));
+OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
+    .UsePartialIndexOnOccurredAt()));
+// Students uses OutboxConfigurationFlags.Default — no SetFlagsFor call needed.
 
 // Register CodedValueSeeder
 builder.Services.AddScoped<CodedValueSeeder>();
