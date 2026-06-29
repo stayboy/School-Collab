@@ -1,10 +1,7 @@
 # Messaging Consolidation Plan
 
-Status: **planning** — to be implemented as a series of focused PRs against
-`main` (or a feature branch off `main`). Each phase ends with a green
-build + green test suite. No phase leaves the repo in a half-migrated
-state where two parallel implementations coexist for more than one
-release cycle.
+Status: **Phase 1 complete** (shared primitives in place). Phases 2–6
+remain.
 
 This plan supersedes the "known domain-specific variants" note in
 [`shared-kernel-extraction-pattern.md`](./shared-kernel-extraction-pattern.md)

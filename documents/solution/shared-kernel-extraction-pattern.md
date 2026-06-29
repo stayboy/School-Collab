@@ -199,20 +199,42 @@ introduces it.
   (`EnqueueAsync<T>(T, CancellationToken) where T : class`).
 - `OutboxMessage` — the outbox row entity (`IEntity`, with `OccurredAt`,
   `DispatchedAt`, `Attempts`, `LastError`).
+- `OutboxOptions` — configuration record bound from the `Outbox`
+  configuration section (`ExchangeName`, `BatchSize`, `PollInterval`).
+- `OutboxIntegrationEventPublisher<TContext>` — default implementation of
+  `IIntegrationEventPublisher`. Generic over the bounded-context
+  `DbContext`; uses `IDbContextFactory<TContext>` to create a short-lived
+  context per call.
+- `OutboxDispatcher<TContext>` — `BackgroundService` that drains
+  `OutboxMessage` rows to RabbitMQ with publisher confirms and
+  `FOR UPDATE SKIP LOCKED`. Generic over the bounded-context `DbContext`;
+  reads the exchange name from `IOptionsMonitor<OutboxOptions>`.
+- `OutboxExtensions.AddOutbox<TContext>(IConfiguration, string? sectionName)`
+  — DI helper that wires the options, publisher, and dispatcher for a
+  bounded context.
 
-### Outbox dispatcher and publisher (in flight)
+### Per-domain EF configuration (intentionally local)
 
-The `OutboxIntegrationEventPublisher`, `OutboxDispatcher`, and the
-configuration wiring are **not yet shared** — each `<Domain>.Core`
-project still has its own near-identical copy. The full plan to
-consolidate them is in
-[`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md).
+The `OutboxMessageConfiguration` class for each bounded context stays in
+the `<Domain>.Core/Data/Configurations/` folder, because it
+configures the same shared `OutboxMessage` entity with per-domain table
+column types and indexes (e.g. CodedValues uses `jsonb` for the
+payload column and a partial index on `OccurredAt`).
 
-Until that plan lands, treat the local `Messaging/Outbox*.cs` files
-in each `<Domain>.Core` as **temporarily tolerated duplication** with
-a planned removal date. New `<Domain>.Core` projects must **not**
-copy them — they should call `services.AddOutbox<TContext>(...)` from
-the kernel (added in Phase 1 of the plan) instead.
+### Plan for further consolidation
+
+`OutboxIntegrationEventPublisher` and `OutboxDispatcher` are now shared
+(Phases 1+2 of [`messaging-consolidation-plan.md`](./messaging-consolidation-plan.md)).
+Phase 3 (migrating Assignments to the shared contract) is the remaining
+work. Until that lands, Assignments keeps its local
+`Messaging/IIntegrationEventPublisher.cs`,
+`Messaging/OutboxIntegrationEventPublisher.cs`,
+`Messaging/OutboxDispatcher.cs`, and `Data/OutboxMessage.cs` —
+intentionally NOT shared because they predate the shared contract.
+
+New `<Domain>.Core` projects must **not** copy the Assignments files.
+They should call `services.AddOutbox<TContext>(...)` from the kernel
+and add only the per-domain `OutboxMessageConfiguration`.
 
 ## 10. Worked Example: CQRS Abstractions
 
