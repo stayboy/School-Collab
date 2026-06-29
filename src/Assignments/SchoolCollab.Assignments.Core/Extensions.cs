@@ -2,10 +2,10 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SchoolCollab.Assignments.Core.CQRS;
+using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
-using SchoolCollab.Assignments.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core;
@@ -23,7 +23,10 @@ public static class Extensions
             ?? configuration["ConnectionStrings:assignments-db"]
             ?? "Host=localhost;Port=5432;Database=schoolcollab_assignments;Username=postgres;Password=postgres";
 
-        services.AddDbContext<AssignmentsDbContext>(opts =>
+        // AddDbContextFactory registers both the factory (needed by the shared
+        // OutboxIntegrationEventPublisher<TContext> + OutboxDispatcher<TContext>)
+        // and the scoped DbContext for command handlers.
+        services.AddDbContextFactory<AssignmentsDbContext>(opts =>
             opts.UseNpgsql(connectionString)
                 .UseSnakeCaseNamingConvention());
 
@@ -41,22 +44,29 @@ public static class Extensions
         var assembly = typeof(Extensions).Assembly;
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.ICommandHandler<>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(ICommandHandler<>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.ICommandHandler<,>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(ICommandHandler<,>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.IQueryHandler<,>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(IQueryHandler<,>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
 
-        services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
-        services.AddHostedService<OutboxDispatcher>();
+        services.AddOutbox<AssignmentsDbContext>(configuration, outbox =>
+        {
+            // Assignments keeps its existing partial index on
+            // `dispatched_at WHERE dispatched_at IS NULL` (previously
+            // on `processed_at`). The dispatcher reads with
+            // `FOR UPDATE SKIP LOCKED` and the partial index keeps
+            // the SELECT cheap as dispatched rows accumulate.
+            outbox.UsePartialIndexOnOccurredAt();
+        });
 
         return services;
     }

@@ -22,6 +22,51 @@ namespace SchoolCollab.Students.Core.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("SchoolCollab.Core.Messaging.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
+
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatched_at");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text")
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
+
+                    b.Property<string>("Payload")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("payload");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_outbox_messages");
+
+                    b.HasIndex("DispatchedAt")
+                        .HasDatabaseName("ix_outbox_messages_dispatched_at");
+
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("ix_outbox_messages_occurred_at");
+
+                    b.ToTable("outbox_messages", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeLevel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -566,51 +611,6 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDatabaseName("ix_subject_strands_subject");
 
                     b.ToTable("subject_strands", (string)null);
-                });
-
-            modelBuilder.Entity("SchoolCollab.Students.Core.Messaging.OutboxMessage", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<int>("Attempts")
-                        .HasColumnType("integer")
-                        .HasColumnName("attempts");
-
-                    b.Property<DateTimeOffset?>("DispatchedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("dispatched_at");
-
-                    b.Property<string>("LastError")
-                        .HasColumnType("text")
-                        .HasColumnName("last_error");
-
-                    b.Property<DateTimeOffset>("OccurredAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("occurred_at");
-
-                    b.Property<string>("Payload")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("payload");
-
-                    b.Property<string>("Type")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("type");
-
-                    b.HasKey("Id")
-                        .HasName("pk_outbox_messages");
-
-                    b.HasIndex("DispatchedAt")
-                        .HasDatabaseName("ix_outbox_messages_dispatched_at");
-
-                    b.HasIndex("OccurredAt")
-                        .HasDatabaseName("ix_outbox_messages_occurred_at");
-
-                    b.ToTable("outbox_messages", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeSubjectAssignment", b =>

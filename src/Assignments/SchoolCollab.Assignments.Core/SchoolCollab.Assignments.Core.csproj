@@ -18,8 +18,6 @@
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Relational" />
     <PackageReference Include="Microsoft.Extensions.Caching.Hybrid" />
-    <PackageReference Include="RabbitMQ.Client" />
-    <PackageReference Include="Aspire.RabbitMQ.Client" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Scrutor" />
     <PackageReference Include="System.Threading.RateLimiting" />

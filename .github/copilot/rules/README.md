@@ -12,6 +12,7 @@ guidance into these files.
 | Entity Framework Core migrations | `ef-migrations.md` |
 | Logging and Aspire observability | `logging-aspire.md` |
 | Testing | `testing.md` |
+| Configuration documentation | `configuration-documentation.md` |
 
 ## How to use
 

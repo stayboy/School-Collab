@@ -10,6 +10,7 @@
     <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Aspire.RabbitMQ.Client" />
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.OpenApi" />

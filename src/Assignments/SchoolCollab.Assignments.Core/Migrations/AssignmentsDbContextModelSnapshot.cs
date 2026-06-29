@@ -117,29 +117,32 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.ToTable("assignments", (string)null);
                 });
 
-            modelBuilder.Entity("SchoolCollab.Assignments.Core.Messaging.OutboxMessage", b =>
+            modelBuilder.Entity("SchoolCollab.Core.Messaging.OutboxMessage", b =>
                 {
                     b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
+                    b.Property<int>("Attempts")
+                        .HasColumnType("integer")
+                        .HasColumnName("attempts");
 
-                    b.Property<string>("Error")
+                    b.Property<DateTimeOffset?>("DispatchedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("dispatched_at");
+
+                    b.Property<string>("LastError")
                         .HasColumnType("text")
-                        .HasColumnName("error");
+                        .HasColumnName("last_error");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("occurred_at");
 
                     b.Property<string>("Payload")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("payload");
-
-                    b.Property<DateTimeOffset?>("ProcessedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("processed_at");
 
                     b.Property<string>("Type")
                         .IsRequired()
@@ -150,9 +153,9 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_outbox_messages");
 
-                    b.HasIndex("ProcessedAt")
-                        .HasDatabaseName("ix_outbox_messages_processed_at")
-                        .HasFilter("processed_at IS NULL");
+                    b.HasIndex("OccurredAt")
+                        .HasDatabaseName("ix_outbox_messages_pending")
+                        .HasFilter("dispatched_at IS NULL");
 
                     b.ToTable("outbox_messages", (string)null);
                 });

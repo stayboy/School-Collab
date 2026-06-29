@@ -7,7 +7,7 @@ using SchoolCollab.CodedValues.Core.Data;
 using SchoolCollab.CodedValues.Core.Data.Repositories;
 using SchoolCollab.CodedValues.Core.Domain;
 using SchoolCollab.CodedValues.Core.DTOs;
-using SchoolCollab.CodedValues.Core.Queries.GetCodedValueByCode;
+using SchoolCollab.CodedValues.Core.CQRS.CodedValues.Queries.GetCodedValueByCode;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Handlers;

@@ -5,7 +5,8 @@ using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
-using SchoolCollab.Students.Core.Messaging;
+using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.Students.Core;
 
@@ -22,7 +23,7 @@ public static class Extensions
             ?? configuration["ConnectionStrings:students-db"]
             ?? "Host=localhost;Port=5432;Database=schoolcollab_students;Username=postgres;Password=postgres";
 
-        services.AddDbContext<StudentsDbContext>(opts =>
+        services.AddDbContextFactory<StudentsDbContext>(opts =>
             opts.UseNpgsql(connectionString)
                 .UseSnakeCaseNamingConvention());
 
@@ -46,22 +47,21 @@ public static class Extensions
         var assembly = typeof(Extensions).Assembly;
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.ICommandHandler<>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(ICommandHandler<>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.ICommandHandler<,>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(ICommandHandler<,>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
         services.Scan(scan => scan
             .FromAssemblies(assembly)
-            .AddClasses(classes => classes.AssignableTo(typeof(CQRS.IQueryHandler<,>)), publicOnly: false)
+            .AddClasses(classes => classes.AssignableTo(typeof(IQueryHandler<,>)), publicOnly: false)
             .AsImplementedInterfaces()
             .WithTransientLifetime());
 
-        services.AddScoped<IIntegrationEventPublisher, OutboxIntegrationEventPublisher>();
-        services.AddHostedService<OutboxDispatcher>();
+        services.AddOutbox<StudentsDbContext>(configuration);
 
         return services;
     }
