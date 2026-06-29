@@ -23,7 +23,7 @@ public static class ChatModelResolver
     /// return empty responses, and surface non-rate-limit-formatted errors
     /// that confuse client-side retry logic.
     /// </summary>
-    public const string DefaultOpenRouterModel = "google/gemma-3-12b-it";
+    public const string DefaultOpenRouterModel = "google/gemma-4-31b-it";
 
     /// <summary>
     /// Resolves the provider and model from three raw configuration values.

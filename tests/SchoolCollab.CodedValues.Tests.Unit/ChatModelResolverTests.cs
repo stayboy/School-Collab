@@ -18,7 +18,7 @@ public class ChatModelResolverTests
     // Stable, paid OpenRouter model. Avoid the :free aliases — they are heavily
     // rate-limited and intermittently return empty responses, which makes the
     // live integration tests flake.
-    private const string OpenRouterModel = "google/gemma-3-12b-it";
+    private const string OpenRouterModel = "google/gemma-4-31b-it";
 
     // =====================================================================
     // Constants
