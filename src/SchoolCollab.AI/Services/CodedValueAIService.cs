@@ -61,20 +61,96 @@ public sealed class CodedValueAIService
             AIFunctionFactory.Create(SetAttributeDefinitionAsync, "set_attribute_definition", "Defines an attribute on a PARENT coded value. Attribute definitions describe what metadata children should have. Must be called on the parent before setting attribute values on children. Accepts: parentCode (the parent's code, e.g. AI-MODELS), key (attribute key like 'weight'), displayName (human-readable label), dataType (0=Text,1=Integer,2=Decimal,3=Boolean,4=Date,5=DateTime,6=Time,7=CodedValue), sourceCode (required only if dataType=7, references another parent code for dropdown values), isRequired, allowMultiple."),
             AIFunctionFactory.Create(SetAttributeAsync, "set_attribute", "Sets an attribute value on a coded value. The attribute definition with the same key must already exist on the PARENT of this coded value. Accepts: code (the coded value's code), key (attribute key that matches a definition on the parent), value (the value as a string).")
         ];
+
+        // Build a name → tool lookup for the prompt-shape filter below.
+        _toolsByName = _tools.ToDictionary(t => t.Name);
+    }
+
+    private readonly Dictionary<string, AITool> _toolsByName;
+
+    /// <summary>
+    /// Classifies the user's most recent prompt into a small set of intents
+    /// and returns the <see cref="AITool"/>s that are relevant to that intent.
+    /// Defaults to the full tool list when the prompt doesn't match any intent
+    /// keyword — preserving the prior "ship everything" behaviour as the
+    /// safety fallback. The classification is intentionally conservative:
+    /// if there's any doubt, ship everything.
+    /// </summary>
+    internal List<AITool> SelectToolsForPrompt(IReadOnlyList<ChatMessage> history)
+    {
+        // Find the most recent user message. If none, fall back to all tools.
+        var latestUser = null as string;
+        for (var i = history.Count - 1; i >= 0; i--)
+        {
+            if (history[i].Role == ChatRole.User)
+            {
+                latestUser = history[i].Text;
+                break;
+            }
+        }
+        if (string.IsNullOrWhiteSpace(latestUser))
+            return _tools;
+
+        var text = latestUser.ToLowerInvariant();
+
+        // Order matters: check the most specific intent first.
+        // Disable/enable intents are the most specific — exclude create/update
+        // tools to prevent the model from re-creating something the user
+        // wants disabled. Update intents win over create because renames and
+        // description changes are common follow-ups to a just-created value.
+        if (ContainsAny(text, "disable", "enable", "hide", "deactivate", "archive", "reactivate"))
+            return GetTools("list_coded_value_categories", "get_coded_value_by_code", "disable_coded_value", "enable_coded_value");
+
+        if (ContainsAny(text, "update", "rename", "change ", "set description", "set the description", "reorder", "move"))
+            return GetTools("list_coded_value_categories", "get_coded_value_by_code", "update_coded_value");
+
+        if (ContainsAny(text, "add ", "create ", "import ", "populate", "propose", "set up", "load ", "new categories", "countries", "languages", "subjects", "genres"))
+            return GetTools("list_coded_value_categories", "get_coded_value_by_code", "create_coded_value", "create_bulk_values", "set_attribute_definition", "set_attribute");
+
+        // Read-only / browse / list / show — never write tools needed.
+        if (ContainsAny(text, "list", "show ", "find ", "what", "which", "see ", "look up", "search"))
+            return GetTools("list_coded_value_categories", "get_coded_value_by_code");
+
+        // Default: ship everything. This is the safe fallback for prompts we
+        // don't recognise (e.g. "hello", or anything ambiguous).
+        return _tools;
+
+        // Local helper — match any of the intent keywords against the prompt.
+        bool ContainsAny(string haystack, params string[] needles) =>
+            needles.Any(n => haystack.Contains(n, StringComparison.OrdinalIgnoreCase));
+
+        // Local helper — collect tools by name into a fresh list.
+        List<AITool> GetTools(params string[] toolNames)
+        {
+            var list = new List<AITool>(toolNames.Length);
+            foreach (var name in toolNames)
+                if (_toolsByName.TryGetValue(name, out var tool))
+                    list.Add(tool);
+            return list;
+        }
     }
 
     /// <summary>
     /// Loads the system prompt from the embedded resource, with caching.
     /// In Development, also checks for a file override in the Prompts folder.
+    ///
+    /// The loader prefers the trimmed prompt (<c>ai-system-prompt.md</c>) and
+    /// falls back to the original (<c>ai-system-prompt.original.md</c>) if the
+    /// primary file/embedded resource is missing — so a corrupted trim can
+    /// always be rolled back by deleting the trimmed copy and re-deploying
+    /// without service downtime.
     /// </summary>
     private string GetSystemPrompt()
     {
-        // In Development, allow file-based override for rapid iteration
+        // In Development, allow file-based override for rapid iteration.
+        // Probe the trimmed copy first, then the original.
         if (_hostEnv.IsDevelopment())
         {
-            var promptFile = Path.Combine(AppContext.BaseDirectory, "Prompts", "ai-system-prompt.md");
-            if (File.Exists(promptFile))
+            foreach (var filename in new[] { "ai-system-prompt.md", "ai-system-prompt.original.md" })
             {
+                var promptFile = Path.Combine(AppContext.BaseDirectory, "Prompts", filename);
+                if (!File.Exists(promptFile)) continue;
+
                 try
                 {
                     var lastWrite = File.GetLastWriteTimeUtc(promptFile);
@@ -88,18 +164,24 @@ public sealed class CodedValueAIService
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "Failed to read system prompt from {Path}, falling back to embedded resource", promptFile);
+                    _logger.LogWarning(ex, "Failed to read system prompt from {Path}, trying fallback", promptFile);
                 }
             }
         }
 
-        // Load from embedded resource
+        // Load from embedded resource. Prefer the trimmed prompt; fall back to
+        // the original copy if the trimmed resource was not packaged.
         if (_cachedSystemPrompt is not null)
             return _cachedSystemPrompt;
 
         var assembly = typeof(CodedValueAIService).Assembly;
-        var resourceName = assembly.GetManifestResourceNames()
-            .FirstOrDefault(n => n.EndsWith("ai-system-prompt.md", StringComparison.OrdinalIgnoreCase));
+        var resourceNames = assembly.GetManifestResourceNames();
+        var preferredResource = resourceNames
+            .FirstOrDefault(n => n.EndsWith("ai-system-prompt.md", StringComparison.OrdinalIgnoreCase)
+                && !n.EndsWith("ai-system-prompt.original.md", StringComparison.OrdinalIgnoreCase));
+        var fallbackResource = resourceNames
+            .FirstOrDefault(n => n.EndsWith("ai-system-prompt.original.md", StringComparison.OrdinalIgnoreCase));
+        var resourceName = preferredResource ?? fallbackResource;
 
         if (resourceName is null)
         {
@@ -107,10 +189,13 @@ public sealed class CodedValueAIService
             return _cachedSystemPrompt = FallbackSystemPrompt;
         }
 
+        if (preferredResource is null && fallbackResource is not null)
+            _logger.LogWarning("Trimmed system prompt resource not found, falling back to ai-system-prompt.original.md");
+
         using var stream = assembly.GetManifestResourceStream(resourceName)!;
         using var reader = new StreamReader(stream);
         _cachedSystemPrompt = reader.ReadToEnd();
-        _logger.LogInformation("Loaded system prompt from embedded resource ({Length} chars)", _cachedSystemPrompt.Length);
+        _logger.LogInformation("Loaded system prompt from embedded resource {Resource} ({Length} chars)", resourceName, _cachedSystemPrompt.Length);
         return _cachedSystemPrompt;
     }
 
@@ -152,7 +237,16 @@ public sealed class CodedValueAIService
         var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
         messages.AddRange(history);
 
-        var options = new ChatOptions { Tools = _tools, ModelId = effectiveModel };
+        // Filter the tool list to the subset relevant to the user's most recent
+        // prompt shape. Most chat turns only need a few of the 9 tools (read
+        // + create-bulk + attribute for an "add X" prompt, read + update for
+        // an "update X" prompt, etc.). Shipping only those reduces the input
+        // payload and avoids the model picking an irrelevant tool when the
+        // intent is unambiguous. The full tool list is sent as a safety
+        // fallback when the intent classifier is unsure.
+        var applicableTools = SelectToolsForPrompt(history);
+
+        var options = new ChatOptions { Tools = applicableTools, ModelId = effectiveModel };
 
         var totalToolCalls = 0;
         const int maxToolCallRounds = 10;
