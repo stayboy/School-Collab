@@ -127,6 +127,39 @@ For icon usage, follow `.github/skills/fluentui-icons/SKILL.md`.
 For FluentUI component property enum validation, follow
 `.github/skills/fluentui-component-props/SKILL.md`.
 
+### FluentTextField has no OnClear — the attribute is silently swallowed
+
+`FluentTextField` (and its base `FluentInputBase<T>`) has never exposed an
+`OnClear` parameter, and the Microsoft Fluent UI Blazor library has never
+shipped a built-in clear (×) button on plain `FluentTextField`. The attribute
+is captured by `[Parameter(CaptureUnmatchedValues = true)] AdditionalAttributes`,
+so the user-supplied callback **never fires** and the page compiles without
+warning. The search-clear side effect must be implemented through
+`ValueChanged` (fires with an empty value as soon as the user empties the
+field) or by handling the `oninput` event manually.
+
+```razor
+@* ✅ correct — ValueChanged already runs when the user empties the textbox *@
+<FluentTextField @bind-Value="_searchText"
+                 ValueChanged="OnSearchValueChanged"
+                 Immediate="true"
+                 ImmediateDelay="300" />
+
+@* ❌ wrong — OnClear is a captured-but-inert AdditionalAttribute; the
+   supplied callback will never fire. *@
+<FluentTextField @bind-Value="_searchText"
+                 OnClear="() => OnSearchClear()" />
+```
+
+There is a bUnit regression guard at
+`tests/SchoolCollab.CodedValues.Tests.Unit/Components/FluentTextFieldOnClearRegressionTests.cs`
+that asserts (a) no built-in clear button is rendered and (b) a supplied
+`OnClear` does not fire when the field is cleared. If that test fails after a
+FluentUI upgrade, audit every search box in the codebase for the now-unnecessary
+clear side-effect paths. The same principle applies to **any** parameter not
+declared on the FluentUI control you're using: if `intellisense` doesn't show
+it, it's a swallowed attribute, not a real callback.
+
 ## ShouldRender optimisation
 
 Override `ShouldRender()` on components that receive frequent external events but only
