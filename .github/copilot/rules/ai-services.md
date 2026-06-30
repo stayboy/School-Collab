@@ -141,3 +141,24 @@ directly:
    non-secret config (endpoint, default model). Secrets stay out of
    source-controlled files and are modelled as
    `AddParameter(..., secret: true)` in the AppHost.
+
+## Trimming the AI system prompt
+
+When you need to reduce the size of the system prompt, follow the
+pattern in `documents/ai-prompts/README.md` ("Pattern for trimming
+prompts"). The short version:
+
+- Snapshot the original as `ai-system-prompt.original.md` next to the
+  active prompt.
+- Update the loader's fallback chain (see
+  `CodedValueAIService.GetSystemPrompt`) to prefer the trimmed file
+  first and fall back to the original — single-step rollback by
+  deleting the trimmed copy.
+- Pair the prompt trim with a per-prompt tool filter
+  (`CodedValueAIService.SelectToolsForPrompt`); together they cut
+  more input tokens than either alone.
+- Add unit tests for the tool filter
+  (`CodedValueAIServiceToolSelectionTests`) and verify against a
+  live-model probe before committing.
+- Save the trimmed variant to `documents/ai-prompts/` so future
+  agents have a reference archive.
