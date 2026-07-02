@@ -24,7 +24,11 @@ namespace SchoolCollab.Config.Core.Data.Migrations
                     is_archived = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                     is_deleted = table.Column<bool>(type: "boolean", nullable: false, defaultValue: false),
                     deleted_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
+                    // xmin is a PostgreSQL system column on every table — it is provided
+                    // implicitly and is mapped to the C# RowVersion property via
+                    // ConfigurePostgresRowVersion. It must NOT be declared here, otherwise
+                    // PostgreSQL rejects the CREATE TABLE with:
+                    //   column "xmin" of relation "feature_flags" does not exist
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
                 },
@@ -83,7 +87,7 @@ namespace SchoolCollab.Config.Core.Data.Migrations
                     reason = table.Column<string>(type: "character varying(1000)", maxLength: 1000, nullable: false),
                     effective_from = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
                     effective_to = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
-                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
+                    // xmin is a PostgreSQL system column on every table — see feature_flags above.
                     tenant_id = table.Column<Guid>(type: "uuid", nullable: false),
                     created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
                     updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),

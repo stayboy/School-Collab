@@ -97,8 +97,17 @@ public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlag
                     var route = tenant is null ? "/api/features/global" : $"/api/features/{tenant}";
                     var dtos = await _http.GetFromJsonAsync<ResolvedFlagDto[]>(route, ct);
                     var now = DateTimeOffset.UtcNow;
-                    return (IReadOnlyDictionary<string, ResolvedFlag>)dtos!
-                        .ToDictionary(d => d.Key, d => new ResolvedFlag(d.Key, d.IsEnabled, ParseSource(d.Source), d.ResolvedAt));
+                    // OrdinalIgnoreCase so callers can look up with the canonical upper-case
+                    // form produced by FeatureFlag.NormalizeKey (e.g.
+                    // "FEATURE:ENABLECODEDVALUESAICHAT") OR with the humanised mixed-case
+                    // form most call sites use (e.g. "FEATURE:EnableCodedValuesAiChat").
+                    // The DB stores the canonical upper-case form; the appsettings fallback
+                    // walks IConfiguration and preserves the keys as-authored. Without the
+                    // case-insensitive comparer a mixed-case lookup against the DB-backed
+                    // path silently misses and the flag evaluates as disabled.
+                    return (IReadOnlyDictionary<string, ResolvedFlag>)new Dictionary<string, ResolvedFlag>(
+                        dtos!.ToDictionary(d => d.Key, d => new ResolvedFlag(d.Key, d.IsEnabled, ParseSource(d.Source), d.ResolvedAt)),
+                        StringComparer.OrdinalIgnoreCase);
                 },
                 CacheOptions,
                 cancellationToken: ct);
@@ -116,7 +125,10 @@ public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlag
 
     private IReadOnlyDictionary<string, ResolvedFlag> FromConfigurationAll(ResolvedFlagSource source)
     {
-        var flags = new Dictionary<string, ResolvedFlag>();
+        // OrdinalIgnoreCase so callers can look up with the canonical upper-case
+        // form produced by FeatureFlag.NormalizeKey OR the humanised mixed-case
+        // form most call sites use. See ResolveAllAsync for the full rationale.
+        var flags = new Dictionary<string, ResolvedFlag>(StringComparer.OrdinalIgnoreCase);
         var section = _configuration.GetSection("FeatureFlags");
         Collect(section, flags, prefix: null, source);
         return flags;
