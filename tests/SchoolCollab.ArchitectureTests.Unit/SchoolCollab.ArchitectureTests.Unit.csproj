@@ -19,6 +19,7 @@
     <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
     <ProjectReference Include="..\..\src\CodedValues\SchoolCollab.CodedValues.Core\SchoolCollab.CodedValues.Core.csproj" />
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" />
+    <ProjectReference Include="..\..\src\Config\SchoolCollab.Config.Core\SchoolCollab.Config.Core.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
 </Project>

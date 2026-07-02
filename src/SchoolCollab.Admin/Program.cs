@@ -2,17 +2,38 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Components;
 using SchoolCollab.Assignments.Admin;
 using SchoolCollab.CodedValues.Admin;
-using SchoolCollab.Students.Admin;
+using SchoolCollab.Config.Admin;
+using SchoolCollab.Config.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
+using SchoolCollab.Students.Admin;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 
-// Auth + tenancy (OIDC via Keycloak for the unified admin host)
-// Disable OIDC when FEATURE:DisableOIDCAuth is enabled; falls back to TestAuth for local development.
+// Auth + tenancy (OIDC via Keycloak for the unified admin host). Disable OIDC when
+// FEATURE:DisableOIDCAuth is enabled; falls back to TestAuth for local development.
+// NOTE: DisableOIDCAuth is a *startup auth-mode switch* read from IConfiguration
+// directly (below), NOT a runtime feature flag — ASP.NET Core auth schemes are
+// registered once at startup and cannot be flipped at runtime. Runtime, mutable,
+// tenant-overridable flags (e.g. FEATURE:EnableCodedValuesAiChat) are resolved by the
+// cached Config service registered via AddConfigFeatureFlagClient below. See
+// documents/solution/central-config-service-plan.md §2.
 builder.Services.AddAuthAndTenancy(builder.Configuration);
+
+// Redis distributed cache backs the HybridCache L2 used by ConfigFeatureFlagService.
+var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
+    ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];
+
+if (string.IsNullOrWhiteSpace(cacheConnectionString))
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+else
+{
+    builder.AddRedisDistributedCache("cache");
+}
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -23,11 +44,20 @@ builder.Services.AddFluentUIComponents();
 builder.Services.AddCodedValuesModule();
 builder.Services.AddAssignmentsModule();
 builder.Services.AddStudentsModule();
+builder.Services.AddConfigModule();
+
+// Cached, DB-backed feature-flag client (resolves runtime flags from the Config
+// service with an IConfiguration fallback). Replaces the config-only
+// IFeatureFlagService registered by AddAuthAndTenancy.
+builder.Services.AddConfigFeatureFlagClient(builder.Configuration);
 
 var app = builder.Build();
 
-var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
-var disableOIDC = featureFlags.IsEnabled("FEATURE:DisableOIDCAuth");
+// Startup auth-mode decision: read DisableOIDCAuth directly from IConfiguration
+// (NOT via IFeatureFlagService, which is now the cached Config client that does not
+// carry this startup-only flag).
+var disableOIDC = bool.TryParse(
+    builder.Configuration["FeatureFlags:FEATURE:DisableOIDCAuth"], out var d) && d;
 
 if (!app.Environment.IsDevelopment())
 {
@@ -47,8 +77,7 @@ app.UseAntiforgery();
 
 // FEATURE:DisableOIDCAuth and the other feature flags are injected by the
 // AppHost via WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", param);
-// see src/AppHost/SchoolCollab.AppHost/Program.cs and documents/configuration.md
-// \xA72.
+// see src/AppHost/SchoolCollab.AppHost/Program.cs and documents/configuration.md §2.
 app.MapStaticAssets();
 app.MapDefaultEndpoints();
 
@@ -57,7 +86,8 @@ var razorComponents = app.MapRazorComponents<App>()
     .AddAdditionalAssemblies(
         typeof(SchoolCollab.CodedValues.Admin.Components._Imports).Assembly,
         typeof(SchoolCollab.Assignments.Admin.Components._Imports).Assembly,
-        typeof(SchoolCollab.Students.Admin.Components._Imports).Assembly);
+        typeof(SchoolCollab.Students.Admin.Components._Imports).Assembly,
+        typeof(SchoolCollab.Config.Admin.Components._Imports).Assembly);
 
 if (!disableOIDC)
 {

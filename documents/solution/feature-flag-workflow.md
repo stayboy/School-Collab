@@ -5,145 +5,77 @@ the School-Collab solution.
 
 ## Overview
 
-Feature flags are **centralised in the Aspire AppHost's `Parameters:` block**
-and fanned out to every consumer via `WithEnvironment("FeatureFlags__FEATURE__...", param)`.
-There is no separate config service and no HTTP overlay — consumers read
-flags from `IConfiguration` directly, via
-`SchoolCollab.Core.Features.FeatureFlagService` (registered by
-`AddAuthAndTenancy`).
+There are now **two distinct kinds** of "feature flag", and they are handled
+differently. Read this before adding one.
 
-This is the same pattern used for outbox exchanges and AI provider
-configuration; see [`documents/configuration.md`](../configuration.md) §2
-and §5 for the canonical reference.
+| Kind | Example | Owner | Mutable at runtime? | Tenant-overridable? |
+|------|---------|-------|---------------------|---------------------|
+| **Deployment-time switch** | `FEATURE:DisableOIDCAuth` | `IConfiguration` (appsettings / env var) | No — read once at startup | No |
+| **Runtime feature flag** | `FEATURE:EnableCodedValuesAiChat` | The central **Config service** (`SchoolCollab.Config`) | Yes — via the admin UI / API | Yes |
 
-## Adding a new flag
+The split exists because ASP.NET Core auth schemes are registered once at
+startup: `FEATURE:DisableOIDCAuth` is a *startup auth-mode switch*
+(`AddAuthAndTenancy` reads it from `IConfiguration` directly), so it cannot be
+flipped at runtime and is **not** a Config-service flag. Everything else a flag
+might gate (a UI surface, a code path) is a *runtime, mutable, tenant-overridable*
+flag and belongs in the Config service.
 
-1. **Pick a flag key.** Use the dotted form `FEATURE:<AreaName>` so the
-   leading section mirrors the existing `FEATURE:DisableOIDCAuth` shape.
-   Keep the colon — `FeatureFlagService.CollectFlags` recurses into nested
-   sections, so the dotted key remains a single, lookup-able name.
+The central Config service is specified in
+[`central-config-service-plan.md`](./central-config-service-plan.md) — that
+document is the authority for the Config bounded context. See also
+[`documents/configuration.md`](../configuration.md) §5.
 
-2. **Add the parameter to the AppHost.** Open
-   `src/AppHost/SchoolCollab.AppHost/appsettings.json` and add an entry to
-   the `Parameters:` block, e.g.
+## Deployment-time flags (rare)
 
-   ```json
-   "Parameters": {
-     "feature-flag-disable-oidc-auth": "false",
-     "feature-flag-my-new-flag": "false"
-   }
-   ```
+Use only for genuine startup decisions that cannot be deferred to runtime
+(e.g. `FEATURE:DisableOIDCAuth`).
 
-   The value should be `"true"` / `"false"` (strings, not bools — that is how
-   the configuration provider surfaces them and how
-   `FeatureFlagService.IsEnabled(string)` parses them).
+1. Add the value to each consumer's `appsettings.json`
+   (`FeatureFlags:FEATURE:<Area>`), with the dev default.
+2. Production overrides it via the env var
+   `FeatureFlags__FEATURE__<Area>=<true|false>`.
+3. Consumers read it via `IConfiguration` (directly for startup decisions, or
+   through `ConfigurationFeatureFlagService`).
 
-3. **Wire the parameter onto every consumer.** In
-   `src/AppHost/SchoolCollab.AppHost/Program.cs`, declare the parameter
-   next to the existing `feature-flag-disable-oidc-auth` line and add
-   `.WithEnvironment("FeatureFlags__FEATURE__MyNewFlag", param)` to every
-   project that reads the flag — APIs and the Admin host.
+## Runtime feature flags (the common case)
 
-   ```csharp
-   var myNewFlag = builder.AddParameter("feature-flag-my-new-flag");
+These live in the Config service's `config-db` and are managed through the
+admin UI at `/config-flags` (or the `/api/config/*` endpoints).
 
-   // ... and on each consumer project resource:
-   .WithEnvironment("FeatureFlags__FEATURE__MyNewFlag", myNewFlag)
-   ```
+### Adding a new runtime flag
 
-4. **Read the flag in code.** Inject `IFeatureFlagService` and call
-   `IsEnabled("FEATURE:MyNewFlag")`:
+1. **Pick a key** of the form `FEATURE:<AreaName>` (positive `Enable*` form is
+   preferred for new flags, e.g. `FEATURE:EnableNewDashboard`).
+2. **Create it in the admin UI** at `/config-flags` → *New Flag*. Set the
+   default state and a reason. (Or seed it in the migrator for flags that must
+   exist from day one, like `FEATURE:EnableCodedValuesAiChat`.)
+3. **Consume it** by injecting `IFeatureFlagService` and calling
+   `IsEnabledAsync("FEATURE:<Area>")`. The host must have registered the
+   cached client via `AddConfigFeatureFlagClient(...)` (the unified admin host
+   does; an API that needs a runtime flag calls it too).
+4. **Tenant overrides** are added from the flag's detail page — one per tenant,
+   with a required reason.
 
-   ```csharp
-   public class MyService(IFeatureFlagService featureFlags)
-   {
-       public void DoWork()
-       {
-           if (featureFlags.IsEnabled("FEATURE:MyNewFlag"))
-           {
-               // New logic
-           }
-       }
-   }
-   ```
+### How a runtime flag resolves
 
-   For conditional authorization, the established pattern is:
+`IsEnabledAsync` → `ConfigFeatureFlagService` → HybridCache (L1 30s / L2 5min)
+→ `GET /api/features/{tenant}` → resolver applies
+`tenant override ?? global default`. If the Config API is unreachable it falls
+back to `IConfiguration["FeatureFlags:FEATURE:<Area>"]` (warn-once per key), so
+a consumer keeps working when Config is down. Changes propagate within the L1/L2
+TTL ("sensible ITL"); a push-invalidation subscriber narrows that to ~1s in a
+follow-up (see the plan §15).
 
-   ```csharp
-   var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
-   var group = app.MapGroup("/api/my-feature");
+### Observing changes
 
-   if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
-   {
-       group.RequireAuthorization();
-   }
-   ```
-
-5. **Update `documents/configuration.md` in the same PR.** §2 (parameters
-   table), §5 (introduced flags table), §11 (env-var reference), and §12
-   (production checklist) all reference every flag. The rule is enforced
-   by the pre-flight review — see
-   [`.github/copilot/rules/configuration-documentation.md`](../../.github/copilot/rules/configuration-documentation.md).
-
-6. **Cover both states in tests.** Use
-   `IConfigurationBuilder.UseSetting("FeatureFlags:FEATURE:MyNewFlag", "true")`
-   (and `"false"`) to set the flag in a test host. See
-   `tests/SchoolCollab.Core.Tests.Unit/Auth/AuthTenancyTests.cs` and
-   `tests/SchoolCollab.Admin.Tests.Unit/ProgramAuthFeatureFlagTests.cs` for
-   examples; see also
-   [`.github/copilot/rules/testing.md`](../../.github/copilot/rules/testing.md)
-   §"Auth Bypass Verification" for the why.
-
-## Local development
-
-Override the AppHost parameter via user-secrets (preferred) or env-var:
-
-```bash
-cd src/AppHost/SchoolCollab.AppHost
-dotnet user-secrets set "Parameters:feature-flag-my-new-flag" "true"
-```
-
-…or set the corresponding env-var
-`Parameters__feature_flag_my_new_flag=true` in the shell that runs the
-AppHost / `dotnet run`. Aspire converts `-` to `_` in parameter names
-when forming the env-var, and the ASP.NET Core environment-variable
-provider converts `_` back to `:` (so the host sees
-`FeatureFlags:FEATURE:MyNewFlag` in `IConfiguration`).
+Every mutation writes an append-only `flag_audit_entries` row (who / when /
+before → after / reason), viewable on each flag's detail page. A
+`FeatureFlagChanged` event is also published on the `config` RabbitMQ exchange
+(via the transactional outbox) for the future push-invalidation subscriber.
 
 ## Retiring a flag
 
-Once the gated behaviour ships unconditionally, retire the flag:
-
-1. **Remove the conditional branch.** Leave the always-active code path
-   behind.
-2. **Remove the read site.** Delete every `IsEnabled(...)` call on the
-   flag; delete the `IFeatureFlagService` dependency if that was its only
-   consumer in that file.
-3. **Remove the parameter.** Delete the `Parameters:feature-flag-<name>`
-   entry from `src/AppHost/SchoolCollab.AppHost/appsettings.json`, the
-   `AddParameter(...)` line, and every `WithEnvironment(...)` wiring in
-   `Program.cs`.
-4. **Remove the test cases.** Delete the tests that exercised the retired
-   toggle (typically two test methods: one with the flag `true`, one
-   with it `false`).
-5. **Update `documents/configuration.md`** in the same PR — remove the
-   row from §2, §5, and the production-checklist bullet in §12.
-
-## Why no `SchoolCollab.Config` service?
-
-Earlier revisions routed feature flags through a separate `SchoolCollab.Config`
-service via `AddRemoteFeatureFlags`, which fetched `GET /api/features` at
-startup. That design was retired — see
-[`centralized-feature-flags-implementation.superseded.md`](./centralized-feature-flags-implementation.superseded.md)
-for the rationale and the migration history.
-
-## See also
-
-- [`configuration.md`](../configuration.md) §2, §5 — canonical reference.
-- [`auth-tenancy-pattern.md`](./auth-tenancy-pattern.md) — where
-  `AddAuthAndTenancy` registers `IFeatureFlagService` and consults
-  `FEATURE:DisableOIDCAuth`.
-- [`.github/copilot/rules/configuration-documentation.md`](../../.github/copilot/rules/configuration-documentation.md)
-  — every flag must be documented in `configuration.md` in the same PR.
-- [`.github/copilot/rules/testing.md`](../../.github/copilot/rules/testing.md)
-  — every flag must have both states tested.
+Once the gated behaviour is permanent, remove the `IsEnabledAsync` call site
+and archive the flag from the admin UI (archived flags are excluded from
+resolution but kept for audit). Delete it (soft-delete, recoverable) once no
+audit window needs it.

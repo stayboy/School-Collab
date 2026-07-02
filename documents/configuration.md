@@ -276,20 +276,42 @@ every request as a test user — intended for local development only.
 
 ---
 
-## 5. `FeatureFlags` — AppHost Parameters
+## 5. `FeatureFlags` — central configuration service
 
-Feature flags are **centralised in the AppHost** under
+> **Updated.** There are now two kinds of feature flag (see
+> [`solution/feature-flag-workflow.md`](./solution/feature-flag-workflow.md) and
+> [`solution/central-config-service-plan.md`](./solution/central-config-service-plan.md)):
+>
+> - **Runtime, mutable, tenant-overridable flags** (e.g.
+>   `FEATURE:EnableCodedValuesAiChat`) are owned by the central
+>   `SchoolCollab.Config` service (`config-api` + `config-db`), managed via the
+>   admin UI at `/config-flags`, resolved by `ConfigFeatureFlagService` with a
+>   HybridCache L1/L2 + `IConfiguration` fallback. Every mutation is audited.
+> - **`FEATURE:DisableOIDCAuth`** remains a *deployment-time startup auth-mode
+>   switch*: it is **no longer** an AppHost `Parameters:` value. Each consumer
+>   carries it in its own `appsettings.json` (`FeatureFlags:FEATURE:DisableOIDCAuth`,
+>   dev default `"true"`) and production overrides it via the env var
+>   `FeatureFlags__FEATURE__DisableOIDCAuth=false`. It is read from
+>   `IConfiguration` directly at startup (auth schemes are registered once and
+>   cannot be flipped at runtime), so it is **not** a Config-service flag.
+
+The historical AppHost-`Parameters:` description below is retained for context
+but is **superseded** by the two-kind model above.
+
+### Runtime flags (current)
+
+| Flag | Default | Notes |
+| :--- | :--- | :--- |
+| `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
+
+### Historical AppHost-`Parameters:` model (superseded)
+
+Feature flags were previously **centralised in the AppHost** under
 `Parameters:feature-flag-*` and fanned out to each consumer via
-`WithEnvironment("FeatureFlags__FEATURE__...", param)`. There is no
-separate `SchoolCollab.Config` service and no HTTP overlay —
-consumers read flags directly from `IConfiguration` via
-`SchoolCollab.Core.Features.FeatureFlagService` (registered by
-`AddAuthAndTenancy`).
-
-This is the same pattern used for outbox exchanges (§3) and AI
-provider configuration (§7): one source of truth in the AppHost, no
-duplication across per-service `appsettings.json` files, and no
-runtime indirection.
+`WithEnvironment("FeatureFlags__FEATURE__...", param)`. That
+`feature-flag-disable-oidc-auth` parameter has been removed; `DisableOIDCAuth`
+now lives in each consumer's `appsettings.json` as described above. Runtime
+flags moved to the Config service.
 
 ### Introduced flags
 

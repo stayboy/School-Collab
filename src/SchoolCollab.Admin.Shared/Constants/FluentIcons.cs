@@ -20,4 +20,6 @@ public static class FluentIcons
     public static readonly Icon ArrowLeft = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowLeft();
     public static readonly Icon ArrowRight = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowRight();
     public static readonly Icon Save = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Save();
+    public static readonly Icon Settings = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Settings();
+    public static readonly Icon Open = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Open();
 }

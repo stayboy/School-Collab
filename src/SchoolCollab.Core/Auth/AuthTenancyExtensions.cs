@@ -34,7 +34,7 @@ public static class AuthTenancyExtensions
 
         // Register configuration and feature flag service only if not already registered
         services.AddSingleton<IConfiguration>(configuration);
-        services.TryAddSingleton<IFeatureFlagService, FeatureFlagService>();
+        services.TryAddSingleton<IFeatureFlagService, ConfigurationFeatureFlagService>();
 
         var disableOIDC = IsFlagEnabled(configuration, "FEATURE:DisableOIDCAuth");
 

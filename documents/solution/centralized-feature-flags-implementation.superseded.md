@@ -1,5 +1,12 @@
 # Centralized Feature Flags — Findings & Implementation
 
+> **Historical.** This document describes the original placeholder design that
+> routed feature flags through a separate `SchoolCollab.Config` service via
+> `AddRemoteFeatureFlags`. The current, authoritative design is
+> [`central-config-service-plan.md`](./central-config-service-plan.md) — a real
+> central Config service with a DB, audit, tenancy overrides, caching, and an
+> admin UI. Read that instead.
+>
 > ⚠️ **Superseded.** This document describes the original design that routed
 > feature flags through a separate `SchoolCollab.Config` service via
 > `AddRemoteFeatureFlags`. That HTTP overlay was removed in the

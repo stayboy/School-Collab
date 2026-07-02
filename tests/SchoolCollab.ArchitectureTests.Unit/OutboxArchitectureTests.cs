@@ -29,11 +29,15 @@ public class OutboxArchitectureTests
     private static readonly Assembly AssignmentsCore =
         typeof(SchoolCollab.Assignments.Core.Data.AssignmentsDbContext).Assembly;
 
+    private static readonly Assembly ConfigCore =
+        typeof(SchoolCollab.Config.Core.Data.ConfigDbContext).Assembly;
+
     private static readonly Assembly[] DomainCores =
     {
         StudentsCore,
         CodedValuesCore,
         AssignmentsCore,
+        ConfigCore,
     };
 
     /// <summary>

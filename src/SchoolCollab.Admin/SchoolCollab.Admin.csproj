@@ -8,12 +8,15 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
     <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
+    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
     <ProjectReference Include="..\CodedValues\SchoolCollab.CodedValues.Admin\SchoolCollab.CodedValues.Admin.csproj" />
     <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Admin\SchoolCollab.Assignments.Admin.csproj" />
     <ProjectReference Include="..\Students\SchoolCollab.Students.Admin\SchoolCollab.Students.Admin.csproj" />
+    <ProjectReference Include="..\Config\SchoolCollab.Config.Admin\SchoolCollab.Config.Admin.csproj" />
+    <ProjectReference Include="..\Config\SchoolCollab.Config.Core\SchoolCollab.Config.Core.csproj" />
     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
     <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />

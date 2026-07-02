@@ -1,0 +1,79 @@
+@page "/config-flags/new"
+@inject ConfigFlagsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<CreateFlag> Logger
+
+<PageTitle>New Feature Flag</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <SectionContent SectionName="page-toolbar">
+            <div class="title-row">
+                <h1 class="page-title">New Feature Flag</h1>
+                <FluentButton Appearance="Appearance.Neutral" Icon="@FluentIcons.ArrowLeft" OnClick="@(() => Nav.NavigateTo("/config-flags"))">Back</FluentButton>
+            </div>
+        </SectionContent>
+
+        <FluentCard class="pa-4 mt-3" Style="max-width:640px;">
+            <EditForm Model="@_model" OnValidSubmit="SubmitAsync">
+                <FluentStack>
+                    <FluentTextField Label="Key (FEATURE:Area)" @bind-Value="_model.Key" Placeholder="FEATURE:EnableNewDashboard" Required />
+                    <FluentTextField Label="Name" @bind-Value="_model.Name" Required />
+                    <FluentTextField Label="Description" @bind-Value="_model.Description" />
+                    <FluentCheckbox Label="Enabled by default" @bind-Value="_model.IsEnabled" />
+                    <FluentTextField Label="Reason (required)" @bind-Value="_model.Reason" Required />
+                    @if (_error is not null)
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+                    }
+                    <FluentStack Orientation="Orientation.Horizontal" HorizontalAlignment="HorizontalAlignment.Right">
+                        <FluentButton Type="ButtonType.Button" Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/config-flags"))">Cancel</FluentButton>
+                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_submitting">Create</FluentButton>
+                    </FluentStack>
+                </FluentStack>
+            </EditForm>
+        </FluentCard>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">@ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private readonly CreateModel _model = new() { Key = "FEATURE:" };
+    private bool _submitting;
+    private string? _error;
+
+    private async Task SubmitAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_model.Reason))
+        {
+            _error = "Reason is required.";
+            return;
+        }
+        _submitting = true;
+        try
+        {
+            await Api.CreateAsync(new CreateFlagRequest(_model.Key, _model.Name, _model.Description, _model.IsEnabled, _model.Reason));
+            Nav.NavigateTo("/config-flags");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Create flag failed");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private sealed class CreateModel
+    {
+        public string Key { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public bool IsEnabled { get; set; }
+        public string Reason { get; set; } = "";
+    }
+}

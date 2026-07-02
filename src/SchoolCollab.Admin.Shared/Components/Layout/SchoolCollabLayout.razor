@@ -31,6 +31,13 @@
 
             <FluentSpacer />
 
+            <FluentButton Appearance="Appearance.Stealth"
+                          Href="/settings"
+                          Title="Settings"
+                          aria-label="Settings">
+                <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
+            </FluentButton>
+
             <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
         </FluentStack>
     </FluentHeader>
