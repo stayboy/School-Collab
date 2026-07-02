@@ -23,19 +23,11 @@ fluent-card[style*="cursor: pointer"]:hover {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
 
-/* Home dashboard layout. The wrapper is centered in the page (margin:
-   0 auto) with a min-width that can comfortably hold at least 3
-   DashboardCards (3 × 320px cards + 2 × 2.5rem gaps = 1040px). The same
-   min-width is applied to BOTH the Home landing (3 cards) and the Settings
-   landing (currently 1 card) so the two pages share an identical centered
-   layout width and the card row never reflows below the "3 cards wide"
-   breakpoint. On wider viewports the wrapper grows naturally to fit the
-   page (no max-width cap). Padding gives the content breathing room off
-   the wrapper edges. */
+/* Home dashboard layout */
 .home-dashboard {
-    min-width: 1040px;
+    max-width: 1100px;
     margin: 0 auto;
-    padding: 2rem;
+    padding: 2rem 0;
 }
 
 .home-dashboard h1 {
@@ -51,7 +43,7 @@ fluent-card[style*="cursor: pointer"]:hover {
 
 .home-cards {
     display: flex;
-    gap: 2.5rem;
+    gap: 1.5rem;
     flex-wrap: wrap;
 }
 

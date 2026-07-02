@@ -57,7 +57,7 @@
                         <FluentAnchor Appearance="Appearance.Hypertext"
                                      Href="@($"/config-flags/{Uri.EscapeDataString(context.Key)}")"
                                      title="@context.Key">
-                            @HumanizeKey(context.Key)
+                            @context.Key
                         </FluentAnchor>
                     </TemplateColumn>
                     <PropertyColumn Property="@(f => f.Name)" Title="Name" Sortable="true" />
@@ -168,27 +168,6 @@
     {
         if (!_initialLoadDone) return Task.CompletedTask;
         return LoadAsync(_showArchived, _search, isUserDriven: true);
-    }
-
-    private static string HumanizeKey(string key)
-    {
-        if (string.IsNullOrWhiteSpace(key))
-            return key;
-
-        var parts = key.Split(':', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0)
-            return key;
-
-        return string.Join(": ", parts.Select(p =>
-        {
-            var humanized = p.Humanize();
-            // All-caps words (e.g. the FEATURE prefix or acronyms) are not split
-            // by Humanizer. Lowercase first so Titleize produces a friendly
-            // "Feature" / "Xml" style result instead of leaving them shouting.
-            if (humanized == humanized.ToUpperInvariant())
-                return humanized.ToLowerInvariant().Titleize();
-            return humanized.Titleize();
-        }));
     }
 
     public void Dispose()

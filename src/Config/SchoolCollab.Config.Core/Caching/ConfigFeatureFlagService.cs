@@ -11,7 +11,7 @@ namespace SchoolCollab.Config.Core.Caching;
 
 /// <summary>
 /// Cached, DB-backed <see cref="IFeatureFlagService"/>. Resolves the whole flag
-/// set per tenant through a HybridCache L1 (in-proc, 5s) + L2 (Redis, 30s)
+/// set per tenant through a HybridCache L1 (in-proc, 30s) + L2 (Redis, 5min)
 /// backed by an HTTP call to the Config API. Falls back to <see cref="IConfiguration"/>
 /// when the API is unreachable (preserving the "works without Config running" dev
 /// behaviour). Propagation of runtime changes is bounded by the L1/L2 TTLs (the
@@ -23,13 +23,8 @@ public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlag
 
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
-        // Short TTLs so a flag change made via the Config admin UI propagates to
-        // consumer hosts within ~30s without a restart. The push-invalidation
-        // subscriber (v1.1) will collapse this to near-zero once wired up; until
-        // then the L2 ceiling is the worst-case propagation delay a human tester
-        // sees after toggling a flag.
-        Expiration = TimeSpan.FromSeconds(30),
-        LocalCacheExpiration = TimeSpan.FromSeconds(5)
+        Expiration = TimeSpan.FromMinutes(5),
+        LocalCacheExpiration = TimeSpan.FromSeconds(30)
     };
 
     private readonly HybridCache _cache;
