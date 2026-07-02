@@ -11,6 +11,11 @@
         {
             <FluentProgressRing />
         }
+        else if (!string.IsNullOrEmpty(_loadError))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/config-flags"))">Back</FluentButton>
+        }
         else if (_flag is null)
         {
             <FluentMessageBar Intent="MessageIntent.Warning">Flag not found.</FluentMessageBar>
@@ -118,6 +123,7 @@
     private FlagAuditEntryDto[] _audit = Array.Empty<FlagAuditEntryDto>();
     private bool _loading = true;
     private bool _busy;
+    private string? _loadError;
 
     private bool _toggleValue;
     private string _toggleReason = "";
@@ -131,17 +137,24 @@
     private async Task LoadAsync()
     {
         _loading = true;
+        _loadError = null;
         try
         {
-            _flag = await Api.GetAsync(Uri.EscapeDataString(Key));
+            _flag = await Api.GetAsync(Key);
             if (_flag is null) return;
             _toggleValue = _flag.IsEnabled;
-            _overrides = await Api.ListOverridesAsync(Uri.EscapeDataString(Key));
+            _overrides = await Api.ListOverridesAsync(Key);
             _audit = await Api.ListAuditAsync(Key, tenantId: null, from: null, to: null, skip: 0, take: 50);
+        }
+        catch (OperationCanceledException)
+        {
+            // User navigated away or the prerender circuit disconnected; don't
+            // surface cancellation as a load error.
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Load flag detail failed");
+            _loadError = $"Failed to load flag: {ex.Message}";
         }
         finally
         {
@@ -155,7 +168,7 @@
         _busy = true;
         try
         {
-            await Api.SetEnabledAsync(Uri.EscapeDataString(Key), new SetEnabledRequest(_toggleValue, _toggleReason));
+            await Api.SetEnabledAsync(Key, new SetEnabledRequest(_toggleValue, _toggleReason));
             _toggleReason = "";
             await LoadAsync();
         }
@@ -166,7 +179,7 @@
     {
         if (string.IsNullOrWhiteSpace(_lifecycleReason)) return;
         _busy = true;
-        try { await Api.ArchiveAsync(Uri.EscapeDataString(Key), new ReasonRequest(_lifecycleReason)); _lifecycleReason = ""; await LoadAsync(); }
+        try { await Api.ArchiveAsync(Key, new ReasonRequest(_lifecycleReason)); _lifecycleReason = ""; await LoadAsync(); }
         finally { _busy = false; }
     }
 
@@ -174,7 +187,7 @@
     {
         if (string.IsNullOrWhiteSpace(_lifecycleReason)) return;
         _busy = true;
-        try { await Api.UnarchiveAsync(Uri.EscapeDataString(Key), new ReasonRequest(_lifecycleReason)); _lifecycleReason = ""; await LoadAsync(); }
+        try { await Api.UnarchiveAsync(Key, new ReasonRequest(_lifecycleReason)); _lifecycleReason = ""; await LoadAsync(); }
         finally { _busy = false; }
     }
 
@@ -182,7 +195,7 @@
     {
         if (string.IsNullOrWhiteSpace(_lifecycleReason)) return;
         _busy = true;
-        try { await Api.DeleteAsync(Uri.EscapeDataString(Key), _lifecycleReason); Nav.NavigateTo("/config-flags"); }
+        try { await Api.DeleteAsync(Key, _lifecycleReason); Nav.NavigateTo("/config-flags"); }
         finally { _busy = false; }
     }
 
@@ -193,10 +206,10 @@
         _busy = true;
         try
         {
-            await Api.UpsertOverrideAsync(Uri.EscapeDataString(Key), tenantId,
+            await Api.UpsertOverrideAsync(Key, tenantId,
                 new UpsertOverrideRequest(enabled, _newOverrideReason, EffectiveFrom: null, EffectiveTo: null));
             _newOverrideTenant = ""; _newOverrideReason = "";
-            _overrides = await Api.ListOverridesAsync(Uri.EscapeDataString(Key));
+            _overrides = await Api.ListOverridesAsync(Key);
         }
         finally { _busy = false; }
     }
@@ -204,7 +217,7 @@
     private async Task DeleteOverrideAsync(Guid tenantId)
     {
         _busy = true;
-        try { await Api.DeleteOverrideAsync(Uri.EscapeDataString(Key), tenantId, reason: "Removed via admin UI"); _overrides = await Api.ListOverridesAsync(Uri.EscapeDataString(Key)); }
+        try { await Api.DeleteOverrideAsync(Key, tenantId, reason: "Removed via admin UI"); _overrides = await Api.ListOverridesAsync(Key); }
         finally { _busy = false; }
     }
 

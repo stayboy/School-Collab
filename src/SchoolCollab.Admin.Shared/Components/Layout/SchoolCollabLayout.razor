@@ -31,14 +31,15 @@
 
             <FluentSpacer />
 
+            <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
+
             <FluentButton Appearance="Appearance.Stealth"
-                          Href="/settings"
+                          OnClick="@(() => Nav.NavigateTo("/settings"))"
                           Title="Settings"
-                          aria-label="Settings">
+                          aria-label="Settings"
+                          class="toolbar-icon-button">
                 <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
             </FluentButton>
-
-            <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
         </FluentStack>
     </FluentHeader>
 

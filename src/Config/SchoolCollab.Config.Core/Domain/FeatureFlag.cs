@@ -121,9 +121,11 @@ public sealed class FeatureFlag : IEntity, IAuditableEntity, ISoftDeletableEntit
     }
 
     /// <summary>
-    /// Canonical key shape: <c>FEATURE:&lt;AreaName&gt;</c>. Trims and upper-cases
-    /// the area so <c>feature:enablex</c> and <c>FEATURE:EnableX</c> collide at the
-    /// same row. Mirrors the existing <c>FEATURE:DisableOIDCAuth</c> convention.
+    /// Canonical key shape: <c>FEATURE:&lt;AreaName&gt;</c>. Trims and
+    /// upper-cases the area so <c>feature:enablex</c> and
+    /// <c>FEATURE:EnableX</c> collide at the same row. The display text in the
+    /// admin grid is humanised separately, so the canonical storage form can
+    /// remain machine-friendly without hurting readability.
     /// </summary>
     public static string NormalizeKey(string key)
     {

@@ -1,13 +1,25 @@
 using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace SchoolCollab.Admin.Shared.Services;
+
+/// <summary>
+/// Mirror of <see cref="SchoolCollab.Config.Core.DTOs.FlagKindDto"/> so the
+/// shared admin client can deserialize the flag kind without taking a reference
+/// on Config.Core.
+/// </summary>
+public enum FlagKindDto
+{
+    Boolean = 0,
+}
 
 public record FeatureFlagDto(
     Guid Id,
     string Key,
     string Name,
     string? Description,
-    string Kind,
+    FlagKindDto Kind,
     bool IsEnabled,
     bool IsArchived,
     bool IsDeleted,
@@ -53,38 +65,64 @@ public record UpsertOverrideRequest(bool? IsEnabled, string Reason, DateTimeOffs
 /// </summary>
 public sealed class ConfigFlagsApiClient(HttpClient http)
 {
-    public Task<FeatureFlagDto[]> ListAsync(string? search, bool includeArchived, CancellationToken ct = default)
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter<FlagKindDto>() }
+    };
+
+    public async Task<FeatureFlagDto[]> ListAsync(string? search, bool includeArchived, CancellationToken ct = default)
     {
         var url = "/api/config/flags";
         var query = new List<string>();
         if (!string.IsNullOrWhiteSpace(search)) query.Add($"search={Uri.EscapeDataString(search)}");
         if (includeArchived) query.Add("includeArchived=true");
         if (query.Count > 0) url += "?" + string.Join("&", query);
-        return http.GetFromJsonAsync<FeatureFlagDto[]>(url, ct).ContinueWith(t => t.Result ?? Array.Empty<FeatureFlagDto>(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+
+        var result = await http.GetFromJsonAsync<FeatureFlagDto[]>(url, JsonOptions, ct);
+        return result ?? [];
     }
 
-    public Task<FeatureFlagDto?> GetAsync(string key, CancellationToken ct = default) =>
-        http.GetFromJsonAsync<FeatureFlagDto>($"/api/config/flags/{Uri.EscapeDataString(key)}", ct);
+    public async Task<FeatureFlagDto?> GetAsync(string key, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync($"/api/config/flags/{Uri.EscapeDataString(key)}", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<FeatureFlagDto>(JsonOptions, ct);
+    }
 
     public async Task<Guid> CreateAsync(CreateFlagRequest req, CancellationToken ct = default)
     {
-        var resp = await http.PostAsJsonAsync("/api/config/flags", req, ct);
+        var resp = await http.PostAsJsonAsync("/api/config/flags", req, JsonOptions, ct);
         resp.EnsureSuccessStatusCode();
-        var body = await resp.Content.ReadFromJsonAsync<CreateFlagResponse>(ct);
+        var body = await resp.Content.ReadFromJsonAsync<CreateFlagResponse>(JsonOptions, ct);
         return body?.Id ?? Guid.Empty;
     }
 
-    public Task UpdateAsync(string key, UpdateFlagRequest req, CancellationToken ct = default) =>
-        http.PutAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}", req, ct).ContinueWith(t => t.Result.EnsureSuccessStatusCode(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    public async Task UpdateAsync(string key, UpdateFlagRequest req, CancellationToken ct = default)
+    {
+        var response = await http.PutAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}", req, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
 
-    public Task SetEnabledAsync(string key, SetEnabledRequest req, CancellationToken ct = default) =>
-        http.PutAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/enabled", req, ct).ContinueWith(t => t.Result.EnsureSuccessStatusCode(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    public async Task SetEnabledAsync(string key, SetEnabledRequest req, CancellationToken ct = default)
+    {
+        var response = await http.PutAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/enabled", req, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
 
-    public Task ArchiveAsync(string key, ReasonRequest req, CancellationToken ct = default) =>
-        http.PostAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/archive", req, ct).ContinueWith(t => t.Result.EnsureSuccessStatusCode(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    public async Task ArchiveAsync(string key, ReasonRequest req, CancellationToken ct = default)
+    {
+        var response = await http.PostAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/archive", req, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
 
-    public Task UnarchiveAsync(string key, ReasonRequest req, CancellationToken ct = default) =>
-        http.PostAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/unarchive", req, ct).ContinueWith(t => t.Result.EnsureSuccessStatusCode(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    public async Task UnarchiveAsync(string key, ReasonRequest req, CancellationToken ct = default)
+    {
+        var response = await http.PostAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/unarchive", req, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
 
     public async Task DeleteAsync(string key, string reason, CancellationToken ct = default)
     {
@@ -92,17 +130,23 @@ public sealed class ConfigFlagsApiClient(HttpClient http)
         resp.EnsureSuccessStatusCode();
     }
 
-    public Task RecoverAsync(string key, ReasonRequest req, CancellationToken ct = default) =>
-        http.PostAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/recover", req, ct).ContinueWith(t => t.Result.EnsureSuccessStatusCode(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    public async Task RecoverAsync(string key, ReasonRequest req, CancellationToken ct = default)
+    {
+        var response = await http.PostAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/recover", req, JsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
 
-    public Task<TenantFlagOverrideDto[]> ListOverridesAsync(string key, CancellationToken ct = default) =>
-        http.GetFromJsonAsync<TenantFlagOverrideDto[]>($"/api/config/flags/{Uri.EscapeDataString(key)}/overrides", ct).ContinueWith(t => t.Result ?? Array.Empty<TenantFlagOverrideDto>(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+    public async Task<TenantFlagOverrideDto[]> ListOverridesAsync(string key, CancellationToken ct = default)
+    {
+        var result = await http.GetFromJsonAsync<TenantFlagOverrideDto[]>($"/api/config/flags/{Uri.EscapeDataString(key)}/overrides", JsonOptions, ct);
+        return result ?? [];
+    }
 
     public async Task<TenantFlagOverrideDto?> UpsertOverrideAsync(string key, Guid tenantId, UpsertOverrideRequest req, CancellationToken ct = default)
     {
-        var resp = await http.PutAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/overrides/{tenantId}", req, ct);
+        var resp = await http.PutAsJsonAsync($"/api/config/flags/{Uri.EscapeDataString(key)}/overrides/{tenantId}", req, JsonOptions, ct);
         resp.EnsureSuccessStatusCode();
-        return await resp.Content.ReadFromJsonAsync<TenantFlagOverrideDto>(ct);
+        return await resp.Content.ReadFromJsonAsync<TenantFlagOverrideDto>(JsonOptions, ct);
     }
 
     public async Task DeleteOverrideAsync(string key, Guid tenantId, string reason, CancellationToken ct = default)
@@ -111,7 +155,7 @@ public sealed class ConfigFlagsApiClient(HttpClient http)
         resp.EnsureSuccessStatusCode();
     }
 
-    public Task<FlagAuditEntryDto[]> ListAuditAsync(string? key, Guid? tenantId, DateTimeOffset? from, DateTimeOffset? to, int skip, int take, CancellationToken ct = default)
+    public async Task<FlagAuditEntryDto[]> ListAuditAsync(string? key, Guid? tenantId, DateTimeOffset? from, DateTimeOffset? to, int skip, int take, CancellationToken ct = default)
     {
         var query = new List<string>();
         if (!string.IsNullOrWhiteSpace(key)) query.Add($"key={Uri.EscapeDataString(key)}");
@@ -121,7 +165,9 @@ public sealed class ConfigFlagsApiClient(HttpClient http)
         query.Add($"skip={skip}");
         query.Add($"take={take}");
         var url = "/api/config/audit?" + string.Join("&", query);
-        return http.GetFromJsonAsync<FlagAuditEntryDto[]>(url, ct).ContinueWith(t => t.Result ?? Array.Empty<FlagAuditEntryDto>(), ct, TaskContinuationOptions.OnlyOnRanToCompletion, TaskScheduler.Default);
+
+        var result = await http.GetFromJsonAsync<FlagAuditEntryDto[]>(url, JsonOptions, ct);
+        return result ?? [];
     }
 
     public record CreateFlagResponse(Guid Id);

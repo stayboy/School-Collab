@@ -1,0 +1,137 @@
+@page "/config-flags/new"
+@inject ConfigFlagsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Create> Logger
+@implements IDisposable
+
+<PageTitle>New Flag</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">New Feature Flag</h1>
+            </div>
+
+            <EditForm Model="_model" OnValidSubmit="OnSaveAsync" class="form-container">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="form-fields">
+                    <div class="form-field required-field">
+                        <FluentTextField @bind-Value="_model.Key"
+                                         Label="Key *"
+                                         Placeholder="e.g. FEATURE:EnableNewDashboard"
+                                         class="full-width" Required />
+                    </div>
+                    <div class="form-field required-field">
+                        <FluentTextField @bind-Value="_model.Name"
+                                         Label="Name *"
+                                         class="full-width" Required />
+                    </div>
+                    <div class="form-field">
+                        <FluentTextArea @bind-Value="_model.Description"
+                                        Label="Description"
+                                        Rows="3"
+                                        class="full-width" />
+                    </div>
+                    <div class="form-field">
+                        <FluentCheckbox @bind-Value="_model.IsEnabled"
+                                        Label="Enabled by default" />
+                    </div>
+                    <div class="form-field required-field">
+                        <FluentTextField @bind-Value="_model.Reason"
+                                         Label="Reason (required for audit) *"
+                                         class="full-width" Required />
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
+                }
+
+                <div class="action-bar">
+                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                        @(_saving ? "Saving…" : "Create Flag")
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
+                </div>
+            </EditForm>
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private readonly FormModel _model = new() { Key = "FEATURE:" };
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _saveCts;
+    private volatile bool _disposed;
+
+    private async Task OnSaveAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        _saveCts?.Cancel();
+        _saveCts?.Dispose();
+        _saveCts = new CancellationTokenSource();
+        var ct = _saveCts.Token;
+
+        try
+        {
+            Logger.LogInformation("User initiated create for flag {Key}", _model.Key);
+            await Api.CreateAsync(new CreateFlagRequest(
+                _model.Key!,
+                _model.Name!,
+                _model.Description,
+                _model.IsEnabled,
+                _model.Reason!),
+                ct);
+
+            if (_disposed) return;
+            Nav.NavigateTo("/config-flags");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create flag {Key}", _model.Key);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/config-flags");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _saveCts?.Cancel();
+        _saveCts?.Dispose();
+        _saveCts = null;
+    }
+
+    private sealed class FormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Key { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+
+        public string? Description { get; set; }
+
+        public bool IsEnabled { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Reason { get; set; }
+    }
+}

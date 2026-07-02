@@ -19,6 +19,7 @@ namespace SchoolCollab.Config.Tests.Playwright.Tests;
 public class ConfigFlagsAdminSmokeTests : PageTest
 {
     private const string SeededFlagKey = "FEATURE:EnableCodedValuesAiChat";
+    private const string HumanizedSeededFlagKey = "Feature: Enable Coded Values Ai Chat";
 
     private string AdminUrl => PlaywrightSettings.AdminUrl;
 
@@ -40,12 +41,11 @@ public class ConfigFlagsAdminSmokeTests : PageTest
         await Page.GotoAsync("/config-flags");
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);
 
-        // The list page must show the seeded flag.
-        await Expect(Page.GetByText(SeededFlagKey)).ToBeVisibleAsync();
+        // The list page must show the seeded flag using its humanized, title-cased key.
+        await Expect(Page.GetByText(HumanizedSeededFlagKey)).ToBeVisibleAsync();
 
-        // Open the seeded flag's detail page via the row's "Open" button.
-        var row = Page.GetByRole(AriaRole.Row).Filter(new() { HasText = SeededFlagKey });
-        await row.GetByRole(AriaRole.Button, new() { Name = "Open" }).ClickAsync();
+        // Open the seeded flag's detail page via the humanized key link.
+        await Page.GetByRole(AriaRole.Link, new() { Name = HumanizedSeededFlagKey }).ClickAsync();
 
         // Detail page renders the "Default state" card.
         await Expect(Page.GetByText("Default state")).ToBeVisibleAsync();
@@ -149,8 +149,8 @@ public class ConfigFlagsAdminSmokeTests : PageTest
 
     private async Task SetFlagEnabledAsync(bool enabled, string reason)
     {
-        var row = Page.GetByRole(AriaRole.Row).Filter(new() { HasText = SeededFlagKey });
-        await row.GetByRole(AriaRole.Button, new() { Name = "Open" }).ClickAsync();
+        var row = Page.GetByRole(AriaRole.Row).Filter(new() { HasText = HumanizedSeededFlagKey });
+        await row.GetByRole(AriaRole.Link).ClickAsync();
         await Expect(Page.GetByText("Default state")).ToBeVisibleAsync();
 
         var enabledSwitch = Page.GetByLabel("Enabled by default");

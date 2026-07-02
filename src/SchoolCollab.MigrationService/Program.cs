@@ -184,7 +184,7 @@ static async Task SeedEnableCodedValuesAiChatAsync(ConfigDbContext db, Microsoft
     const string actorId = "system:migrator";
     const string actorName = "Migration Service";
 
-    // FeatureFlag.Create normalizes the key via FeatureFlag.NormalizeKey (uppercases
+    // FeatureFlag.Create normalizes the key via FeatureFlag.NormalizeKey (upper-cases
     // the area after 'FEATURE:'), so we must compare against the canonical form here.
     // A plain `f.Key == "FEATURE:EnableCodedValuesAiChat"` is a case-sensitive
     // Postgres text comparison and would MISS an existing row stored as

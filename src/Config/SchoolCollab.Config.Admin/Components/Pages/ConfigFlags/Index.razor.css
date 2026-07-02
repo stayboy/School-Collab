@@ -1,0 +1,64 @@
+/* Config Flags landing page.
+
+   The shared layout (SchoolCollabLayout) owns the height chain and provides
+   three pinned slots via Blazor sections:
+     - page-toolbar  : this page publishes title-row + action-bar here (pinned top)
+     - page-scroll    : everything else renders here via @Body — the SOLE scroll region
+     - page-footer    : reserved for any pinned footer
+
+   So this page no longer manages its own height or scroll. The rules below only
+   style the page's own pieces. The spinner uses flex:1 so it fills and centers
+   in the scroll region during load; the grid-container is left at natural
+   height so the scroll region (not the grid) scrolls and the grid's sticky
+   header sticks to it. Mirrors src/CodedValues/.../Index.razor.css. */
+
+.title-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-top: 0.25rem;
+}
+
+.page-title {
+    margin: 0;
+}
+
+.action-bar {
+    flex-shrink: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+.spacer {
+    flex-grow: 1;
+    flex-basis: auto;
+}
+
+::deep .search-box {
+    flex: 1 1 auto;
+    min-width: 180px;
+    max-width: 320px;
+    width: 100%;
+}
+
+/* Loading state: fill the scroll region and center the spinner. */
+.spinner-container {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* The grid sits in the layout's scroll region; it must NOT be a scroll
+   context itself (no overflow:auto, no bounded flex height), otherwise
+   the grid's sticky header would stick to a non-scrolling grid-container
+   and scroll out of view. Natural height lets the scroll region scroll
+   and the sticky header stick to it. */
+.grid-container {
+    width: 100%;
+}

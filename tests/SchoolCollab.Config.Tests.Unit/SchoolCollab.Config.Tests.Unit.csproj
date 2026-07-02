@@ -14,6 +14,7 @@
     <ProjectReference Include="..\..\src\Config\SchoolCollab.Config.Api\SchoolCollab.Config.Api.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Humanizer" />
     <PackageReference Include="MSTest" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />

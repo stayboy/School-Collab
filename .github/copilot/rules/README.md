@@ -8,6 +8,7 @@ guidance into these files.
 
 | Rule | File |
 |---|---|
+| Agent / AI communication style | `communication-style.md` |
 | Blazor components, Fluent UI, and styling | `blazor-components.md` |
 | Entity Framework Core migrations | `ef-migrations.md` |
 | Logging and Aspire observability | `logging-aspire.md` |
