@@ -36,8 +36,11 @@ public static class ConfigFeatureFlagClientExtensions
         {
             options.DefaultEntryOptions = new HybridCacheEntryOptions
             {
-                Expiration = TimeSpan.FromMinutes(5),
-                LocalCacheExpiration = TimeSpan.FromSeconds(30)
+                // Short TTLs so a flag change made via the Config admin UI propagates
+                // to consumer hosts within ~30s without a restart. The push-invalidation
+                // subscriber (v1.1) will collapse this to near-zero once wired up.
+                Expiration = TimeSpan.FromSeconds(30),
+                LocalCacheExpiration = TimeSpan.FromSeconds(5)
             };
         });
 
