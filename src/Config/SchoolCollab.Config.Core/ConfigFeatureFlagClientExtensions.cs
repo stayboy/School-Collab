@@ -36,8 +36,8 @@ public static class ConfigFeatureFlagClientExtensions
         {
             options.DefaultEntryOptions = new HybridCacheEntryOptions
             {
-                Expiration = TimeSpan.FromMinutes(5),
-                LocalCacheExpiration = TimeSpan.FromSeconds(30)
+                Expiration = TimeSpan.FromSeconds(30),
+                LocalCacheExpiration = TimeSpan.FromSeconds(5)
             };
         });
 
