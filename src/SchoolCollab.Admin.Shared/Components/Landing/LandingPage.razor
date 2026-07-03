@@ -1,0 +1,195 @@
+@typeparam TItem
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Routing
+@using Microsoft.AspNetCore.Components.Sections
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject NavigationManager Nav
+
+<PageTitle>@Title</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <SectionContent SectionName="page-toolbar">
+            <div class="title-row">
+                <h1 class="page-title">@Title</h1>
+            </div>
+            <div class="action-bar">
+                @if (CreateEnabled)
+                {
+                    <FluentButton Appearance="Appearance.Accent"
+                                  OnClick="@(() => Nav.NavigateTo(CreateRoute))">
+                        @CreateLabel
+                    </FluentButton>
+                }
+                @ToolbarFilters
+                <div class="spacer"></div>
+                @if (SearchEnabled)
+                {
+                    <FluentTextField Placeholder="@(SearchPlaceholder ?? "Search…")"
+                                     class="search-box"
+                                     Immediate="true"
+                                     ImmediateDelay="300"
+                                     Value="@SearchText"
+                                     ValueChanged="@OnSearchChanged" />
+                }
+                @ToolbarActions
+            </div>
+        </SectionContent>
+
+        @AboveGrid
+
+        @if (Loading || Items is null)
+        {
+            <div class="spinner-container">
+                <FluentProgressRing />
+            </div>
+        }
+        else if (Items.Length == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info">@EmptyMessage</FluentMessageBar>
+        }
+        else if (Grid is not null)
+        {
+            <div class="grid-container">
+                @Grid
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(Error))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@Error</FluentMessageBar>
+        }
+
+        @ChildContent
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@if (Footer is not null)
+{
+    <SectionContent SectionName="page-footer">@Footer</SectionContent>
+}
+
+@code {
+    /// <summary>
+    /// The grid row DTO. Forwarded to <c>&lt;FluentDataGrid TGridItem&gt;</c> and
+    /// available to the <c>Columns</c> render fragment as <c>context</c>.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Text of the <c>+ New …</c> button (e.g. "+ New Assignment").</summary>
+    [Parameter, EditorRequired]
+    public string CreateLabel { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Route the New button navigates to (e.g. "/assignments/create").
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string CreateRoute { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The list to render. <c>null</c> shows the loading spinner; an empty
+    /// array shows <see cref="EmptyMessage"/>; otherwise <see cref="Grid"/>
+    /// renders (wrapped in the <c>grid-container</c>).
+    /// </summary>
+    [Parameter]
+    public TItem[]? Items { get; set; }
+
+    /// <summary>
+    /// Message bar text shown when <see cref="Items"/> is an empty array.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public string EmptyMessage { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The populated grid, rendered inside the wrapper's
+    /// <c>grid-container</c> when <see cref="Items"/> is non-empty. Supply a
+    /// <c>&lt;FluentDataGrid TGridItem="TItem" Items="…" GridTemplateColumns="…"
+    /// GenerateHeader="Sticky" MultiLine="true"&gt;</c> with its columns as
+    /// direct children — this keeps Blazor's parent-to-child <c>TGridItem</c>
+    /// inference working, which a forwarded <c>Columns</c> fragment would lose.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? Grid { get; set; }
+
+    /// <summary>
+    /// Error text. Rendered as a red message bar beneath the grid when non-empty.
+    /// </summary>
+    [Parameter]
+    public string? Error { get; set; }
+
+    /// <summary>
+    /// When <c>true</c>, the spinner is shown even if <see cref="Items"/> is
+    /// non-null (e.g. an in-flight server search). The page drives this from its
+    /// own search state.
+    /// </summary>
+    [Parameter]
+    public bool Loading { get; set; }
+
+    /// <summary>
+    /// Optional slot rendered in the action-bar immediately after the New
+    /// button — typically a filter control such as a status
+    /// <c>FluentSelect</c> or a "Show deleted" <c>FluentCheckbox</c>.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ToolbarFilters { get; set; }
+
+    /// <summary>
+    /// Optional slot rendered at the far right of the action-bar, after the
+    /// search box — e.g. an AI-assistant launcher button.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ToolbarActions { get; set; }
+
+    /// <summary>Two-way bound search box value.</summary>
+    [Parameter]
+    public string SearchText { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Fired (debounced by the <c>FluentTextField</c>'s <c>Immediate</c> +
+    /// <c>ImmediateDelay</c>) when the search box value changes. The page owns
+    /// the strategy: a server fetch with cancellation, a client-side filter,
+    /// or a bind-and-reload.
+    /// </summary>
+    [Parameter]
+    public EventCallback<string> SearchTextChanged { get; set; }
+
+    /// <summary>Search box placeholder. Defaults to "Search…".</summary>
+    [Parameter]
+    public string? SearchPlaceholder { get; set; }
+
+    /// <summary>Default <c>true</c>; set <c>false</c> to hide the search box.</summary>
+    [Parameter]
+    public bool SearchEnabled { get; set; } = true;
+
+    /// <summary>Default <c>true</c>; set <c>false</c> to hide the New button.</summary>
+    [Parameter]
+    public bool CreateEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Optional slot rendered above the main grid — e.g. a deleted-items
+    /// section for pages that support soft-delete recovery.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? AboveGrid { get; set; }
+
+    /// <summary>
+    /// Optional pinned-footer content, published into the layout's
+    /// <c>page-footer</c> section slot (e.g. an inline chat launcher).
+    /// </summary>
+    [Parameter]
+    public RenderFragment? Footer { get; set; }
+
+    /// <summary>
+    /// Escape hatch for anything not covered by the slots above; rendered last
+    /// in the scroll region. Kept for forward-compatibility.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    private Task OnSearchChanged(string? text)
+        => SearchTextChanged.InvokeAsync(text ?? string.Empty);
+}

@@ -1,0 +1,78 @@
+@* Test fixture for LandingPageTests. Holds the Razor markup (Grid + slot
+   fragments) that cannot be expressed with the @<> syntax from a .cs file.
+   The .cs test class toggles the bool flags / arrays and asserts on markup. *@
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Sections
+
+@* SectionContent only renders when a matching SectionOutlet exists. In the
+   real app the SchoolCollabLayout provides them; in tests we provide our own
+   so the toolbar + footer markup is visible for assertions. *@
+<SectionOutlet SectionName="page-toolbar" />
+<SectionOutlet SectionName="page-footer" />
+
+<LandingPage TItem="Widget"
+             Title="Widgets"
+             CreateLabel="+ New Widget"
+             CreateRoute="/widgets/create"
+             EmptyMessage="No widgets yet."
+             Items="@Items"
+             Error="@Error"
+             Loading="@Loading"
+             SearchEnabled="@SearchEnabled"
+             CreateEnabled="@CreateEnabled"
+             SearchPlaceholder="Search widgets…"
+             SearchTextChanged="@SearchTextChanged">
+    <ToolbarFilters>
+        @if (ShowFilters)
+        {
+            <FluentCheckbox Label="Show deleted" />
+        }
+    </ToolbarFilters>
+    <ToolbarActions>
+        @if (ShowActions)
+        {
+            <FluentButton Appearance="Appearance.Neutral">Chat</FluentButton>
+        }
+    </ToolbarActions>
+    <AboveGrid>
+        @if (ShowAboveGrid)
+        {
+            <h3>Deleted Values</h3>
+        }
+    </AboveGrid>
+    <Footer>
+        @if (ShowFooter)
+        {
+            <span id="chat-launcher">Chat</span>
+        }
+    </Footer>
+    <Grid>
+        <FluentDataGrid Items="@Items.AsQueryable()"
+                        GridTemplateColumns="minmax(180px,2fr) 1fr auto"
+                        GenerateHeader="GenerateHeaderOption.Sticky"
+                        MultiLine="true"
+                        TGridItem="Widget">
+            <TemplateColumn Title="Name">
+                @context.Name
+            </TemplateColumn>
+        </FluentDataGrid>
+    </Grid>
+</LandingPage>
+
+@code {
+    // A minimal row DTO so the generic grid has something concrete to render.
+    public sealed record Widget(Guid Id, string Name);
+
+    [Parameter] public Widget[]? Items { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public bool SearchEnabled { get; set; } = true;
+    [Parameter] public bool CreateEnabled { get; set; } = true;
+    [Parameter] public bool ShowFilters { get; set; }
+    [Parameter] public bool ShowActions { get; set; }
+    [Parameter] public bool ShowAboveGrid { get; set; }
+    [Parameter] public bool ShowFooter { get; set; }
+    [Parameter] public EventCallback<string> SearchTextChanged { get; set; }
+}

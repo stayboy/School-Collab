@@ -1,0 +1,70 @@
+/* LandingPage wrapper.
+
+   Consolidates the four near-identical Index.razor.css scaffolding rules that
+   every landing page previously duplicated. The shared layout
+   (SchoolCollabLayout) owns the height chain and the three pinned section
+   slots (page-toolbar / page-scroll via @Body / page-footer). This wrapper
+   publishes into page-toolbar and page-footer and renders the list body into
+   the layout's scroll region.
+
+   Scope note (same behaviour as SchoolCollabLayout.razor.css): the structural
+   elements authored directly here (title-row, action-bar, spacer,
+   grid-container, spinner-container) receive this component's CSS-isolation
+   scope attribute. Elements rendered inside RenderFragment slots (filter
+   controls, the search box, grid columns) carry the *consuming page's* scope,
+   so they are reached via ::deep. */
+
+.title-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-top: 0.25rem;
+}
+
+.page-title {
+    margin: 0;
+}
+
+.action-bar {
+    flex-shrink: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+.spacer {
+    flex-grow: 1;
+    flex-basis: auto;
+}
+
+::deep .search-box {
+    flex: 1 1 auto;
+    min-width: 180px;
+    max-width: 320px;
+    width: 100%;
+}
+
+::deep .status-filter {
+    width: 160px;
+}
+
+/* Loading state: fill the scroll region and center the spinner. */
+.spinner-container {
+    flex: 1 1 0;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* The grid sits in the layout's scroll region; it must NOT be a scroll context
+   itself (no overflow:auto, no bounded flex height), otherwise the grid's
+   sticky header would stick to a non-scrolling grid-container and scroll out
+   of view. Natural height lets the scroll region scroll and the sticky header
+   stick to it. */
+.grid-container {
+    width: 100%;
+}
