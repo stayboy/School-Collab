@@ -292,6 +292,18 @@ to push. Keep working-tree changes uncommitted by default. The
 instruction is the enforcement layer for the commit half, since commits
 are local and cannot be blocked server-side.
 
+**User reviews local changes before each commit:** When the user says
+`"commit"` (or any variant — "commit changes", "commit it", "commit the
+changes"), and the working tree has uncommitted changes, the agent must
+**first show the change set** (`git status --short` + `git diff --stat`,
+or `git diff <path>` for the relevant files) and **wait for the user to
+confirm the change set to be committed** before running `git commit`. The
+agent does not commit whatever happens to be in the working tree on the
+user's behalf. If the user has already named the change set ("commit
+src/Foo.cs", "commit the rule file"), the agent may commit exactly that
+and report. The default is: keep working-tree changes uncommitted by
+default; the user reviews and authorises each commit explicitly.
+
 Do not merge a PR while required status checks are still running or failing. If
 CI fails, fix the branch and wait for a green workflow before merging.
 
