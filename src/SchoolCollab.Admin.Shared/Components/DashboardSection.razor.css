@@ -1,0 +1,76 @@
+/* Dashboard layout shell + the card-as-flex-item rules.
+
+   The card subtree is rendered by the child DashboardCard component.
+   NavLink's <a.card-link> root and FluentCard's <fluent-card.home-card>
+   carry their child components' scope attributes (or none), NOT this
+   component's, so they cannot be scoped from DashboardCard.razor.css.
+   To reach them we anchor ::deep on the plain <div class="home-cards">
+   authored here, which reliably carries this component's scope — the
+   same pattern documented in SchoolCollabLayout.razor.css.
+
+   The card's own CONTENT styling (inner padding, typography, the
+   description line-clamp, the icon) lives in DashboardCard.razor.css,
+   where those plain-HTML elements carry DashboardCard's scope. The rules
+   kept here are the dashboard LAYOUT and the card-as-flex-item shell,
+   which must be anchored on .home-cards. */
+
+.home-dashboard {
+    min-width: 1100px;
+    margin: 0 auto;
+    padding: 2rem 0;
+}
+
+.home-dashboard h1 {
+    font-size: 2rem;
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.home-subtitle {
+    color: var(--neutral-foreground-2, #616161);
+    margin-bottom: 2rem;
+}
+
+.home-cards {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    /* align-items defaults to stretch, so every card-link on a row
+       shares the height of the tallest sibling. */
+    width: 100%;
+    gap: 1.5rem;
+}
+
+/* NavLink renders the <a.card-link> as a child component, so ::deep is
+   required to reach it from this section's scope. */
+.home-cards ::deep a.card-link {
+    display: inline-flex;
+    text-decoration: none !important;
+    color: inherit;
+    /* Ensure the single-card layout stays flush-left instead of drifting
+       to the centre of the flex row, and stretches to the row height. */
+    flex: 0 0 auto;
+    height: 100%;
+    align-self: stretch;
+}
+
+.home-cards ::deep a.card-link:hover {
+    text-decoration: none !important;
+}
+
+.home-cards ::deep a.card-link:hover fluent-card,
+.home-cards ::deep a.card-link:focus-visible fluent-card {
+    outline: 2px solid var(--neutral-stroke-active, #616161);
+}
+
+.home-cards ::deep fluent-card[style*="cursor: pointer"]:hover {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.home-cards ::deep .home-card {
+    /* The inline Style on <FluentCard> only sets width/cursor; supply
+       height here so the card fills its link parent. */
+    height: 100%;
+    display: flex;
+}

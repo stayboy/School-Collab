@@ -3,18 +3,14 @@
 
 <PageTitle>Settings</PageTitle>
 
-<div class="home-dashboard">
-    <h1>Settings</h1>
-    <p class="home-subtitle">Platform-level configuration and administration.</p>
+<DashboardSection Title="Settings"
+                  Subtitle="Platform-level configuration and administration.">
+    <DashboardCard Href="/config-flags"
+                   Icon="@(Icons.Regular.Size24.SlideText)"
+                   Title="Config Flags"
+                   Description="Manage runtime feature flags — global defaults and per-tenant overrides." />
 
-    <div class="home-cards">
-        <DashboardCard Href="/config-flags"
-                       Icon="@(Icons.Regular.Size24.SlideText)"
-                       Title="Config Flags"
-                       Description="Manage runtime feature flags — global defaults and per-tenant overrides." />
-
-        @* Future settings (tenants, integrations, audit retention, …) will land
-           here as additional DashboardCard entries. Keeping the surface area
-           small until a real consumer needs the entry avoids dead navigation. *@
-    </div>
-</div>
+    @* Future settings (tenants, integrations, audit retention, …) will land
+       here as additional DashboardCard entries. Keeping the surface area
+       small until a real consumer needs the entry avoids dead navigation. *@
+</DashboardSection>

@@ -1,7 +1,7 @@
 using Bunit;
 using FluentAssertions;
 using Microsoft.FluentUI.AspNetCore.Components;
-using SchoolCollab.Admin.Components;
+using SchoolCollab.Admin.Shared.Components;
 using PeopleIcon = Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size24.People;
 
 namespace SchoolCollab.CodedValues.Tests.Unit;
@@ -129,19 +129,24 @@ public sealed class DashboardCardTests
     }
 
     [TestMethod]
-    public void DashboardCard_AppCssContainsLineClampRule()
+    public void DashboardCard_CssContainsLineClampRule()
     {
         // Regression guard at the CSS level: the line-clamp rule must
         // exist so the clamp class actually constrains the description.
         // If someone removes the class on the <p> or drops the CSS rule,
         // the Home page Students card re-grows taller than its siblings.
+        //
+        // The description clamp rule is owned by DashboardCard itself — it
+        // lives in DashboardCard.razor.css (CSS-isolated). The shell/layout
+        // rules live in DashboardSection.razor.css; both files replaced the
+        // original global wwwroot/css/app.css dashboard block.
         var cssPath = Path.Combine(
             AppContext.BaseDirectory,
             "..", "..", "..", "..", "..",
-            "src", "SchoolCollab.Admin", "wwwroot", "css", "app.css");
+            "src", "SchoolCollab.Admin.Shared", "Components", "DashboardCard.razor.css");
         cssPath = Path.GetFullPath(cssPath);
 
-        File.Exists(cssPath).Should().BeTrue($"expected app.css to exist at {cssPath}");
+        File.Exists(cssPath).Should().BeTrue($"expected DashboardCard.razor.css to exist at {cssPath}");
 
         var css = File.ReadAllText(cssPath);
 
