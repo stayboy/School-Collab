@@ -6,6 +6,7 @@
 
 /* Navigation cards on the Home page */
 a.card-link {
+    display: inline-flex;
     text-decoration: none !important;
     color: inherit;
 }
@@ -25,7 +26,7 @@ fluent-card[style*="cursor: pointer"]:hover {
 
 /* Home dashboard layout */
 .home-dashboard {
-    max-width: 1100px;
+    min-width: 1100px;
     margin: 0 auto;
     padding: 2rem 0;
 }
@@ -43,12 +44,35 @@ fluent-card[style*="cursor: pointer"]:hover {
 
 .home-cards {
     display: flex;
-    gap: 1.5rem;
+    flex-direction: row;
     flex-wrap: wrap;
+    justify-content: flex-start;
+    /* align-items defaults to stretch, so every card-link on a row
+       shares the height of the tallest sibling. */
+    width: 100%;
+    gap: 1.5rem;
+}
+
+.home-cards > a.card-link {
+    /* Ensure the single-card layout stays flush-left instead of drifting
+       to the centre of the flex row, and stretches to the row height. */
+    flex: 0 0 auto;
+    height: 100%;
+    align-self: stretch;
+}
+
+.home-card {
+    /* The inline Style on <FluentCard> only sets width/cursor; supply
+       height here so the card fills its link parent. */
+    height: 100%;
+    display: flex;
 }
 
 .home-card .home-card-inner {
     padding: 1.5rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
 }
 
 .home-card-inner h3 {
@@ -56,10 +80,31 @@ fluent-card[style*="cursor: pointer"]:hover {
     font-size: 1.15rem;
 }
 
-.home-card-inner p {
+.home-card-description {
     margin: 0;
     color: var(--neutral-foreground-2, #616161);
     font-size: 0.9rem;
+    /* Fixed line-height so the reserved height below is deterministic
+       rather than depending on an inherited value. */
+    line-height: 1.4;
+    /* Constrain the description to a fixed number of lines so cards in a
+       row share the same height regardless of how the text wraps. The
+       full description remains available via the `title` attribute (see
+       DashboardCard.razor) and via the `MaxDescriptionLength` clipper. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* line-clamp only caps the MAXIMUM line count; a card whose
+       description wraps to fewer lines than the tallest sibling still
+       renders shorter, so flex stretch alone does not equalise the row
+       (and the fluent-card custom element breaks the stretch chain).
+       Reserving exactly 3 line-boxes here makes every card occupy the
+       same description space: shorter descriptions pad down, a 3-line
+       description fills it, and anything longer is clamped + hidden. */
+    min-height: calc(1.4em * 3);
 }
 
 .home-card-icon {

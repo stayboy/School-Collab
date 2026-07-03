@@ -3,7 +3,7 @@
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.FluentUI.AspNetCore.Components
 
-<NavLink Href="@Href" Match="@Match" class="card-link" aria-label="@Title">
+<NavLink Href="@Href" Match="@Match" class="card-link" aria-label="@($"{Title} — {Description}")">
     <FluentCard Style="width: 320px; cursor: pointer;" class="home-card">
         <div class="home-card-inner">
             <div class="home-card-icon" aria-hidden="true">
@@ -11,7 +11,7 @@
             </div>
 
             <h3>@Title</h3>
-            <p>@Description</p>
+            <p class="home-card-description" title="@Description">@_displayedDescription</p>
         </div>
     </FluentCard>
 </NavLink>
@@ -31,4 +31,46 @@
 
     [Parameter]
     public string IconWidth { get; set; } = "48px";
+
+    /// <summary>
+    /// Soft cap on the visible description length. Descriptions longer than
+    /// this are clipped on a word boundary and suffixed with an ellipsis;
+    /// the full original text is preserved on the <c>title</c> attribute so
+    /// the browser shows it as a tooltip on hover.
+    /// </summary>
+    [Parameter]
+    public int MaxDescriptionLength { get; set; } = 120;
+
+    private string _displayedDescription = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        _displayedDescription = ClipForDisplay(Description, MaxDescriptionLength);
+    }
+
+    /// <summary>
+    /// Truncates <paramref name="value"/> to at most <paramref name="maxLength"/>
+    /// characters on a word boundary and appends an ellipsis. Returns the input
+    /// unchanged when it already fits.
+    /// </summary>
+    internal static string ClipForDisplay(string value, int maxLength)
+    {
+        if (string.IsNullOrEmpty(value) || value.Length <= maxLength)
+        {
+            return value;
+        }
+
+        // Reserve room for the ellipsis suffix.
+        const string ellipsis = "…";
+        var budget = Math.Max(0, maxLength - ellipsis.Length);
+
+        var slice = value[..budget];
+        var lastSpace = slice.LastIndexOf(' ');
+        if (lastSpace > 0)
+        {
+            slice = slice[..lastSpace];
+        }
+
+        return string.Concat(slice, ellipsis);
+    }
 }
