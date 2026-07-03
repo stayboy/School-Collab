@@ -3,15 +3,9 @@
 
 <PageTitle>Home</PageTitle>
 
-<div class="home-dashboard">
-    <h1>Welcome to School Collab</h1>
-    <p class="home-subtitle">A collaborative platform for managing educational data.</p>
-
-    <div class="home-cards">
-        <DashboardCard Href="/coded-values" Icon="@(Icons.Regular.Size24.Tag)" Title="Coded Values" Description="Manage categories, subjects, grades, and other reference data." />
-
-        <DashboardCard Href="/assignments" Icon="@(Icons.Regular.Size24.ClipboardCheckmark)" Title="Assignments" Description="Create, publish, and review assignments and homework." />
-
-        <DashboardCard Href="/students" Icon="@(Icons.Regular.Size24.People)" Title="Students" Description="Manage student records, enrollments, grade levels, subjects, and periods." />
-    </div>
-</div>
+<DashboardSection Title="Welcome to School Collab"
+                  Subtitle="A collaborative platform for managing educational data.">
+    <DashboardCard Href="/coded-values" Icon="@(Icons.Regular.Size24.Tag)" Title="Coded Values" Description="Manage categories, subjects, grades, and other reference data." />
+    <DashboardCard Href="/assignments" Icon="@(Icons.Regular.Size24.ClipboardCheckmark)" Title="Assignments" Description="Create, publish, and review assignments and homework." />
+    <DashboardCard Href="/students" Icon="@(Icons.Regular.Size24.People)" Title="Students" Description="Manage student records, enrollments, grade levels, subjects, and periods." />
+</DashboardSection>

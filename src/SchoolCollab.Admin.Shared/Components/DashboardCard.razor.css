@@ -1,0 +1,57 @@
+/* DashboardCard content styling — the card's inner appearance.
+
+   These elements (<div class="home-card-inner">, its <h3>, the
+   <p class="home-card-description">, and <div class="home-card-icon">)
+   are plain HTML authored in DashboardCard.razor, so CSS isolation
+   applies this component's scope attribute to them and the rules below
+   match without ::deep.
+
+   The card's OUTER shell — the NavLink <a.card-link> root and the
+   FluentCard <fluent-card.home-card> — is rendered by child components
+   and carries their scope (or none), not DashboardCard's, so it cannot
+   be scoped from here. Those layout/shell rules live in
+   DashboardSection.razor.css, anchored on .home-cards ::deep. */
+
+.home-card-inner {
+    padding: 1.5rem;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.home-card-inner h3 {
+    margin: 0.5rem 0 0.5rem;
+    font-size: 1.15rem;
+}
+
+.home-card-description {
+    margin: 0;
+    color: var(--neutral-foreground-2, #616161);
+    font-size: 0.9rem;
+    /* Fixed line-height so the reserved height below is deterministic
+       rather than depending on an inherited value. */
+    line-height: 1.4;
+    /* Constrain the description to a fixed number of lines so cards in a
+       row share the same height regardless of how the text wraps. The
+       full description remains available via the `title` attribute (see
+       DashboardCard.razor) and via the `MaxDescriptionLength` clipper. */
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* line-clamp only caps the MAXIMUM line count; a card whose
+       description wraps to fewer lines than the tallest sibling still
+       renders shorter, so flex stretch alone does not equalise the row
+       (and the fluent-card custom element breaks the stretch chain).
+       Reserving exactly 3 line-boxes here makes every card occupy the
+       same description space: shorter descriptions pad down, a 3-line
+       description fills it, and anything longer is clamped + hidden. */
+    min-height: calc(1.4em * 3);
+}
+
+.home-card-icon {
+    font-size: 3rem;
+    margin-bottom: 0.5rem;
+}
