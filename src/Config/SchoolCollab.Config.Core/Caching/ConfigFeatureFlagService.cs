@@ -97,14 +97,12 @@ public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlag
                     var route = tenant is null ? "/api/features/global" : $"/api/features/{tenant}";
                     var dtos = await _http.GetFromJsonAsync<ResolvedFlagDto[]>(route, ct);
                     var now = DateTimeOffset.UtcNow;
-                    // OrdinalIgnoreCase so callers can look up with the canonical upper-case
-                    // form produced by FeatureFlag.NormalizeKey (e.g.
-                    // "FEATURE:ENABLECODEDVALUESAICHAT") OR with the humanised mixed-case
-                    // form most call sites use (e.g. "FEATURE:EnableCodedValuesAiChat").
-                    // The DB stores the canonical upper-case form; the appsettings fallback
-                    // walks IConfiguration and preserves the keys as-authored. Without the
-                    // case-insensitive comparer a mixed-case lookup against the DB-backed
-                    // path silently misses and the flag evaluates as disabled.
+                    // Build with OrdinalIgnoreCase so the in-memory (L1) copy lets callers
+                    // look up with the canonical upper-case form produced by
+                    // FeatureFlag.NormalizeKey (e.g. "FEATURE:ENABLECODEDVALUESAICHAT") OR
+                    // the humanised mixed-case form most call sites use (e.g.
+                    // "FEATURE:EnableCodedValuesAiChat"). The DB stores the canonical
+                    // upper-case form; the appsettings fallback preserves keys as-authored.
                     return (IReadOnlyDictionary<string, ResolvedFlag>)new Dictionary<string, ResolvedFlag>(
                         dtos!.ToDictionary(d => d.Key, d => new ResolvedFlag(d.Key, d.IsEnabled, ParseSource(d.Source), d.ResolvedAt)),
                         StringComparer.OrdinalIgnoreCase);
@@ -112,7 +110,19 @@ public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlag
                 CacheOptions,
                 cancellationToken: ct);
 
-            return fromCache;
+            // Re-wrap with OrdinalIgnoreCase on every read. HybridCache serializes
+            // the cached dictionary through its L2 (Redis) / L1 serializer on a
+            // round-trip; the deserialized copy is rebuilt as a plain
+            // Dictionary<string, ResolvedFlag> with the DEFAULT (case-sensitive)
+            // comparer, so the OrdinalIgnoreCase comparer set in the factory above
+            // is silently lost on a cache hit after L1 expires. A mixed-case
+            // caller key ("FEATURE:EnableCodedValuesAiChat") then misses the
+            // stored canonical key ("FEATURE:ENABLECODEDVALUESAICHAT") and the
+            // flag evaluates as disabled even though it is enabled in the DB —
+            // the exact "chat won't render" symptom. Re-wrapping here guarantees a
+            // case-insensitive lookup regardless of how the cache returned the
+            // dictionary. Cost is a small copy per call (a handful of flags).
+            return WithCaseInsensitiveLookup(fromCache);
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
@@ -158,6 +168,22 @@ public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlag
     }
 
     // ── helpers ──
+
+    /// <summary>
+    /// Re-wraps the resolved flag set in a dictionary keyed with
+    /// <see cref="StringComparer.OrdinalIgnoreCase"/>. <see cref="ResolveAllAsync"/>
+    /// calls this on every read because HybridCache serializes the cached
+    /// dictionary through its L2/L1 serializer on a round-trip, and the
+    /// deserialized copy is rebuilt with the DEFAULT (case-sensitive) comparer —
+    /// silently discarding the OrdinalIgnoreCase comparer the factory set. A
+    /// mixed-case caller key (e.g. "FEATURE:EnableCodedValuesAiChat") would then
+    /// miss the stored canonical key ("FEATURE:ENABLECODEDVALUESAICHAT") and the
+    /// flag would evaluate as disabled. Exposed as internal static so the
+    /// behaviour is unit-testable without standing up HybridCache/HttpClient.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, ResolvedFlag> WithCaseInsensitiveLookup(
+        IReadOnlyDictionary<string, ResolvedFlag> flags) =>
+        new Dictionary<string, ResolvedFlag>(flags, StringComparer.OrdinalIgnoreCase);
 
     private Guid? SafeTenantId()
     {

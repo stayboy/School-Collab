@@ -6,6 +6,9 @@
     <RootNamespace>SchoolCollab.Config.Core</RootNamespace>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="SchoolCollab.Config.Tests.Unit" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\SchoolCollab.Config.Contracts\SchoolCollab.Config.Contracts.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
