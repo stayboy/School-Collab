@@ -1,99 +1,66 @@
 @page "/config-flags"
+@using SchoolCollab.Admin.Shared.Components.Landing
 @inject ConfigFlagsApiClient Api
-@inject NavigationManager Nav
 @inject ILogger<Index> Logger
 @implements IDisposable
 
-<PageTitle>Config Flags</PageTitle>
-
-<ErrorBoundary>
-    <ChildContent>
-        <SectionContent SectionName="page-toolbar">
-            <div class="title-row">
-                <h1 class="page-title">Feature Flags</h1>
-            </div>
-            <div class="action-bar">
-                <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/config-flags/new")'>
-                    + New Flag
-                </FluentButton>
-                <FluentCheckbox @bind-Value="_showArchived"
-                                @bind-Value:after="OnFilterChanged"
-                                Label="Show archived" />
-                <div class="spacer"></div>
-                <FluentTextField Placeholder="Search flags…"
-                                 class="search-box"
-                                 Immediate="true"
-                                 ImmediateDelay="300"
-                                 @bind-Value="_search"
-                                 @bind-Value:after="OnSearchChanged" />
-            </div>
-        </SectionContent>
-
-        @* -- Loading state: fill the scroll region and center the spinner. -- *@
-        @if (_items is null)
-        {
-            <div class="spinner-container">
-                <FluentProgressRing />
-            </div>
-        }
-        else if (_items.Length == 0 && !_showArchived && string.IsNullOrEmpty(_search))
-        {
-            <FluentMessageBar Intent="MessageIntent.Info">No feature flags. Create one to get started.</FluentMessageBar>
-        }
-        else if (_items.Length == 0)
-        {
-            <FluentMessageBar Intent="MessageIntent.Info">No feature flags match the current filter.</FluentMessageBar>
-        }
-        else
-        {
-            @* -- Grid fills remaining vertical space -- *@
-            <div class="grid-container">
-                <FluentDataGrid Items="@_items.AsQueryable()"
-                                GridTemplateColumns="minmax(240px,2fr) minmax(220px,2fr) 100px 100px minmax(160px,1fr)"
-                                GenerateHeader="GenerateHeaderOption.Sticky"
-                                MultiLine="true"
-                                TGridItem="FeatureFlagDto">
-                    <TemplateColumn Title="Key" Sortable="true" SortBy="@_sortByKey" TooltipText="@(f => f.Key)">
-                        <FluentAnchor Appearance="Appearance.Hypertext"
-                                     Href="@($"/config-flags/{Uri.EscapeDataString(context.Key)}")"
-                                     title="@context.Key">
-                            @context.Key
-                        </FluentAnchor>
-                    </TemplateColumn>
-                    <PropertyColumn Property="@(f => f.Name)" Title="Name" Sortable="true" />
-                    <TemplateColumn Title="Enabled" Sortable="true" SortBy="@_sortByEnabled">
-                        <FluentBadge Appearance="@(context.IsEnabled ? Appearance.Accent : Appearance.Neutral)">
-                            @(context.IsEnabled ? "On" : "Off")
-                        </FluentBadge>
-                    </TemplateColumn>
-                    <TemplateColumn Title="Overrides" Sortable="true" SortBy="@_sortByOverrides">
-                        @context.OverrideCount
-                    </TemplateColumn>
-                    <TemplateColumn Title="Last changed" Sortable="true" SortBy="@_sortByUpdatedAt">
-                        @(context.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))
-                    </TemplateColumn>
-                </FluentDataGrid>
-            </div>
-        }
-
-        @if (!string.IsNullOrEmpty(_error))
-        {
-            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
-        }
-    </ChildContent>
-    <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
-    </ErrorContent>
-</ErrorBoundary>
+<LandingPage TItem="FeatureFlagDto"
+             Title="Feature Flags"
+             CreateLabel="+ New Flag"
+             CreateRoute="/config-flags/new"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@_items"
+             Error="@_error"
+             GridSettings="@_gridSettings"
+             SearchText="@_search"
+             SearchTextChanged="@OnSearchChanged"
+             SearchPlaceholder="Search flags…">
+    <ToolbarFilters>
+        <FluentCheckbox @bind-Value="_showArchived"
+                        @bind-Value:after="OnFilterChanged"
+                        Label="Show archived" />
+    </ToolbarFilters>
+    <Columns>
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Key" Sortable="true" SortBy="@_sortByKey" TooltipText="@(f => f.Key)">
+            <FluentAnchor Appearance="Appearance.Hypertext"
+                          Href="@($"/config-flags/{Uri.EscapeDataString(context.Key)}")"
+                          title="@context.Key">
+                @context.Key
+            </FluentAnchor>
+        </TemplateColumn>
+        <PropertyColumn TGridItem="FeatureFlagDto" TProp="string" Property="@(f => f.Name)" Title="Name" Sortable="true" />
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Enabled" Sortable="true" SortBy="@_sortByEnabled">
+            <FluentBadge Appearance="@(context.IsEnabled ? Appearance.Accent : Appearance.Neutral)">
+                @(context.IsEnabled ? "On" : "Off")
+            </FluentBadge>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Overrides" Sortable="true" SortBy="@_sortByOverrides">
+            @context.OverrideCount
+        </TemplateColumn>
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Last changed" Sortable="true" SortBy="@_sortByUpdatedAt">
+            @(context.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
 
 @code {
     private FeatureFlagDto[]? _items;
     private bool _showArchived;
-    private string? _search;
+    private string _search = string.Empty;
     private string? _error;
     private bool _initialLoadDone;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+
+    private string CurrentEmptyMessage =>
+        (!_showArchived && string.IsNullOrEmpty(_search))
+            ? "No feature flags. Create one to get started."
+            : "No feature flags match the current filter.";
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(240px,2fr) minmax(220px,2fr) 100px 100px minmax(160px,1fr)"
+    };
 
     private readonly GridSort<FeatureFlagDto> _sortByKey =
         GridSort<FeatureFlagDto>.ByAscending(f => f.Key);
@@ -164,8 +131,9 @@
         return LoadAsync(_showArchived, _search, isUserDriven: true);
     }
 
-    private Task OnSearchChanged()
+    private Task OnSearchChanged(string text)
     {
+        _search = text ?? string.Empty;
         if (!_initialLoadDone) return Task.CompletedTask;
         return LoadAsync(_showArchived, _search, isUserDriven: true);
     }

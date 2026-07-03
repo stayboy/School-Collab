@@ -1,130 +1,59 @@
 @page "/students"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Components.Landing
 @inject StudentsApiClient Api
-@inject NavigationManager Nav
 @inject ILogger<Index> Logger
 @inject IDialogService DialogService
 @implements IDisposable
 
-<PageTitle>Students</PageTitle>
-
-<ErrorBoundary>
-    <ChildContent>
-        <SectionContent SectionName="page-toolbar">
-            <div class="title-row">
-                <h1 class="page-title">Students</h1>
-            </div>
-            <div class="action-bar">
-                <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/students/create")'>
-                    + New Student
-                </FluentButton>
-                <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged" Label="Show deleted" />
-                <div class="spacer"></div>
-                <FluentTextField Placeholder="Search students…"
-                                 class="search-box"
-                                 Immediate="true"
-                                 ImmediateDelay="300"
-                                 ValueChanged="@OnSearchValueChanged" />
-            </div>
-        </SectionContent>
-            @if (_showDeleted && _deletedItems is not null)
+<LandingPage TItem="StudentDto"
+             Title="Students"
+             CreateLabel="+ New Student"
+             CreateRoute="/students/create"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@_filteredItems"
+             Loading="@(_items is null)"
+             GridSettings="@_gridSettings"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchValueChanged"
+             SearchPlaceholder="Search students…">
+    <ToolbarFilters>
+        <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged"
+                        Label="Show deleted" />
+    </ToolbarFilters>
+    <Columns>
+        <TemplateColumn TGridItem="StudentDto" Title="Student #" SortBy="@_sortByStudentNumber" Sortable="true">
+            <code>@context.StudentNumber</code>
+        </TemplateColumn>
+        <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.FirstName)" Sortable="true" />
+        <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.LastName)" Sortable="true" />
+        <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.ContactEmail)" />
+        <TemplateColumn TGridItem="StudentDto" Title="Date of Birth">
+            @(context.DateOfBirth?.ToShortDateString() ?? "—")
+        </TemplateColumn>
+        <TemplateColumn TGridItem="StudentDto" Title="Status">
+            @if (context.IsDeleted)
             {
-                @if (_deletedItems.Length == 0)
-                {
-                    <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">No deleted students.</FluentMessageBar>
-                }
-                else
-                {
-                    <h3>Deleted Students</h3>
-                    <FluentDataGrid Items="@_deletedItems.AsQueryable()"
-                                    GridTemplateColumns="1fr 2fr 2fr 2fr 1fr auto"
-                                    TGridItem="StudentDto"
-                                    GenerateHeader="GenerateHeaderOption.Sticky"
-                                    MultiLine="true"
-                                    class="mb-4">
-                        <TemplateColumn Title="Student #" SortBy="@_sortByStudentNumber" Sortable="true">
-                            <code>@context.StudentNumber</code>
-                        </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.FirstName)" Sortable="true" />
-                        <PropertyColumn Property="@(x => x.LastName)" Sortable="true" />
-                        <PropertyColumn Property="@(x => x.ContactEmail)" />
-                        <TemplateColumn Title="Status">
-                            <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
-                        </TemplateColumn>
-                        <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))">Recover</FluentAnchor>
-                            <FluentAnchor Href="@($"/students/{context.Id}")" class="ms-2">View</FluentAnchor>
-                        </TemplateColumn>
-                    </FluentDataGrid>
-                }
-            }
-
-            @* -- Grid fills remaining vertical space -- *@
-            @if (_items is null)
-            {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
-            }
-            else if (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0)
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">No students match '@_searchText'.</FluentMessageBar>
-            }
-            else if (_items.Length == 0)
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">No students yet.</FluentMessageBar>
+                <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
             }
             else
             {
-                <div class="grid-container">
-                    <FluentDataGrid Items="@_filteredItems.AsQueryable()"
-                                    GridTemplateColumns="120px minmax(180px,2fr) minmax(180px,2fr) minmax(200px,2fr) 120px 100px auto"
-                                    GenerateHeader="GenerateHeaderOption.Sticky"
-                                    MultiLine="true"
-                                    TGridItem="StudentDto">
-                        <TemplateColumn Title="Student #" SortBy="@_sortByStudentNumber" Sortable="true">
-                            <code>@context.StudentNumber</code>
-                        </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.FirstName)" Sortable="true" />
-                        <PropertyColumn Property="@(x => x.LastName)" Sortable="true" />
-                        <PropertyColumn Property="@(x => x.ContactEmail)" />
-                        <TemplateColumn Title="Date of Birth">
-                            @(context.DateOfBirth?.ToShortDateString() ?? "—")
-                        </TemplateColumn>
-                        <TemplateColumn Title="Status">
-                            @if (context.IsDeleted)
-                            {
-                                <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
-                            }
-                            else
-                            {
-                                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                            }
-                        </TemplateColumn>
-                        <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="@($"/students/{context.Id}")">View</FluentAnchor>
-                            @if (!context.IsDeleted)
-                            {
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="ms-2">Delete</FluentAnchor>
-                            }
-                            else
-                            {
-                                <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="ms-2">Recover</FluentAnchor>
-                            }
-                        </TemplateColumn>
-                    </FluentDataGrid>
-                </div>
+                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
             }
-
-            @if (!string.IsNullOrEmpty(_error))
+        </TemplateColumn>
+        <TemplateColumn TGridItem="StudentDto" Title="Actions">
+            <FluentAnchor Href="@($"/students/{context.Id}")">View</FluentAnchor>
+            @if (!context.IsDeleted)
             {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="ms-2">Delete</FluentAnchor>
             }
-    </ChildContent>
-    <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
-    </ErrorContent>
-</ErrorBoundary>
+            else
+            {
+                <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="ms-2">Recover</FluentAnchor>
+            }
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
 
 @code {
     private StudentDto[]? _items;
@@ -136,9 +65,41 @@
 
     private string _searchText = string.Empty;
 
-    private StudentDto[] _filteredItems => string.IsNullOrWhiteSpace(_searchText)
-        ? _items ?? []
-        : (_items ?? []).Where(MatchesSearch).ToArray();
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "120px minmax(180px,2fr) minmax(180px,2fr) minmax(200px,2fr) 120px 100px auto"
+    };
+
+    /// <summary>
+    /// The array bound to the grid: the active list plus the deleted list when
+    /// "Show deleted" is on (the deleted rows render with a Deleted status badge
+    /// and a Recover action via the per-row column templates), then narrowed by
+    /// the client-side search filter.
+    /// </summary>
+    private StudentDto[] _filteredItems
+    {
+        get
+        {
+            var baseItems = _showDeleted
+                ? (_items ?? []).Concat(_deletedItems ?? []).ToArray()
+                : (_items ?? []);
+
+            return string.IsNullOrWhiteSpace(_searchText)
+                ? baseItems
+                : baseItems.Where(MatchesSearch).ToArray();
+        }
+    }
+
+    /// <summary>
+    /// Empty-state message. While loading the wrapper shows the spinner (Loading
+    /// is true), so this is only read when _items is populated. A non-empty
+    /// search with no matches yields "No students match …"; otherwise "No
+    /// students yet."
+    /// </summary>
+    private string CurrentEmptyMessage =>
+        !string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
+            ? $"No students match '{_searchText}'."
+            : "No students yet.";
 
     private readonly GridSort<StudentDto> _sortByStudentNumber =
         GridSort<StudentDto>.ByAscending(x => x.StudentNumber);

@@ -1,181 +1,76 @@
 @page "/assignments"
 @using SchoolCollab.Assignments.Contracts
-@using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Admin.Helpers
+@using SchoolCollab.Admin.Shared.Components.Landing
 @inject AssignmentsApiClient Api
-@inject NavigationManager Nav
 @inject ILogger<Index> Logger
 @implements IDisposable
 
-<PageTitle>Assignments</PageTitle>
-
-<ErrorBoundary>
-    <ChildContent>
-        <SectionContent SectionName="page-toolbar">
-            <div class="title-row">
-                <h1 class="page-title">Assignments</h1>
-            </div>
-            <div class="action-bar">
-                <FluentButton Appearance="Appearance.Accent" OnClick="@(() => Nav.NavigateTo("/assignments/create"))">
-                    + New Assignment
-                </FluentButton>
-                <FluentSelect Items="@_statusOptions"
-                              @bind-SelectedOption="_selectedStatus"
-                              @bind-SelectedOption:after="OnStatusFilterChangedAsync"
-                              OptionText="@(o => o!.Label)"
-                              OptionValue="@(o => o!.Value?.ToString() ?? "")"
-                              class="status-filter" />
-                <div class="spacer"></div>
-                <FluentTextField Id="search-assignments"
-                                Placeholder="Search assignments…"
-                                class="search-box"
-                                Immediate="true"
-                                ImmediateDelay="300"
-                                ValueChanged="@OnSearchValueChanged" />
-            </div>
-        </SectionContent>
-
-            @* Search results view *@
-            @if (_isSearching && _searchResults is null)
+<LandingPage TItem="AssignmentSummaryDto"
+             Title="Assignments"
+             CreateLabel="+ New Assignment"
+             CreateRoute="/assignments/create"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@DisplayItems"
+             Error="@_error"
+             Loading="@_isSearching"
+             GridSettings="@_gridSettings"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchValueChanged"
+             SearchPlaceholder="Search assignments…">
+    <ToolbarFilters>
+        <FluentSelect Items="@_statusOptions"
+                      @bind-SelectedOption="_selectedStatus"
+                      @bind-SelectedOption:after="OnStatusFilterChangedAsync"
+                      OptionText="@(o => o!.Label)"
+                      OptionValue="@(o => o!.Value?.ToString() ?? "")"
+                      class="status-filter" />
+    </ToolbarFilters>
+    <Columns>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Title" SortBy="@_sortByTitle" Sortable="true">
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Type" SortBy="@_sortByType" Sortable="true">
+            @EnumHelper.GetDescription(context.AssignmentType)
+        </TemplateColumn>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Grading" SortBy="@_sortByGradingFormat" Sortable="true">
+            @EnumHelper.GetDescription(context.GradingFormat)
+        </TemplateColumn>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Audience" SortBy="@_sortByTargetAudience" Sortable="true">
+            @EnumHelper.GetDescription(context.TargetAudienceType)
+        </TemplateColumn>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Status" SortBy="@_sortByStatus" Sortable="true">
+            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
+                : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
+                : Appearance.Lightweight)">
+                @context.Status
+            </FluentBadge>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Due Date" SortBy="@_sortByDueDate" Sortable="true">
+            @(context.DueDate?.ToLocalTime().ToString("g") ?? "—")
+        </TemplateColumn>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Max Score" SortBy="@_sortByMaxScore" Sortable="true">
+            @(context.MaxScore?.ToString("0.##") ?? "—")
+        </TemplateColumn>
+        <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Actions">
+            @if (context.Status == AssignmentStatusDto.Draft)
             {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
+                <FluentAnchor Href="@($"/assignments/{context.Id}/edit")">Edit</FluentAnchor>
+                <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="ms-2">Publish</FluentAnchor>
+                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="ms-2">Delete</FluentAnchor>
             }
-            else if (!string.IsNullOrWhiteSpace(_searchText) && _searchResults is not null)
+            else if (context.Status == AssignmentStatusDto.Published)
             {
-                if (_searchResults.Length == 0)
-                {
-                    <FluentMessageBar Intent="MessageIntent.Info">No assignments match '@_searchText'.</FluentMessageBar>
-                }
-                else
-                {
-                    <div class="grid-container">
-                        <FluentDataGrid Items="@_searchResults.AsQueryable()"
-                                        GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto"
-                                        GenerateHeader="GenerateHeaderOption.Sticky"
-                                        MultiLine="true"
-                                        TGridItem="AssignmentSummaryDto">
-                            <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
-                                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
-                            </TemplateColumn>
-                            <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
-                                @EnumHelper.GetDescription(context.AssignmentType)
-                            </TemplateColumn>
-                            <TemplateColumn Title="Grading" SortBy="@_sortByGradingFormat" Sortable="true">
-                                @EnumHelper.GetDescription(context.GradingFormat)
-                            </TemplateColumn>
-                            <TemplateColumn Title="Audience" SortBy="@_sortByTargetAudience" Sortable="true">
-                                @EnumHelper.GetDescription(context.TargetAudienceType)
-                            </TemplateColumn>
-                            <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
-                                    <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
-                                    : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                                        : Appearance.Lightweight)">
-                                    @context.Status
-                                </FluentBadge>
-                            </TemplateColumn>
-                            <TemplateColumn Title="Due Date" SortBy="@_sortByDueDate" Sortable="true">
-                                @(context.DueDate?.ToLocalTime().ToString("g") ?? "—")
-                            </TemplateColumn>
-                            <TemplateColumn Title="Max Score" SortBy="@_sortByMaxScore" Sortable="true">
-                                @(context.MaxScore?.ToString("0.##") ?? "—")
-                            </TemplateColumn>
-                            <TemplateColumn Title="Actions">
-                                @if (context.Status == AssignmentStatusDto.Draft)
-                                {
-                                    <FluentAnchor Href="@($"/assignments/{context.Id}/edit")">Edit</FluentAnchor>
-                                    <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="ms-2">Publish</FluentAnchor>
-                                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="ms-2">Delete</FluentAnchor>
-                                }
-                                else if (context.Status == AssignmentStatusDto.Published)
-                                {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))">Unpublish</FluentAnchor>
-                                    <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="ms-2">Close</FluentAnchor>
-                                }
-                                else if (context.Status == AssignmentStatusDto.Closed)
-                                {
-                                    <FluentAnchor Href="@($"/assignments/{context.Id}")">Review</FluentAnchor>
-                                }
-                            </TemplateColumn>
-                        </FluentDataGrid>
-                    </div>
-                }
+                <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))">Unpublish</FluentAnchor>
+                <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="ms-2">Close</FluentAnchor>
             }
-            @* Default list view *@
-            else if (_items is null)
+            else if (context.Status == AssignmentStatusDto.Closed)
             {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
+                <FluentAnchor Href="@($"/assignments/{context.Id}")">Review</FluentAnchor>
             }
-            else if (_items.Length == 0)
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">No assignments yet.</FluentMessageBar>
-            }
-            else
-            {
-                <div class="grid-container">
-                    <FluentDataGrid Items="@_items.AsQueryable()"
-                                    GridTemplateColumns="minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto"
-                                    GenerateHeader="GenerateHeaderOption.Sticky"
-                                    MultiLine="true"
-                                    TGridItem="AssignmentSummaryDto">
-                        <TemplateColumn Title="Title" SortBy="@_sortByTitle" Sortable="true">
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/assignments/{context.Id}")">@context.Title</FluentAnchor>
-                        </TemplateColumn>
-                        <TemplateColumn Title="Type" SortBy="@_sortByType" Sortable="true">
-                            @EnumHelper.GetDescription(context.AssignmentType)
-                        </TemplateColumn>
-                        <TemplateColumn Title="Grading" SortBy="@_sortByGradingFormat" Sortable="true">
-                            @EnumHelper.GetDescription(context.GradingFormat)
-                        </TemplateColumn>
-                        <TemplateColumn Title="Audience" SortBy="@_sortByTargetAudience" Sortable="true">
-                            @EnumHelper.GetDescription(context.TargetAudienceType)
-                        </TemplateColumn>
-                        <TemplateColumn Title="Status" SortBy="@_sortByStatus" Sortable="true">
-                            <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
-                                : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
-                                : Appearance.Lightweight)">
-                                @context.Status
-                            </FluentBadge>
-                        </TemplateColumn>
-                        <TemplateColumn Title="Due Date" SortBy="@_sortByDueDate" Sortable="true">
-                            @(context.DueDate?.ToLocalTime().ToString("g") ?? "—")
-                        </TemplateColumn>
-                        <TemplateColumn Title="Max Score" SortBy="@_sortByMaxScore" Sortable="true">
-                            @(context.MaxScore?.ToString("0.##") ?? "—")
-                        </TemplateColumn>
-                        <TemplateColumn Title="Actions">
-                            @if (context.Status == AssignmentStatusDto.Draft)
-                            {
-                                <FluentAnchor Href="@($"/assignments/{context.Id}/edit")">Edit</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnPublishAsync(context.Id))" class="ms-2">Publish</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Title))" class="ms-2">Delete</FluentAnchor>
-                            }
-                            else if (context.Status == AssignmentStatusDto.Published)
-                            {
-                                <FluentAnchor Href="#" OnClick="@(() => OnUnpublishAsync(context.Id))">Unpublish</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnCloseAsync(context.Id))" class="ms-2">Close</FluentAnchor>
-                            }
-                            else if (context.Status == AssignmentStatusDto.Closed)
-                            {
-                                <FluentAnchor Href="@($"/assignments/{context.Id}")">Review</FluentAnchor>
-                            }
-                        </TemplateColumn>
-                    </FluentDataGrid>
-                </div>
-            }
-
-            @if (!string.IsNullOrEmpty(_error))
-            {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
-            }
-    </ChildContent>
-    <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
-    </ErrorContent>
-</ErrorBoundary>
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
 
 @code {
     private AssignmentSummaryDto[]? _items;
@@ -188,6 +83,22 @@
     private AssignmentSummaryDto[]? _searchResults;
     private bool _isSearching;
     private CancellationTokenSource? _searchCts;
+
+    // The array currently shown: search results while searching, otherwise the
+    // loaded list. Null while the relevant fetch is in flight (the wrapper turns
+    // that into the spinner via Items=null or Loading=_isSearching).
+    private AssignmentSummaryDto[]? DisplayItems =>
+        !string.IsNullOrWhiteSpace(_searchText) ? _searchResults : _items;
+
+    private string CurrentEmptyMessage =>
+        !string.IsNullOrWhiteSpace(_searchText)
+            ? $"No assignments match '{_searchText}'."
+            : "No assignments yet.";
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto"
+    };
 
     // Status filter
     private record StatusOption(int? Value, string Label);
