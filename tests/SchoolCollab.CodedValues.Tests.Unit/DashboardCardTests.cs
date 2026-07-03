@@ -1,7 +1,7 @@
 using Bunit;
 using FluentAssertions;
 using Microsoft.FluentUI.AspNetCore.Components;
-using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Admin.Shared.Components.Dashboard;
 using PeopleIcon = Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size24.People;
 
 namespace SchoolCollab.CodedValues.Tests.Unit;
@@ -16,14 +16,15 @@ public sealed class DashboardCardTests
 
         var cut = ctx.Render(builder =>
         {
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(0);
-            builder.AddAttribute(1, nameof(DashboardCard<PeopleIcon>.Href), "/students");
-            builder.AddAttribute(2, nameof(DashboardCard<PeopleIcon>.Title), "Students");
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Description), "Manage student records.");
+            builder.OpenComponent<DashboardCard>(0);
+            builder.AddAttribute(1, nameof(DashboardCard.Href), "/students");
+            builder.AddAttribute(2, nameof(DashboardCard.Title), "Students");
+            builder.AddAttribute(3, nameof(DashboardCard.Description), "Manage student records.");
+            builder.AddAttribute(4, nameof(DashboardCard.Icon), new PeopleIcon());
             builder.CloseComponent();
         });
 
-        var card = cut.FindComponents<DashboardCard<PeopleIcon>>().Single();
+        var card = cut.FindComponents<DashboardCard>().Single();
 
         card.Markup.Should().Contain("Students");
         cut.Markup.Should().Contain("Manage student records.");
@@ -41,11 +42,12 @@ public sealed class DashboardCardTests
 
         var cut = ctx.Render(builder =>
         {
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(0);
-            builder.AddAttribute(1, nameof(DashboardCard<PeopleIcon>.Href), "/students");
-            builder.AddAttribute(2, nameof(DashboardCard<PeopleIcon>.Title), "Students");
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Description), longDescription);
-            builder.AddAttribute(4, nameof(DashboardCard<PeopleIcon>.MaxDescriptionLength), 60);
+            builder.OpenComponent<DashboardCard>(0);
+            builder.AddAttribute(1, nameof(DashboardCard.Href), "/students");
+            builder.AddAttribute(2, nameof(DashboardCard.Title), "Students");
+            builder.AddAttribute(3, nameof(DashboardCard.Description), longDescription);
+            builder.AddAttribute(4, nameof(DashboardCard.Icon), new PeopleIcon());
+            builder.AddAttribute(5, nameof(DashboardCard.MaxDescriptionLength), 60);
             builder.CloseComponent();
         });
 
@@ -66,10 +68,11 @@ public sealed class DashboardCardTests
 
         var cut = ctx.Render(builder =>
         {
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(0);
-            builder.AddAttribute(1, nameof(DashboardCard<PeopleIcon>.Href), "/students");
-            builder.AddAttribute(2, nameof(DashboardCard<PeopleIcon>.Title), "Students");
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Description), "Manage student records.");
+            builder.OpenComponent<DashboardCard>(0);
+            builder.AddAttribute(1, nameof(DashboardCard.Href), "/students");
+            builder.AddAttribute(2, nameof(DashboardCard.Title), "Students");
+            builder.AddAttribute(3, nameof(DashboardCard.Description), "Manage student records.");
+            builder.AddAttribute(4, nameof(DashboardCard.Icon), new PeopleIcon());
             builder.CloseComponent();
         });
 
@@ -93,10 +96,11 @@ public sealed class DashboardCardTests
 
         var cut = ctx.Render(builder =>
         {
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(0);
-            builder.AddAttribute(1, nameof(DashboardCard<PeopleIcon>.Href), "/students");
-            builder.AddAttribute(2, nameof(DashboardCard<PeopleIcon>.Title), "Students");
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Description), "Manage student records, enrollments, grade levels, subjects, and periods.");
+            builder.OpenComponent<DashboardCard>(0);
+            builder.AddAttribute(1, nameof(DashboardCard.Href), "/students");
+            builder.AddAttribute(2, nameof(DashboardCard.Title), "Students");
+            builder.AddAttribute(3, nameof(DashboardCard.Description), "Manage student records, enrollments, grade levels, subjects, and periods.");
+            builder.AddAttribute(4, nameof(DashboardCard.Icon), new PeopleIcon());
             builder.CloseComponent();
         });
 
@@ -116,10 +120,11 @@ public sealed class DashboardCardTests
 
         var cut = ctx.Render(builder =>
         {
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(0);
-            builder.AddAttribute(1, nameof(DashboardCard<PeopleIcon>.Href), "/students");
-            builder.AddAttribute(2, nameof(DashboardCard<PeopleIcon>.Title), "Students");
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Description), fullDescription);
+            builder.OpenComponent<DashboardCard>(0);
+            builder.AddAttribute(1, nameof(DashboardCard.Href), "/students");
+            builder.AddAttribute(2, nameof(DashboardCard.Title), "Students");
+            builder.AddAttribute(3, nameof(DashboardCard.Description), fullDescription);
+            builder.AddAttribute(4, nameof(DashboardCard.Icon), new PeopleIcon());
             builder.CloseComponent();
         });
 
@@ -139,11 +144,12 @@ public sealed class DashboardCardTests
         // The description clamp rule is owned by DashboardCard itself — it
         // lives in DashboardCard.razor.css (CSS-isolated). The shell/layout
         // rules live in DashboardSection.razor.css; both files replaced the
-        // original global wwwroot/css/app.css dashboard block.
+        // original global wwwroot/css/app.css dashboard block and both now
+        // live under the grouped Components/Dashboard/ solution folder.
         var cssPath = Path.Combine(
             AppContext.BaseDirectory,
             "..", "..", "..", "..", "..",
-            "src", "SchoolCollab.Admin.Shared", "Components", "DashboardCard.razor.css");
+            "src", "SchoolCollab.Admin.Shared", "Components", "Dashboard", "DashboardCard.razor.css");
         cssPath = Path.GetFullPath(cssPath);
 
         File.Exists(cssPath).Should().BeTrue($"expected DashboardCard.razor.css to exist at {cssPath}");
@@ -169,22 +175,25 @@ public sealed class DashboardCardTests
 
         var cut = ctx.Render(builder =>
         {
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(0);
-            builder.AddAttribute(1, nameof(DashboardCard<PeopleIcon>.Href), "/coded-values");
-            builder.AddAttribute(2, nameof(DashboardCard<PeopleIcon>.Title), "Coded Values");
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Description), "Manage categories, subjects, grades, and other reference data.");
+            builder.OpenComponent<DashboardCard>(0);
+            builder.AddAttribute(1, nameof(DashboardCard.Href), "/coded-values");
+            builder.AddAttribute(2, nameof(DashboardCard.Title), "Coded Values");
+            builder.AddAttribute(3, nameof(DashboardCard.Description), "Manage categories, subjects, grades, and other reference data.");
+            builder.AddAttribute(4, nameof(DashboardCard.Icon), new Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size24.Tag());
             builder.CloseComponent();
 
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(1);
-            builder.AddAttribute(2, nameof(DashboardCard<PeopleIcon>.Href), "/assignments");
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Title), "Assignments");
-            builder.AddAttribute(4, nameof(DashboardCard<PeopleIcon>.Description), "Create, publish, and review assignments and homework.");
+            builder.OpenComponent<DashboardCard>(1);
+            builder.AddAttribute(2, nameof(DashboardCard.Href), "/assignments");
+            builder.AddAttribute(3, nameof(DashboardCard.Title), "Assignments");
+            builder.AddAttribute(4, nameof(DashboardCard.Description), "Create, publish, and review assignments and homework.");
+            builder.AddAttribute(5, nameof(DashboardCard.Icon), new Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size24.ClipboardCheckmark());
             builder.CloseComponent();
 
-            builder.OpenComponent<DashboardCard<PeopleIcon>>(2);
-            builder.AddAttribute(3, nameof(DashboardCard<PeopleIcon>.Href), "/students");
-            builder.AddAttribute(4, nameof(DashboardCard<PeopleIcon>.Title), "Students");
-            builder.AddAttribute(5, nameof(DashboardCard<PeopleIcon>.Description), "Manage student records, enrollments, grade levels, subjects, and periods.");
+            builder.OpenComponent<DashboardCard>(2);
+            builder.AddAttribute(3, nameof(DashboardCard.Href), "/students");
+            builder.AddAttribute(4, nameof(DashboardCard.Title), "Students");
+            builder.AddAttribute(5, nameof(DashboardCard.Description), "Manage student records, enrollments, grade levels, subjects, and periods.");
+            builder.AddAttribute(6, nameof(DashboardCard.Icon), new PeopleIcon());
             builder.CloseComponent();
         });
 

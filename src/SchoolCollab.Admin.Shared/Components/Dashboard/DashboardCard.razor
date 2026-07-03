@@ -1,4 +1,3 @@
-@typeparam Icon where Icon : Microsoft.FluentUI.AspNetCore.Components.Icon, new()
 @using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Routing
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -7,7 +6,7 @@
     <FluentCard Style="width: 320px; cursor: pointer;" class="home-card">
         <div class="home-card-inner">
             <div class="home-card-icon" aria-hidden="true">
-                <FluentIcon Icon="@Icon" Width="@IconWidth" />
+                <FluentIcon Value="@Icon" Width="@IconWidth" />
             </div>
 
             <h3>@Title</h3>
@@ -17,18 +16,38 @@
 </NavLink>
 
 @code {
+    /// <summary>Relative URL the card navigates to.</summary>
     [Parameter, EditorRequired]
     public string Href { get; set; } = "/";
 
+    /// <summary>Card heading.</summary>
     [Parameter, EditorRequired]
     public string Title { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Card description. The visible text is line-clamped; the full text is
+    /// also exposed via the <c>title</c> attribute so the browser shows it as a
+    /// tooltip on hover.
+    /// </summary>
     [Parameter, EditorRequired]
     public string Description { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Fluent UI icon <em>instance</em> rendered via
+    /// <c>&lt;FluentIcon Value="..." /&gt;</c>. Pass a concrete icon such as
+    /// <c>new Icons.Regular.Size24.Tag()</c>. This is the non-generic successor
+    /// to the previous <c>&lt;DashboardCard TIcon&gt;</c> type-parameter so
+    /// cards can be data-driven from a heterogeneous
+    /// <see cref="DashboardItem"/> list.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Icon Icon { get; set; } = default!;
+
+    /// <summary>NavLink match mode.</summary>
     [Parameter]
     public NavLinkMatch Match { get; set; } = NavLinkMatch.Prefix;
 
+    /// <summary>Rendered icon width (CSS length).</summary>
     [Parameter]
     public string IconWidth { get; set; } = "48px";
 
