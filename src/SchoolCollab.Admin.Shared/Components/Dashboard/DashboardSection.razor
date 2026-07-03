@@ -1,0 +1,59 @@
+@using Microsoft.AspNetCore.Components
+
+<div class="home-dashboard">
+    <h1>@Title</h1>
+    @if (!string.IsNullOrWhiteSpace(Subtitle))
+    {
+        <p class="home-subtitle">@Subtitle</p>
+    }
+    <div class="home-cards">
+        @if (Items is not null)
+        {
+            @foreach (var item in Items)
+            {
+                <DashboardCard Href="@item.Href"
+                               Title="@item.Title"
+                               Description="@item.Description"
+                               Icon="@item.Icon"
+                               Match="@item.Match"
+                               IconWidth="@item.IconWidth"
+                               MaxDescriptionLength="@item.MaxDescriptionLength" />
+            }
+        }
+        else
+        {
+            @ChildContent
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>The dashboard heading.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Optional subtitle rendered beneath the heading.</summary>
+    [Parameter]
+    public string? Subtitle { get; set; }
+
+    /// <summary>
+    /// Data-driven card list. When set, the section renders a
+    /// <see cref="DashboardCard"/> per <see cref="DashboardItem"/> and ignores
+    /// <see cref="ChildContent"/>. When <c>null</c>, the section falls back to
+    /// <see cref="ChildContent"/> so a page can still author bespoke markup
+    /// (interleaved comments, non-card entries, ...). Supplying both
+    /// <see cref="Items"/> and <see cref="ChildContent"/> is allowed;
+    /// <see cref="Items"/> wins.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<DashboardItem>? Items { get; set; }
+
+    /// <summary>
+    /// Author-authored card markup. Typically one or more
+    /// <c>&lt;DashboardCard /&gt;</c> instances, but any markup is accepted so
+    /// a page can interleave comments or bespoke entries. Only rendered when
+    /// <see cref="Items"/> is <c>null</c>.
+    /// </summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+}

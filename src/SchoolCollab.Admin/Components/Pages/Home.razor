@@ -4,8 +4,25 @@
 <PageTitle>Home</PageTitle>
 
 <DashboardSection Title="Welcome to School Collab"
-                  Subtitle="A collaborative platform for managing educational data.">
-    <DashboardCard Href="/coded-values" Icon="@(Icons.Regular.Size24.Tag)" Title="Coded Values" Description="Manage categories, subjects, grades, and other reference data." />
-    <DashboardCard Href="/assignments" Icon="@(Icons.Regular.Size24.ClipboardCheckmark)" Title="Assignments" Description="Create, publish, and review assignments and homework." />
-    <DashboardCard Href="/students" Icon="@(Icons.Regular.Size24.People)" Title="Students" Description="Manage student records, enrollments, grade levels, subjects, and periods." />
-</DashboardSection>
+                  Subtitle="A collaborative platform for managing educational data."
+                  Items="homeItems" />
+
+@code {
+    private static readonly IReadOnlyList<DashboardItem> homeItems =
+    [
+        new(Href: "/coded-values",
+            Title: "Coded Values",
+            Description: "Manage categories, subjects, grades, and other reference data.",
+            Icon: new Icons.Regular.Size24.Tag()),
+
+        new(Href: "/assignments",
+            Title: "Assignments",
+            Description: "Create, publish, and review assignments and homework.",
+            Icon: new Icons.Regular.Size24.ClipboardCheckmark()),
+
+        new(Href: "/students",
+            Title: "Students",
+            Description: "Manage student records, enrollments, grade levels, subjects, and periods.",
+            Icon: new Icons.Regular.Size24.People()),
+    ];
+}
