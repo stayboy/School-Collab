@@ -1,0 +1,225 @@
+@page "/config-flags/{Key}"
+@inject ConfigFlagsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<ConfigFlagDetail> Logger
+
+<PageTitle>Flag: @_flag?.Key</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (!string.IsNullOrEmpty(_loadError))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/config-flags"))">Back</FluentButton>
+        }
+        else if (_flag is null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning">Flag not found.</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/config-flags"))">Back</FluentButton>
+        }
+        else
+        {
+            <SectionContent SectionName="page-toolbar">
+                <div class="title-row">
+                    <h1 class="page-title">@_flag.Key</h1>
+                    <FluentButton Appearance="Appearance.Neutral" Icon="@FluentIcons.ArrowLeft" OnClick="@(() => Nav.NavigateTo("/config-flags"))">Back</FluentButton>
+                </div>
+            </SectionContent>
+
+            @* ── Default toggle ── *@
+            <FluentCard class="pa-4 mt-3">
+                <h2>Default state</h2>
+                <FluentStack Orientation="Orientation.Horizontal">
+                    <FluentSwitch Label="Enabled by default" @bind-Value="_toggleValue" />
+                    <FluentTextField Label="Reason (required for save)" @bind-Value="_toggleReason" Style="min-width:320px;" />
+                    <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="SaveEnabledAsync">Save</FluentButton>
+                </FluentStack>
+                <p class="text-muted">Description: @(_flag.Description ?? "—")</p>
+            </FluentCard>
+
+            @* ── Lifecycle ── *@
+            <FluentCard class="pa-4 mt-3">
+                <h2>Lifecycle</h2>
+                <FluentStack Orientation="Orientation.Horizontal">
+                    @if (_flag.IsArchived)
+                    {
+                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_busy" OnClick="UnarchiveAsync">Unarchive</FluentButton>
+                    }
+                    else
+                    {
+                        <FluentButton Appearance="Appearance.Neutral" Disabled="@_busy" OnClick="ArchiveAsync">Archive</FluentButton>
+                    }
+                    <FluentButton Appearance="Appearance.Neutral" Disabled="@_busy" OnClick="DeleteAsync">Delete</FluentButton>
+                    <FluentTextField Label="Reason (required)" @bind-Value="_lifecycleReason" Style="min-width:320px;" />
+                </FluentStack>
+            </FluentCard>
+
+            @* ── Tenant overrides ── *@
+            <FluentCard class="pa-4 mt-3">
+                <h2>Tenant overrides (@_overrides.Length)</h2>
+                @if (_overrides.Length > 0)
+                {
+                    <FluentDataGrid Items="@_overrides.AsQueryable()">
+                        <PropertyColumn Title="Tenant" Property="@(o => o.TenantId)" />
+                        <TemplateColumn Title="Enabled">
+                            <FluentBadge Appearance="@(context.IsEnabled is true ? Appearance.Accent : context.IsEnabled is false ? Appearance.Neutral : Appearance.Lightweight)">
+                                @(context.IsEnabled is true ? "On" : context.IsEnabled is false ? "Off" : "Inherit")
+                            </FluentBadge>
+                        </TemplateColumn>
+                        <PropertyColumn Title="Reason" Property="@(o => o.Reason)" />
+                        <PropertyColumn Title="Effective" Property="@(o => o.EffectiveFrom)" Format="yyyy-MM-dd" />
+                        <TemplateColumn Title="Actions">
+                            <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => DeleteOverrideAsync(context.TenantId))">Delete</FluentButton>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                }
+                else
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info">No tenant overrides. All tenants inherit the default.</FluentMessageBar>
+                }
+
+                <h3 class="mt-3">Add override</h3>
+                <FluentStack Orientation="Orientation.Horizontal">
+                    <FluentTextField Label="Tenant Id (GUID)" @bind-Value="_newOverrideTenant" Style="min-width:320px;" />
+                    <FluentSelect TOption="string" Label="Enabled" @bind-Value="_newOverrideEnabledText">
+                        <FluentOption Value="inherit">Inherit</FluentOption>
+                        <FluentOption Value="on">On</FluentOption>
+                        <FluentOption Value="off">Off</FluentOption>
+                    </FluentSelect>
+                    <FluentTextField Label="Reason (required)" @bind-Value="_newOverrideReason" Style="min-width:320px;" />
+                    <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="AddOverrideAsync">Add</FluentButton>
+                </FluentStack>
+            </FluentCard>
+
+            @* ── Audit log ── *@
+            <FluentCard class="pa-4 mt-3">
+                <h2>Audit log</h2>
+                <FluentDataGrid Items="@_audit.AsQueryable()">
+                    <PropertyColumn Title="When" Property="@(a => a.OccurredAt)" Format="yyyy-MM-dd HH:mm:ss" />
+                    <PropertyColumn Title="Actor" Property="@(a => a.ActorDisplayName)" />
+                    <PropertyColumn Title="Change" Property="@(a => a.ChangeKind)" />
+                    <TemplateColumn Title="Before -> After">
+                        @(FormatBool(context.PreviousIsEnabled)) -> @(FormatBool(context.NewIsEnabled))
+                    </TemplateColumn>
+                    <PropertyColumn Title="Reason" Property="@(a => a.Reason)" />
+                </FluentDataGrid>
+            </FluentCard>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">@ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public string Key { get; set; } = "";
+
+    private FeatureFlagDto? _flag;
+    private TenantFlagOverrideDto[] _overrides = Array.Empty<TenantFlagOverrideDto>();
+    private FlagAuditEntryDto[] _audit = Array.Empty<FlagAuditEntryDto>();
+    private bool _loading = true;
+    private bool _busy;
+    private string? _loadError;
+
+    private bool _toggleValue;
+    private string _toggleReason = "";
+    private string _lifecycleReason = "";
+    private string _newOverrideTenant = "";
+    private string _newOverrideEnabledText = "inherit";
+    private string _newOverrideReason = "";
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            _flag = await Api.GetAsync(Key);
+            if (_flag is null) return;
+            _toggleValue = _flag.IsEnabled;
+            _overrides = await Api.ListOverridesAsync(Key);
+            _audit = await Api.ListAuditAsync(Key, tenantId: null, from: null, to: null, skip: 0, take: 50);
+        }
+        catch (OperationCanceledException)
+        {
+            // User navigated away or the prerender circuit disconnected; don't
+            // surface cancellation as a load error.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Load flag detail failed");
+            _loadError = $"Failed to load flag: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task SaveEnabledAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_toggleReason)) return;
+        _busy = true;
+        try
+        {
+            await Api.SetEnabledAsync(Key, new SetEnabledRequest(_toggleValue, _toggleReason));
+            _toggleReason = "";
+            await LoadAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ArchiveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_lifecycleReason)) return;
+        _busy = true;
+        try { await Api.ArchiveAsync(Key, new ReasonRequest(_lifecycleReason)); _lifecycleReason = ""; await LoadAsync(); }
+        finally { _busy = false; }
+    }
+
+    private async Task UnarchiveAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_lifecycleReason)) return;
+        _busy = true;
+        try { await Api.UnarchiveAsync(Key, new ReasonRequest(_lifecycleReason)); _lifecycleReason = ""; await LoadAsync(); }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_lifecycleReason)) return;
+        _busy = true;
+        try { await Api.DeleteAsync(Key, _lifecycleReason); Nav.NavigateTo("/config-flags"); }
+        finally { _busy = false; }
+    }
+
+    private async Task AddOverrideAsync()
+    {
+        if (!Guid.TryParse(_newOverrideTenant, out var tenantId) || string.IsNullOrWhiteSpace(_newOverrideReason)) return;
+        bool? enabled = _newOverrideEnabledText switch { "on" => true, "off" => false, _ => null };
+        _busy = true;
+        try
+        {
+            await Api.UpsertOverrideAsync(Key, tenantId,
+                new UpsertOverrideRequest(enabled, _newOverrideReason, EffectiveFrom: null, EffectiveTo: null));
+            _newOverrideTenant = ""; _newOverrideReason = "";
+            _overrides = await Api.ListOverridesAsync(Key);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteOverrideAsync(Guid tenantId)
+    {
+        _busy = true;
+        try { await Api.DeleteOverrideAsync(Key, tenantId, reason: "Removed via admin UI"); _overrides = await Api.ListOverridesAsync(Key); }
+        finally { _busy = false; }
+    }
+
+    private static string FormatBool(bool? b) => b is null ? "—" : b is true ? "On" : "Off";
+}

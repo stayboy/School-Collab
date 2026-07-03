@@ -10,6 +10,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues;
 using SchoolCollab.CodedValues.Admin.Services;
+using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.CodedValues.Tests.Unit.Components;
 
@@ -27,6 +28,7 @@ public class CodedValuesIndexChatHistoryTests : BunitContext
         Services.AddFluentUIComponents();
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddScoped<CodedValuesChatHub>();
+        Services.AddSingleton<IFeatureFlagService, AlwaysOnFeatureFlagService>();
 
         _handler = new CapturingHandler();
         Services.AddSingleton(_handler);

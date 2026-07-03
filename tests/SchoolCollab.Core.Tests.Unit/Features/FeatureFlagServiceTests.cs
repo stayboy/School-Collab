@@ -22,7 +22,7 @@ public class FeatureFlagServiceTests
         { 
             { "FeatureFlags:FEATURE:DisableOIDCAuth", "true" } 
         });
-        var service = new FeatureFlagService(config);
+        var service = new ConfigurationFeatureFlagService(config);
 
         // Act
         var result = service.IsEnabled("FEATURE:DisableOIDCAuth");
@@ -39,7 +39,7 @@ public class FeatureFlagServiceTests
         { 
             { "FeatureFlags:FEATURE:DisableOIDCAuth", "false" } 
         });
-        var service = new FeatureFlagService(config);
+        var service = new ConfigurationFeatureFlagService(config);
 
         // Act
         var result = service.IsEnabled("FEATURE:DisableOIDCAuth");
@@ -53,7 +53,7 @@ public class FeatureFlagServiceTests
     {
         // Arrange
         var config = CreateConfiguration(new Dictionary<string, string?>());
-        var service = new FeatureFlagService(config);
+        var service = new ConfigurationFeatureFlagService(config);
 
         // Act
         var result = service.IsEnabled("FEATURE:DisableOIDCAuth");
@@ -72,7 +72,7 @@ public class FeatureFlagServiceTests
             { "FeatureFlags:Flag2", "false" },
             { "FeatureFlags:NotABool", "hello" }
         });
-        var service = new FeatureFlagService(config);
+        var service = new ConfigurationFeatureFlagService(config);
 
         // Act
         var result = service.GetAllFlags();

@@ -32,6 +32,14 @@
             <FluentSpacer />
 
             <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
+
+            <FluentButton Appearance="Appearance.Stealth"
+                          OnClick="@(() => Nav.NavigateTo("/settings"))"
+                          Title="Settings"
+                          aria-label="Settings"
+                          class="toolbar-icon-button">
+                <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
+            </FluentButton>
         </FluentStack>
     </FluentHeader>
 

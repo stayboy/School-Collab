@@ -4,6 +4,25 @@ These instructions apply to every file in this repository.
 
 ---
 
+## Communication style
+
+Be concise. Do not over-explain, apologize repeatedly, or include large
+unchanged code blocks in responses. For every change:
+
+1. State what you changed and why in one or two sentences.
+2. List the affected file paths.
+3. Show only the relevant diff snippet or minimal example, not the whole file.
+4. Report build/test results in a compact table.
+
+When a user reports a symptom (e.g., "an error pops on config-flags landing
+page"), focus on diagnosing and fixing it. Avoid verbose step-by-step
+narration of every tool call. If the fix is straightforward, present the
+result, not the journey.
+
+Do not emit empty shell commands or placeholder comments as output.
+
+---
+
 ## Skill discovery (read first)
 
 When you need a skill — for code review, PR description, testing, deployment,

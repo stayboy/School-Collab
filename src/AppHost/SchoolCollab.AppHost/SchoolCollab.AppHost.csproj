@@ -27,5 +27,7 @@
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Worker\SchoolCollab.Students.Worker.csproj" />
+    <ProjectReference Include="..\..\Config\SchoolCollab.Config.Api\SchoolCollab.Config.Api.csproj" />
+    <ProjectReference Include="..\..\Config\SchoolCollab.Config.Core\SchoolCollab.Config.Core.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 </Project>

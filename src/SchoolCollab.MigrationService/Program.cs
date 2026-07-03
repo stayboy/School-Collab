@@ -5,6 +5,8 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.CodedValues.Core.Data;
+using SchoolCollab.Config.Core.Data;
+using SchoolCollab.Config.Core.Domain;
 using SchoolCollab.Core.Data.Outbox;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -59,6 +61,18 @@ OutboxMapping.SetFlagsFor<CodedValuesDbContext>(OutboxConfigurationFlags.FromCon
 OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
     .UsePartialIndexOnOccurredAt()));
 // Students uses OutboxConfigurationFlags.Default — no SetFlagsFor call needed.
+OutboxMapping.SetFlagsFor<ConfigDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
+    .SetTypeMaxLength(500)
+    .UseJsonbPayload()
+    .UseAttemptsDefaultZero()
+    .UsePartialIndexOnOccurredAt()));
+
+// Register Config DbContext
+var configConnectionString = builder.Configuration.GetConnectionString("config-db")
+    ?? throw new InvalidOperationException("Connection string 'config-db' is not configured.");
+
+builder.Services.AddDbContext<ConfigDbContext>(opts =>
+    opts.UseNpgsql(configConnectionString).UseSnakeCaseNamingConvention());
 
 // Register CodedValueSeeder
 builder.Services.AddScoped<CodedValueSeeder>();
@@ -121,6 +135,23 @@ try
             logger.LogError(ex, "Students migration failed");
             exitCode = 1;
         }
+
+        // ── Config migrations + seed FEATURE:EnableCodedValuesAiChat ──
+        try
+        {
+            var configDb = scope.ServiceProvider.GetRequiredService<ConfigDbContext>();
+
+            logger.LogInformation("Applying EF Core migrations for Config");
+            await configDb.Database.MigrateAsync();
+            logger.LogInformation("Config EF Core migrations applied successfully");
+
+            await SeedEnableCodedValuesAiChatAsync(configDb, logger);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Config migration or seeding failed");
+            exitCode = 1;
+        }
     }
 
     if (exitCode == 0)
@@ -140,3 +171,47 @@ finally
 }
 
 return exitCode;
+
+// ── Config seed ──
+// Seeds the first real runtime feature flag — FEATURE:EnableCodedValuesAiChat —
+// if it does not already exist. Default true preserves the current always-on AI-chat
+// behaviour on the CodedValues landing page. Records an audit row with a system
+// actor so the seed is traceable. NOTE: FEATURE:DisableOIDCAuth is intentionally
+// NOT seeded here — it is a startup auth-mode switch read from IConfiguration, not a
+// runtime feature flag (see documents/solution/central-config-service-plan.md §2).
+static async Task SeedEnableCodedValuesAiChatAsync(ConfigDbContext db, Microsoft.Extensions.Logging.ILogger logger)
+{
+    const string actorId = "system:migrator";
+    const string actorName = "Migration Service";
+
+    // FeatureFlag.Create normalizes the key via FeatureFlag.NormalizeKey (upper-cases
+    // the area after 'FEATURE:'), so we must compare against the canonical form here.
+    // A plain `f.Key == "FEATURE:EnableCodedValuesAiChat"` is a case-sensitive
+    // Postgres text comparison and would MISS an existing row stored as
+    // "FEATURE:ENABLECODEDVALUESAICHAT", causing SaveChangesAsync to violate the
+    // partial unique index ix_feature_flags_key_unique on a re-run.
+    var key = FeatureFlag.NormalizeKey("FEATURE:EnableCodedValuesAiChat");
+
+    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
+    if (exists)
+    {
+        logger.LogInformation("Seed flag {Key} already present; skipping", key);
+        return;
+    }
+
+    var flag = FeatureFlag.Create(key, "Enable AI chat on Coded Values landing page", null, isEnabled: true);
+    db.FeatureFlags.Add(flag);
+    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
+        tenantId: null,
+        featureFlagId: flag.Id,
+        featureFlagKey: flag.Key,
+        changeKind: FlagChangeKind.Created,
+        previousIsEnabled: null,
+        newIsEnabled: flag.IsEnabled,
+        reason: "Initial seed by migration service",
+        actorId: actorId,
+        actorDisplayName: actorName));
+
+    await db.SaveChangesAsync();
+    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
+}

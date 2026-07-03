@@ -7,6 +7,7 @@
 @inject ILogger<Index> Logger
 @inject IDialogService DialogService
 @inject CodedValuesChatHub ChatHub
+@inject IFeatureFlagService FeatureFlags
 @implements IDisposable
 
 <PageTitle>Coded Values</PageTitle>
@@ -33,12 +34,17 @@
                     @* Opens the AI assistant side drawer without sending a prompt,
                        so users can re-read prior responses or follow an ongoing
                        stream. (Sending a prompt opens the drawer via
-                       OnPromptSubmittedAsync instead.) *@
-                    <FluentButton Appearance="Appearance.Neutral"
-                                  Title="Open AI assistant"
-                                  OnClick="OpenChatDrawerAsync">
-                        ✨ Chat
-                    </FluentButton>
+                       OnPromptSubmittedAsync instead.) Gated by the runtime,
+                       tenant-overridable FEATURE:EnableCodedValuesAiChat flag
+                       resolved via the central Config service. *@
+                    @if (_aiChatEnabled == true)
+                    {
+                        <FluentButton Appearance="Appearance.Neutral"
+                                      Title="Open AI assistant"
+                                      OnClick="OpenChatDrawerAsync">
+                            ✨ Chat
+                        </FluentButton>
+                    }
                 </div>
             </div>
         </SectionContent>
@@ -209,15 +215,18 @@
                feeds the text to the drawer's Full-mode chat via the Prompt
                parameter. The drawer is the single AI-calling surface and owns
                the conversation history. -- *@
-            <SectionContent SectionName="page-footer">
-                <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
-                                 ShowIntro="true"
-                                 OnPromptSubmitted="@OnPromptSubmittedAsync" />
-            </SectionContent>
+            @if (_aiChatEnabled == true)
+            {
+                <SectionContent SectionName="page-footer">
+                    <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
+                                     ShowIntro="true"
+                                     OnPromptSubmitted="@OnPromptSubmittedAsync" />
+                </SectionContent>
 
-            <CodedValuesChatPanel Open="_chatDrawerOpen"
-                                    OpenChanged="@OnDrawerOpenChangedAsync"
-                                    Prompt="@_pendingPrompt" />
+                <CodedValuesChatPanel Open="_chatDrawerOpen"
+                                        OpenChanged="@OnDrawerOpenChangedAsync"
+                                        Prompt="@_pendingPrompt" />
+            }
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -232,6 +241,14 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
     private bool _chatDrawerOpen;
+    // Tri-state so the page can render the chat only when the feature flag has
+    // actually been resolved. Defaulting to `true` caused a visible flash on the
+    // landing page: the chat button + inline input appeared on first paint, then
+    // hid a tick later when OnInitializedAsync awaited the flag and discovered
+    // the flag was off. Defaulting to `null` (unresolved) keeps both render
+    // branches inactive until the flag is known, so the disabled state never
+    // leaks into the first frame.
+    private bool? _aiChatEnabled;
 
     // Search state
     private string _searchText = string.Empty;
@@ -247,6 +264,7 @@
 
     protected override async Task OnInitializedAsync()
     {
+        _aiChatEnabled = await FeatureFlags.IsEnabledAsync("FEATURE:EnableCodedValuesAiChat");
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
 

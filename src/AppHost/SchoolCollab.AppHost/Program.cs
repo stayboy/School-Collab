@@ -26,6 +26,9 @@ var rabbit = builder.AddRabbitMQ("rabbitmq", password: rabbitPassword)
 
 var codedValuesDb = postgres.AddDatabase("coded-values-db");
 
+// Config bounded-context database (owns the central feature-flag service).
+var configDb = postgres.AddDatabase("config-db");
+
 var redis = builder.AddRedis("cache");
 
 // Per-bounded-context outbox exchange names. Centralised in the AppHost's
@@ -37,6 +40,7 @@ var redis = builder.AddRedis("cache");
 var codedValuesOutboxExchange = builder.AddParameter("outbox-exchange-coded-values");
 var assignmentsOutboxExchange  = builder.AddParameter("outbox-exchange-assignments");
 var studentsOutboxExchange     = builder.AddParameter("outbox-exchange-students");
+var configOutboxExchange       = builder.AddParameter("outbox-exchange-config");
 
 // AI provider configuration that the `coded-values-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
@@ -55,19 +59,14 @@ var openRouterEndpoint      = builder.AddParameter("openrouter-endpoint");
 var openRouterDefaultModel  = builder.AddParameter("openrouter-default-model");
 var openRouterApiKey        = builder.AddParameter("openrouter-api-key", secret: true);
 
-// Feature flags. Centralised in the AppHost's appsettings.json under
-// Parameters:feature-flag-* and fanned out to the matching API / Admin via
-// WithEnvironment("FeatureFlags__FEATURE__...", param). Previously these were
-// served by a separate `SchoolCollab.Config` service that proxied a local JSON
-// file over HTTP via `AddRemoteFeatureFlags`; the HTTP overlay was removed
-// because (a) the proxy was a placeholder, not a real central config service,
-// (b) the cost of a synchronous HTTP call at every API/Admin startup wasn't
-// justified by a single dev-only flag, and (c) using the same AppHost
-// Parameters: pattern as outbox exchanges and AI config gives a single
-// mental model for "how a cross-service value gets distributed". New flags
-// should follow the same shape: add a `Parameters:feature-flag-<name>` row
-// and wire the env-var on each consumer. See documents/configuration.md §2.
-var disableOidcAuth = builder.AddParameter("feature-flag-disable-oidc-auth");
+// Feature flags used to be a per-service env-var fanned out from here. Runtime,
+// mutable, tenant-overridable flags are now owned by the central Config service
+// (see documents/solution/central-config-service-plan.md). The one flag that
+// remains deployment-time — FEATURE:DisableOIDCAuth, a startup auth-mode switch —
+// is read by each consumer from its own appsettings.json (dev default "true") or
+// the FeatureFlags__FEATURE__DisableOIDCAuth env var in production. It is NOT
+// managed as a Config flag because ASP.NET Core auth schemes are registered once
+// at startup and cannot be flipped at runtime.
 
 // ── Assignments bounded context ──
 
@@ -84,16 +83,26 @@ var migrator = builder.AddProject<Projects.SchoolCollab_MigrationService>("migra
     .WithReference(codedValuesDb)
     .WithReference(assignmentsDb)
     .WithReference(studentsDb)
+    .WithReference(configDb)
     .WaitFor(codedValuesDb)
     .WaitFor(assignmentsDb)
-    .WaitFor(studentsDb);
+    .WaitFor(studentsDb)
+    .WaitFor(configDb);
+
+var configApi = builder.AddProject<Projects.SchoolCollab_Config_Api>("config-api")
+    .WithReference(configDb)
+    .WithReference(rabbit)
+    .WithReference(redis)
+    .WithEnvironment("Outbox__ExchangeName", configOutboxExchange)
+    .WaitFor(rabbit)
+    .WaitFor(redis)
+    .WaitForCompletion(migrator);
 
 var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("coded-values-api")
     .WithReference(codedValuesDb)
     .WithReference(rabbit)
     .WithReference(redis)
     .WithEnvironment("Outbox__ExchangeName", codedValuesOutboxExchange)
-    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
@@ -119,7 +128,6 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithReference(rabbit)
     .WithReference(redis)
     .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
-    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
@@ -129,7 +137,6 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
     .WithReference(rabbit)
     .WithReference(redis)
     .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
-    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
@@ -147,7 +154,8 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WithReference(codedValuesAi)
     .WithReference(assignmentsApi)
     .WithReference(studentsApi)
-    .WithEnvironment("FeatureFlags__FEATURE__DisableOIDCAuth", disableOidcAuth)
+    .WithReference(configApi)
+    .WithReference(redis)
     .WaitFor(codedValuesApi)
     .WaitFor(codedValuesAi)
     .WaitFor(assignmentsApi)
