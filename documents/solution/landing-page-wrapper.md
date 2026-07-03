@@ -45,9 +45,7 @@ scaffolding, even though their data, columns, and row actions differ:
 3. **List body states** (rendered in the layout's scroll region):
    - `_items is null` → `spinner-container` + `<FluentProgressRing />`
    - `_items.Length == 0` → `<FluentMessageBar Intent="Info">No … yet.</FluentMessageBar>`
-   - otherwise → `grid-container` wrapping `<FluentDataGrid>` with
-     `Items="@…AsQueryable()"`, `GenerateHeader="Sticky"`, `MultiLine="true"`,
-     `TGridItem="<Dto>"`, and a `GridTemplateColumns` string.
+   - otherwise → `grid-container` wrapping the page's `<FluentDataGrid>`.
 
 4. **CSS** — four near-identical `Index.razor.css` files, each defining the
    same `.title-row`, `.page-title`, `.action-bar`, `.spacer`,
@@ -63,7 +61,7 @@ scaffolding, even though their data, columns, and row actions differ:
 | Filter control | `FluentSelect` (status) | `FluentCheckbox` "Show deleted" | `FluentCheckbox` "Show deleted" | `FluentCheckbox` "Show archived" |
 | Search strategy | **server** (`_searchResults` + `_searchCts` cancel) | **client** (`_filteredItems` computed from `_searchText`) | **server** (`_searchResults` + `_searchCts`) | **server** (`@bind` + reload) |
 | Row actions | View / Edit / Publish / Unpublish / Close / Delete | View / Delete / Recover | Enable/Disable / Edit / Delete / Recover | (none — detail page only) |
-| Deleted-items grid | — | yes | yes | — |
+| Deleted items | — | merged into main grid via "Show deleted" filter (per-row Deleted badge + Recover) | merged into main grid via "Show deleted" filter (per-row Deleted badge + Recover) | — |
 | Confirmation dialogs | no (delete direct) | yes (`DialogService`) | yes (`DialogService`) | — |
 | Optimistic row mutations | publish/unpublish/close | (full reload on recover) | enable/disable toggle | — |
 | Pinned footer / AI chat | — | — | yes (`page-footer` chat + side drawer) | — |
@@ -101,10 +99,10 @@ the *how*.
 | `Title` | `string` | yes | `<PageTitle>` + the `page-title` `<h1>`. |
 | `CreateLabel` | `string` | yes | Text of the `+ New …` button (e.g. `"+ New Assignment"`). |
 | `CreateRoute` | `string` | yes | `Nav.NavigateTo` target for the New button. |
-| `Items` | `TItem[]?` | yes | The list to render. `null` ⇒ loading spinner. |
-| `EmptyMessage` | `string` | yes | Message bar text when `Items` is empty. |
-| `GridTemplateColumns` | `string` | yes | Passed to `<FluentDataGrid>`. |
-| `Columns` | `RenderFragment` | yes | The grid's column definitions, forwarded as child content of `<FluentDataGrid>`. |
+| `Items` | `TItem[]?` | yes | The list to render. `null` ⇒ loading spinner; empty ⇒ `EmptyMessage`; otherwise `Grid` renders (wrapped in `grid-container`). |
+| `EmptyMessage` | `string` | yes | Message bar text when `Items` is an empty array. |
+| `GridSettings` | `LandingGridSettings` | yes | Grid configuration applied to the wrapper's `<FluentDataGrid>` — at minimum `GridTemplateColumns`. See §2.4. |
+| `Columns` | `RenderFragment` | yes | The grid's column definitions, forwarded as the child content of the wrapper's `<FluentDataGrid TGridItem="TItem">`. Every `TemplateColumn`/`PropertyColumn` MUST declare `TGridItem="<the DTO>"` (and `PropertyColumn` must also declare `TProp`) explicitly — see §2.4. `context` inside a `TemplateColumn` is the current `TItem` row. |
 | `Error` | `string?` | no | Error text; rendered as a red message bar under the grid when non-empty. |
 | `Loading` | `bool` | no | When true, show the spinner even if `Items` is non-null (used for in-flight server search). |
 | `ToolbarFilters` | `RenderFragment?` | no | Slot rendered in the action-bar right after the New button (status select / show-deleted checkbox / show-archived checkbox). |
@@ -114,9 +112,8 @@ the *how*.
 | `SearchPlaceholder` | `string?` | no | Search box placeholder. Defaults to `"Search…"`. |
 | `SearchEnabled` | `bool` | no | Default `true`; set `false` to hide the search box entirely (none of the four pages need this today, but a future page might). |
 | `CreateEnabled` | `bool` | no | Default `true`; set `false` to hide the New button. |
-| `AboveGrid` | `RenderFragment?` | no | Slot rendered above the main grid (the deleted-items section for Students/CodedValues). |
 | `Footer` | `RenderFragment?` | no | Published into `<SectionContent SectionName="page-footer">` (CodedValues chat launcher). |
-| `ChildContent` | `RenderFragment?` | no | Escape hatch for anything not covered by the slots above; rendered last in the scroll region. Kept for forward-compatibility. |
+| `ChildContent` | `RenderFragment?` | no | Escape hatch for anything not covered by the slots above; rendered last in the scroll region. Kept for forward-compatibility (CodedValues uses it for the chat side drawer). |
 
 ### 2.2 Rendered shape
 
@@ -151,8 +148,6 @@ the *how*.
             </div>
         </SectionContent>
 
-        @AboveGrid
-
         @if (Loading || Items is null)
         {
             <div class="spinner-container"><FluentProgressRing /></div>
@@ -165,9 +160,10 @@ the *how*.
         {
             <div class="grid-container">
                 <FluentDataGrid Items="@Items.AsQueryable()"
-                                GridTemplateColumns="@GridTemplateColumns"
-                                GenerateHeader="GenerateHeaderOption.Sticky"
-                                MultiLine="true" TGridItem="TItem">
+                                GridTemplateColumns="@GridSettings.GridTemplateColumns"
+                                GenerateHeader="@GridSettings.GenerateHeader"
+                                MultiLine="@GridSettings.MultiLine"
+                                TGridItem="TItem">
                     @Columns
                 </FluentDataGrid>
             </div>
@@ -219,6 +215,67 @@ Pages no longer ship their own `Index.razor.css` for these scaffolding rules.
 Page-specific styling (e.g. a deleted-section heading) stays in a page-scoped
 CSS file scoped to that page.
 
+### 2.4 The grid: `GridSettings` + `Columns`, and the explicit-`TGridItem` rule
+
+The wrapper **owns** the `<FluentDataGrid TGridItem="TItem">` and configures it
+from a `LandingGridSettings` instance the page supplies. The page supplies only
+the column templates via the `Columns` `RenderFragment` — the grid section
+contains nothing else.
+
+`LandingGridSettings` (in `SchoolCollab.Admin.Shared.Components.Landing`) is a
+small POCO:
+
+```csharp
+public sealed class LandingGridSettings
+{
+    public string GridTemplateColumns { get; set; } = "";                 // required
+    public GenerateHeaderOption GenerateHeader { get; set; } = Sticky;    // default
+    public bool MultiLine { get; set; } = true;                           // default
+}
+```
+
+Pages keep a `static readonly LandingGridSettings _gridSettings = new() { GridTemplateColumns = "…" }`
+and pass `GridSettings="@_gridSettings"`. Only `GridTemplateColumns` varies in
+practice; the other two have sensible defaults so pages rarely set them.
+
+**The explicit-`TGridItem` rule (important).** Because the `Columns` fragment is
+compiled in the *consuming page's* assembly — where the enclosing component is
+`LandingPage<TItem>` and there is no `FluentDataGrid<TItem>` in scope — Blazor
+cannot infer each column's `TGridItem` from a parent grid (the way it can when
+columns are written directly inside a `<FluentDataGrid>`). Every `TemplateColumn`
+and `PropertyColumn` MUST therefore declare `TGridItem="<the DTO>"` explicitly,
+and `PropertyColumn` must also declare `TProp`:
+
+```razor
+<TemplateColumn TGridItem="StudentDto" Title="Status" SortBy="@_sortBy" Sortable="true">…</TemplateColumn>
+<PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.FirstName)" Sortable="true" />
+```
+
+Forgetting the attribute is a compile error (`RZ10000` / `CS0305`), not a silent
+runtime bug — so the wrapper's `@Columns` forwarding is safe.
+
+### 2.5 Deleted items — merged into the main grid, not a separate section
+
+Students and Coded Values support soft-delete. Instead of a second grid above
+the main one, the page composes a **single** array — active items plus deleted
+items when the "Show deleted" filter is on — and binds it to `Items`. The main
+grid's per-row column templates render the deleted state: a `Deleted` status
+badge and a `Recover` action when `context.IsDeleted` (Coded Values also keeps
+its `Active`/`Disabled` branching for non-deleted rows). Toggling "Show deleted"
+just changes the array composition — the "filtering technique" — so there is one
+grid, one column set, and one sort/header behaviour for both active and deleted
+rows.
+
+```csharp
+// Students
+private StudentDto[] _filteredItems =>
+    (_showDeleted ? (_items ?? []).Concat(_deletedItems ?? []) : (_items ?? []))
+        .Where(MatchesSearch)…;
+```
+
+The wrapper has no `AboveGrid` slot and no knowledge of soft-delete; the merge is
+entirely the page's concern, expressed through `Items` + the column templates.
+
 ## 3. Search Strategy — owned by the page, not the wrapper
 
 The three search strategies are too different to collapse into the wrapper
@@ -260,9 +317,9 @@ block, instead of ~250 lines of duplicated scaffolding:
              CreateLabel="+ New Widget"
              CreateRoute="/widgets/create"
              EmptyMessage="No widgets yet."
-             GridTemplateColumns="minmax(180px,2fr) 1fr 1fr auto"
              Items="@_items"
              Error="@_error"
+             GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchChanged"
              SearchPlaceholder="Search widgets…">
@@ -271,16 +328,16 @@ block, instead of ~250 lines of duplicated scaffolding:
                         Label="Show inactive" />
     </ToolbarFilters>
     <Columns>
-        <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true">
+        <TemplateColumn TGridItem="WidgetDto" Title="Name" SortBy="@_sortByName" Sortable="true">
             <FluentAnchor Appearance="Appearance.Hypertext"
                           Href="@($"/widgets/{context.Id}")">@context.Name</FluentAnchor>
         </TemplateColumn>
-        <TemplateColumn Title="Status">
+        <TemplateColumn TGridItem="WidgetDto" Title="Status">
             <FluentBadge Appearance="@(context.IsActive ? Appearance.Accent : Appearance.Neutral)">
                 @(context.IsActive ? "Active" : "Inactive")
             </FluentBadge>
         </TemplateColumn>
-        <TemplateColumn Title="Actions">
+        <TemplateColumn TGridItem="WidgetDto" Title="Actions">
             <FluentAnchor Href="@($"/widgets/{context.Id}/edit")">Edit</FluentAnchor>
             <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id))" class="ms-2">Delete</FluentAnchor>
         </TemplateColumn>
@@ -295,6 +352,11 @@ block, instead of ~250 lines of duplicated scaffolding:
     private CancellationTokenSource? _cts;
     private volatile bool _disposed;
     private readonly GridSort<WidgetDto> _sortByName = GridSort<WidgetDto>.ByAscending(x => x.Name);
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(180px,2fr) 1fr 1fr auto"
+    };
 
     protected override async Task OnInitializedAsync() => await ReloadAsync();
 
@@ -326,8 +388,8 @@ block, instead of ~250 lines of duplicated scaffolding:
       (add to the shared `_Imports.razor` once, so every module gets it).
 - [ ] Page declares `@implements IDisposable` and cancels its own CTS(s) — the
       wrapper does **not** own the page's `CancellationTokenSource`s.
-- [ ] Page supplies a unique `EmptyMessage`, `GridTemplateColumns`, and `Columns`.
-- [ ] If the page needs a deleted-items section, render it via `AboveGrid`.
+- [ ] Page supplies a unique `EmptyMessage`, a `GridSettings` (at least `GridTemplateColumns`), and a `<Columns>` block whose `TemplateColumn`/`PropertyColumn` each declare `TGridItem` (and `TProp` for `PropertyColumn`).
+- [ ] If the page supports soft-delete, merge deleted rows into `Items` when the filter is on and render the deleted state per-row in the column templates (no separate grid).
 - [ ] If the page needs a pinned footer (chat), render it via `Footer`.
 - [ ] Page-specific CSS only — no re-declaration of `title-row` / `action-bar` /
       `spacer` / `search-box` / `spinner-container` / `grid-container`.
@@ -347,12 +409,11 @@ reviewable), after the wrapper itself lands. Order: simplest → most complex.
 3. Add unit tests mirroring `DashboardCard`/`DashboardSection` test shape
    (`SchoolCollab.Admin.Tests.Unit`): renders title, New button navigates,
    `null` Items shows spinner, empty Items shows message bar, non-empty
-   renders a `FluentDataGrid` with the supplied `GridTemplateColumns`,
-   `Error` shows the red bar.
+   renders the `Grid` slot's `FluentDataGrid`, `Error` shows the red bar.
 4. `dotnet build` + run the wrapper unit tests.
 
 ### Phase 1 — Config Flags (simplest: no row actions, no deleted grid, no footer)
-- Move the grid columns into `<Columns>`.
+- Move the grid into the `<Columns>` slot + a `GridSettings` instance (the wrapper owns the `FluentDataGrid`).
 - Move `Show archived` checkbox into `<ToolbarFilters>`.
 - Bind `SearchText`/`SearchTextChanged` to the existing `LoadAsync` reload.
 - Delete `Index.razor.css` (all its rules now live in the wrapper).
@@ -361,8 +422,8 @@ reviewable), after the wrapper itself lands. Order: simplest → most complex.
 ### Phase 2 — Students
 - `StudentDto` rows + `GridSort` definitions stay; only the scaffolding moves.
 - `Show deleted` checkbox → `ToolbarFilters`.
-- The deleted-students grid → `<AboveGrid>` (conditionally rendered).
-- Search is client-side: bind `SearchText`, recompute `_filteredItems`, bind to `Items`.
+- Deleted students merge into `Items` (active + deleted when `Show deleted` on); the main grid's Status/Actions column templates already branch on `IsDeleted` (Deleted badge + Recover), so no separate grid.
+- Search is client-side: bind `SearchText`, recompute `_filteredItems` (combined + filtered), bind to `Items`.
 - `DialogService` confirmations and `RecoverAsync` stay in the page `@code`.
 - Delete `Index.razor.css`.
 
@@ -379,7 +440,7 @@ reviewable), after the wrapper itself lands. Order: simplest → most complex.
 
 ### Phase 4 — Coded Values (most complex: footer + side drawer + feature flag)
 - `Show deleted` checkbox → `ToolbarFilters`.
-- Deleted-values grid → `<AboveGrid>`.
+- Deleted values merge into `Items` (active + deleted when `Show deleted` on); the Status/Actions column templates branch on `IsDeleted` (Deleted badge + Recover, keeping the Active/Disabled branching for non-deleted rows).
 - Server search → as Phase 3.
 - The `✨ Chat` button → `<ToolbarActions>` (only rendered when
   `_aiChatEnabled == true`; the page still owns the feature-flag resolution and

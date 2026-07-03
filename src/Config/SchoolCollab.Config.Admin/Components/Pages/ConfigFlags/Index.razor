@@ -11,6 +11,7 @@
              EmptyMessage="@CurrentEmptyMessage"
              Items="@_items"
              Error="@_error"
+             GridSettings="@_gridSettings"
              SearchText="@_search"
              SearchTextChanged="@OnSearchChanged"
              SearchPlaceholder="Search flags…">
@@ -19,33 +20,27 @@
                         @bind-Value:after="OnFilterChanged"
                         Label="Show archived" />
     </ToolbarFilters>
-    <Grid>
-        <FluentDataGrid Items="@_items.AsQueryable()"
-                        GridTemplateColumns="minmax(240px,2fr) minmax(220px,2fr) 100px 100px minmax(160px,1fr)"
-                        GenerateHeader="GenerateHeaderOption.Sticky"
-                        MultiLine="true"
-                        TGridItem="FeatureFlagDto">
-            <TemplateColumn Title="Key" Sortable="true" SortBy="@_sortByKey" TooltipText="@(f => f.Key)">
-                <FluentAnchor Appearance="Appearance.Hypertext"
-                              Href="@($"/config-flags/{Uri.EscapeDataString(context.Key)}")"
-                              title="@context.Key">
-                    @context.Key
-                </FluentAnchor>
-            </TemplateColumn>
-            <PropertyColumn Property="@(f => f.Name)" Title="Name" Sortable="true" />
-            <TemplateColumn Title="Enabled" Sortable="true" SortBy="@_sortByEnabled">
-                <FluentBadge Appearance="@(context.IsEnabled ? Appearance.Accent : Appearance.Neutral)">
-                    @(context.IsEnabled ? "On" : "Off")
-                </FluentBadge>
-            </TemplateColumn>
-            <TemplateColumn Title="Overrides" Sortable="true" SortBy="@_sortByOverrides">
-                @context.OverrideCount
-            </TemplateColumn>
-            <TemplateColumn Title="Last changed" Sortable="true" SortBy="@_sortByUpdatedAt">
-                @(context.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))
-            </TemplateColumn>
-        </FluentDataGrid>
-    </Grid>
+    <Columns>
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Key" Sortable="true" SortBy="@_sortByKey" TooltipText="@(f => f.Key)">
+            <FluentAnchor Appearance="Appearance.Hypertext"
+                          Href="@($"/config-flags/{Uri.EscapeDataString(context.Key)}")"
+                          title="@context.Key">
+                @context.Key
+            </FluentAnchor>
+        </TemplateColumn>
+        <PropertyColumn TGridItem="FeatureFlagDto" TProp="string" Property="@(f => f.Name)" Title="Name" Sortable="true" />
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Enabled" Sortable="true" SortBy="@_sortByEnabled">
+            <FluentBadge Appearance="@(context.IsEnabled ? Appearance.Accent : Appearance.Neutral)">
+                @(context.IsEnabled ? "On" : "Off")
+            </FluentBadge>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Overrides" Sortable="true" SortBy="@_sortByOverrides">
+            @context.OverrideCount
+        </TemplateColumn>
+        <TemplateColumn TGridItem="FeatureFlagDto" Title="Last changed" Sortable="true" SortBy="@_sortByUpdatedAt">
+            @(context.UpdatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))
+        </TemplateColumn>
+    </Columns>
 </LandingPage>
 
 @code {
@@ -61,6 +56,11 @@
         (!_showArchived && string.IsNullOrEmpty(_search))
             ? "No feature flags. Create one to get started."
             : "No feature flags match the current filter.";
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(240px,2fr) minmax(220px,2fr) 100px 100px minmax(160px,1fr)"
+    };
 
     private readonly GridSort<FeatureFlagDto> _sortByKey =
         GridSort<FeatureFlagDto>.ByAscending(f => f.Key);

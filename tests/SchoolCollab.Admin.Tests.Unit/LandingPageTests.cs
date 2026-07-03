@@ -31,7 +31,6 @@ public class LandingPageTests : BunitContext
         bool createEnabled = true,
         bool showFilters = false,
         bool showActions = false,
-        bool showAboveGrid = false,
         bool showFooter = false,
         EventCallback<string>? searchChanged = null)
     {
@@ -43,7 +42,6 @@ public class LandingPageTests : BunitContext
             .Add(x => x.CreateEnabled, createEnabled)
             .Add(x => x.ShowFilters, showFilters)
             .Add(x => x.ShowActions, showActions)
-            .Add(x => x.ShowAboveGrid, showAboveGrid)
             .Add(x => x.ShowFooter, showFooter)
             .Add(x => x.SearchTextChanged, searchChanged ?? EventCallback<string>.Empty));
     }
@@ -164,16 +162,6 @@ public class LandingPageTests : BunitContext
         var cut = RenderWrapper(items: [], showActions: true);
 
         cut.Markup.Should().Contain("Chat");
-    }
-
-    [TestMethod]
-    public void AboveGrid_Slot_Renders_BeforeGrid()
-    {
-        var cut = RenderWrapper(
-            items: [new(Guid.NewGuid(), "W1")], showAboveGrid: true);
-
-        cut.Markup.Should().Contain("Deleted Values");
-        cut.Markup.Should().Contain("fluent-data-grid");
     }
 
     [TestMethod]

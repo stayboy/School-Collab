@@ -1,237 +1,125 @@
 @page "/coded-values"
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.CodedValues.Admin.Components.Pages.CodedValues
 @using SchoolCollab.CodedValues.Admin.Services
 @inject CodedValuesApiClient Api
-@inject NavigationManager Nav
 @inject ILogger<Index> Logger
 @inject IDialogService DialogService
 @inject CodedValuesChatHub ChatHub
 @inject IFeatureFlagService FeatureFlags
 @implements IDisposable
 
-<PageTitle>Coded Values</PageTitle>
-
-<ErrorBoundary>
-    <ChildContent>
-        <SectionContent SectionName="page-toolbar">
-            <div class="title-row">
-                <h1 class="page-title">Coded Values</h1>
-            </div>
-            <div class="action-bar">
-                <FluentButton Appearance="Appearance.Accent" OnClick='() => Nav.NavigateTo("/coded-values/new")'>
-                    + New Category
-                </FluentButton>
-                <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged" Label="Show deleted" />
-                <div class="spacer"></div>
-                <div class="action-bar-right">
-                    <FluentTextField Id="search-root"
-                                    Placeholder="Search categories…"
-                                    class="search-box"
-                                    Immediate="true"
-                                    ImmediateDelay="300"
-                                    ValueChanged="@OnSearchValueChanged" />
-                    @* Opens the AI assistant side drawer without sending a prompt,
-                       so users can re-read prior responses or follow an ongoing
-                       stream. (Sending a prompt opens the drawer via
-                       OnPromptSubmittedAsync instead.) Gated by the runtime,
-                       tenant-overridable FEATURE:EnableCodedValuesAiChat flag
-                       resolved via the central Config service. *@
-                    @if (_aiChatEnabled == true)
-                    {
-                        <FluentButton Appearance="Appearance.Neutral"
-                                      Title="Open AI assistant"
-                                      OnClick="OpenChatDrawerAsync">
-                            ✨ Chat
-                        </FluentButton>
-                    }
-                </div>
-            </div>
-        </SectionContent>
-            @if (_showDeleted && _deletedItems is not null)
+<LandingPage TItem="CodedValueDto"
+             Title="Coded Values"
+             CreateLabel="+ New Category"
+             CreateRoute="/coded-values/new"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@DisplayItems"
+             Error="@_error"
+             Loading="@_isSearching"
+             GridSettings="@_gridSettings"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchValueChanged"
+             SearchPlaceholder="Search categories…">
+    <ToolbarFilters>
+        <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged"
+                        Label="Show deleted" />
+    </ToolbarFilters>
+    <ToolbarActions>
+        @* Opens the AI assistant side drawer without sending a prompt, so users
+           can re-read prior responses or follow an ongoing stream. (Sending a
+           prompt opens the drawer via OnPromptSubmittedAsync instead.) Gated by
+           the runtime, tenant-overridable FEATURE:EnableCodedValuesAiChat flag
+           resolved via the central Config service. *@
+        @if (_aiChatEnabled == true)
+        {
+            <FluentButton Appearance="Appearance.Neutral"
+                          Title="Open AI assistant"
+                          OnClick="OpenChatDrawerAsync">
+                ✨ Chat
+            </FluentButton>
+        }
+    </ToolbarActions>
+    <Columns>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
+            <code>@context.Code</code>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">
+                @context.Name (@context.ChildrenCount)
+            </FluentAnchor>
+        </TemplateColumn>
+        <PropertyColumn TGridItem="CodedValueDto" TProp="string" Property="@(x => x.Description)" Title="Description" />
+        <TemplateColumn TGridItem="CodedValueDto" Title="Status">
+            @if (context.IsDeleted)
             {
-                @if (_deletedItems.Length == 0)
-                {
-                    <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">No deleted coded values.</FluentMessageBar>
-                }
-                else
-                {
-                    <h3>Deleted Values</h3>
-                    <FluentDataGrid Items="@_deletedItems.AsQueryable()" GridTemplateColumns="1fr 2fr 1fr 2fr" TGridItem="CodedValueDto" MultiLine="true" class="mb-4">
-                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true">
-                            <code>@context.Code</code>
-                        </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.Name)" Sortable="true" />
-                        <TemplateColumn Title="Deleted At">
-                            @(context.DeletedAt?.ToLocalTime().ToString("g") ?? "—")
-                        </TemplateColumn>
-                        <TemplateColumn Title="Actions">
-                            <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.Code))">Recover</FluentAnchor>
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="ms-2">View</FluentAnchor>
-                        </TemplateColumn>
-                    </FluentDataGrid>
-                }
+                <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
             }
-
-            @* -- Grid fills remaining vertical space -- *@
-            @if (_isSearching && _searchResults is null)
+            else if (context.IsDisabled)
             {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
-            }
-            else if (!string.IsNullOrWhiteSpace(_searchText) && _searchResults is not null)
-            {
-                @* Search results view *@
-                if (_searchResults.Length == 0)
-                {
-                    <FluentMessageBar Intent="MessageIntent.Info">No categories match '@_searchText'.</FluentMessageBar>
-                }
-                else
-                {
-                    <div class="grid-container">
-                        <FluentDataGrid Items="@_searchResults.AsQueryable()"
-                                        GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(180px,2fr) auto"
-                                        GenerateHeader="GenerateHeaderOption.Sticky"
-                                        MultiLine="true"
-                                        TGridItem="CodedValueDto">
-                            <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
-                                <code>@context.Code</code>
-                            </TemplateColumn>
-                            <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">
-                                    @context.Name (@context.ChildrenCount)
-                                </FluentAnchor>
-                            </TemplateColumn>
-                            <PropertyColumn Property="@(x => x.Description)" Title="Description" />
-                            <TemplateColumn Title="Status">
-                                @if (context.IsDisabled)
-                                {
-                                    <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-                                }
-                                else
-                                {
-                                    <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                                }
-                            </TemplateColumn>
-                            <TemplateColumn Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
-                                @if (context.AttributeDefinitions.Count > 0)
-                                {
-                                    @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
-                                }
-                                else
-                                {
-                                    <span class="text-muted">—</span>
-                                }
-                            </TemplateColumn>
-                            <TemplateColumn Title="Actions">
-                                @if (context.IsDisabled)
-                                {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))">Enable</FluentAnchor>
-                                }
-                                else
-                                {
-                                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))">Disable</FluentAnchor>
-                                }
-                                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="ms-2">Edit</FluentAnchor>
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
-                            </TemplateColumn>
-                        </FluentDataGrid>
-                    </div>
-                }
-            }
-            else if (_items is null)
-            {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
-            }
-            else if (_items.Length == 0)
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">No coded value categories yet.</FluentMessageBar>
+                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
             }
             else
             {
-                <div class="grid-container">
-                    <FluentDataGrid Items="@_items.AsQueryable()"
-                                   GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(180px,2fr) auto"
-                                    GenerateHeader="GenerateHeaderOption.Sticky"
-                                    MultiLine="true"
-                                    TGridItem="CodedValueDto">
-                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
-                            <code>@context.Code</code>
-                        </TemplateColumn>
-                        <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")">
-                                @context.Name (@context.ChildrenCount)
-                            </FluentAnchor>
-                        </TemplateColumn>
-                        <PropertyColumn Property="@(x => x.Description)" Title="Description" />
-                        <TemplateColumn Title="Status">
-                            @if (context.IsDisabled)
-                            {
-                                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-                            }
-                            else
-                            {
-                                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                            }
-                        </TemplateColumn>
-                        <TemplateColumn Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
-                            @if (context.AttributeDefinitions.Count > 0)
-                            {
-                                @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
-                            }
-                            else
-                            {
-                                <span class="text-muted">—</span>
-                            }
-                        </TemplateColumn>
-                        <TemplateColumn Title="Actions">
-                            @if (context.IsDisabled)
-                            {
-                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))">Enable</FluentAnchor>
-                            }
-                            else
-                            {
-                                <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))">Disable</FluentAnchor>
-                            }
-                            <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="ms-2">Edit</FluentAnchor>
-                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
-                        </TemplateColumn>
-                    </FluentDataGrid>
-                </div>
+                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
             }
-
-            @if (!string.IsNullOrEmpty(_error))
+        </TemplateColumn>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Definitions" TooltipText="@(x => x.AttributeDefinitions.Count > 0 ? string.Join(", ", x.AttributeDefinitions.Select(d => d.Key)) : null)">
+            @if (context.AttributeDefinitions.Count > 0)
             {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                @string.Join(", ", context.AttributeDefinitions.Select(d => d.Key))
             }
-
-            @* -- Chat pinned to bottom. The inline chat is InputOnly: a pure
-               launcher that never calls the AI. It forwards the user's text via
-               OnPromptSubmitted; this handler clears the shared hub for a fresh
-               conversation (when the drawer is closed), opens the drawer, and
-               feeds the text to the drawer's Full-mode chat via the Prompt
-               parameter. The drawer is the single AI-calling surface and owns
-               the conversation history. -- *@
-            @if (_aiChatEnabled == true)
+            else
             {
-                <SectionContent SectionName="page-footer">
-                    <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
-                                     ShowIntro="true"
-                                     OnPromptSubmitted="@OnPromptSubmittedAsync" />
-                </SectionContent>
-
-                <CodedValuesChatPanel Open="_chatDrawerOpen"
-                                        OpenChanged="@OnDrawerOpenChangedAsync"
-                                        Prompt="@_pendingPrompt" />
+                <span class="text-muted">—</span>
             }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Actions">
+            @if (context.IsDeleted)
+            {
+                <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.Code))">Recover</FluentAnchor>
+                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/children")" class="ms-2">View</FluentAnchor>
+            }
+            else
+            {
+                @if (context.IsDisabled)
+                {
+                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: false))">Enable</FluentAnchor>
+                }
+                else
+                {
+                    <FluentAnchor Href="#" OnClick="@(() => OnToggleAsync(context.Id, disable: true))">Disable</FluentAnchor>
+                }
+                <FluentAnchor Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")" class="ms-2">Edit</FluentAnchor>
+                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
+            }
+        </TemplateColumn>
+    </Columns>
+    <Footer>
+        @* -- Chat pinned to bottom. The inline chat is InputOnly: a pure
+           launcher that never calls the AI. It forwards the user's text via
+           OnPromptSubmitted; this handler clears the shared hub for a fresh
+           conversation (when the drawer is closed), opens the drawer, and
+           feeds the text to the drawer's Full-mode chat via the Prompt
+           parameter. The drawer is the single AI-calling surface and owns
+           the conversation history. -- *@
+        @if (_aiChatEnabled == true)
+        {
+            <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
+                             ShowIntro="true"
+                             OnPromptSubmitted="@OnPromptSubmittedAsync" />
+        }
+    </Footer>
+    <ChildContent>
+        @if (_aiChatEnabled == true)
+        {
+            <CodedValuesChatPanel Open="_chatDrawerOpen"
+                                   OpenChanged="@OnDrawerOpenChangedAsync"
+                                   Prompt="@_pendingPrompt" />
+        }
     </ChildContent>
-    <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
-    </ErrorContent>
-</ErrorBoundary>
+</LandingPage>
 
 @code {
     private CodedValueDto[]? _items;
@@ -255,6 +143,34 @@
     private CodedValueDto[]? _searchResults;
     private bool _isSearching;
     private CancellationTokenSource? _searchCts;
+
+    // The array currently shown: search results while searching, otherwise the
+    // loaded active list merged with the deleted list when "Show deleted" is on
+    // (deleted rows render with a Deleted status badge and a Recover action via
+    // the per-row column templates). Null while the relevant fetch is in flight
+    // (the wrapper turns that into the spinner via Items=null or Loading=_isSearching).
+    private CodedValueDto[]? DisplayItems
+    {
+        get
+        {
+            if (!string.IsNullOrWhiteSpace(_searchText))
+                return _searchResults;
+
+            return _showDeleted
+                ? (_items ?? []).Concat(_deletedItems ?? []).ToArray()
+                : _items;
+        }
+    }
+
+    private string CurrentEmptyMessage =>
+        !string.IsNullOrWhiteSpace(_searchText)
+            ? $"No categories match '{_searchText}'."
+            : "No coded value categories yet.";
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "150px minmax(200px,2fr) minmax(180px,2fr) minmax(80px,1fr) minmax(180px,2fr) auto"
+    };
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);

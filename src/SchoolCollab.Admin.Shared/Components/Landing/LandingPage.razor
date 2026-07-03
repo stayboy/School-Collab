@@ -36,8 +36,6 @@
             </div>
         </SectionContent>
 
-        @AboveGrid
-
         @if (Loading || Items is null)
         {
             <div class="spinner-container">
@@ -48,10 +46,16 @@
         {
             <FluentMessageBar Intent="MessageIntent.Info">@EmptyMessage</FluentMessageBar>
         }
-        else if (Grid is not null)
+        else
         {
             <div class="grid-container">
-                @Grid
+                <FluentDataGrid Items="@Items.AsQueryable()"
+                                GridTemplateColumns="@GridSettings.GridTemplateColumns"
+                                GenerateHeader="@GridSettings.GenerateHeader"
+                                MultiLine="@GridSettings.MultiLine"
+                                TGridItem="TItem">
+                    @Columns
+                </FluentDataGrid>
             </div>
         }
 
@@ -92,8 +96,8 @@
 
     /// <summary>
     /// The list to render. <c>null</c> shows the loading spinner; an empty
-    /// array shows <see cref="EmptyMessage"/>; otherwise <see cref="Grid"/>
-    /// renders (wrapped in the <c>grid-container</c>).
+    /// array shows <see cref="EmptyMessage"/>; otherwise the wrapper's
+    /// <c>&lt;FluentDataGrid&gt;</c> renders (wrapped in <c>grid-container</c>).
     /// </summary>
     [Parameter]
     public TItem[]? Items { get; set; }
@@ -105,15 +109,24 @@
     public string EmptyMessage { get; set; } = string.Empty;
 
     /// <summary>
-    /// The populated grid, rendered inside the wrapper's
-    /// <c>grid-container</c> when <see cref="Items"/> is non-empty. Supply a
-    /// <c>&lt;FluentDataGrid TGridItem="TItem" Items="…" GridTemplateColumns="…"
-    /// GenerateHeader="Sticky" MultiLine="true"&gt;</c> with its columns as
-    /// direct children — this keeps Blazor's parent-to-child <c>TGridItem</c>
-    /// inference working, which a forwarded <c>Columns</c> fragment would lose.
+    /// Grid configuration applied to the wrapper's
+    /// <c>&lt;FluentDataGrid&gt;</c> — at minimum
+    /// <see cref="LandingGridSettings.GridTemplateColumns"/>.
     /// </summary>
-    [Parameter]
-    public RenderFragment? Grid { get; set; }
+    [Parameter, EditorRequired]
+    public LandingGridSettings GridSettings { get; set; } = new();
+
+    /// <summary>
+    /// The grid's column definitions, forwarded as the child content of the
+    /// wrapper's <c>&lt;FluentDataGrid TGridItem="TItem"&gt;</c>. Because the
+    /// columns are compiled in the consuming page's scope (not the grid's),
+    /// Blazor cannot infer each column's <c>TGridItem</c> — so every
+    /// <c>TemplateColumn</c>/<c>PropertyColumn</c> MUST declare
+    /// <c>TGridItem="&lt;the DTO&gt;"</c> explicitly. <c>context</c> inside a
+    /// <c>TemplateColumn</c> is the current <typeparamref name="TItem"/> row.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public RenderFragment? Columns { get; set; }
 
     /// <summary>
     /// Error text. Rendered as a red message bar beneath the grid when non-empty.
@@ -168,13 +181,6 @@
     /// <summary>Default <c>true</c>; set <c>false</c> to hide the New button.</summary>
     [Parameter]
     public bool CreateEnabled { get; set; } = true;
-
-    /// <summary>
-    /// Optional slot rendered above the main grid — e.g. a deleted-items
-    /// section for pages that support soft-delete recovery.
-    /// </summary>
-    [Parameter]
-    public RenderFragment? AboveGrid { get; set; }
 
     /// <summary>
     /// Optional pinned-footer content, published into the layout's
