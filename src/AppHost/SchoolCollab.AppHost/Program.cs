@@ -24,10 +24,10 @@ var rabbit = builder.AddRabbitMQ("rabbitmq", password: rabbitPassword)
     .WithLifetime(ContainerLifetime.Persistent)
     .WithManagementPlugin();
 
-var codedValuesDb = postgres.AddDatabase("coded-values-db");
-
-// Config bounded-context database (owns the central feature-flag service).
-var configDb = postgres.AddDatabase("config-db");
+// Settings bounded-context database (replaces the legacy coded-values-db and
+// config-db). The Settings bounded context owns both CodedValues and
+// FeatureFlag aggregates — see documents/solution/settings-context-merge-spec.md.
+var settingsDb = postgres.AddDatabase("settings-db");
 
 var redis = builder.AddRedis("cache");
 
@@ -37,12 +37,11 @@ var redis = builder.AddRedis("cache");
 // no per-service appsettings.json needs an Outbox section — the value reaches
 // every consumer exclusively through the env var Aspire injects at launch.
 // See OutboxExtensions.AddOutbox<TContext> for the consumer side.
-var codedValuesOutboxExchange = builder.AddParameter("outbox-exchange-coded-values");
+var settingsOutboxExchange  = builder.AddParameter("outbox-exchange-settings");
 var assignmentsOutboxExchange  = builder.AddParameter("outbox-exchange-assignments");
 var studentsOutboxExchange     = builder.AddParameter("outbox-exchange-students");
-var configOutboxExchange       = builder.AddParameter("outbox-exchange-config");
 
-// AI provider configuration that the `coded-values-ai` host reads at startup.
+// AI provider configuration that the `settings-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
 // see every knob they may need to set in exactly one place — the AppHost's
 // appsettings.json under Parameters:. The values are fanned out as the exact
@@ -60,13 +59,13 @@ var openRouterDefaultModel  = builder.AddParameter("openrouter-default-model");
 var openRouterApiKey        = builder.AddParameter("openrouter-api-key", secret: true);
 
 // Feature flags used to be a per-service env-var fanned out from here. Runtime,
-// mutable, tenant-overridable flags are now owned by the central Config service
-// (see documents/solution/central-config-service-plan.md). The one flag that
-// remains deployment-time — FEATURE:DisableOIDCAuth, a startup auth-mode switch —
-// is read by each consumer from its own appsettings.json (dev default "true") or
-// the FeatureFlags__FEATURE__DisableOIDCAuth env var in production. It is NOT
-// managed as a Config flag because ASP.NET Core auth schemes are registered once
-// at startup and cannot be flipped at runtime.
+// mutable, tenant-overridable flags are now owned by the central Settings
+// FeatureFlag aggregate (see documents/solution/settings-context-merge-spec.md).
+// The one flag that remains deployment-time — FEATURE:DisableOIDCAuth, a startup
+// auth-mode switch — is read by each consumer from its own appsettings.json
+// (dev default "true") or the FeatureFlags__FEATURE__DisableOIDCAuth env var in
+// production. It is NOT managed as a Config flag because ASP.NET Core auth
+// schemes are registered once at startup and cannot be flipped at runtime.
 
 // ── Assignments bounded context ──
 
@@ -77,41 +76,34 @@ var assignmentsDb = postgres.AddDatabase("assignments-db");
 var studentsDb = postgres.AddDatabase("students-db");
 
 // Unified migration service: runs EF Core migrations for all bounded contexts
-// and seeds CodedValues data, then exits. The APIs wait for successful completion
+// and seeds Settings data, then exits. The APIs wait for successful completion
 // before starting, ensuring the schema and seed data are ready in all environments.
 var migrator = builder.AddProject<Projects.SchoolCollab_MigrationService>("migrator")
-    .WithReference(codedValuesDb)
+    .WithReference(settingsDb)
     .WithReference(assignmentsDb)
     .WithReference(studentsDb)
-    .WithReference(configDb)
-    .WaitFor(codedValuesDb)
+    .WaitFor(settingsDb)
     .WaitFor(assignmentsDb)
-    .WaitFor(studentsDb)
-    .WaitFor(configDb);
+    .WaitFor(studentsDb);
 
-var configApi = builder.AddProject<Projects.SchoolCollab_Config_Api>("config-api")
-    .WithReference(configDb)
+// Unified Settings API: exposes /coded-values/* (CodedValues aggregate) and
+// /api/config/* + /api/features/* (FeatureFlag aggregate) in a single host
+// backed by SettingsDbContext and settings-db. Replaces coded-values-api and
+// config-api. See spec §8.
+var settingsApi = builder.AddProject<Projects.SchoolCollab_Settings_Api>("settings-api")
+    .WithReference(settingsDb)
     .WithReference(rabbit)
     .WithReference(redis)
-    .WithEnvironment("Outbox__ExchangeName", configOutboxExchange)
+    .WithEnvironment("Outbox__ExchangeName", settingsOutboxExchange)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
 
-var codedValuesApi = builder.AddProject<Projects.SchoolCollab_CodedValues_Api>("coded-values-api")
-    .WithReference(codedValuesDb)
-    .WithReference(rabbit)
-    .WithReference(redis)
-    .WithEnvironment("Outbox__ExchangeName", codedValuesOutboxExchange)
-    .WaitFor(rabbit)
-    .WaitFor(redis)
-    .WaitForCompletion(migrator);
-
-var codedValuesAi = builder.AddProject<Projects.SchoolCollab_AI>("coded-values-ai")
-    .WithReference(codedValuesApi)
+var settingsAi = builder.AddProject<Projects.SchoolCollab_AI>("settings-ai")
+    .WithReference(settingsApi)
     // Env-var names use the double-underscore convention so that ASP.NET
     // Core's EnvironmentVariablesConfigurationProvider maps `__` to `:`
-    // when reading them inside `coded-values-ai`. The `:` separator
+    // when reading them inside `settings-ai`. The `:` separator
     // works on Windows but not on Linux/sh, so `__` is the cross-platform
     // safe form here. See documents/configuration.md §11 and the .NET docs
     // (https://learn.microsoft.com/aspnet/core/fundamentals/configuration).
@@ -121,7 +113,7 @@ var codedValuesAi = builder.AddProject<Projects.SchoolCollab_AI>("coded-values-a
     .WithEnvironment("OpenRouter__Endpoint", openRouterEndpoint)
     .WithEnvironment("OpenRouter__DefaultModel", openRouterDefaultModel)
     .WithEnvironment("OpenRouter__ApiKey", openRouterApiKey)
-    .WaitFor(codedValuesApi);
+    .WaitFor(settingsApi);
 
 var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
     .WithReference(assignmentsDb)
@@ -148,16 +140,16 @@ var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("
     .WaitFor(rabbit)
     .WaitForCompletion(migrator);
 
-// Unified admin host — serves CodedValues, Assignments, and Students Blazor UIs
+// Unified admin host — serves the unified Settings (CodedValues + Config
+// Flags), Assignments, and Students Blazor UIs.
 builder.AddProject<Projects.SchoolCollab_Admin>("admin")
-    .WithReference(codedValuesApi)
-    .WithReference(codedValuesAi)
+    .WithReference(settingsApi)
+    .WithReference(settingsAi)
     .WithReference(assignmentsApi)
     .WithReference(studentsApi)
-    .WithReference(configApi)
     .WithReference(redis)
-    .WaitFor(codedValuesApi)
-    .WaitFor(codedValuesAi)
+    .WaitFor(settingsApi)
+    .WaitFor(settingsAi)
     .WaitFor(assignmentsApi)
     .WaitFor(studentsApi);
 

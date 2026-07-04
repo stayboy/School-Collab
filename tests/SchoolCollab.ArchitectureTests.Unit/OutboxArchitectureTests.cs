@@ -24,20 +24,18 @@ public class OutboxArchitectureTests
         typeof(SchoolCollab.Students.Core.Data.StudentsDbContext).Assembly;
 
     private static readonly Assembly CodedValuesCore =
-        typeof(SchoolCollab.CodedValues.Core.Data.CodedValuesDbContext).Assembly;
+        typeof(SchoolCollab.Settings.Core.Data.SettingsDbContext).Assembly;
 
     private static readonly Assembly AssignmentsCore =
         typeof(SchoolCollab.Assignments.Core.Data.AssignmentsDbContext).Assembly;
 
-    private static readonly Assembly ConfigCore =
-        typeof(SchoolCollab.Config.Core.Data.ConfigDbContext).Assembly;
-
+    // CodedValues and Config merged into Settings (spec §3). The single
+    // SettingsCore assembly replaces both CodedValuesCore and ConfigCore.
     private static readonly Assembly[] DomainCores =
     {
         StudentsCore,
         CodedValuesCore,
         AssignmentsCore,
-        ConfigCore,
     };
 
     /// <summary>

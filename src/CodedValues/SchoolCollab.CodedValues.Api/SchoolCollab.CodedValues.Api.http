@@ -1,6 +1,0 @@
-@SchoolCollab.CodedValues.Api_HostAddress = http://localhost:5212
-
-GET {{SchoolCollab.CodedValues.Api_HostAddress}}/weatherforecast/
-Accept: application/json
-
-###

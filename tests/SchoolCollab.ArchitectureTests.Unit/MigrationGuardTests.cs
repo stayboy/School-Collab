@@ -35,15 +35,14 @@ public class MigrationGuardTests
         typeof(SchoolCollab.Students.Core.Data.StudentsDbContext).Assembly;
 
     private static readonly Assembly CodedValuesCore =
-        typeof(SchoolCollab.CodedValues.Core.Data.CodedValuesDbContext).Assembly;
+        typeof(SchoolCollab.Settings.Core.Data.SettingsDbContext).Assembly;
 
     private static readonly Assembly AssignmentsCore =
         typeof(SchoolCollab.Assignments.Core.Data.AssignmentsDbContext).Assembly;
 
-    private static readonly Assembly ConfigCore =
-        typeof(SchoolCollab.Config.Core.Data.ConfigDbContext).Assembly;
-
-    private static readonly Assembly[] DomainCores = { StudentsCore, CodedValuesCore, AssignmentsCore, ConfigCore };
+    // CodedValues and Config merged into Settings (spec §3). The single
+    // SettingsCore assembly replaces both CodedValuesCore and ConfigCore.
+    private static readonly Assembly[] DomainCores = { StudentsCore, CodedValuesCore, AssignmentsCore };
 
     /// <summary>
     /// Pairs every <c>DbContext</c> in the three <c>&lt;Domain&gt;.Core</c>
@@ -257,11 +256,9 @@ public class MigrationGuardTests
 
         contextNames.Should().Contain("StudentsDbContext",
             "Students.Core must expose a design-time factory for EF migrations.");
-        contextNames.Should().Contain("CodedValuesDbContext",
-            "CodedValues.Core must expose a design-time factory for EF migrations.");
         contextNames.Should().Contain("AssignmentsDbContext",
             "Assignments.Core must expose a design-time factory for EF migrations.");
-        contextNames.Should().Contain("ConfigDbContext",
-            "Config.Core must expose a design-time factory for EF migrations.");
+        contextNames.Should().Contain("SettingsDbContext",
+            "Settings.Core must expose a design-time factory for EF migrations.");
     }
 }

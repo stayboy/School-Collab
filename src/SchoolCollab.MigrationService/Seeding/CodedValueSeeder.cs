@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using SchoolCollab.CodedValues.Core.Data;
-using SchoolCollab.CodedValues.Core.Domain;
+using SchoolCollab.Settings.Core.Data;
+using SchoolCollab.Settings.Core.Domain;
 
 namespace SchoolCollab.MigrationService.Seeding;
 
@@ -16,7 +16,7 @@ namespace SchoolCollab.MigrationService.Seeding;
 /// seed-attribute-definitions.csv, and seed-attributes.csv in the SeedData subdirectory.
 /// </summary>
 public sealed class CodedValueSeeder(
-    CodedValuesDbContext db,
+    SettingsDbContext db,
     IConfiguration configuration,
     ILogger<CodedValueSeeder> logger)
 {

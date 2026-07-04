@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <EnableMSTestRunner>true</EnableMSTestRunner>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      Unified Settings integration tests. Replaces the legacy
+      SchoolCollab.CodedValues.Tests.Integration +
+      SchoolCollab.Config.Tests.Integration projects. Both legacy ApiFactory
+      classes target the unified SchoolCollab.Settings.Api Program (see spec
+      §14) and re-point its SettingsDbContext at an ephemeral Testcontainers
+      Postgres (settings-db).
+    -->
+    <AppHostUserSecretsId>71bc1e6c-899e-4131-98f2-60199f7d3ba2</AppHostUserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Api\SchoolCollab.Settings.Api.csproj" />
+    <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
+    <ProjectReference Include="..\..\src\SchoolCollab.AI\SchoolCollab.AI.csproj" Aliases="ai" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="MSTest" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="Testcontainers.RabbitMq" />
+    <PackageReference Include="OpenAI" />
+    <PackageReference Include="Microsoft.Extensions.AI" />
+    <PackageReference Include="Microsoft.Extensions.AI.OpenAI" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+  </ItemGroup>
+  <ItemGroup>
+    <!--
+      Live AI configuration (provider, endpoints, default models) lives in the
+      AppHost project under Parameters:*, not in SchoolCollab.AI/appsettings.json
+      anymore (the AI host is fed the values via env vars by the AppHost). This
+      test project runs without the AppHost, so we link the AppHost's
+      appsettings.json to keep that single source of truth also discoverable
+      from tests. The OpenRouter API key remains a secret and is read from the
+      AppHost's UserSecretsId above so a developer setting
+      `Parameters:openrouter-api-key` once supplies both the AI host in dev
+      and the live integration tests. See documents/configuration.md §2 and §7
+      for the full picture.
+    -->
+    <None Include="..\..\src\AppHost\SchoolCollab.AppHost\appsettings.json" Link="appHost-appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

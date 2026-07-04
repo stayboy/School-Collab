@@ -483,4 +483,7 @@ $RECYCLE.BIN/
 
 .playwright-mcp/
 .playwright-cli/
+graphify-out/
+TestResults/
+test-results/
 aspire.config.json

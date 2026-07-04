@@ -15,7 +15,7 @@
     -->
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="SchoolCollab.CodedValues.Tests.Unit" />
+    <InternalsVisibleTo Include="SchoolCollab.Settings.Tests.Unit" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.AI" />
@@ -24,7 +24,7 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\CodedValues\SchoolCollab.CodedValues.Contracts\SchoolCollab.CodedValues.Contracts.csproj" />
+    <ProjectReference Include="..\Settings\SchoolCollab.Settings.Contracts\SchoolCollab.Settings.Contracts.csproj" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Prompts\**\*.md" />

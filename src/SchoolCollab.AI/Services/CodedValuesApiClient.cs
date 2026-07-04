@@ -1,5 +1,4 @@
 using System.Net;
-using SchoolCollab.CodedValues.Contracts;
 
 namespace SchoolCollab.AI.Services;
 
