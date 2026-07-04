@@ -13,8 +13,8 @@ namespace SchoolCollab.Settings.Tests.Playwright;
 /// </list>
 /// When running <c>SchoolCollab.Admin</c> directly (<c>dotnet run</c>) the
 /// <c>http://localhost:5300</c> default applies, but note that the
-/// <c>config-api</c> HttpClient is resolved via Aspire service discovery, so
-/// the full AppHost must be running for the admin UI to reach Config.Api.
+/// <c>settings-api</c> HttpClient is resolved via Aspire service discovery, so
+/// the full AppHost must be running for the admin UI to reach the Settings API.
 /// </summary>
 public static class PlaywrightSettings
 {
