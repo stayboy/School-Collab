@@ -86,7 +86,7 @@ var migrator = builder.AddProject<Projects.SchoolCollab_MigrationService>("migra
     .WaitFor(assignmentsDb)
     .WaitFor(studentsDb);
 
-// Unified Settings API: exposes /coded-values/* (CodedValues aggregate) and
+// Unified Settings API: exposes /api/coded-values/* (CodedValues aggregate) and
 // /api/config/* + /api/features/* (FeatureFlag aggregate) in a single host
 // backed by SettingsDbContext and settings-db. Replaces coded-values-api and
 // config-api. See spec §8.

@@ -8,12 +8,16 @@
                   Items="homeItems" />
 
 @code {
+    @* Settings is a sub-page of the platform admin surface (its DashboardCard
+       entries live at /settings). The other three — Assignments, Students,
+       and the Settings landing page — sit at the top level because they
+       each own their own bounded context. *@
     private static readonly IReadOnlyList<DashboardItem> homeItems =
     [
-        new(Href: "/coded-values",
-            Title: "Coded Values",
-            Description: "Manage categories, subjects, grades, and other reference data.",
-            Icon: new Icons.Regular.Size24.Tag()),
+        new(Href: "/settings",
+            Title: "Settings",
+            Description: "Platform-level configuration: coded values and runtime feature flags.",
+            Icon: new Icons.Regular.Size24.Settings()),
 
         new(Href: "/assignments",
             Title: "Assignments",

@@ -5,10 +5,10 @@ using Microsoft.Playwright.MSTest;
 namespace SchoolCollab.Settings.Tests.Playwright.Tests;
 
 /// <summary>
-/// End-to-end smoke tests for the central Config feature-flag service driven
+/// End-to-end smoke tests for the central FeatureFlag service driven
 /// through the Admin UI. These assume the full Aspire AppHost is running (the
 /// <c>/config-flags</c> page is served by <c>SchoolCollab.Admin</c>, which reaches
-/// <c>config-api</c> via Aspire service discovery, and the seed migrator has
+/// <c>settings-api</c> via Aspire service discovery, and the seed migrator has
 /// created <c>FEATURE:EnableCodedValuesAiChat</c>).
 ///
 /// Set <c>PLAYWRIGHT_BASE_URL</c> to the Admin host URL shown in the Aspire

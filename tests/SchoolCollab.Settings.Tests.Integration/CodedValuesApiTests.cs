@@ -50,7 +50,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task POST_CodedValues_CreatesCategory()
     {
-        var response = await _client.PostAsJsonAsync("/coded-values", new
+        var response = await _client.PostAsJsonAsync("/api/coded-values", new
         {
             Code = $"TEST_{Guid.NewGuid():N}",
             Name = "Test Category",
@@ -65,9 +65,9 @@ public class CodedValuesApiTests
     public async Task POST_CodedValues_DuplicateCode_ReturnsConflict()
     {
         var code = $"DUP_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "First", DisplayOrder = 0 });
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code, Name = "First", DisplayOrder = 0 });
 
-        var response = await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Second", DisplayOrder = 0 });
+        var response = await _client.PostAsJsonAsync("/api/coded-values", new { Code = code, Name = "Second", DisplayOrder = 0 });
 
         response.StatusCode.Should().Be(HttpStatusCode.Conflict);
     }
@@ -76,9 +76,9 @@ public class CodedValuesApiTests
     public async Task GET_CodedValues_ReturnsRootValues()
     {
         var code = $"ROOT_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Root Value", DisplayOrder = 0 });
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code, Name = "Root Value", DisplayOrder = 0 });
 
-        var response = await _client.GetAsync("/coded-values");
+        var response = await _client.GetAsync("/api/coded-values");
         var items = await response.Content.ReadFromJsonAsync<CodedValueDto[]>();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -90,11 +90,11 @@ public class CodedValuesApiTests
     public async Task GET_CodedValuesById_ReturnsCorrectItem()
     {
         var code = $"BYID_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "By Id Test", DisplayOrder = 0 });
-        var roots = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code, Name = "By Id Test", DisplayOrder = 0 });
+        var roots = await _client.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values");
         var created = roots!.Single(x => x.Code == code);
 
-        var response = await _client.GetAsync($"/coded-values/{created.Id}");
+        var response = await _client.GetAsync($"/api/coded-values/{created.Id}");
         var item = await response.Content.ReadFromJsonAsync<CodedValueDto>();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -105,7 +105,7 @@ public class CodedValuesApiTests
     [TestMethod]
     public async Task GET_CodedValuesById_NotFound_Returns404()
     {
-        var response = await _client.GetAsync($"/coded-values/{Guid.NewGuid()}");
+        var response = await _client.GetAsync($"/api/coded-values/{Guid.NewGuid()}");
         response.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
@@ -113,14 +113,14 @@ public class CodedValuesApiTests
     public async Task GET_ByParent_ReturnsChildrenOnly()
     {
         var parentCode = $"PAR_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = parentCode, Name = "Parent", DisplayOrder = 0 });
-        var parent = (await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values"))!
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = parentCode, Name = "Parent", DisplayOrder = 0 });
+        var parent = (await _client.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values"))!
             .Single(x => x.Code == parentCode);
 
         var childCode = $"CHD_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = childCode, Name = "Child", ParentId = parent.Id, DisplayOrder = 0 });
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = childCode, Name = "Child", ParentId = parent.Id, DisplayOrder = 0 });
 
-        var response = await _client.GetAsync($"/coded-values/by-parent?parentId={parent.Id}");
+        var response = await _client.GetAsync($"/api/coded-values/by-parent?parentId={parent.Id}");
         var children = await response.Content.ReadFromJsonAsync<CodedValueDto[]>();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -131,14 +131,14 @@ public class CodedValuesApiTests
     public async Task GET_ByParent_ByParentCode_ReturnsChildren()
     {
         var parentCode = $"PARCODE_{Guid.NewGuid():N}"[..20].ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = parentCode, Name = "Parent", DisplayOrder = 0 });
-        var parent = (await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values"))!
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = parentCode, Name = "Parent", DisplayOrder = 0 });
+        var parent = (await _client.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values"))!
             .Single(x => x.Code == parentCode);
 
         var childCode = $"CHDCODE_{Guid.NewGuid():N}"[..20].ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = childCode, Name = "Child", ParentId = parent.Id, DisplayOrder = 0 });
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = childCode, Name = "Child", ParentId = parent.Id, DisplayOrder = 0 });
 
-        var response = await _client.GetAsync($"/coded-values/by-parent?parentCode={parentCode}");
+        var response = await _client.GetAsync($"/api/coded-values/by-parent?parentCode={parentCode}");
         var children = await response.Content.ReadFromJsonAsync<CodedValueDto[]>();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -149,14 +149,14 @@ public class CodedValuesApiTests
     public async Task PUT_CodedValues_UpdatesItem()
     {
         var code = $"UPD_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Original", DisplayOrder = 0 });
-        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code, Name = "Original", DisplayOrder = 0 });
+        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values");
         var item = items!.Single(x => x.Code == code);
 
-        var response = await _client.PutAsJsonAsync($"/coded-values/{item.Id}", new { Name = "Updated", Description = "new desc", DisplayOrder = 1 });
+        var response = await _client.PutAsJsonAsync($"/api/coded-values/{item.Id}", new { Name = "Updated", Description = "new desc", DisplayOrder = 1 });
 
         response.StatusCode.Should().Be(HttpStatusCode.NoContent);
-        var updated = await _client.GetFromJsonAsync<CodedValueDto>($"/coded-values/{item.Id}");
+        var updated = await _client.GetFromJsonAsync<CodedValueDto>($"/api/coded-values/{item.Id}");
         updated!.Name.Should().Be("Updated");
     }
 
@@ -164,20 +164,20 @@ public class CodedValuesApiTests
     public async Task DisableAndEnable_ToggleIsDisabled()
     {
         var code = $"DIS_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Disable Test", DisplayOrder = 0 });
-        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code, Name = "Disable Test", DisplayOrder = 0 });
+        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values");
         var item = items!.Single(x => x.Code == code);
 
-        var disableResponse = await _client.PostAsync($"/coded-values/{item.Id}/disable", null);
+        var disableResponse = await _client.PostAsync($"/api/coded-values/{item.Id}/disable", null);
         disableResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        var disabled = await _client.GetFromJsonAsync<CodedValueDto>($"/coded-values/{item.Id}");
+        var disabled = await _client.GetFromJsonAsync<CodedValueDto>($"/api/coded-values/{item.Id}");
         disabled!.IsDisabled.Should().BeTrue();
 
-        var enableResponse = await _client.PostAsync($"/coded-values/{item.Id}/enable", null);
+        var enableResponse = await _client.PostAsync($"/api/coded-values/{item.Id}/enable", null);
         enableResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        var enabled = await _client.GetFromJsonAsync<CodedValueDto>($"/coded-values/{item.Id}");
+        var enabled = await _client.GetFromJsonAsync<CodedValueDto>($"/api/coded-values/{item.Id}");
         enabled!.IsDisabled.Should().BeFalse();
     }
 
@@ -185,20 +185,20 @@ public class CodedValuesApiTests
     public async Task Attributes_SetAndRemove()
     {
         var code = $"ATTR_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code, Name = "Attr Test", DisplayOrder = 0 });
-        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code, Name = "Attr Test", DisplayOrder = 0 });
+        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values");
         var item = items!.Single(x => x.Code == code);
 
-        var setResp = await _client.PutAsJsonAsync($"/coded-values/{item.Id}/attributes/country", new { Value = "US" });
+        var setResp = await _client.PutAsJsonAsync($"/api/coded-values/{item.Id}/attributes/country", new { Value = "US" });
         setResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        var withAttr = await _client.GetFromJsonAsync<CodedValueDto>($"/coded-values/{item.Id}");
+        var withAttr = await _client.GetFromJsonAsync<CodedValueDto>($"/api/coded-values/{item.Id}");
         withAttr!.Attributes.Should().ContainSingle(a => a.Key == "country" && a.Value == "US");
 
-        var removeResp = await _client.DeleteAsync($"/coded-values/{item.Id}/attributes/country");
+        var removeResp = await _client.DeleteAsync($"/api/coded-values/{item.Id}/attributes/country");
         removeResp.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
-        var withoutAttr = await _client.GetFromJsonAsync<CodedValueDto>($"/coded-values/{item.Id}");
+        var withoutAttr = await _client.GetFromJsonAsync<CodedValueDto>($"/api/coded-values/{item.Id}");
         withoutAttr!.Attributes.Should().NotContain(a => a.Key == "country");
     }
 
@@ -207,16 +207,16 @@ public class CodedValuesApiTests
     {
         var code1 = $"ID1_{Guid.NewGuid():N}".ToUpperInvariant();
         var code2 = $"ID2_{Guid.NewGuid():N}".ToUpperInvariant();
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code1, Name = "Active Item", DisplayOrder = 0 });
-        await _client.PostAsJsonAsync("/coded-values", new { Code = code2, Name = "Disabled Item", DisplayOrder = 0 });
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code1, Name = "Active Item", DisplayOrder = 0 });
+        await _client.PostAsJsonAsync("/api/coded-values", new { Code = code2, Name = "Disabled Item", DisplayOrder = 0 });
 
-        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/coded-values");
+        var items = await _client.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values");
         var item1 = items!.Single(x => x.Code == code1);
         var item2 = items!.Single(x => x.Code == code2);
 
-        await _client.PostAsync($"/coded-values/{item2.Id}/disable", null);
+        await _client.PostAsync($"/api/coded-values/{item2.Id}/disable", null);
 
-        var response = await _client.GetAsync($"/coded-values/by-ids?ids={item1.Id}&ids={item2.Id}");
+        var response = await _client.GetAsync($"/api/coded-values/by-ids?ids={item1.Id}&ids={item2.Id}");
         var results = await response.Content.ReadFromJsonAsync<CodedValueDto[]>();
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);

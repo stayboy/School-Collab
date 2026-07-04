@@ -59,7 +59,7 @@ public class CodedValuesApiClientNotFoundTests
         var result = await client.GetByCodeAsync("NOTEXIST", ct: CancellationToken.None);
 
         result.Should().BeNull("404 should return null, not throw");
-        handler.Requests.Should().ContainSingle(r => r.RequestUri!.PathAndQuery == "/coded-values/by-code/NOTEXIST");
+        handler.Requests.Should().ContainSingle(r => r.RequestUri!.PathAndQuery == "/api/coded-values/by-code/NOTEXIST");
     }
 
     [TestMethod]
@@ -129,7 +129,7 @@ public class CodedValuesApiClientNotFoundTests
 
         result.Should().NotBeNull();
         result!.Should().ContainSingle();
-        handler.Requests.Should().ContainSingle(r => r.RequestUri!.PathAndQuery == "/coded-values/by-parent?parentCode=PARENT_CODE");
+        handler.Requests.Should().ContainSingle(r => r.RequestUri!.PathAndQuery == "/api/coded-values/by-parent?parentCode=PARENT_CODE");
     }
 
     // --- AI CodedValuesApiClient tests ---

@@ -12,14 +12,22 @@ namespace SchoolCollab.Settings.Core.Caching;
 /// <summary>
 /// Cached, DB-backed <see cref="IFeatureFlagService"/>. Resolves the whole flag
 /// set per tenant through a HybridCache L1 (in-proc, 5s) + L2 (Redis, 30s)
-/// backed by an HTTP call to the Config API. Falls back to <see cref="IConfiguration"/>
-/// when the API is unreachable (preserving the "works without Config running" dev
+/// backed by an HTTP call to the Settings API. Falls back to <see cref="IConfiguration"/>
+/// when the API is unreachable (preserving the "works without Settings running" dev
 /// behaviour). Propagation of runtime changes is bounded by the L1/L2 TTLs (the
 /// "sensible ITL" floor); a push invalidation subscriber is a follow-up (v1.1).
 /// </summary>
 public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlagResolver
 {
-    internal const string HttpClientName = "config-api";
+    /// <summary>
+    /// Named HttpClient key in the consumer host's DI container. The
+    /// <see cref="ConfigFeatureFlagClientExtensions.AddConfigFeatureFlagClient"/>
+    /// extension registers a named HttpClient under this key with its
+    /// <c>BaseAddress</c> set to the Aspire service-discovery URL of the
+    /// unified <c>settings-api</c> resource (was <c>config-api</c> before the
+    /// Settings context merge).
+    /// </summary>
+    internal const string HttpClientName = "settings-api";
 
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -131,7 +139,7 @@ public sealed class ConfigFeatureFlagService : IFeatureFlagService, IFeatureFlag
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
         {
-            WarnOnce(cacheKey, "Config API unreachable; falling back to IConfiguration for flags.");
+            WarnOnce(cacheKey, "Settings API unreachable; falling back to IConfiguration for flags.");
             return FromConfigurationAll(ResolvedFlagSource.ConfigurationFallback);
         }
     }

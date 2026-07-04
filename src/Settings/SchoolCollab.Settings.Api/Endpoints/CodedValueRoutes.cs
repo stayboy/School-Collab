@@ -142,7 +142,7 @@ public static class CodedValueRoutes
             try
             {
                 var id = await handler.HandleAsync(command, ct);
-                return Results.Created($"/coded-values/{id}", new { id });
+                return Results.Created($"/api/coded-values/{id}", new { id });
             }
             catch (DuplicateCodeException ex)
             {

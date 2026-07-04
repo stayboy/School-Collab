@@ -27,7 +27,7 @@ public class CodedValuesGridLoadTests : PageTest
     {
         // Wait for the API response that populates the grid
         var gridResponseTask = Page.WaitForResponseAsync(
-            resp => resp.Url.Contains("/coded-values") && resp.Request.Method == "GET",
+            resp => resp.Url.Contains("/api/coded-values") && resp.Request.Method == "GET",
             new() { Timeout = 30_000 });
 
         await Page.GotoAsync("/coded-values");
@@ -62,7 +62,7 @@ public class CodedValuesGridLoadTests : PageTest
 
         // The "by-parent" call is triggered by the Children page on init.
         var childrenResponseTask = Page.WaitForResponseAsync(
-            resp => resp.Url.Contains("/coded-values/by-parent") && resp.Request.Method == "GET",
+            resp => resp.Url.Contains("/api/coded-values/by-parent") && resp.Request.Method == "GET",
             new() { Timeout = 30_000 });
 
         await genderRow.GetByRole(AriaRole.Link, new() { Name = "View children" }).ClickAsync();
@@ -92,7 +92,7 @@ public class CodedValuesGridLoadTests : PageTest
         await Page.GotoAsync("/coded-values");
 
         // Wait for at least one seeded row to render; the FluentProgressRing
-        // is replaced by the grid as soon as the GET /coded-values resolves.
+        // is replaced by the grid as soon as the GET /api/coded-values resolves.
         var genderRow = Page.GetByRole(AriaRole.Row).Filter(new() { HasText = "GENDER" });
         await Expect(genderRow).ToBeVisibleAsync(new() { Timeout = 30_000 });
         await Page.WaitForLoadStateAsync(LoadState.NetworkIdle);

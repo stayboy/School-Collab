@@ -4,13 +4,24 @@
 <PageTitle>Settings</PageTitle>
 
 <DashboardSection Title="Settings"
-                  Subtitle="Platform-level configuration and administration.">
-    <DashboardCard Href="/config-flags"
-                   Icon="@(new Icons.Regular.Size24.SlideText())"
-                   Title="Config Flags"
-                   Description="Manage runtime feature flags — global defaults and per-tenant overrides." />
+                  Subtitle="Platform-level configuration and administration."
+                  Items="settingsItems" />
+
+@code {
+    private static readonly IReadOnlyList<DashboardItem> settingsItems =
+    [
+        new(Href: "/coded-values",
+            Title: "Coded Values",
+            Description: "Manage categories, subjects, grades, and other reference data.",
+            Icon: new Icons.Regular.Size24.Tag()),
+
+        new(Href: "/config-flags",
+            Title: "Config Flags",
+            Description: "Manage runtime feature flags — global defaults and per-tenant overrides.",
+            Icon: new Icons.Regular.Size24.SlideText()),
+    ];
 
     @* Future settings (tenants, integrations, audit retention, …) will land
-       here as additional DashboardCard entries. Keeping the surface area
+       here as additional DashboardItem entries. Keeping the surface area
        small until a real consumer needs the entry avoids dead navigation. *@
-</DashboardSection>
+}

@@ -5,7 +5,7 @@
 @inject NavigationManager Nav
 
 <FluentNavMenu Width="250"
-               Title="@(_currentModule == "coded-values" ? "Coded Values" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
+               Title="@(_currentModule == "settings" ? "Settings" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
 
     <FluentNavLink Href="/"
                  Icon="@FluentIcons.Home"
@@ -14,9 +14,9 @@
     </FluentNavLink>
 
     <FluentNavGroup Title="Admin Modules" Expanded="false">
-        <FluentNavLink Href="/coded-values"
-                        Icon="@FluentIcons.Tag">
-            Coded Values
+        <FluentNavLink Href="/settings"
+                        Icon="@FluentIcons.Settings">
+            Settings
         </FluentNavLink>
         <FluentNavLink Href="/assignments"
                         Icon="@FluentIcons.ClipboardCheckmark">
@@ -26,54 +26,74 @@
                         Icon="@FluentIcons.People">
             Students
         </FluentNavLink>
-        <FluentNavLink Href="/config-flags"
-                        Icon="@FluentIcons.SlideText">
-            Config Flags
-        </FluentNavLink>
     </FluentNavGroup>
 
-    @if (_currentModule == "coded-values")
+    @* When the user is on a Coded Values page, show the Coded Values sub-nav
+       (parent categories + AI Assistant) regardless of whether they arrived
+       via /settings → /coded-values or directly via the /coded-values URL.
+       The Coded Values landing page is hosted in the Settings Admin module
+       (see /settings) but the sub-nav still belongs here in the host shell
+       so the drawer is available from any Coded Values page. *@
+    @if (_currentModule == "settings" || _currentModule == "coded-values")
     {
-        <FluentNavGroup Title="Coded Values"
+        <FluentNavGroup Title="Settings"
                        Expanded="true">
-            @if (_loadingParents)
-            {
-               <FluentNavLink Href="#" Disabled="true">
-                  <FluentProgressRing class="progress-ring-small" />
-               </FluentNavLink>
-            }
-            else if (_parentValues is { Length: > 0 })
-            {
-               foreach (var cv in _parentValues.Take(20))
-               {
-                  <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
-                                Icon="@FluentIcons.Tag"
-                                Tooltip="@cv.Name">
-                      @Truncate(cv.Name, 22)
-                  </FluentNavLink>
-               }
+            <FluentNavLink Href="/settings"
+                          Icon="@FluentIcons.Home">
+                Settings Home
+            </FluentNavLink>
 
-               if (_parentValues.Length > 20)
-               {
-                  <FluentNavLink Href="/coded-values"
-                                Icon="@FluentIcons.ArrowExportUp">
-                      <i>Show More …</i>
-                  </FluentNavLink>
-               }
-            }
-            else
-            {
-               <FluentNavLink Href="/coded-values"
-                            Icon="@FluentIcons.TextBulletList">
-                  All Categories
-               </FluentNavLink>
-            }
+            <FluentNavLink Href="/coded-values"
+                          Icon="@FluentIcons.TextBulletList">
+                Coded Values
+            </FluentNavLink>
+            <FluentNavGroup Title="Coded Values"
+                           Expanded="true"
+                           Icon="@FluentIcons.Tag">
+                @if (_loadingParents)
+                {
+                   <FluentNavLink Href="#" Disabled="true">
+                      <FluentProgressRing class="progress-ring-small" />
+                   </FluentNavLink>
+                }
+                else if (_parentValues is { Length: > 0 })
+                {
+                   foreach (var cv in _parentValues.Take(20))
+                   {
+                      <FluentNavLink Href="@($"/coded-values/{Uri.EscapeDataString(cv.Code)}/children")"
+                                    Icon="@FluentIcons.Tag"
+                                    Tooltip="@cv.Name">
+                          @Truncate(cv.Name, 22)
+                      </FluentNavLink>
+                   }
 
-            <hr class="nav-separator" />
+                   if (_parentValues.Length > 20)
+                   {
+                      <FluentNavLink Href="/coded-values"
+                                    Icon="@FluentIcons.ArrowExportUp">
+                          <i>Show More …</i>
+                      </FluentNavLink>
+                   }
+                }
+                else
+                {
+                   <FluentNavLink Href="/coded-values"
+                                Icon="@FluentIcons.TextBulletList">
+                      All Categories
+                   </FluentNavLink>
+                }
 
-            <FluentNavLink Href="/coded-values/chat"
-                          Icon="@FluentIcons.Bot">
-               AI Assistant
+                <hr class="nav-separator" />
+
+                <FluentNavLink Href="/coded-values/chat"
+                              Icon="@FluentIcons.Bot">
+                   AI Assistant
+                </FluentNavLink>
+            </FluentNavGroup>
+
+            <FluentNavLink Href="/config-flags"
+                          Icon="@FluentIcons.SlideText">
+                Config Flags
             </FluentNavLink>
         </FluentNavGroup>
     }
@@ -138,7 +158,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (_currentModule == "coded-values")
+        if (_currentModule is "settings" or "coded-values")
         {
             await LoadParentValuesAsync();
         }
@@ -152,7 +172,7 @@
             _currentModule = newModule;
             StateHasChanged();
 
-            if (_currentModule == "coded-values" && _parentValues is null && !_loadingParents)
+            if ((_currentModule is "settings" or "coded-values") && _parentValues is null && !_loadingParents)
             {
                _ = LoadParentValuesAsync();
             }
@@ -161,6 +181,9 @@
 
     private static string DetermineModule(string path) => path switch
     {
+        // /settings and any of its sub-pages → "settings"
+        var p when p.Equals("/settings", StringComparison.OrdinalIgnoreCase) => "settings",
+        // /coded-values and its sub-pages → "coded-values" (a sub-module of Settings)
         var p when p.StartsWith("/coded-values", StringComparison.OrdinalIgnoreCase) => "coded-values",
         var p when p.StartsWith("/assignments", StringComparison.OrdinalIgnoreCase) => "assignments",
         var p when p.StartsWith("/students", StringComparison.OrdinalIgnoreCase) => "students",

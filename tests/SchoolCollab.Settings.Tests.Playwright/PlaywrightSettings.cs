@@ -9,24 +9,29 @@ namespace SchoolCollab.Settings.Tests.Playwright;
 /// <list type="bullet">
 ///   <item><c>PLAYWRIGHT_BASE_URL</c> — the Admin host serving <c>/config-flags</c>.</item>
 ///   <item><c>PLAYWRIGHT_CODEDVALUES_URL</c> — the CodedValues host serving
-///       <c>/coded-values</c> (cross-service gating test only).</item>
+///       the Blazor <c>/coded-values</c> landing page (the API surface it
+///       drives is at <c>/api/coded-values</c> on the unified
+///       <c>settings-api</c>; cross-service gating test only).</item>
 /// </list>
 /// When running <c>SchoolCollab.Admin</c> directly (<c>dotnet run</c>) the
 /// <c>http://localhost:5300</c> default applies, but note that the
-/// <c>config-api</c> HttpClient is resolved via Aspire service discovery, so
-/// the full AppHost must be running for the admin UI to reach Config.Api.
+/// <c>settings-api</c> HttpClient is resolved via Aspire service discovery, so
+/// the full AppHost must be running for the admin UI to reach the Settings API.
 /// </summary>
 public static class PlaywrightSettings
 {
     /// <summary>Base URL of the unified <c>SchoolCollab.Admin</c> host. The
     /// Settings merge folded the legacy CodedValues + Config admin pages into
-    /// one host, so the Playwright tests now drive <c>/coded-values</c>,
-    /// <c>/config-flags</c>, and the shared layout all from the same origin.
-    /// Under <c>aspire run</c> the AppHost assigns a random port, so point
-    /// this at the actual Admin URL printed in the Aspire dashboard via the
-    /// <c>PLAYWRIGHT_BASE_URL</c> env var. The legacy
-    /// <c>PLAYWRIGHT_CODEDVALUES_URL</c> env var is still honoured for
-    /// compatibility with any external Playwright runners.</summary>
+    /// one host, so the Playwright tests now drive the Blazor
+    /// <c>/coded-values</c> page, the <c>/config-flags</c> page, and the
+    /// shared layout all from the same origin. The Coded Values UI talks to
+    /// the Settings API at <c>/api/coded-values/*</c> (the
+    /// <c>/api/</c> prefix matches the Config aggregate's <c>/api/config</c>
+    /// and <c>/api/features</c> routes). Under <c>aspire run</c> the AppHost
+    /// assigns a random port, so point this at the actual Admin URL printed
+    /// in the Aspire dashboard via the <c>PLAYWRIGHT_BASE_URL</c> env var.
+    /// The legacy <c>PLAYWRIGHT_CODEDVALUES_URL</c> env var is still
+    /// honoured for compatibility with any external Playwright runners.</summary>
     public static string AdminUrl =>
         Environment.GetEnvironmentVariable("PLAYWRIGHT_BASE_URL")
         ?? "http://localhost:5300";

@@ -66,7 +66,7 @@ builder.Services.AddSingleton<IChatClientFactory>(sp =>
 
 // HttpClient for calling the Settings REST API (service discovery) — replaces
 // the legacy Coded Values host. The settings-api project exposes the CodedValues
-// aggregate endpoints under /coded-values/* alongside the FeatureFlag aggregate
+// aggregate endpoints under /api/coded-values/* alongside the FeatureFlag aggregate
 // endpoints under /api/config/* + /api/features/*. See
 // documents/solution/settings-context-merge-spec.md §8.
 builder.Services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(client =>
