@@ -25,7 +25,7 @@ public class LayoutRenderingTests : PageTest
     public async Task IndexPage_RendersHeaderAndGrid()
     {
         var gridResponseTask = Page.WaitForResponseAsync(
-            resp => resp.Url.Contains("/coded-values") && resp.Request.Method == "GET",
+            resp => resp.Url.Contains("/api/coded-values") && resp.Request.Method == "GET",
             new() { Timeout = 30_000 });
 
         await Page.GotoAsync("/coded-values");
@@ -77,7 +77,7 @@ public class LayoutRenderingTests : PageTest
         await Expect(genderRow).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         var childrenResponseTask = Page.WaitForResponseAsync(
-            resp => resp.Url.Contains("/coded-values/by-parent") && resp.Request.Method == "GET",
+            resp => resp.Url.Contains("/api/coded-values/by-parent") && resp.Request.Method == "GET",
             new() { Timeout = 30_000 });
 
         await genderRow.GetByRole(AriaRole.Link, new() { Name = "View children" }).ClickAsync();
@@ -112,7 +112,7 @@ public class LayoutRenderingTests : PageTest
         await Expect(genderRow).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         var childrenResponseTask = Page.WaitForResponseAsync(
-            resp => resp.Url.Contains("/coded-values/by-parent") && resp.Request.Method == "GET",
+            resp => resp.Url.Contains("/api/coded-values/by-parent") && resp.Request.Method == "GET",
             new() { Timeout = 30_000 });
 
         await genderRow.GetByRole(AriaRole.Link, new() { Name = "View children" }).ClickAsync();
@@ -176,7 +176,7 @@ public class LayoutRenderingTests : PageTest
         await Expect(genderRow).ToBeVisibleAsync(new() { Timeout = 30_000 });
 
         var childrenResponseTask = Page.WaitForResponseAsync(
-            resp => resp.Url.Contains("/coded-values/by-parent") && resp.Request.Method == "GET",
+            resp => resp.Url.Contains("/api/coded-values/by-parent") && resp.Request.Method == "GET",
             new() { Timeout = 30_000 });
 
         await genderRow.GetByRole(AriaRole.Link, new() { Name = "View children" }).ClickAsync();

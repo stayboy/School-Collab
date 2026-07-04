@@ -4,7 +4,7 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <!--
-      Unified Settings API. Hosts the legacy /coded-values/* endpoints (CodedValues
+      Unified Settings API. Hosts the legacy /api/coded-values/* endpoints (CodedValues
       aggregate) and the /api/config/* + /api/features/* endpoints (FeatureFlag
       aggregate) in a single process backed by a single SettingsDbContext /
       settings-db. See documents/solution/settings-context-merge-spec.md §8.

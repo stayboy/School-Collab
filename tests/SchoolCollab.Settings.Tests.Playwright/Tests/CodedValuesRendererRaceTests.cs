@@ -53,10 +53,10 @@ public class CodedValuesRendererRaceTests : PageTest
         };
         Page.PageError += (_, message) => pageErrors.Enqueue(message);
 
-        // Slow the /coded-values response so the streaming renderer is still
+        // Slow the /api/coded-values response so the streaming renderer is still
         // awaiting it when we navigate away — that's what makes the bug
         // reproducible.
-        await Page.RouteAsync("**/coded-values**", async route =>
+        await Page.RouteAsync("**/api/coded-values**", async route =>
         {
             await Task.Delay(2_000);
             await route.FulfillAsync(new()
@@ -115,7 +115,7 @@ public class CodedValuesRendererRaceTests : PageTest
         var pageErrors = new ConcurrentQueue<string>();
         Page.PageError += (_, message) => pageErrors.Enqueue(message);
 
-        await Page.RouteAsync("**/coded-values**", async route =>
+        await Page.RouteAsync("**/api/coded-values**", async route =>
         {
             await Task.Delay(2_000);
             await route.FulfillAsync(new()
@@ -154,12 +154,12 @@ public class CodedValuesRendererRaceTests : PageTest
 
         // Slow the Enable/Disable API call so the rollback path is the one
         // racing the navigation.
-        await Page.RouteAsync("**/coded-values/*/disable", async route =>
+        await Page.RouteAsync("**/api/coded-values/*/disable", async route =>
         {
             await Task.Delay(1_500);
             await route.FulfillAsync(new() { Status = 204 });
         });
-        await Page.RouteAsync("**/coded-values/*/enable", async route =>
+        await Page.RouteAsync("**/api/coded-values/*/enable", async route =>
         {
             await Task.Delay(1_500);
             await route.FulfillAsync(new() { Status = 204 });

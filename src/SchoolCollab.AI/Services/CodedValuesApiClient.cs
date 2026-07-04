@@ -92,14 +92,14 @@ public interface ICodedValuesApiClient
 public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClient
 {
     public Task<CodedValueDto[]?> GetRootValuesAsync(CancellationToken ct = default) =>
-        http.GetFromJsonAsync<CodedValueDto[]>("/coded-values", ct);
+        http.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values", ct);
 
     public Task<CodedValueDto[]?> GetChildrenAsync(Guid parentId, CancellationToken ct = default) =>
-        http.GetFromJsonAsync<CodedValueDto[]>($"/coded-values/by-parent?parentId={parentId}&includeDisabled=true", ct);
+        http.GetFromJsonAsync<CodedValueDto[]>($"/api/coded-values/by-parent?parentId={parentId}&includeDisabled=true", ct);
 
     public async Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var response = await http.GetAsync($"/coded-values/{id}", ct);
+        var response = await http.GetAsync($"/api/coded-values/{id}", ct);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             return null;
         response.EnsureSuccessStatusCode();
@@ -109,8 +109,8 @@ public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClien
     public async Task<CodedValueDto?> GetByCodeAsync(string code, Guid? parentId = null, CancellationToken ct = default)
     {
         var url = parentId.HasValue
-            ? $"/coded-values/by-code/{Uri.EscapeDataString(code)}?parentId={parentId.Value}"
-            : $"/coded-values/by-code/{Uri.EscapeDataString(code)}";
+            ? $"/api/coded-values/by-code/{Uri.EscapeDataString(code)}?parentId={parentId.Value}"
+            : $"/api/coded-values/by-code/{Uri.EscapeDataString(code)}";
         var response = await http.GetAsync(url, ct);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             return null;
@@ -120,14 +120,14 @@ public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClien
 
     public async Task CreateAsync(CreateCodedValueRequest req, CancellationToken ct = default)
     {
-        var response = await http.PostAsJsonAsync("/coded-values", req, ct);
+        var response = await http.PostAsJsonAsync("/api/coded-values", req, ct);
         response.EnsureSuccessStatusCode();
     }
 
     public async Task<BulkCreateResult> BulkCreateAsync(Guid parentId, IEnumerable<CreateCodedValueRequest> children, CancellationToken ct = default)
     {
         var body = new { ParentId = parentId, Children = children.ToList() };
-        var response = await http.PostAsJsonAsync("/coded-values/bulk", body, ct);
+        var response = await http.PostAsJsonAsync("/api/coded-values/bulk", body, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<BulkCreateResult>(ct);
         return result ?? new BulkCreateResult(0, Array.Empty<string>(), parentId);
@@ -135,31 +135,31 @@ public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClien
 
     public async Task UpdateAsync(Guid id, UpdateCodedValueRequest req, CancellationToken ct = default)
     {
-        var response = await http.PutAsJsonAsync($"/coded-values/{id}", req, ct);
+        var response = await http.PutAsJsonAsync($"/api/coded-values/{id}", req, ct);
         response.EnsureSuccessStatusCode();
     }
 
     public async Task DisableAsync(Guid id, CancellationToken ct = default) =>
-        (await http.PostAsync($"/coded-values/{id}/disable", null, ct)).EnsureSuccessStatusCode();
+        (await http.PostAsync($"/api/coded-values/{id}/disable", null, ct)).EnsureSuccessStatusCode();
 
     public async Task EnableAsync(Guid id, CancellationToken ct = default) =>
-        (await http.PostAsync($"/coded-values/{id}/enable", null, ct)).EnsureSuccessStatusCode();
+        (await http.PostAsync($"/api/coded-values/{id}/enable", null, ct)).EnsureSuccessStatusCode();
 
     public async Task SetAttributeAsync(Guid id, string key, string value, CancellationToken ct = default)
     {
-        var response = await http.PutAsJsonAsync($"/coded-values/{id}/attributes/{key}", new { Value = value }, ct);
+        var response = await http.PutAsJsonAsync($"/api/coded-values/{id}/attributes/{key}", new { Value = value }, ct);
         response.EnsureSuccessStatusCode();
     }
 
     public async Task RemoveAttributeAsync(Guid id, string key, CancellationToken ct = default) =>
-        (await http.DeleteAsync($"/coded-values/{id}/attributes/{key}", ct)).EnsureSuccessStatusCode();
+        (await http.DeleteAsync($"/api/coded-values/{id}/attributes/{key}", ct)).EnsureSuccessStatusCode();
 
     public async Task SetAttributeDefinitionAsync(Guid id, string key, AttributeDefinitionRequest req, CancellationToken ct = default)
     {
-        var response = await http.PutAsJsonAsync($"/coded-values/{id}/attribute-definitions/{key}", req, ct);
+        var response = await http.PutAsJsonAsync($"/api/coded-values/{id}/attribute-definitions/{key}", req, ct);
         response.EnsureSuccessStatusCode();
     }
 
     public async Task RemoveAttributeDefinitionAsync(Guid id, string key, CancellationToken ct = default) =>
-        (await http.DeleteAsync($"/coded-values/{id}/attribute-definitions/{key}", ct)).EnsureSuccessStatusCode();
+        (await http.DeleteAsync($"/api/coded-values/{id}/attribute-definitions/{key}", ct)).EnsureSuccessStatusCode();
 }
