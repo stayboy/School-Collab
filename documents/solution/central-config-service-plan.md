@@ -1,9 +1,27 @@
 # Central Config Service for Feature Flags — Implementation Plan
 
-> **Status:** Active plan (replaces the prior `central-config-feature-flags-design.md`,
-> which was dropped because the team moved away from it).
-> **Authority:** This document is the source of truth for the Config feature-flag
-> service. Follow it; do not re-litigate the decisions below unless the user asks.
+> **⚠️ SUPERSEDED — see `settings-context-merge-spec.md` and `settings-context-merge.md`.**
+>
+> This plan documented the original `SchoolCollab.Config` bounded context that
+> introduced the central feature-flag service. That context has since been
+> **merged into the unified `SchoolCollab.Settings` bounded context** along
+> with the legacy `SchoolCollab.CodedValues` context, because the two shared
+> `settings-db` and the Settings `SettingsDbContext`. See
+> [`solution/settings-context-merge-spec.md`](./settings-context-merge-spec.md)
+> for the design and [`solution/settings-context-merge.md`](./settings-context-merge.md)
+> for the implementation notes.
+>
+> The historical plan below is retained as the **decision record** for the
+> FeatureFlag aggregate (boolean-only v1, ITL propagation, `flag_admin` OIDC
+> role, audit-transactional-not-via-outbox, per-tenant cache key). Those
+> decisions are unchanged in the merged `Settings.Core` FeatureFlag aggregate.
+> Only the project structure and resource names changed; current values are
+> `SchoolCollab.Settings.{Core,Contracts,Api,Admin}`, `settings-api`, and
+> `settings-db` — see `documents/configuration.md` §1, §2, and §5.
+>
+> **Status (historical):** Active plan (replaces the prior
+> `central-config-feature-flags-design.md`, which was dropped because the team
+> moved away from it).
 
 ## 1. Goal
 

@@ -61,12 +61,13 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
        postgres    rabbitmq       redis    migrator  (UI / APIs)
             │          │             │         │         │             │             │
             │          │             │         │         │             ▼             ▼
-            │          │             │         │         │      coded-values-api   assignments-api
-            │          │             │         │         │      coded-values-ai    students-api
+            │          │             │         │         │      settings-api   assignments-api
+            │          │             │         │         │      settings-ai    students-api
             │          │             │         │         │      students-worker    admin
             │          │             │         │         │
             ▼          ▼             ▼         ▼
-        coded-values-db        (RabbitMQ exchanges per bounded context)
+        settings-db         assignments-db  students-db
+        (RabbitMQ exchanges per bounded context)
         assignments-db
         students-db
 ```
@@ -75,15 +76,15 @@ application. The composition is fixed by `src/AppHost/SchoolCollab.AppHost/Progr
 
 | Aspire name | Type | Used by |
 | :--- | :--- | :--- |
-| `postgres` | Container (`postgres`) | The three DBs |
+| `postgres` | Container (`postgres`) | All bounded-context DBs |
 | `rabbitmq` | Container (`rabbitmq`) | All APIs + Students.Worker |
 | `cache` | Container (`redis`) | APIs + Worker |
 | `migrator` | Project | (one-shot) |
-| `coded-values-db` | Postgres database | migrator, coded-values-api |
+| `settings-db` | Postgres database | migrator, settings-api |
 | `assignments-db` | Postgres database | migrator, assignments-api |
 | `students-db` | Postgres database | migrator, students-api, students-worker |
-| `coded-values-api` | Project | admin, coded-values-ai |
-| `coded-values-ai` | Project | admin |
+| `settings-api` | Project | admin, settings-ai |
+| `settings-ai` | Project | admin |
 | `assignments-api` | Project | admin |
 | `students-api` | Project | admin |
 | `students-worker` | Project | — |
@@ -113,7 +114,7 @@ files only carry values that genuinely belong to that single service
 | :--- | :--- | :--- | :--- |
 | `postgres-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | Superuser password for the local Postgres container. **Pinned** so the persisted volume keeps working across runs. |
 | `rabbitmq-password` | Aspire secret parameter (`AddParameter`) | _none — must be supplied_ | `RABBITMQ_DEFAULT_PASS` for the local RabbitMQ container. Pinned for the same reason as Postgres. |
-| `outbox-exchange-coded-values` | Aspire parameter | `coded-values` | Outbox topic exchange name for the CodedValues bounded context. Injected as `Outbox__ExchangeName` into `coded-values-api`. |
+| `outbox-exchange-settings` | Aspire parameter | `settings` | Outbox topic exchange name for the Settings bounded context. Injected as `Outbox__ExchangeName` into `settings-api`. |
 | `outbox-exchange-assignments` | Aspire parameter | `assignments` | Outbox topic exchange name for the Assignments bounded context. Injected as `Outbox__ExchangeName` into `assignments-api`. |
 | `outbox-exchange-students` | Aspire parameter | `students` | Outbox topic exchange name for the Students bounded context. Injected as `Outbox__ExchangeName` into `students-api` and `students-worker`. |
 | `ai-default-provider` | Aspire parameter | `openrouter` | Active AI provider name — `ollama` (local) or `openrouter` (cloud). Injected as `codedvalue-ai-provider`. |
@@ -122,7 +123,7 @@ files only carry values that genuinely belong to that single service
 | `openrouter-endpoint` | Aspire parameter | `https://openrouter.ai/api/v1` | OpenRouter API base URL. Injected as `OpenRouter__Endpoint`. |
 | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
 | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
-| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `coded-values-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
+| `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
 
 **Where to set them:**
 
@@ -203,7 +204,7 @@ Each bounded context that owns an `OutboxMessage` table relies on
 
 | App | Injected env-var | Sourced from |
 | :--- | :--- | :--- |
-| `coded-values-api` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-coded-values` |
+| `settings-api` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-settings` |
 | `assignments-api` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-assignments` |
 | `students-api` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-students` |
 | `students-worker` | `Outbox__ExchangeName` | `Parameters:outbox-exchange-students` |
@@ -283,10 +284,12 @@ every request as a test user — intended for local development only.
 > [`solution/central-config-service-plan.md`](./solution/central-config-service-plan.md)):
 >
 > - **Runtime, mutable, tenant-overridable flags** (e.g.
->   `FEATURE:EnableCodedValuesAiChat`) are owned by the central
->   `SchoolCollab.Config` service (`config-api` + `config-db`), managed via the
->   admin UI at `/config-flags`, resolved by `ConfigFeatureFlagService` with a
->   HybridCache L1/L2 + `IConfiguration` fallback. Every mutation is audited.
+>   `FEATURE:EnableCodedValuesAiChat`) are owned by the central Settings
+>   bounded context (`settings-api` + `settings-db`, see
+>   [`solution/settings-context-merge-spec.md`](./solution/settings-context-merge-spec.md)
+>   for the merge history), managed via the admin UI at `/config-flags`,
+>   resolved by `ConfigFeatureFlagService` with a HybridCache L1/L2 +
+>   `IConfiguration` fallback. Every mutation is audited.
 > - **`FEATURE:DisableOIDCAuth`** remains a *deployment-time startup auth-mode
 >   switch*: it is **no longer** an AppHost `Parameters:` value. Each consumer
 >   carries it in its own `appsettings.json` (`FeatureFlags:FEATURE:DisableOIDCAuth`,
@@ -317,7 +320,7 @@ flags moved to the Config service.
 
 | Flag | Default | Consumers |
 | :--- | :--- | :--- |
-| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.CodedValues.Api`, `SchoolCollab.Students.Api` |
+| `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
 
 ### Setting a flag
 
@@ -503,7 +506,7 @@ Aspire injects connection strings into the apps that call
 
 | Resource | Injected key | Used by |
 | :--- | :--- | :--- |
-| `coded-values-db` | `ConnectionStrings:coded-values-db` | `SchoolCollab.CodedValues.Api`, migrator |
+| `settings-db` | `ConnectionStrings:settings-db` | `SchoolCollab.Settings.Api`, migrator |
 | `assignments-db` | `ConnectionStrings:assignments-db` | `SchoolCollab.Assignments.Api`, migrator |
 | `students-db` | `ConnectionStrings:students-db` | `SchoolCollab.Students.Api`, `SchoolCollab.Students.Worker`, migrator |
 | `cache` | `ConnectionStrings:cache` | APIs + Worker (also surfaced as `Aspire:StackExchange:Redis:ConnectionString`) |
@@ -633,7 +636,7 @@ matching env-var form:
 | :--- | :--- |
 | `Parameters:postgres-password` | `Parameters__postgres_password` |
 | `Parameters:rabbitmq-password` | `Parameters__rabbitmq_password` |
-| `Parameters:outbox-exchange-coded-values` | `Parameters__outbox_exchange_coded_values` |
+| `Parameters:outbox-exchange-settings` | `Parameters__outbox_exchange_coded_values` |
 | `Parameters:outbox-exchange-assignments` | `Parameters__outbox_exchange_assignments` |
 | `Parameters:outbox-exchange-students` | `Parameters__outbox_exchange_students` |
 | `Parameters:ai-default-provider` | `Parameters__ai_default_provider` |
@@ -659,7 +662,7 @@ matching env-var form:
 | `OpenRouter:Endpoint` | `OpenRouter__Endpoint` |
 | `OpenRouter:DefaultModel` | `OpenRouter__DefaultModel` |
 | `OpenRouter:ApiKey` | `OpenRouter__ApiKey` |
-| `ConnectionStrings:coded-values-db` | `ConnectionStrings__coded-values-db` |
+| `ConnectionStrings:settings-db` | `ConnectionStrings__settings-db` |
 | `ConnectionStrings:assignments-db` | `ConnectionStrings__assignments-db` |
 | `ConnectionStrings:students-db` | `ConnectionStrings__students-db` |
 | `ConnectionStrings:cache` | `ConnectionStrings__cache` |
