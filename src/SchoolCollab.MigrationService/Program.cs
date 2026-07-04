@@ -4,12 +4,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Core.Data;
-using SchoolCollab.CodedValues.Core.Data;
-using SchoolCollab.Config.Core.Data;
-using SchoolCollab.Config.Core.Domain;
 using SchoolCollab.Core.Data.Outbox;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Settings.Core.Data;
+using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.MigrationService.Seeding;
 using Serilog;
@@ -24,12 +23,13 @@ builder.AddServiceDefaults();
 // worker does not use authentication/claims transformation.
 builder.Services.AddTenancy();
 
-// Register CodedValues DbContext
-var codedValuesConnectionString = builder.Configuration.GetConnectionString("coded-values-db")
-    ?? throw new InvalidOperationException("Connection string 'coded-values-db' is not configured.");
+// Register Settings DbContext (unified replacement for CodedValuesDbContext and
+// ConfigDbContext — see documents/solution/settings-context-merge-spec.md §6).
+var settingsConnectionString = builder.Configuration.GetConnectionString("settings-db")
+    ?? throw new InvalidOperationException("Connection string 'settings-db' is not configured.");
 
-builder.Services.AddDbContext<CodedValuesDbContext>(opts =>
-    opts.UseNpgsql(codedValuesConnectionString).UseSnakeCaseNamingConvention());
+builder.Services.AddDbContext<SettingsDbContext>(opts =>
+    opts.UseNpgsql(settingsConnectionString).UseSnakeCaseNamingConvention());
 
 // Register Assignments DbContext
 var assignmentsConnectionString = builder.Configuration.GetConnectionString("assignments-db")
@@ -50,10 +50,10 @@ builder.Services.AddDbContext<StudentsDbContext>(opts =>
 // "The model for context 'X' has pending changes" because the runtime model
 // built from AddDbContext reads default flags while the model snapshot was
 // generated with the per-module outbox flags applied.
-// Keep these three SetFlagsFor calls in lock-step with:
-//   * src/<Domain>/SchoolCollab.<Domain>.Core/Extensions.cs (runtime)
-//   * src/<Domain>/SchoolCollab.<Domain>.Core/Data/DesignTime*DbContextFactory.cs (design-time)
-OutboxMapping.SetFlagsFor<CodedValuesDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
+// Keep these SetFlagsFor calls in lock-step with:
+//   * src/Settings/SchoolCollab.Settings.Core/Extensions.cs (runtime)
+//   * src/Settings/SchoolCollab.Settings.Core/Data/DesignTimeSettingsDbContextFactory.cs (design-time)
+OutboxMapping.SetFlagsFor<SettingsDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
     .SetTypeMaxLength(500)
     .UseJsonbPayload()
     .UseAttemptsDefaultZero()
@@ -61,18 +61,6 @@ OutboxMapping.SetFlagsFor<CodedValuesDbContext>(OutboxConfigurationFlags.FromCon
 OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
     .UsePartialIndexOnOccurredAt()));
 // Students uses OutboxConfigurationFlags.Default — no SetFlagsFor call needed.
-OutboxMapping.SetFlagsFor<ConfigDbContext>(OutboxConfigurationFlags.FromConfiguration(b => b
-    .SetTypeMaxLength(500)
-    .UseJsonbPayload()
-    .UseAttemptsDefaultZero()
-    .UsePartialIndexOnOccurredAt()));
-
-// Register Config DbContext
-var configConnectionString = builder.Configuration.GetConnectionString("config-db")
-    ?? throw new InvalidOperationException("Connection string 'config-db' is not configured.");
-
-builder.Services.AddDbContext<ConfigDbContext>(opts =>
-    opts.UseNpgsql(configConnectionString).UseSnakeCaseNamingConvention());
 
 // Register CodedValueSeeder
 builder.Services.AddScoped<CodedValueSeeder>();
@@ -88,21 +76,23 @@ try
 
     using (var scope = host.Services.CreateScope())
     {
-        // ── CodedValues migrations + seeding ──
+        // ── Settings migrations + seeding (CodedValues data + FeatureFlag
+        //    FEATURE:EnableCodedValuesAiChat) ──
         try
         {
-            var codedValuesDb = scope.ServiceProvider.GetRequiredService<CodedValuesDbContext>();
+            var settingsDb = scope.ServiceProvider.GetRequiredService<SettingsDbContext>();
 
-            logger.LogInformation("Applying EF Core migrations for CodedValues");
-            await codedValuesDb.Database.MigrateAsync();
-            logger.LogInformation("CodedValues EF Core migrations applied successfully");
+            logger.LogInformation("Applying EF Core migrations for Settings");
+            await settingsDb.Database.MigrateAsync();
+            logger.LogInformation("Settings EF Core migrations applied successfully");
 
             var seeder = scope.ServiceProvider.GetRequiredService<CodedValueSeeder>();
             await seeder.SeedAsync();
+            await SeedEnableCodedValuesAiChatAsync(settingsDb, logger);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "CodedValues migration or seeding failed");
+            logger.LogError(ex, "Settings migration or seeding failed");
             exitCode = 1;
         }
 
@@ -135,23 +125,6 @@ try
             logger.LogError(ex, "Students migration failed");
             exitCode = 1;
         }
-
-        // ── Config migrations + seed FEATURE:EnableCodedValuesAiChat ──
-        try
-        {
-            var configDb = scope.ServiceProvider.GetRequiredService<ConfigDbContext>();
-
-            logger.LogInformation("Applying EF Core migrations for Config");
-            await configDb.Database.MigrateAsync();
-            logger.LogInformation("Config EF Core migrations applied successfully");
-
-            await SeedEnableCodedValuesAiChatAsync(configDb, logger);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Config migration or seeding failed");
-            exitCode = 1;
-        }
     }
 
     if (exitCode == 0)
@@ -172,14 +145,14 @@ finally
 
 return exitCode;
 
-// ── Config seed ──
+// ── Settings seed ──
 // Seeds the first real runtime feature flag — FEATURE:EnableCodedValuesAiChat —
 // if it does not already exist. Default true preserves the current always-on AI-chat
 // behaviour on the CodedValues landing page. Records an audit row with a system
 // actor so the seed is traceable. NOTE: FEATURE:DisableOIDCAuth is intentionally
 // NOT seeded here — it is a startup auth-mode switch read from IConfiguration, not a
 // runtime feature flag (see documents/solution/central-config-service-plan.md §2).
-static async Task SeedEnableCodedValuesAiChatAsync(ConfigDbContext db, Microsoft.Extensions.Logging.ILogger logger)
+static async Task SeedEnableCodedValuesAiChatAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
 {
     const string actorId = "system:migrator";
     const string actorName = "Migration Service";

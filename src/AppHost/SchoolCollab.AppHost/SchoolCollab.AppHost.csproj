@@ -14,9 +14,9 @@
     <PackageReference Include="Aspire.Hosting.Redis" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Contracts\SchoolCollab.CodedValues.Contracts.csproj" IsAspireProjectResource="false" />
-    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Core\SchoolCollab.CodedValues.Core.csproj" IsAspireProjectResource="false" />
-    <ProjectReference Include="..\..\CodedValues\SchoolCollab.CodedValues.Api\SchoolCollab.CodedValues.Api.csproj" />
+    <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Contracts\SchoolCollab.Settings.Contracts.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" IsAspireProjectResource="false" />
+    <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Api\SchoolCollab.Settings.Api.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Admin\SchoolCollab.Admin.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.MigrationService\SchoolCollab.MigrationService.csproj" />
@@ -27,7 +27,5 @@
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" IsAspireProjectResource="false" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />
     <ProjectReference Include="..\..\Students\SchoolCollab.Students.Worker\SchoolCollab.Students.Worker.csproj" />
-    <ProjectReference Include="..\..\Config\SchoolCollab.Config.Api\SchoolCollab.Config.Api.csproj" />
-    <ProjectReference Include="..\..\Config\SchoolCollab.Config.Core\SchoolCollab.Config.Core.csproj" IsAspireProjectResource="false" />
   </ItemGroup>
 </Project>

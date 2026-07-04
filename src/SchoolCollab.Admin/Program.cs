@@ -1,11 +1,9 @@
 using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Components;
 using SchoolCollab.Assignments.Admin;
-using SchoolCollab.CodedValues.Admin;
-using SchoolCollab.Config.Admin;
-using SchoolCollab.Config.Core;
+using SchoolCollab.Settings.Admin;
+using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
-using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Admin;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -17,12 +15,13 @@ builder.AddServiceDefaults();
 // NOTE: DisableOIDCAuth is a *startup auth-mode switch* read from IConfiguration
 // directly (below), NOT a runtime feature flag — ASP.NET Core auth schemes are
 // registered once at startup and cannot be flipped at runtime. Runtime, mutable,
-// tenant-overridable flags (e.g. FEATURE:EnableCodedValuesAiChat) are resolved by the
-// cached Config service registered via AddConfigFeatureFlagClient below. See
-// documents/solution/central-config-service-plan.md §2.
+// tenant-overridable flags (e.g. FEATURE:EnableCodedValuesAiChat) are resolved by
+// the cached Settings client registered via AddSettingsFeatureFlagClient below.
+// See documents/solution/settings-context-merge-spec.md §10.
 builder.Services.AddAuthAndTenancy(builder.Configuration);
 
-// Redis distributed cache backs the HybridCache L2 used by ConfigFeatureFlagService.
+// Redis distributed cache backs the HybridCache L2 used by
+// ConfigFeatureFlagService (the cached Settings client used by the Admin host).
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
     ?? builder.Configuration["Aspire:StackExchange:Redis:ConnectionString"];
 
@@ -40,15 +39,16 @@ builder.Services.AddRazorComponents()
 
 builder.Services.AddFluentUIComponents();
 
-// Register module services (HttpClient factories for each bounded context)
-builder.Services.AddCodedValuesModule();
+// Register module services (HttpClient factories for each bounded context).
+// AddSettingsModule replaces the legacy AddCodedValuesModule + AddConfigModule
+// pair (see documents/solution/settings-context-merge-spec.md §9).
+builder.Services.AddSettingsModule();
 builder.Services.AddAssignmentsModule();
 builder.Services.AddStudentsModule();
-builder.Services.AddConfigModule();
 
-// Cached, DB-backed feature-flag client (resolves runtime flags from the Config
-// service with an IConfiguration fallback). Replaces the config-only
-// IFeatureFlagService registered by AddAuthAndTenancy.
+// Cached, DB-backed feature-flag client (resolves runtime flags from the
+// Settings FeatureFlag aggregate with an IConfiguration fallback). Replaces the
+// config-only IFeatureFlagService registered by AddAuthAndTenancy.
 builder.Services.AddConfigFeatureFlagClient(builder.Configuration);
 
 var app = builder.Build();
@@ -84,10 +84,9 @@ app.MapDefaultEndpoints();
 var razorComponents = app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies(
-        typeof(SchoolCollab.CodedValues.Admin.Components._Imports).Assembly,
+        typeof(SchoolCollab.Settings.Admin.Components._Imports).Assembly,
         typeof(SchoolCollab.Assignments.Admin.Components._Imports).Assembly,
-        typeof(SchoolCollab.Students.Admin.Components._Imports).Assembly,
-        typeof(SchoolCollab.Config.Admin.Components._Imports).Assembly);
+        typeof(SchoolCollab.Students.Admin.Components._Imports).Assembly);
 
 if (!disableOIDC)
 {

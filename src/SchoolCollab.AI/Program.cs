@@ -64,9 +64,13 @@ builder.Services.AddSingleton<IChatClientFactory>(sp =>
     return new ChatClientFactory(ollamaClient, openRouterClient, defaultProvider, logger);
 });
 
-// HttpClient for calling the Coded Values API (service discovery)
+// HttpClient for calling the Settings REST API (service discovery) — replaces
+// the legacy Coded Values host. The settings-api project exposes the CodedValues
+// aggregate endpoints under /coded-values/* alongside the FeatureFlag aggregate
+// endpoints under /api/config/* + /api/features/*. See
+// documents/solution/settings-context-merge-spec.md §8.
 builder.Services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(client =>
-    client.BaseAddress = new Uri("https+http://coded-values-api"));
+    client.BaseAddress = new Uri("https+http://settings-api"));
 
 builder.Services.AddSingleton<CodedValueAIService>();
 

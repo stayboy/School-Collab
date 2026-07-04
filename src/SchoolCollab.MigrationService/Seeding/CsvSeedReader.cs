@@ -1,6 +1,6 @@
 using System.Globalization;
 using System.Text;
-using SchoolCollab.CodedValues.Core.Domain;
+using SchoolCollab.Settings.Core.Domain;
 
 namespace SchoolCollab.MigrationService.Seeding;
 

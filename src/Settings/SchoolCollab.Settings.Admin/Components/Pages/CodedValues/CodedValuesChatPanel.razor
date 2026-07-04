@@ -1,0 +1,155 @@
+@implements IDisposable
+
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Settings.Admin.Services
+@inject CodedValuesChatHub ChatHub
+
+@* Side-drawer surface for the AI assistant chat. The page toggles
+   <see cref="Open"/>; this component renders the drawer shell, hosts a
+   single read-only <see cref="CodedValuesChat"/> bound to
+   <see cref="CodedValuesChatHub"/>, and forwards close requests back to
+   the page via <see cref="OpenChanged"/>.
+
+   The drawer is read-only: users prompt from the inline chat on the page;
+   the drawer surfaces the responses. There is no second input area here. *@
+
+<SideDrawer Open="Open"
+            OpenChanged="OnInnerOpenChangedAsync"
+            Title="✨ AI Assistant"
+            Width="420px"
+            ShowCancel="true"
+            CancelText="Close"
+            OnSubmitAsync="@OnSubmitAsync">
+    <div class="chat-panel">
+        <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.Full"
+                        HideHeader="true"
+                        ShowIntro="true"
+                        Prompt="@Prompt"
+                        ExternalMessages="@_mirroredMessages"
+                        ExternalStreamingState="@_mirroredStreamingState"
+                        OnMessageAdded="OnMessageAddedAsync"
+                        OnStreamingStateChanged="OnStreamingStateChangedAsync"
+                        OnCleared="OnPanelClearedAsync" />
+    </div>
+</SideDrawer>
+
+@code {
+    /// <summary>Whether the drawer is visible. Two-way bindable.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>
+    /// A prompt forwarded into the drawer's chat (e.g. from the inline
+    /// InputOnly chat on the page, which never calls the AI itself). When set
+    /// to a new non-empty value, the inner <see cref="CodedValuesChat"/> runs
+    /// one AI turn with it. The page clears the shared hub first (for a fresh
+    /// conversation) when the drawer was closed.
+    /// </summary>
+    [Parameter]
+    public string? Prompt { get; set; }
+
+    /// <summary>Fires when the drawer requests to close (× button, backdrop, Esc).</summary>
+    [Parameter]
+    public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>
+    /// Forwards the inner <see cref="SideDrawer"/> open/close request up to
+    /// the parent via <see cref="OpenChanged"/>.
+    ///
+    /// This is deliberately NOT wired with <c>@bind-Open="Open"</c>. Using
+    /// <c>@bind</c> on a <c>[Parameter]</c> only assigns the local property —
+    /// it never invokes this component's own <see cref="OpenChanged"/>, so a
+    /// close fired by the <see cref="SideDrawer"/> would never reach the
+    /// owning page. The page's <c>_chatDrawerOpen</c> would stay stale
+    /// (<c>true</c>) after the first close, and on the next open attempt
+    /// Blazor would see no parameter change and skip re-rendering the
+    /// drawer — leaving it stuck closed. Propagating the event explicitly
+    /// keeps the page's state in sync so the drawer reopens every time.
+    /// </summary>
+    private Task OnInnerOpenChangedAsync(bool value) => OpenChanged.InvokeAsync(value);
+
+    /// <summary>
+    /// Clears the mirrored conversation held in <see cref="ChatHub"/> so the
+    /// drawer's chat empties. Wired to the chat's
+    /// <see cref="CodedValuesChat.OnCleared"/> event (the drawer's Clear
+    /// button). Clearing the hub raises <see cref="CodedValuesChatHub.Changed"/>,
+    /// which <see cref="HandleHubChanged"/> picks up to refresh
+    /// <see cref="_mirroredMessages"/> and <see cref="_mirroredStreamingState"/>.
+    /// </summary>
+    private Task OnPanelClearedAsync()
+    {
+        ChatHub.Clear();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Mirror handler for the drawer chat's <see cref="CodedValuesChat.OnMessageAdded"/>
+    /// event. The drawer chat renders from <see cref="CodedValuesChatHub.Messages"/>
+    /// via <c>ExternalMessages</c> but keeps its own <c>_messages</c> for AI
+    /// multi-turn history; this callback pushes each added prompt/response into
+    /// the shared hub so the rendered view (and the inline page chat) stays in
+    /// sync. Without it, typing into the drawer would add to the chat's private
+    /// history (sent to the AI) but never appear on screen.
+    /// </summary>
+    private Task OnMessageAddedAsync(CodedValuesChat.ChatMessageItem message)
+    {
+        ChatHub.AddMessage(message);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Mirror handler for the drawer chat's
+    /// <see cref="CodedValuesChat.OnStreamingStateChanged"/> event. Pushes the
+    /// live streaming snapshot into the hub on every chunk so the drawer (and
+    /// the inline page chat) renders the same "AI is typing…" indicator and
+    /// partial response text.
+    /// </summary>
+    private Task OnStreamingStateChangedAsync(CodedValuesChat.ChatStreamingState state)
+    {
+        ChatHub.SetStreamingState(state);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the panel can close. The chat panel has no
+    /// real submit; we accept immediately so the Cancel button can close
+    /// the drawer without errors.
+    /// </summary>
+    private Task<bool> OnSubmitAsync() => Task.FromResult(true);
+
+    private IReadOnlyList<CodedValuesChat.ChatMessageItem> _mirroredMessages = [];
+    private CodedValuesChat.ChatStreamingState _mirroredStreamingState =
+        new(IsStreaming: false, StreamingText: string.Empty, ActiveToolCalls: null);
+
+    protected override void OnInitialized()
+    {
+        _mirroredMessages = ChatHub.Messages.ToList();
+        _mirroredStreamingState = ChatHub.StreamingState;
+        ChatHub.Changed += HandleHubChanged;
+    }
+
+    private void HandleHubChanged()
+    {
+        // Snapshot the hub's messages into a fresh list on every change.
+        // CodedValuesChatHub.Messages returns the hub's internal List<T> by
+        // reference, and AddMessage mutates that list in place — so reading
+        // it directly never produces a new reference. Blazor's renderer uses
+        // reference equality to decide whether a child component's
+        // reference-type parameters changed; if the ExternalMessages
+        // reference is identical to the previous render, the renderer skips
+        // calling SetParametersAsync on the child chat and the new message
+        // is never displayed. ToList() gives each update a brand-new list
+        // reference so the child chat re-renders and shows the latest turn.
+        _ = InvokeAsync(() =>
+        {
+            _mirroredMessages = ChatHub.Messages.ToList();
+            _mirroredStreamingState = ChatHub.StreamingState;
+            StateHasChanged();
+        });
+    }
+
+    public void Dispose()
+    {
+        ChatHub.Changed -= HandleHubChanged;
+    }
+}

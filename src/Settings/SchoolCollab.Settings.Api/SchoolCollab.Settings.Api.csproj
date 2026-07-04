@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!--
+      Unified Settings API. Hosts the legacy /coded-values/* endpoints (CodedValues
+      aggregate) and the /api/config/* + /api/features/* endpoints (FeatureFlag
+      aggregate) in a single process backed by a single SettingsDbContext /
+      settings-db. See documents/solution/settings-context-merge-spec.md §8.
+    -->
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.OpenIdConnect" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.OpenApi" />
+  </ItemGroup>
+</Project>

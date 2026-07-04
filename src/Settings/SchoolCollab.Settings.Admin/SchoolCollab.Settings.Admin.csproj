@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <NoWarn>CS0436</NoWarn>
+    <!--
+      Unified Settings admin module. Hosts the CodedValues landing page +
+      drawer chat AND the Config Flags (FeatureFlag) landing page in a single
+      Razor class library. Consumed by SchoolCollab.Admin via
+      AddSettingsModule() + AddAdditionalAssemblies(...). See
+      documents/solution/settings-context-merge-spec.md §5 (ModuleServices
+      merge) and §9 (Admin host updates).
+    -->
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="SchoolCollab.Settings.Tests.Unit" />
+  </ItemGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Humanizer" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components" />
+    <PackageReference Include="Microsoft.FluentUI.AspNetCore.Components.Icons" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
+    <ProjectReference Include="..\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
+  </ItemGroup>
+</Project>
