@@ -15,7 +15,7 @@
     -->
   </PropertyGroup>
   <ItemGroup>
-    <InternalsVisibleTo Include="SchoolCollab.CodedValues.Tests.Unit" />
+    <InternalsVisibleTo Include="SchoolCollab.Settings.Tests.Unit" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.AI" />
