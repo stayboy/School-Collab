@@ -1,33 +1,29 @@
 using System.ComponentModel;
-using System.ClientModel;
-using System.Net;
-using System.Net.Sockets;
-using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
 using SchoolCollab.AI.Abstractions;
 
-namespace SchoolCollab.AI.Services;
+namespace SchoolCollab.AI.Tools.CodedValues;
 
 /// <summary>
-/// AI-powered service for populating coded values using natural language prompts.
-/// Uses Microsoft.Extensions.AI with function calling to let the AI model create
-/// and manage coded values through the Coded Values API.
+/// CodedValues-flavoured <see cref="IToolProvider"/>: exposes the 9 coded-value
+/// tools to the AI model, narrows the tool bag per prompt via
+/// <see cref="SelectToolsForPrompt"/> (the intent classifier carried over
+/// verbatim from the former <c>CodedValueAIService</c>), dispatches tool calls
+/// to the Coded Values REST API through <see cref="ICodedValuesApiClient"/>,
+/// and supplies the friendly-name / args-summary / result-summary formatting
+/// that the engine emits in the SSE <c>ToolCallStart</c>/<c>ToolCallEnd</c>
+/// events (kept byte-for-byte identical to the pre-refactor payload).
 /// </summary>
-public sealed class CodedValueAIService
+public sealed class CodedValuesToolProvider : IToolProvider
 {
-    private readonly IChatClientFactory _chatClientFactory;
     private readonly ICodedValuesApiClient _api;
-    private readonly ILogger<CodedValueAIService> _logger;
-    private readonly IHostEnvironment _hostEnv;
-    private readonly IConfiguration _config;
+    private readonly ILogger<CodedValuesToolProvider> _logger;
 
     private readonly List<AITool> _tools;
-
-    // System prompt loaded dynamically from embedded resource
-    private string? _cachedSystemPrompt;
-    private DateTime _systemPromptLastWrite;
+    private readonly Dictionary<string, AITool> _toolsByName;
 
     private static readonly Dictionary<string, string> FriendlyToolNames = new()
     {
@@ -42,13 +38,12 @@ public sealed class CodedValueAIService
         ["set_attribute"] = "Set Attribute"
     };
 
-    public CodedValueAIService(IChatClientFactory chatClientFactory, ICodedValuesApiClient api, ILogger<CodedValueAIService> logger, IHostEnvironment hostEnv, IConfiguration config)
+    public IReadOnlyList<string> ToolNames { get; }
+
+    public CodedValuesToolProvider(ICodedValuesApiClient api, ILogger<CodedValuesToolProvider> logger)
     {
-        _chatClientFactory = chatClientFactory;
         _api = api;
         _logger = logger;
-        _hostEnv = hostEnv;
-        _config = config;
 
         _tools =
         [
@@ -63,11 +58,24 @@ public sealed class CodedValueAIService
             AIFunctionFactory.Create(SetAttributeAsync, "set_attribute", "Sets an attribute value on a coded value. The attribute definition with the same key must already exist on the PARENT of this coded value. Accepts: code (the coded value's code), key (attribute key that matches a definition on the parent), value (the value as a string).")
         ];
 
-        // Build a name → tool lookup for the prompt-shape filter below.
         _toolsByName = _tools.ToDictionary(t => t.Name);
+        ToolNames = _tools.Select(t => t.Name).ToList();
     }
 
-    private readonly Dictionary<string, AITool> _toolsByName;
+    /// <summary>
+    /// Returns the per-turn tool subset for the user's most recent prompt,
+    /// applying the intent classifier carried over verbatim from the former
+    /// <c>CodedValueAIService</c>. The engine calls this each turn so the model
+    /// sees the same filtered tool bag it saw before the refactor.
+    /// </summary>
+    public IReadOnlyList<AITool> CreateTools(IReadOnlyList<ChatMessage> history, ILogger logger) =>
+        SelectToolsForPrompt(history);
+
+    public Task<string> DispatchAsync(string toolName, string? args, CancellationToken ct) =>
+        DispatchToolCallAsync(toolName, args, ct);
+
+    public string GetFriendlyName(string toolName) =>
+        FriendlyToolNames.TryGetValue(toolName, out var friendly) ? friendly : toolName;
 
     /// <summary>
     /// Classifies the user's most recent prompt into a small set of intents
@@ -95,10 +103,6 @@ public sealed class CodedValueAIService
         var text = latestUser.ToLowerInvariant();
 
         // Order matters: check the most specific intent first.
-        // Disable/enable intents are the most specific — exclude create/update
-        // tools to prevent the model from re-creating something the user
-        // wants disabled. Update intents win over create because renames and
-        // description changes are common follow-ups to a just-created value.
         if (ContainsAny(text, "disable", "enable", "hide", "deactivate", "archive", "reactivate"))
             return GetTools("list_coded_value_categories", "get_coded_value_by_code", "disable_coded_value", "enable_coded_value");
 
@@ -129,332 +133,6 @@ public sealed class CodedValueAIService
                     list.Add(tool);
             return list;
         }
-    }
-
-    /// <summary>
-    /// Loads the system prompt from the embedded resource, with caching.
-    /// In Development, also checks for a file override in the Prompts folder.
-    ///
-    /// The loader prefers the trimmed prompt (<c>ai-system-prompt.md</c>) and
-    /// falls back to the original (<c>ai-system-prompt.original.md</c>) if the
-    /// primary file/embedded resource is missing — so a corrupted trim can
-    /// always be rolled back by deleting the trimmed copy and re-deploying
-    /// without service downtime.
-    /// </summary>
-    private string GetSystemPrompt()
-    {
-        // In Development, allow file-based override for rapid iteration.
-        // Probe the trimmed copy first, then the original.
-        if (_hostEnv.IsDevelopment())
-        {
-            foreach (var filename in new[] { "ai-system-prompt.md", "ai-system-prompt.original.md" })
-            {
-                var promptFile = Path.Combine(AppContext.BaseDirectory, "Prompts", filename);
-                if (!File.Exists(promptFile)) continue;
-
-                try
-                {
-                    var lastWrite = File.GetLastWriteTimeUtc(promptFile);
-                    if (_cachedSystemPrompt is not null && lastWrite == _systemPromptLastWrite)
-                        return _cachedSystemPrompt;
-
-                    _cachedSystemPrompt = File.ReadAllText(promptFile);
-                    _systemPromptLastWrite = lastWrite;
-                    _logger.LogInformation("Loaded system prompt from file {Path} ({Length} chars)", promptFile, _cachedSystemPrompt.Length);
-                    return _cachedSystemPrompt;
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogWarning(ex, "Failed to read system prompt from {Path}, trying fallback", promptFile);
-                }
-            }
-        }
-
-        // Load from embedded resource. Prefer the trimmed prompt; fall back to
-        // the original copy if the trimmed resource was not packaged.
-        if (_cachedSystemPrompt is not null)
-            return _cachedSystemPrompt;
-
-        var assembly = typeof(CodedValueAIService).Assembly;
-        var resourceNames = assembly.GetManifestResourceNames();
-        var preferredResource = resourceNames
-            .FirstOrDefault(n => n.EndsWith("ai-system-prompt.md", StringComparison.OrdinalIgnoreCase)
-                && !n.EndsWith("ai-system-prompt.original.md", StringComparison.OrdinalIgnoreCase));
-        var fallbackResource = resourceNames
-            .FirstOrDefault(n => n.EndsWith("ai-system-prompt.original.md", StringComparison.OrdinalIgnoreCase));
-        var resourceName = preferredResource ?? fallbackResource;
-
-        if (resourceName is null)
-        {
-            _logger.LogWarning("Embedded system prompt resource not found, using fallback");
-            return _cachedSystemPrompt = FallbackSystemPrompt;
-        }
-
-        if (preferredResource is null && fallbackResource is not null)
-            _logger.LogWarning("Trimmed system prompt resource not found, falling back to ai-system-prompt.original.md");
-
-        using var stream = assembly.GetManifestResourceStream(resourceName)!;
-        using var reader = new StreamReader(stream);
-        _cachedSystemPrompt = reader.ReadToEnd();
-        _logger.LogInformation("Loaded system prompt from embedded resource {Resource} ({Length} chars)", resourceName, _cachedSystemPrompt.Length);
-        return _cachedSystemPrompt;
-    }
-
-    private const string FallbackSystemPrompt = """
-        You are a helpful assistant for managing coded values in a school collaboration system.
-        Coded values are hierarchical lookup tables. Each has a unique code, a name, and an optional description.
-        Parents define categories; children are the actual values.
-
-        ## Critical rules for responses
-        1. Always determine the parent code FIRST — it is required for every create/update. Parse the user's request (explicit code, name that implies one, or context), look it up read-only with get_coded_value_by_code. If it does not exist, derive a proposed code+name (do not create yet). If it cannot be determined or derived, stop and ask the user — never proceed without a parent code. On a confirmation turn, recover it from the prior proposal message instead of re-asking.
-        2. Never list or describe tool/function calls in your text response. Just use the tools silently and present results.
-        3. Never output raw JSON or technical data structures. Always use human-readable format.
-        4. Two-turn gate: always present proposed values as a Markdown table and STOP for explicit user approval BEFORE any write. In the proposal turn you may ONLY call read-only lookups (get_coded_value_by_code, list_coded_value_categories) — never call create/update/set/disable/enable tools. The user's explicit "yes" in the next turn is the only trigger that authorizes a write.
-        5. After a tool succeeds, describe the outcome in plain English.
-
-        ## Workflow
-        1. Identify the parent coded value from the user's request (read-only lookup only). If ambiguous, ask. If not found, propose a new parent in the table but do NOT create it yet.
-        2. Present proposed values (including any new parent) as a Markdown table. Begin with a `Parent: \`CODE\` (Name) — existing|NEW` header line so the next turn can recover the code. Ask: "Shall I create these coded values?" Then STOP — end your turn. Do not write in this turn.
-        3. When the user explicitly confirms (e.g. "yes", "go ahead") in the NEXT turn, recover the parent code from your previous proposal message — do NOT ask the user to restate it. Emit NO preamble text — immediately call the bulk creation tool using the exact proposed values. A text-only reply creates nothing.
-        4. After creation succeeds, confirm briefly in plain English.
-        """;
-
-    /// <summary>
-    /// Sends conversation history to the AI and yields structured updates (text chunks,
-    /// tool-call progress, errors). Handles multi-turn tool-call loops.
-    /// Text from tool-call rounds is collected for message history but NOT streamed to UI —
-    /// only the final round's text is yielded, preventing function-call JSON leakage.
-    /// </summary>
-    public async IAsyncEnumerable<ChatUpdate> ChatAsync(
-        IReadOnlyList<ChatMessage> history,
-        [EnumeratorCancellation] CancellationToken ct = default)
-    {
-        var effectiveModel = ResolveDefaultModel();
-        _logger.LogInformation("Processing AI chat with {Count} history messages, model {Model}", history.Count, effectiveModel);
-
-        var chatClient = _chatClientFactory.GetClient();
-
-        var systemPrompt = GetSystemPrompt();
-        var messages = new List<ChatMessage> { new(ChatRole.System, systemPrompt) };
-        messages.AddRange(history);
-
-        // Filter the tool list to the subset relevant to the user's most recent
-        // prompt shape. Most chat turns only need a few of the 9 tools (read
-        // + create-bulk + attribute for an "add X" prompt, read + update for
-        // an "update X" prompt, etc.). Shipping only those reduces the input
-        // payload and avoids the model picking an irrelevant tool when the
-        // intent is unambiguous. The full tool list is sent as a safety
-        // fallback when the intent classifier is unsure.
-        var applicableTools = SelectToolsForPrompt(history);
-
-        var options = new ChatOptions { Tools = applicableTools, ModelId = effectiveModel };
-
-        var totalToolCalls = 0;
-        const int maxToolCallRounds = 10;
-
-        while (totalToolCalls < maxToolCallRounds)
-        {
-            var roundText = new StringBuilder();
-            var toolCallsByCallId = new Dictionary<string, (string Name, string? Args)>();
-            var seenCallIds = new HashSet<string>();
-            // Collect ToolCallStart events to yield outside the try/catch (C# forbids yield in try with catch)
-            var pendingStarts = new List<ChatUpdate.ToolCallStart>();
-            bool streamCancelled = false;
-            Exception? streamError = null;
-
-            try
-            {
-                await foreach (var chunk in chatClient.GetStreamingResponseAsync(messages, options, ct).WithCancellation(ct))
-                {
-                    // Collect function call content from streaming updates
-                    // Accumulate: later chunks for the same call ID may have more complete arguments
-                    if (chunk.Contents is not null)
-                    {
-                        foreach (var content in chunk.Contents)
-                        {
-                            if (content is FunctionCallContent fc && fc.Name is not null)
-                            {
-                                var callId = fc.CallId ?? Guid.NewGuid().ToString();
-                                var args = fc.Arguments is not null
-                                    ? JsonSerializer.Serialize(fc.Arguments)
-                                    : null;
-
-                                if (toolCallsByCallId.TryGetValue(callId, out var existing))
-                                {
-                                    // Preserve existing args if this chunk has none (streaming may send name-only deltas)
-                                    var mergedArgs = args ?? existing.Args;
-                                    toolCallsByCallId[callId] = (fc.Name, mergedArgs);
-                                }
-                                else
-                                {
-                                    toolCallsByCallId[callId] = (fc.Name, args);
-                                }
-
-                                // Collect ToolCallStart to yield outside try/catch
-                                if (seenCallIds.Add(callId))
-                                {
-                                    var friendlyName = GetFriendlyToolName(fc.Name);
-                                    var argsSummary = FormatArgsSummary(fc.Name, args ?? toolCallsByCallId[callId].Args);
-                                    pendingStarts.Add(new ChatUpdate.ToolCallStart(callId, friendlyName, argsSummary));
-                                }
-                            }
-                        }
-                    }
-
-                    // Collect text for message history (always), but do NOT stream to UI during tool-call rounds
-                    if (chunk.Text is not null)
-                        roundText.Append(chunk.Text);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                _logger.LogInformation("AI chat streaming canceled by user or system.");
-                streamCancelled = true;
-            }
-            catch (ClientResultException ex)
-            {
-                // The AI provider returned an HTTP error (e.g. 401 Unauthorized, 429 rate
-                // limited, 5xx). Report it gracefully as a ChatUpdate.Error rather than letting
-                // it propagate and crash the /api/ai/chat endpoint as an HTTP 500.
-                _logger.LogError(ex, "AI provider returned an error (Status: {Status}).", ex.Status);
-                streamError = ex;
-            }
-            catch (IOException ex)
-            {
-                _logger.LogWarning(ex, "I/O operation aborted during AI chat streaming. This usually indicates the connection was closed unexpectedly.");
-                streamCancelled = true;
-            }
-            catch (SocketException ex)
-            {
-                _logger.LogWarning(ex, "Socket error during AI chat streaming (SocketErrorCode={SocketErrorCode}). Treating as stream completion.", ex.SocketErrorCode);
-                streamCancelled = true;
-            }
-            catch (HttpRequestException) when (ct.IsCancellationRequested)
-            {
-                _logger.LogInformation("AI chat streaming cancelled (HttpRequestException during cancellation)");
-                streamCancelled = true;
-            }
-            catch (HttpRequestException ex)
-            {
-                // Non-cancellation HTTP failure (DNS resolution, connection refused, etc.)
-                _logger.LogError(ex, "HTTP failure during AI chat streaming.");
-                streamError = ex;
-            }
-            catch (Exception ex)
-            {
-                // Last-resort: never let a provider/transport error crash the chat endpoint.
-                _logger.LogError(ex, "Unexpected error during AI chat streaming.");
-                streamError = ex;
-            }
-
-            // Yield any pending ToolCallStart events (must be outside try/catch for yield)
-            foreach (var start in pendingStarts)
-                yield return start;
-
-            if (streamCancelled)
-                yield break;
-
-            // If the provider returned an error (auth failure, rate limit, 5xx, transport),
-            // surface it as a structured ChatUpdate.Error instead of throwing an HTTP 500.
-            if (streamError is not null)
-            {
-                yield return new ChatUpdate.Error(FormatProviderError(streamError));
-                yield break;
-            }
-
-            // Re-throw unexpected errors that were NOT caught above
-            // (The catch blocks above only handle cancellation, I/O, and socket errors)
-
-            // Build assistant message with text + function call content items.
-            // ALWAYS clean the round text before adding to history — even intermediate
-            // round text can contain leaked tool-call syntax that the model will echo
-            // back in subsequent rounds if it sees it in the conversation history.
-            // Use CleanForHistory (aggressive) for the message history to prevent echo-back.
-            var historyText = CleanForHistory(roundText.ToString());
-            var assistantContents = new List<AIContent>();
-            if (historyText.Length > 0)
-                assistantContents.Add(new TextContent(historyText));
-            foreach (var (callId, (name, args)) in toolCallsByCallId)
-            {
-                var arguments = ParseArgumentsDictionary(args);
-                assistantContents.Add(new FunctionCallContent(callId, name, arguments));
-            }
-            if (assistantContents.Count > 0)
-                messages.Add(new ChatMessage(ChatRole.Assistant, assistantContents));
-
-            if (toolCallsByCallId.Count == 0)
-            {
-                // Final round — no more tool calls. Stream the clean text to UI.
-                // Use CleanForDisplay (gentle) for the UI to preserve the model's
-                // human-readable prose while still stripping leaked syntax.
-                var displayText = CleanForDisplay(roundText.ToString());
-                if (displayText.Length > 0)
-                    yield return new ChatUpdate.TextChunk(displayText);
-
-                break;
-            }
-
-            totalToolCalls += toolCallsByCallId.Count;
-
-            // Dispatch each tool call and add results
-            foreach (var (callId, (name, args)) in toolCallsByCallId)
-            {
-                var result = await DispatchToolCallAsync(name, args, ct);
-                messages.Add(new ChatMessage(ChatRole.Tool, [new FunctionResultContent(callId, result)]));
-
-                var friendlyName = GetFriendlyToolName(name);
-                var resultSummary = FormatResultSummary(name, result);
-                var success = !result.StartsWith("Error", StringComparison.OrdinalIgnoreCase);
-                yield return new ChatUpdate.ToolCallEnd(callId, friendlyName, resultSummary, success);
-            }
-        }
-
-        if (totalToolCalls >= maxToolCallRounds)
-        {
-            _logger.LogWarning("Reached max tool-call rounds ({Max}), stopping", maxToolCallRounds);
-            yield return new ChatUpdate.Error($"Reached maximum tool-call limit ({maxToolCallRounds}). Please continue your request.");
-        }
-
-        _logger.LogInformation("AI chat completed with {ToolCalls} tool calls", totalToolCalls);
-    }
-
-    private string ResolveDefaultModel()
-    {
-        // ChatModelResolver.Resolve returns the (provider, model) tuple resolved from
-        // configuration. We only need the model here; ChatAsync always uses the model
-        // that the active provider is configured with.
-        var (_, model) = ChatModelResolver.Resolve(
-            _config["codedvalue-ai-provider"],
-            _config["Ollama:DefaultModel"],
-            _config["OpenRouter:DefaultModel"]);
-        return model;
-    }
-
-    private static IDictionary<string, object?> ParseArgumentsDictionary(string? args)
-    {
-        var arguments = new Dictionary<string, object?>();
-        if (string.IsNullOrEmpty(args)) return arguments;
-        try
-        {
-            var parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args);
-            if (parsed is not null)
-            {
-                foreach (var kvp in parsed)
-                {
-                    arguments[kvp.Key] = kvp.Value.ValueKind switch
-                    {
-                        JsonValueKind.String => kvp.Value.GetString(),
-                        JsonValueKind.Number => kvp.Value.GetDouble(),
-                        JsonValueKind.True => true,
-                        JsonValueKind.False => false,
-                        JsonValueKind.Null => null,
-                        _ => kvp.Value.GetRawText()
-                    };
-                }
-            }
-        }
-        catch { /* ignore parse errors, partial args ok */ }
-        return arguments;
     }
 
     private async Task<string> DispatchToolCallAsync(string toolName, string? arguments, CancellationToken ct)
@@ -607,37 +285,9 @@ public sealed class CodedValueAIService
         catch { return []; }
     }
 
-    // --- Tool name and result formatting helpers (text cleaning is in AiTextCleaner.cs) ---
+    // --- SSE formatting (kept byte-for-byte identical to the pre-refactor payload) ---
 
-    private static string CleanForHistory(string text) => AiTextCleaner.CleanForHistory(text);
-    private static string CleanForDisplay(string text) => AiTextCleaner.CleanForDisplay(text);
-
-    /// <summary>
-    /// Formats a provider/transport exception into a concise, user-facing message,
-    /// mapping common HTTP statuses (401/403/429/5xx) to actionable guidance.
-    /// </summary>
-    private static string FormatProviderError(Exception ex)
-    {
-        var status = ex switch
-        {
-            ClientResultException cre => (int?)cre.Status,
-            HttpRequestException hre => (int?)hre.StatusCode,
-            _ => null
-        };
-
-        return status switch
-        {
-            401 or 403 => "The AI provider rejected the request as unauthorised. Please check that a valid OpenRouter API key is configured (OpenRouter:ApiKey).",
-            429 => "The AI provider rate-limited the request. Please wait a moment and try again.",
-            >= 500 => $"The AI provider returned a server error (HTTP {status}). Please try again in a moment.",
-            _ => $"The AI chat could not be completed: {ex.Message}"
-        };
-    }
-
-    private static string GetFriendlyToolName(string toolName) =>
-        FriendlyToolNames.TryGetValue(toolName, out var friendly) ? friendly : toolName;
-
-    private static string FormatArgsSummary(string toolName, string? args)
+    public string FormatArgsSummary(string toolName, string? args)
     {
         if (string.IsNullOrEmpty(args)) return string.Empty;
         try
@@ -674,7 +324,7 @@ public sealed class CodedValueAIService
         };
     }
 
-    private static string FormatResultSummary(string toolName, string result)
+    public string FormatResultSummary(string toolName, string result)
     {
         if (string.IsNullOrEmpty(result))
             return string.Empty;

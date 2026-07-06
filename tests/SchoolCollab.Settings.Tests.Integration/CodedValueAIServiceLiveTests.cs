@@ -17,7 +17,7 @@ using AI = ai::SchoolCollab.AI;
 namespace SchoolCollab.Settings.Tests.Integration;
 
 /// <summary>
-/// Live tests for <see cref="AI.Services.CodedValueAIService.ChatAsync"/> against the real
+/// Live tests for <see cref="AI.Services.AIChatEngine.ChatAsync"/> against the real
 /// OpenRouter endpoint, using the configured model (<c>google/gemma-4-31b-it</c>).
 ///
 /// These build the <see cref="IChatClient"/> exactly as <c>SchoolCollab.AI/Program.cs</c>
@@ -110,10 +110,12 @@ public class CodedValueAIServiceLiveTests
     }
 
     /// <summary>
-    /// Builds a <see cref="AI.Services.CodedValueAIService"/> wired to a real OpenRouter chat client
-    /// and a mocked Coded Values API.
+    /// Builds an <see cref="AI.Services.AIChatEngine"/> wired to a real OpenRouter chat
+    /// client and a mocked Coded Values API, with the CodedValues tool bag
+    /// (<see cref="AI.Tools.CodedValues.CodedValuesToolProvider"/> +
+    /// <see cref="AI.Tools.CodedValues.CodedValuesSystemPromptProvider"/>) plugged in.
     /// </summary>
-    private static AI.Services.CodedValueAIService BuildService(IChatClient chatClient, Mock<AI.Services.ICodedValuesApiClient> mockApi)
+    private static AI.Services.AIChatEngine BuildService(IChatClient chatClient, Mock<AI.Tools.CodedValues.ICodedValuesApiClient> mockApi)
     {
         var mockFactory = new Mock<AI.Services.IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
@@ -121,20 +123,26 @@ public class CodedValueAIServiceLiveTests
         var mockEnv = new Mock<IHostEnvironment>();
         mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
 
-        // Load the AppHost's centralised appsettings so CodedValueAIService
-        // .ResolveDefaultModel picks up the same OpenRouter model the live
-        // client uses. Reading from the AppHost's Parameters:* section keeps
-        // this helper in lock-step with the running AI host.
+        // Load the AppHost's centralised appsettings so AIChatEngine.ResolveDefaultModel
+        // picks up the same OpenRouter model the live client uses. Reading from the
+        // AppHost's Parameters:* section keeps this helper in lock-step with the
+        // running AI host.
         var config = new ConfigurationBuilder()
             .AddJsonFile("appHost-appsettings.json", optional: false)
             .Build();
 
-        return new AI.Services.CodedValueAIService(
-            mockFactory.Object,
+        var toolProvider = new AI.Tools.CodedValues.CodedValuesToolProvider(
             mockApi.Object,
-            new NullLogger<AI.Services.CodedValueAIService>(),
+            new NullLogger<AI.Tools.CodedValues.CodedValuesToolProvider>());
+        var promptProvider = new AI.Tools.CodedValues.CodedValuesSystemPromptProvider(
             mockEnv.Object,
-            config);
+            new NullLogger<AI.Tools.CodedValues.CodedValuesSystemPromptProvider>());
+        return new AI.Services.AIChatEngine(
+            new ai::SchoolCollab.AI.Abstractions.IToolProvider[] { toolProvider },
+            promptProvider,
+            mockFactory.Object,
+            config,
+            new NullLogger<AI.Services.AIChatEngine>());
     }
 
     // =====================================================================
@@ -148,7 +156,7 @@ public class CodedValueAIServiceLiveTests
     [TestMethod]
     public async Task ChatAsync_WithOpenRouter_StreamsSimpleTextResponse()
     {
-        var mockApi = new Mock<AI.Services.ICodedValuesApiClient>(MockBehavior.Loose);
+        var mockApi = new Mock<AI.Tools.CodedValues.ICodedValuesApiClient>(MockBehavior.Loose);
         using var chatClient = BuildOpenRouterClient();
         var service = BuildService(chatClient, mockApi);
 
@@ -205,7 +213,7 @@ public class CodedValueAIServiceLiveTests
     {
         var categories = new[]
         {
-            new AI.Services.CodedValueDto(
+            new AI.Tools.CodedValues.CodedValueDto(
                 Id: Guid.NewGuid(),
                 Code: "CNTRY",
                 Name: "Countries",
@@ -219,7 +227,7 @@ public class CodedValueAIServiceLiveTests
                 Attributes: [],
                 AttributeDefinitions: [],
                 ChildrenCount: 5),
-            new AI.Services.CodedValueDto(
+            new AI.Tools.CodedValues.CodedValueDto(
                 Id: Guid.NewGuid(),
                 Code: "DOW",
                 Name: "Days of Week",
@@ -235,9 +243,9 @@ public class CodedValueAIServiceLiveTests
                 ChildrenCount: 7)
         };
 
-        var mockApi = new Mock<AI.Services.ICodedValuesApiClient>(MockBehavior.Strict);
+        var mockApi = new Mock<AI.Tools.CodedValues.ICodedValuesApiClient>(MockBehavior.Strict);
         mockApi.Setup(a => a.GetRootValuesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.FromResult<AI.Services.CodedValueDto[]?>(categories));
+            .Returns(Task.FromResult<AI.Tools.CodedValues.CodedValueDto[]?>(categories));
 
         using var chatClient = BuildOpenRouterClient();
         var service = BuildService(chatClient, mockApi);
@@ -294,7 +302,7 @@ public class CodedValueAIServiceLiveTests
     /// turn 1 proposes the country values (looking up the CNTRY parent), turn 2 is the
     /// user's <i>"yes"</i> confirmation which must trigger the bulk creation tool.
     ///
-    /// The Coded Values API is mocked, so <see cref="AI.Services.ICodedValuesApiClient.BulkCreateAsync"/>
+    /// The Coded Values API is mocked, so <see cref="AI.Tools.CodedValues.ICodedValuesApiClient.BulkCreateAsync"/>
     /// being called with country children is the proof that the prompt <i>works to insert</i>.
     /// This is the exact path (cross-turn text-only history + confirm turn) that previously
     /// failed to fire the bulk tool.
@@ -303,7 +311,7 @@ public class CodedValueAIServiceLiveTests
     public async Task ChatAsync_WithOpenRouter_AddCountriesUnderCntry_ConfirmInsertsValues()
     {
         var parentId = Guid.NewGuid();
-        var parentCntry = new AI.Services.CodedValueDto(
+        var parentCntry = new AI.Tools.CodedValues.CodedValueDto(
             Id: parentId,
             Code: "CNTRY",
             Name: "Countries",
@@ -318,13 +326,13 @@ public class CodedValueAIServiceLiveTests
             AttributeDefinitions: [],
             ChildrenCount: 0);
 
-        var capturedChildren = new List<AI.Services.CreateCodedValueRequest>();
-        var mockApi = new Mock<AI.Services.ICodedValuesApiClient>(MockBehavior.Loose);
+        var capturedChildren = new List<AI.Tools.CodedValues.CreateCodedValueRequest>();
+        var mockApi = new Mock<AI.Tools.CodedValues.ICodedValuesApiClient>(MockBehavior.Loose);
         mockApi.Setup(a => a.GetByCodeAsync("CNTRY", It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(parentCntry);
-        mockApi.Setup(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Services.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, IEnumerable<AI.Services.CreateCodedValueRequest>, CancellationToken>((_, children, _) => capturedChildren.AddRange(children))
-            .Returns(() => Task.FromResult(new AI.Services.BulkCreateResult(capturedChildren.Count, Array.Empty<string>(), parentId)));
+        mockApi.Setup(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Tools.CodedValues.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, IEnumerable<AI.Tools.CodedValues.CreateCodedValueRequest>, CancellationToken>((_, children, _) => capturedChildren.AddRange(children))
+            .Returns(() => Task.FromResult(new AI.Tools.CodedValues.BulkCreateResult(capturedChildren.Count, Array.Empty<string>(), parentId)));
 
         using var chatClient = BuildOpenRouterClient();
         var service = BuildService(chatClient, mockApi);
@@ -417,7 +425,7 @@ public class CodedValueAIServiceLiveTests
         // be invoked — together these prove the prompt end-to-end persisted coded values.
         mockApi.Verify(a => a.GetByCodeAsync("CNTRY", It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce,
             "the CNTRY parent must be looked up (by the model and/or the bulk-create path)");
-        mockApi.Verify(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Services.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce,
+        mockApi.Verify(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Tools.CodedValues.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce,
             "the bulk creation API must be called to persist the countries");
     }
 
@@ -432,7 +440,7 @@ public class CodedValueAIServiceLiveTests
     /// real break from a transient provider hiccup).
     /// </summary>
     private static async Task<(List<ChatUpdate> Updates, bool Cancelled, Exception? Error)> DrainAsync(
-        AI.Services.CodedValueAIService service, IReadOnlyList<ChatMessage> history, TimeSpan? timeout = null)
+        AI.Services.AIChatEngine service, IReadOnlyList<ChatMessage> history, TimeSpan? timeout = null)
     {
         var updates = new List<ChatUpdate>();
         using var cts = new CancellationTokenSource(timeout ?? Timeout);

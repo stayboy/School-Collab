@@ -23,4 +23,25 @@ public interface IToolProvider
 
     /// <summary>Route a tool call to the right local implementation.</summary>
     Task<string> DispatchAsync(string toolName, string? args, CancellationToken ct);
+
+    /// <summary>
+    /// Human-friendly display name for a tool, emitted in the SSE
+    /// <c>ToolCallStart</c>/<c>ToolCallEnd</c> events. Falls back to
+    /// <paramref name="toolName"/> when no friendly name is mapped.
+    /// </summary>
+    string GetFriendlyName(string toolName);
+
+    /// <summary>
+    /// One-line summary of a tool call's arguments, emitted in the SSE
+    /// <c>ToolCallStart</c> event (e.g. <c>"parent: CNTRY"</c>). Return
+    /// <see cref="string.Empty"/> when no summary is useful.
+    /// </summary>
+    string FormatArgsSummary(string toolName, string? args);
+
+    /// <summary>
+    /// One-line summary of a tool call's result, emitted in the SSE
+    /// <c>ToolCallEnd</c> event. <paramref name="result"/> is the raw string
+    /// returned by <see cref="DispatchAsync"/>.
+    /// </summary>
+    string FormatResultSummary(string toolName, string result);
 }
