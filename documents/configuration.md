@@ -36,7 +36,7 @@ School-Collab platform. It covers:
 4. [`Auth:Keycloak` — OIDC authentication](#4-authkeycloak--oidc-authentication)
 5. [`FeatureFlags` — central configuration service](#5-featureflags--central-configuration-service)
 6. [`Promotion` — Students.Worker scheduled job](#6-promotion--studentsworker-scheduled-job)
-7. [AI provider configuration (`SchoolCollab.AI`)](#7-ai-provider-configuration-schoolcollabai)
+7. [AI provider configuration (`SchoolCollab.AI.Server`)](#7-ai-provider-configuration-schoolcollabaiserver)
 8. [Connection strings (Aspire-injected)](#8-connection-strings-aspire-injected)
 9. [Logging](#9-logging)
 10. [Local-development quickstart](#10-local-development-quickstart)
@@ -436,7 +436,7 @@ and bound via `builder.Configuration.GetSection(PromotionOptions.SectionName)`.
 
 ---
 
-## 7. AI provider configuration (`SchoolCollab.AI`)
+## 7. AI provider configuration (`SchoolCollab.AI.Server`)
 
 > **Centralisation note.** All AI provider configuration is owned by the
 > AppHost — see [§2](#2-aspire-apphost--shared-infrastructure) for the
@@ -444,9 +444,9 @@ and bound via `builder.Configuration.GetSection(PromotionOptions.SectionName)`.
 > documents the **runtime contract** (which keys the AI host reads, and
 > how `ChatModelResolver` resolves them to a working `(provider, model)`
 > pair) — the *values* are no longer configured in
-> `src/SchoolCollab.AI/appsettings.json`.
+> `src/SchoolCollab.AI.Server/appsettings.json`.
 
-Two providers are wired in `src/SchoolCollab.AI/Program.cs` and selected
+Two providers are wired in `src/SchoolCollab.AI.Server/Program.cs` and selected
 by the `codedvalue-ai-provider` configuration key at startup (its value
 is sourced from the AppHost's `Parameters:ai-default-provider` parameter).
 The remaining keys come from the AppHost's `Ollama:*` /
@@ -469,7 +469,7 @@ AppHost — see §2 for the parameter names):
 `src/AppHost/SchoolCollab.AppHost/appsettings.json` (or override via env
 var / user-secrets / Azure App Configuration in deployment), then re-run
 the AppHost. Do **not** edit
-`src/SchoolCollab.AI/appsettings.json` — it no longer carries these
+`src/SchoolCollab.AI.Server/appsettings.json` — it no longer carries these
 keys.
 
 **Production example — OpenRouter with Claude:**
@@ -552,7 +552,7 @@ For `appsettings.Development.json` the convention is:
 ```
 
 Serilog request logging is enabled in the AI service only
-(`app.UseSerilogRequestLogging()` in `src/SchoolCollab.AI/Program.cs`).
+(`app.UseSerilogRequestLogging()` in `src/SchoolCollab.AI.Server/Program.cs`).
 
 ---
 
