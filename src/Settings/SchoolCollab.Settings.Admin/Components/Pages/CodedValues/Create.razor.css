@@ -1,0 +1,27 @@
+/* Form layout */
+.form-container {
+    max-width: 600px;
+}
+
+.form-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.form-field {
+    display: block;
+}
+
+.form-field.required-field ::deep label {
+    color: var(--neutral-foreground-1, #242424);
+    font-weight: 700;
+}
+
+.full-width {
+    width: 100%;
+}
+
+.narrow-field {
+    width: 12rem;
+}

@@ -1,0 +1,69 @@
+/* Page layout */
+.page-container {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.breadcrumb-row {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+.breadcrumb {
+    margin: 0;
+}
+
+.action-bar {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 0.75rem;
+}
+
+.page-title {
+    margin: 0;
+}
+
+.spacer {
+    flex-grow: 1;
+}
+
+::deep .search-box {
+    width: 260px;
+    margin-left: auto;
+}
+
+/* Loading / empty states */
+.spinner-container {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.grid-container {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    width: 100%;
+}
+
+/* Attribute badges */
+.attr-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.required-marker {
+    color: var(--error);
+}
+
+.data-type {
+    font-size: 0.8em;
+}

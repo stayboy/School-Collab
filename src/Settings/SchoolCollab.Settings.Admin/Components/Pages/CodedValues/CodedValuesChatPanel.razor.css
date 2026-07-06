@@ -1,0 +1,52 @@
+/*
+ * Drawer body layout for the AI assistant. A single chat instance fills the
+ * whole drawer:
+ *
+ *   ┌─────────────────────────────────────┐
+ *   │  ✨ AI Assistant                     │  SideDrawer header
+ *   │  ──────────────────────────────────  │
+ *   │  [intro paragraph]                   │  chat-intro (ShowIntro)
+ *   │  [scrollable message history]        │  DisplayOnly: height: 100%
+ *   │  [typing indicator + partial text]   │  (see CodedValuesChat.razor.css)
+ *   │  ...                                 │
+ *   │  Model: gemma4 (ollama)              │
+ *   └─────────────────────────────────────┘
+ *
+ * The chat's .chat-container-displayonly sets height: 100% and uses
+ * flexbox internally (with .chat-messages having flex: 1, min-height: 0,
+ * overflow-y: auto) so the messages area scrolls when content overflows
+ * the drawer height. No external flex layout is needed here — the chat
+ * already self-sizes to fill its parent.
+ *
+ * Padding: the drawer body (SideDrawer) renders flush to the panel edge, so
+ * we pad the chat-panel wrapper to give the intro paragraph and the first
+ * message breathing room. The inner chat-messages area keeps its own
+ * internal padding (set in CodedValuesChat.razor.css).
+ */
+.chat-panel {
+    height: 100%;
+    min-height: 0;
+    overflow-x: hidden;
+    /* Generous padding so the intro/topic paragraph and the first message
+       aren't hugging the drawer edge. The intro in particular benefits
+       from the horizontal breathing room. */
+    padding: 0.75rem 1rem 1rem;
+    box-sizing: border-box;
+}
+
+/*
+ * Topic / intro formatting inside the drawer. The drawer's own header
+ * carries the title ("✨ AI Assistant"), but the chat also renders the
+ * intro paragraph as the conversation kicker. Give it explicit padding
+ * and a slightly larger top margin so it reads as the "topic" of the
+ * conversation rather than a stray line.
+ */
+::deep .chat-panel .chat-intro {
+    margin-top: 0;
+    margin-bottom: 1rem;
+    padding: 0.65rem 0.85rem;
+    border-left: 3px solid var(--accent-fill-rest, #0078d4);
+    background: var(--neutral-fill-layer-alt, #f5f5f5);
+    border-radius: 0 4px 4px 0;
+    line-height: 1.45;
+}
