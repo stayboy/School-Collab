@@ -7,7 +7,7 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.AI.Abstractions;
 
-namespace SchoolCollab.Admin.Shared.Services;
+namespace SchoolCollab.AI.Chat.Services;
 
 /// <summary>
 /// HTTP client that calls the AI API's SSE streaming endpoint and yields <see cref="ChatUpdate"/> objects.

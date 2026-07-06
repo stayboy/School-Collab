@@ -6,7 +6,7 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.AI.Chat.Services;
 using SchoolCollab.AI.Abstractions;
 
 namespace SchoolCollab.Settings.Tests.Unit;

@@ -9,23 +9,23 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Settings.Admin.Components.Pages.CodedValues;
-using SchoolCollab.Settings.Admin.Services;
+using SchoolCollab.AI.Chat.Components;
+using SchoolCollab.AI.Chat.Services;
 
 namespace SchoolCollab.Settings.Tests.Unit.Components;
 
 /// <summary>
-/// bUnit tests for the AI assistant <see cref="CodedValuesChatPanel"/> —
+/// bUnit tests for the AI assistant <see cref="AiChatPanel"/> —
 /// the side-drawer surface that mirrors the inline chat's conversation into
-/// a read-only <see cref="CodedValuesChat"/> bound to
-/// <see cref="CodedValuesChatHub"/>.
+/// a read-only <see cref="AiChat"/> bound to
+/// <see cref="AiChatHub"/>.
 ///
 /// Regression coverage for the bug where messages appended to the hub after
 /// the user submitted a prompt failed to appear in the drawer. Root cause:
-/// <see cref="CodedValuesChatPanel"/> assigned its
+/// <see cref="AiChatPanel"/> assigned its
 /// <c>_mirroredMessages</c> field directly from
-/// <see cref="CodedValuesChatHub.Messages"/>, which is the hub's internal
-/// <see cref="List{T}"/> reference. <see cref="CodedValuesChatHub.AddMessage"/>
+/// <see cref="AiChatHub.Messages"/>, which is the hub's internal
+/// <see cref="List{T}"/> reference. <see cref="AiChatHub.AddMessage"/>
 /// mutates that list in place, so the reference never changed. Blazor's
 /// parameter diffing uses reference equality for reference-type parameters,
 /// so it saw "no change" and skipped re-rendering the child chat — leaving
@@ -37,7 +37,7 @@ namespace SchoolCollab.Settings.Tests.Unit.Components;
 /// re-renders.
 /// </summary>
 [TestClass]
-public class CodedValuesChatPanelTests : BunitContext
+public class AiChatPanelTests : BunitContext
 {
     [TestInitialize]
     public void Setup()
@@ -47,7 +47,7 @@ public class CodedValuesChatPanelTests : BunitContext
         // The panel injects the hub and the inner chat injects AiChatClient.
         // Singleton scope is fine for tests — bUnit runs each test in its
         // own BunitContext so they don't share state.
-        Services.AddSingleton<CodedValuesChatHub>();
+        Services.AddSingleton<AiChatHub>();
         // AiChatClient backed by a stub handler that serves /api/ai/config and
         // a one-chunk SSE stream for /api/ai/chat, so tests that drive the
         // drawer's own Send button get a deterministic AI response without a
@@ -67,8 +67,8 @@ public class CodedValuesChatPanelTests : BunitContext
     public void Drawer_NewMessageInHub_RendersInChildChat()
     {
         // Arrange: open the drawer with an empty hub.
-        var hub = Services.GetRequiredService<CodedValuesChatHub>();
-        var cut = Render<CodedValuesChatPanel>(parameters => parameters
+        var hub = Services.GetRequiredService<AiChatHub>();
+        var cut = Render<AiChatPanel>(parameters => parameters
             .Add(p => p.Open, true));
         var drawer = cut.Find("aside.side-drawer-panel");
         drawer.Should().NotBeNull();
@@ -77,7 +77,7 @@ public class CodedValuesChatPanelTests : BunitContext
         cut.FindAll(".chat-message").Should().BeEmpty();
 
         // Act: simulate the inline chat pushing a user prompt to the hub.
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "Hello, AI"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "Hello, AI"));
 
         // Assert: the prompt now appears in the drawer's display chat.
         cut.WaitForState(() => cut.FindAll(".chat-message").Count > 0);
@@ -97,17 +97,17 @@ public class CodedValuesChatPanelTests : BunitContext
     [TestMethod]
     public void Drawer_SubsequentMessages_RenderInOrder()
     {
-        var hub = Services.GetRequiredService<CodedValuesChatHub>();
-        var cut = Render<CodedValuesChatPanel>(parameters => parameters
+        var hub = Services.GetRequiredService<AiChatHub>();
+        var cut = Render<AiChatPanel>(parameters => parameters
             .Add(p => p.Open, true));
 
         // Round 1 — user prompt.
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "First"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "First"));
         cut.WaitForState(() => cut.FindAll(".chat-message").Count == 1);
         cut.Find(".message-user .message-text").TextContent.Should().Contain("First");
 
         // Round 2 — assistant response.
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.Assistant, "Hi there"));
+        hub.AddMessage(new AiChatMessage(ChatRole.Assistant, "Hi there"));
         cut.WaitForState(() => cut.FindAll(".chat-message").Count == 2);
 
         // Both messages present and in order.
@@ -120,18 +120,18 @@ public class CodedValuesChatPanelTests : BunitContext
     }
 
     /// <summary>
-    /// Bug regression follow-up: <see cref="CodedValuesChatHub.Clear"/> must
+    /// Bug regression follow-up: <see cref="AiChatHub.Clear"/> must
     /// also reach the child chat so the drawer empties when the user
     /// presses the drawer's Clear button.
     /// </summary>
     [TestMethod]
     public void Drawer_HubClear_EmptiesChildChat()
     {
-        var hub = Services.GetRequiredService<CodedValuesChatHub>();
-        var cut = Render<CodedValuesChatPanel>(parameters => parameters
+        var hub = Services.GetRequiredService<AiChatHub>();
+        var cut = Render<AiChatPanel>(parameters => parameters
             .Add(p => p.Open, true));
 
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "Before clear"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "Before clear"));
         cut.WaitForState(() => cut.FindAll(".chat-message").Count == 1);
 
         hub.Clear();
@@ -143,35 +143,35 @@ public class CodedValuesChatPanelTests : BunitContext
     /// <summary>
     /// Streaming state must also reach the drawer so the user sees the
     /// "AI is typing…" indicator while a response streams in. Mirrors
-    /// what <see cref="CodedValuesChat"/> pushes to the hub via
+    /// what <see cref="AiChat"/> pushes to the hub via
     /// <c>OnStreamingStateChanged</c>.
     /// </summary>
     [TestMethod]
     public void Drawer_StreamingState_RendersTypingIndicator()
     {
-        var hub = Services.GetRequiredService<CodedValuesChatHub>();
-        var cut = Render<CodedValuesChatPanel>(parameters => parameters
+        var hub = Services.GetRequiredService<AiChatHub>();
+        var cut = Render<AiChatPanel>(parameters => parameters
             .Add(p => p.Open, true));
 
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "Go"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "Go"));
         cut.WaitForState(() => cut.FindAll(".chat-message").Count == 1);
 
         // Streaming begins.
-        hub.SetStreamingState(new CodedValuesChat.ChatStreamingState(
+        hub.SetStreamingState(new AiChatStreamingState(
             IsStreaming: true, StreamingText: string.Empty, ActiveToolCalls: null));
 
         cut.WaitForState(() => cut.FindAll(".streaming-container").Count == 1);
         cut.Find(".streaming-container").Should().NotBeNull();
 
         // Partial text arrives.
-        hub.SetStreamingState(new CodedValuesChat.ChatStreamingState(
+        hub.SetStreamingState(new AiChatStreamingState(
             IsStreaming: true, StreamingText: "Partial", ActiveToolCalls: null));
 
         cut.WaitForState(() => cut.Find(".streaming-text") != null);
         cut.Find(".streaming-text").TextContent.Should().Contain("Partial");
 
         // Streaming ends.
-        hub.SetStreamingState(new CodedValuesChat.ChatStreamingState(
+        hub.SetStreamingState(new AiChatStreamingState(
             IsStreaming: false, StreamingText: string.Empty, ActiveToolCalls: null));
 
         cut.WaitForState(() => cut.FindAll(".streaming-container").Count == 0);
@@ -182,19 +182,19 @@ public class CodedValuesChatPanelTests : BunitContext
     /// WORKING input. Prompting directly from the drawer's textbox must add the
     /// user's message and stream the AI response into the drawer — without the
     /// inline page chat. The drawer chat is the Full-mode
-    /// <see cref="CodedValuesChat"/> hosted by <see cref="CodedValuesChatPanel"/>,
+    /// <see cref="AiChat"/> hosted by <see cref="AiChatPanel"/>,
     /// wired to mirror through the hub.
     /// </summary>
     [TestMethod]
     public async Task DrawerInput_Submit_RendersUserPromptAndAiResponse()
     {
-        var cut = Render<CodedValuesChatPanel>(parameters => parameters
+        var cut = Render<AiChatPanel>(parameters => parameters
             .Add(p => p.Open, true));
         cut.WaitForElement(".input-area");
 
-        // The drawer's Full-mode chat is the single CodedValuesChat here.
-        var drawerChat = cut.FindComponent<CodedValuesChat>();
-        var field = typeof(CodedValuesChat).GetField("_inputText",
+        // The drawer's Full-mode chat is the single AiChat here.
+        var drawerChat = cut.FindComponent<AiChat>();
+        var field = typeof(AiChat).GetField("_inputText",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         field!.SetValue(drawerChat.Instance, "Create a Country coded value");
 
@@ -216,7 +216,7 @@ public class CodedValuesChatPanelTests : BunitContext
 /// <summary>
 /// Minimal handler that serves the two endpoints the drawer chat hits when
 /// it sends: GET /api/ai/config (provider/model) and POST /api/ai/chat (SSE
-/// stream with one text chunk). Used by <see cref="CodedValuesChatPanelTests"/>.
+/// stream with one text chunk). Used by <see cref="AiChatPanelTests"/>.
 /// </summary>
 file sealed class StubAiHandler : HttpMessageHandler
 {
