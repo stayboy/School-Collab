@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
+using SchoolCollab.AI.Abstractions;
 
 namespace SchoolCollab.AI.Services;
 

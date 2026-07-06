@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using OpenAI;
+using ChatUpdate = ai::SchoolCollab.AI.Abstractions.ChatUpdate;
 using AI = ai::SchoolCollab.AI;
 
 namespace SchoolCollab.Settings.Tests.Integration;
@@ -180,9 +181,9 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request. Skipping live verification.");
             return;
         }
-        updates.Should().NotContain(u => u is AI.ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
+        updates.Should().NotContain(u => u is ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
 
-        var text = string.Concat(updates.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
+        var text = string.Concat(updates.OfType<ChatUpdate.TextChunk>().Select(t => t.Text));
         text.Should().NotBeNullOrWhiteSpace("ChatAsync should stream a text response for a simple prompt");
         text.ToUpperInvariant().Should().Contain("PONG",
             "the model was asked to reply with PONG and ChatAsync should stream that text to the UI");
@@ -267,7 +268,7 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request during the tool-call loop. Skipping live verification.");
             return;
         }
-        updates.Should().NotContain(u => u is AI.ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
+        updates.Should().NotContain(u => u is ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
 
         // The model should have emitted a list_coded_value_categories function call that
         // ChatAsync parsed and dispatched to the API. Verifying the mock was called proves
@@ -275,11 +276,11 @@ public class CodedValueAIServiceLiveTests
         mockApi.Verify(a => a.GetRootValuesAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce,
             "the model should call list_coded_value_categories, which ChatAsync must dispatch to the API");
 
-        var toolEnds = updates.OfType<AI.ChatUpdate.ToolCallEnd>().ToList();
+        var toolEnds = updates.OfType<ChatUpdate.ToolCallEnd>().ToList();
         toolEnds.Should().Contain(t => t.FriendlyName == "List Categories" && t.Success,
             "ChatAsync should yield a successful ToolCallEnd for the list categories call");
 
-        var text = string.Concat(updates.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
+        var text = string.Concat(updates.OfType<ChatUpdate.TextChunk>().Select(t => t.Text));
         text.Should().NotBeNullOrWhiteSpace("the model should produce a final summary after the tool call");
     }
 
@@ -352,9 +353,9 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request on the proposal turn. Skipping live verification.");
             return;
         }
-        updates1.Should().NotContain(u => u is AI.ChatUpdate.Error, "no error should occur on the proposal turn");
+        updates1.Should().NotContain(u => u is ChatUpdate.Error, "no error should occur on the proposal turn");
 
-        var proposalText = string.Concat(updates1.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
+        var proposalText = string.Concat(updates1.OfType<ChatUpdate.TextChunk>().Select(t => t.Text));
         proposalText.Should().NotBeNullOrWhiteSpace("the model should present a proposal in turn 1");
 
         // ── Turn 2: user confirms — model must invoke the bulk creation tool ──
@@ -383,7 +384,7 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request on the confirm turn. Skipping live verification.");
             return;
         }
-        updates2.Should().NotContain(u => u is AI.ChatUpdate.Error, "no error should occur on the confirm turn");
+        updates2.Should().NotContain(u => u is ChatUpdate.Error, "no error should occur on the confirm turn");
 
         // Some models create immediately in turn 1 (skipping the confirm gate); others wait
         // for turn 2. Either way, the prompt <i>works to insert</i> iff BulkCreateAsync was called.
@@ -408,7 +409,7 @@ public class CodedValueAIServiceLiveTests
 
         // The bulk tool should have been reported as a successful ToolCallEnd.
         var allUpdates = updates1.Concat(updates2).ToList();
-        allUpdates.OfType<AI.ChatUpdate.ToolCallEnd>()
+        allUpdates.OfType<ChatUpdate.ToolCallEnd>()
             .Should().Contain(t => t.FriendlyName == "Create Bulk Values" && t.Success,
                 "ChatAsync should yield a successful ToolCallEnd for the bulk creation");
 
@@ -425,15 +426,15 @@ public class CodedValueAIServiceLiveTests
     // =====================================================================
 
     /// <summary>
-    /// Drives <c>ChatAsync</c> to completion, collecting all <see cref="AI.ChatUpdate"/>s.
+    /// Drives <c>ChatAsync</c> to completion, collecting all <see cref="ChatUpdate"/>s.
     /// Returns the collected updates, whether the call timed out (cancelled), and any
     /// unexpected exception that escaped <c>ChatAsync</c> (so the test can distinguish a
     /// real break from a transient provider hiccup).
     /// </summary>
-    private static async Task<(List<AI.ChatUpdate> Updates, bool Cancelled, Exception? Error)> DrainAsync(
+    private static async Task<(List<ChatUpdate> Updates, bool Cancelled, Exception? Error)> DrainAsync(
         AI.Services.CodedValueAIService service, IReadOnlyList<ChatMessage> history, TimeSpan? timeout = null)
     {
-        var updates = new List<AI.ChatUpdate>();
+        var updates = new List<ChatUpdate>();
         using var cts = new CancellationTokenSource(timeout ?? Timeout);
 
         try
@@ -467,12 +468,12 @@ public class CodedValueAIServiceLiveTests
         IsRateLimitMessage(ex.Message);
 
     /// <summary>
-    /// True when the streamed updates contain a <see cref="AI.ChatUpdate.Error"/> whose
+    /// True when the streamed updates contain a <see cref="ChatUpdate.Error"/> whose
     /// message indicates OpenRouter rate-limiting. The free-tier model surfaces 429s
     /// this way rather than throwing, so the caller should skip as Inconclusive.
     /// </summary>
-    private static bool ContainsRateLimitError(IEnumerable<AI.ChatUpdate> updates) =>
-        updates.OfType<AI.ChatUpdate.Error>().Any(e => IsRateLimitMessage(e.Message));
+    private static bool ContainsRateLimitError(IEnumerable<ChatUpdate> updates) =>
+        updates.OfType<ChatUpdate.Error>().Any(e => IsRateLimitMessage(e.Message));
 
     private static bool IsRateLimitMessage(string? message) => !string.IsNullOrWhiteSpace(message) &&
         (message.Contains("rate-limit", StringComparison.OrdinalIgnoreCase) ||

@@ -1,4 +1,4 @@
-namespace SchoolCollab.AI;
+namespace SchoolCollab.AI.Abstractions;
 
 /// <summary>
 /// Represents a streaming update from the AI chat service.

@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
-using SchoolCollab.AI;
+using SchoolCollab.AI.Abstractions;
 using SchoolCollab.AI.Services;
 
 namespace SchoolCollab.Settings.Tests.Unit;

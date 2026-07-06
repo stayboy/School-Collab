@@ -1,5 +1,5 @@
 using Microsoft.Extensions.AI;
-using SchoolCollab.AI;
+using SchoolCollab.AI.Abstractions;
 using SchoolCollab.AI.Services;
 using Serilog;
 
