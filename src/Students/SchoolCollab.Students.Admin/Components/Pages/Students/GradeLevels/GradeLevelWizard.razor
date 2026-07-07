@@ -1,0 +1,880 @@
+@page "/students/grade-levels/create"
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Core.Tenancy
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ITenantProvider TenantProvider
+@inject ILogger<GradeLevelWizard> Logger
+@implements IDisposable
+
+<PageTitle>New Grade Level</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentWizard StepperPosition="StepperPosition.Top"
+                      StepSequence="WizardStepSequence.Visited"
+                      Width="960px"
+                      Height="auto"
+                      @ref="_wizard"
+                      @bind-Value="_stepIndex">
+            <Steps>
+                @* ── Step 1: Pick a grade coded value, optionally override the tenant name ── *@
+                <FluentWizardStep Label="Grade &amp; Subjects"
+                                  Summary="Pick a grade and assign subjects"
+                                  IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                  OnChange="OnStep1ChangingAsync">
+                    @* Each section below uses a 1/3 + 2/3 split (FluentGrid 12-col
+                       system: md="4" for the header + inputs, md="8" for the wider
+                       list area on the subject section). The inputs and action
+                       buttons live in the first column directly under the section
+                       title. *@
+                    <FluentGrid Spacing="3" class="wizard-split-section">
+                        <FluentGridItem xs="12" md="4">
+                            <div class="wizard-split-header">
+                                <div class="wizard-split-header-title">
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.BuildingGovernment)" Color="@Color.Accent" />
+                                    <h3>Grade coded value</h3>
+                                </div>
+                                <p class="wizard-hint">Pick an existing grade, create a new one, or override the displayed name for your tenant.</p>
+                            </div>
+                            <div class="wizard-split-inputs">
+                                <div class="coded-value-row">
+                                    <div class="coded-value-picker">
+                                        <CodedValueDropdown @ref="_codedValueDropdown"
+                                                            Parent="CodedValueParent.Grades"
+                                                            SelectedId="_codedValueIdNullable"
+                                                            SelectedIdChanged="OnCodedValueChanged" />
+                                    </div>
+                                    <div class="coded-value-actions">
+                                        @if (IsRealTenant)
+                                        {
+                                            <FluentButton Appearance="Appearance.Neutral"
+                                                          Title="Override the default name for this tenant"
+                                                          OnClick="OpenOverrideDialogAsync"
+                                                          Disabled="@(!_codedValueIdNullable.HasValue)">
+                                                Override name
+                                            </FluentButton>
+                                        }
+                                        <FluentButton Appearance="Appearance.Neutral"
+                                                      Title="Create a new grade coded value"
+                                                      OnClick="OpenCreateDialogAsync">
+                                            New grade
+                                        </FluentButton>
+                                    </div>
+                                </div>
+                            </div>
+                        </FluentGridItem>
+                        <FluentGridItem xs="12" md="8">
+                            @* Selected grade confirmation lives in the wider
+                               second column so the name and override status have
+                               room to breathe. Uses native FluentCard /
+                               FluentLabel / FluentBadge / FluentMessageBar. *@
+                            @if (_selectedCodedValue is not null)
+                            {
+                                <FluentCard class="grade-confirm-card">
+                                    <FluentStack Orientation="Orientation.Vertical" VerticalGap="8">
+                                        <FluentLabel class="grade-confirm-name-large">
+                                            @_selectedCodedValue.Name
+                                        </FluentLabel>
+                                        <FluentStack Orientation="Orientation.Horizontal"
+                                                     HorizontalAlignment="HorizontalAlignment.Start"
+                                                     VerticalAlignment="VerticalAlignment.Center"
+                                                     HorizontalGap="10">
+                                            <FluentLabel class="grade-confirm-meta-text">
+                                                Code: <strong>@_selectedCodedValue.Code</strong>
+                                            </FluentLabel>
+                                            @if (_selectedCodedValue.IsOverridden)
+                                            {
+                                                <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
+                                                @if (IsRealTenant)
+                                                {
+                                                    <FluentAnchor Href="#" OnClick="OpenOverrideDialogAsync" class="grade-confirm-reset">Reset to default</FluentAnchor>
+                                                }
+                                            }
+                                        </FluentStack>
+                                    </FluentStack>
+                                </FluentCard>
+                            }
+                            else
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info" class="grade-confirm-empty">
+                                    No grade selected. Pick a grade coded value on the left to see the selected name and override status here.
+                                </FluentMessageBar>
+                            }
+                        </FluentGridItem>
+                    </FluentGrid>
+
+                    <div class="wizard-section-gap" aria-hidden="true"></div>
+
+                    <FluentGrid Spacing="3" class="wizard-split-section">
+                        <FluentGridItem xs="12" md="4">
+                            <div class="wizard-split-header">
+                                <div class="wizard-split-header-title">
+                                    <FluentIcon Icon="@(Icons.Regular.Size24.BookmarkMultiple)" Color="@Color.Accent" />
+                                    <h3>Assign Subjects</h3>
+                                </div>
+                                <p class="wizard-hint">Pick a subject coded value to add it to this grade, or create a new one.</p>
+                            </div>
+                            <div class="wizard-split-inputs">
+                                <div class="coded-value-row">
+                                    <div class="coded-value-picker">
+                                        <CodedValueDropdown @ref="_subjectCodedValueDropdown"
+                                                            Parent="CodedValueParent.Subjects"
+                                                            SelectedId="_selectedSubjectCodedValueId"
+                                                            SelectedIdChanged="OnSubjectCodedValueChanged" />
+                                    </div>
+
+                                    @* Last-added subject chip — confirms the most
+                                       recent auto-add so the user can see what was
+                                       just wired to the grade. Shows an Override
+                                       button and Reset link when a real tenant is
+                                       in scope (the override is a per-tenant
+                                       concept; in default-tenant mode the handler
+                                       rewrites the global coded value). *@
+                                    @if (_lastAddedSubjectCodedValue is not null)
+                                    {
+                                        <FluentCard class="grade-confirm-chip">
+                                            <FluentStack Orientation="Orientation.Horizontal"
+                                                         HorizontalAlignment="HorizontalAlignment.Start"
+                                                         VerticalAlignment="VerticalAlignment.Center"
+                                                         HorizontalGap="8">
+                                                <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
+                                                <span class="grade-confirm-name">@_lastAddedSubjectCodedValue.Name added</span>
+                                                @if (_lastAddedSubjectCodedValue.IsOverridden)
+                                                {
+                                                    <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
+                                                }
+                                                @if (IsRealTenant)
+                                                {
+                                                    if (_lastAddedSubjectCodedValue.IsOverridden)
+                                                    {
+                                                        <FluentAnchor Href="#" OnClick="OpenSubjectOverrideDialogAsync" class="grade-confirm-reset">Reset to default</FluentAnchor>
+                                                    }
+                                                    else
+                                                    {
+                                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                                      Title="Override the default name for this tenant"
+                                                                      OnClick="OpenSubjectOverrideDialogAsync">
+                                                            Override name
+                                                        </FluentButton>
+                                                    }
+                                                }
+                                            </FluentStack>
+                                        </FluentCard>
+                                    }
+
+                                    <div class="coded-value-actions">
+                                        <FluentButton Appearance="Appearance.Neutral"
+                                                      Title="Create a new subject coded value"
+                                                      OnClick="OpenCreateSubjectDialogAsync">
+                                            New subject
+                                        </FluentButton>
+                                    </div>
+                                </div>
+                            </div>
+                        </FluentGridItem>
+                        <FluentGridItem xs="12" md="8">
+                            @* List of subjects already assigned to this grade. Lives
+                               in the wider second column so long lists can scroll
+                               without squeezing the picker column. *@
+                            @if (_assignedSubjects.Count > 0)
+                            {
+                                <div class="assigned-list">
+                                    <h4>Subjects assigned to this grade</h4>
+                                    <ul>
+                                        @foreach (var s in _assignedSubjects)
+                                        {
+                                            <li>
+                                                <span>@s.Name</span>
+                                                <FluentButton Appearance="Appearance.Lightweight"
+                                                              OnClick="@(() => RemoveSubject(s))">Remove</FluentButton>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                            else
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info" class="assigned-list-empty">
+                                    No subjects assigned yet. Pick a subject coded value on the left to add it to this grade.
+                                </FluentMessageBar>
+                            }
+                        </FluentGridItem>
+                    </FluentGrid>
+
+                    @if (!string.IsNullOrEmpty(_step1Error))
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_step1Error</FluentMessageBar>
+                    }
+                </FluentWizardStep>
+
+                @* ── Step 2: Enrol students against the current period ── *@
+                <FluentWizardStep Label="Students"
+                                  Summary="Enrol students in this grade"
+                                  IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                  OnChange="OnStep2ChangingAsync">
+                    @if (_currentPeriod is null)
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Warning">
+                            No period covers today. Create a period whose date range includes today before enrolling students.
+                        </FluentMessageBar>
+                    }
+                    else
+                    {
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.People)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Enrol Students</h3>
+                                    <p class="wizard-hint">Enrol students into this grade level for the current period (@_currentPeriod.Name).</p>
+                                </div>
+                            </div>
+
+                            @if (_availableStudents.Length == 0 && _assignedStudents.Count == 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">No students available to enrol.</FluentMessageBar>
+                            }
+                            else
+                            {
+                                <div class="grid-container">
+                                    <FluentDataGrid Items="@_availableStudents.AsQueryable()" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto">
+                                        <PropertyColumn Property="@(x => x.StudentNumber)" Title="Number" />
+                                        <PropertyColumn Property="@(x => x.FirstName)" Title="First Name" />
+                                        <PropertyColumn Property="@(x => x.LastName)" Title="Last Name" />
+                                        <TemplateColumn Title="Action">
+                                            <FluentButton Appearance="Appearance.Lightweight"
+                                                          OnClick="@(() => AddStudent(context))">Enrol</FluentButton>
+                                        </TemplateColumn>
+                                    </FluentDataGrid>
+                                </div>
+
+                                @if (_assignedStudents.Count > 0)
+                                {
+                                    <div class="assigned-list">
+                                        <h4>Enrolled in this grade</h4>
+                                        <ul>
+                                            @foreach (var s in _assignedStudents)
+                                            {
+                                                <li>
+                                                    <span>@s.FirstName @s.LastName</span>
+                                                    <FluentButton Appearance="Appearance.Lightweight"
+                                                                  OnClick="@(() => RemoveStudent(s))">Remove</FluentButton>
+                                                </li>
+                                            }
+                                        </ul>
+                                    </div>
+                                }
+                            }
+                        </section>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_step2Error))
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_step2Error</FluentMessageBar>
+                    }
+                </FluentWizardStep>
+
+                @* ── Step 3: Review and save ── *@
+                <FluentWizardStep Label="Review"
+                                  Summary="Verify and save"
+                                  IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                  DeferredLoading="true">
+                    <section class="wizard-section">
+                        <div class="wizard-section-header">
+                            <FluentIcon Icon="@(Icons.Regular.Size24.Eye)" Color="@Color.Accent" />
+                            <div>
+                                <h3>Review &amp; Save</h3>
+                                <p class="wizard-hint">Verify the details before creating this grade level.</p>
+                            </div>
+                        </div>
+
+                        <div class="review-card">
+                            <div class="review-grid">
+                                <div class="review-row">
+                                    <span class="review-label">Name</span>
+                                    <span class="review-value">@(string.IsNullOrWhiteSpace(ResolvedName) ? "—" : ResolvedName)</span>
+                                </div>
+                                <div class="review-row">
+                                    <span class="review-label">Tenant override</span>
+                                    <span class="review-value">
+                                        @if (_selectedCodedValue?.IsOverridden == true)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Accent">Overridden</FluentBadge>
+                                        }
+                                        else
+                                        {
+                                            <FluentBadge Appearance="Appearance.Lightweight">None</FluentBadge>
+                                        }
+                                    </span>
+                                </div>
+                                <div class="review-row">
+                                    <span class="review-label">Current period</span>
+                                    <span class="review-value">@(_currentPeriod?.Name ?? "No current period")</span>
+                                </div>
+                                <div class="review-row">
+                                    <span class="review-label">Subjects assigned</span>
+                                    <span class="review-value">@_assignedSubjects.Count</span>
+                                </div>
+                                <div class="review-row">
+                                    <span class="review-label">Students enrolled</span>
+                                    <span class="review-value">@_assignedStudents.Count</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(_error))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3 mb-3">@_error</FluentMessageBar>
+                        }
+                    </section>
+                </FluentWizardStep>
+            </Steps>
+
+            <ButtonTemplate Context="stepIndex">
+                <div class="wizard-actions">
+                    @if (stepIndex > 0)
+                    {
+                        <FluentButton Appearance="Appearance.Neutral"
+                                      IconStart="@FluentIcons.ArrowLeft"
+                                      OnClick="@(() => GoToStepAsync(stepIndex - 1))">
+                            Back
+                        </FluentButton>
+                    }
+
+                    <span class="wizard-actions-spacer" aria-hidden="true"></span>
+
+                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
+
+                    @if (stepIndex < 2)
+                    {
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@FluentIcons.ArrowRight"
+                                      OnClick="@(() => GoToStepAsync(stepIndex + 1))"
+                                      class="ms-2">
+                            Continue
+                        </FluentButton>
+                    }
+                    else
+                    {
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@FluentIcons.Save"
+                                      Disabled="@_saving" OnClick="SaveAsync"
+                                      class="ms-2">
+                            @(_saving ? "Saving…" : "Save and Finish")
+                        </FluentButton>
+                    }
+                </div>
+            </ButtonTemplate>
+        </FluentWizard>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private FluentWizard? _wizard;
+    private int _stepIndex;
+    private CodedValueDropdown? _codedValueDropdown;
+    private Guid? _codedValueIdNullable;
+    private CodedValueDto? _selectedCodedValue;
+    private string? _error;
+    private string? _step1Error;
+    private string? _step2Error;
+    private bool _saving;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    // Current period (derived client-side from ListPeriodsAsync — same rule
+    // as the server: StartDate <= today && EndDate >= today). Null = no
+    // current period, which blocks step 2 (§6.3).
+    private SchoolCollab.Students.Admin.Services.PeriodDto? _currentPeriod;
+
+    // The resolved name to write into GradeLevel.Name on save (the mirror
+    // field). Sourced from the selected coded value, not user-typed.
+    private string ResolvedName => _selectedCodedValue?.Name ?? string.Empty;
+
+    // True when the current tenant is a real tenant (not the default/system
+    // tenant). The override actions on the grade and subject confirmations
+    // are only meaningful for real tenants — in default-tenant mode the
+    // override handler rewrites the global coded value directly, so there
+    // is no per-tenant concept for the UI to manage. Hide the override
+    // button and reset link in that case.
+    //
+    // Stored as a field (not a computed property) so it can be refreshed
+    // explicitly in OnAfterRender — Blazor's diffing won't re-evaluate a
+    // property whose backing store (the singleton TenantProvider's
+    // AsyncLocal) changes without a [Parameter] change or a state event.
+    private bool _isRealTenant;
+
+    private bool IsRealTenant => _isRealTenant;
+
+    // Subject coded-value picker (step 1, "Assign Subjects" section). Picking
+    // a subject coded value auto-adds it to the grade's assigned list — no
+    // separate "Add to grade" button. The picker resets to null after each add
+    // so the user can pick another subject immediately.
+    private CodedValueDropdown? _subjectCodedValueDropdown;
+    private Guid? _selectedSubjectCodedValueId;
+    private CodedValueDto? _selectedSubjectCodedValue;
+
+    // Most recently auto-added subject — shown as a compact chip under the
+    // picker to confirm the add. Cleared when the user picks a different one.
+    private CodedValueDto? _lastAddedSubjectCodedValue;
+
+    private List<SchoolCollab.Students.Admin.Services.SubjectDto> _assignedSubjects = new();
+    private SchoolCollab.Students.Core.DTOs.StudentDto[] _availableStudents = [];
+    private List<SchoolCollab.Students.Core.DTOs.StudentDto> _assignedStudents = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        // Snapshot the tenant on init so the override buttons know whether
+        // a real tenant is in scope.
+        _isRealTenant = !TenantProvider.GetTenantContext().IsDefault;
+
+        // Derive the current period once on load (§6.3) — used by step 2.
+        await DeriveCurrentPeriodAsync(ct);
+
+        // Eagerly load the students list we'll need in step 2 so the user
+        // doesn't see an empty grid the first time they navigate there.
+        await LoadStudentsAsync(ct);
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // The TenantProvider is a singleton backed by AsyncLocal<TenantContext>
+        // and Blazor's diffing won't re-evaluate our override visibility
+        // when the underlying context changes (no [Parameter] changes). On
+        // every render, re-read the tenant and request a re-render if it
+        // differs from what we last saw — this catches tenant switches that
+        // happen while the wizard is open (the dev tenant switcher uses
+        // Nav.NavigateTo(forceLoad: true) which tears down the circuit, so
+        // OnInitialized re-snapshots the value; this is a safety net for
+        // any future in-place tenant switch).
+        var current = !TenantProvider.GetTenantContext().IsDefault;
+        if (current != _isRealTenant)
+        {
+            _isRealTenant = current;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DeriveCurrentPeriodAsync(CancellationToken ct)
+    {
+        try
+        {
+            var periods = await Api.ListPeriodsAsync(ct) ?? [];
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            _currentPeriod = periods.FirstOrDefault(p => p.StartDate <= today && p.EndDate >= today);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to derive current period");
+        }
+    }
+
+    private Task OnStep1ChangingAsync(FluentWizardStepChangeEventArgs args)
+    {
+        if (!_codedValueIdNullable.HasValue || _selectedCodedValue is null)
+        {
+            args.IsCancelled = true;
+            _step1Error = "Please select a grade coded value before continuing.";
+        }
+        else
+        {
+            _step1Error = null;
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task OnStep2ChangingAsync(FluentWizardStepChangeEventArgs args)
+    {
+        if (_currentPeriod is null)
+        {
+            args.IsCancelled = true;
+            _step2Error = "A current period is required to assign subjects and enrol students.";
+        }
+        else
+        {
+            _step2Error = null;
+        }
+        return Task.CompletedTask;
+    }
+
+    private async Task OnCodedValueChanged(Guid? id)
+    {
+        _codedValueIdNullable = id;
+        _error = null;
+        _step1Error = null;
+
+        if (id.HasValue)
+        {
+            try
+            {
+                var ct = _loadCts?.Token ?? CancellationToken.None;
+                _selectedCodedValue = await CodedValuesApi.GetByIdAsync(id.Value, ct);
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to load coded value {CodedValueId}", id);
+                _error = ex.Message;
+            }
+        }
+        else
+        {
+            _selectedCodedValue = null;
+        }
+    }
+
+    // ── Grade-coded-value dialog (§6.2) ──────────────────────────────────────
+
+    private async Task OpenOverrideDialogAsync()
+    {
+        if (!_codedValueIdNullable.HasValue) return;
+
+        // Refresh the dropdown first so the dialog sees the current resolved
+        // name (e.g. after a prior override) rather than a stale snapshot.
+        if (_codedValueDropdown is not null)
+        {
+            await _codedValueDropdown.RefreshAsync();
+        }
+
+        var cv = await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
+        if (cv is null) return;
+
+        var data = new CodedValueDialogData(
+            Mode: "Override",
+            ParentId: cv.ParentId,
+            CodedValue: new CodedValueDto(
+                cv.Id, cv.Code, cv.Name, cv.Description, cv.ParentId, cv.ParentCode,
+                cv.IsDisabled, cv.DisplayOrder, cv.CreatedAt, cv.UpdatedAt,
+                cv.Attributes, cv.AttributeDefinitions, cv.ChildrenCount, cv.IsDeleted, cv.DeletedAt,
+                cv.IsOverridden),
+            HasOverride: cv.IsOverridden);
+
+        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Override Grade Name",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "420px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is CodedValueDialogResult)
+        {
+            if (_codedValueDropdown is not null)
+            {
+                await _codedValueDropdown.RefreshAsync();
+            }
+            _selectedCodedValue = await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
+        }
+    }
+
+    /// <summary>
+    /// Opens the CodedValueDialog in Override mode for the most recently
+    /// added subject. Mirrors <see cref="OpenOverrideDialogAsync"/> but
+    /// targets the subject dropdown / last-added cached value.
+    /// </summary>
+    private async Task OpenSubjectOverrideDialogAsync()
+    {
+        if (_lastAddedSubjectCodedValue is null) return;
+
+        // Refresh the dropdown first so the dialog sees the current resolved
+        // name (e.g. after a prior override) rather than a stale snapshot.
+        if (_subjectCodedValueDropdown is not null)
+        {
+            await _subjectCodedValueDropdown.RefreshAsync();
+        }
+
+        var cv = await CodedValuesApi.GetByIdAsync(_lastAddedSubjectCodedValue.Id);
+        if (cv is null) return;
+
+        var data = new CodedValueDialogData(
+            Mode: "Override",
+            ParentId: cv.ParentId,
+            CodedValue: new CodedValueDto(
+                cv.Id, cv.Code, cv.Name, cv.Description, cv.ParentId, cv.ParentCode,
+                cv.IsDisabled, cv.DisplayOrder, cv.CreatedAt, cv.UpdatedAt,
+                cv.Attributes, cv.AttributeDefinitions, cv.ChildrenCount, cv.IsDeleted, cv.DeletedAt,
+                cv.IsOverridden),
+            HasOverride: cv.IsOverridden);
+
+        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Override Subject Name",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "420px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is CodedValueDialogResult)
+        {
+            if (_subjectCodedValueDropdown is not null)
+            {
+                await _subjectCodedValueDropdown.RefreshAsync();
+            }
+            // Update the chip to reflect the new resolved name + override state.
+            _lastAddedSubjectCodedValue = await CodedValuesApi.GetByIdAsync(_lastAddedSubjectCodedValue.Id);
+        }
+    }
+
+    private async Task OpenCreateDialogAsync()
+    {
+        var parent = await CodedValuesApi.GetByCodeAsync(CodedValueParent.Grades.ToCode());
+
+        var data = new CodedValueDialogData(
+            Mode: "Create",
+            ParentId: parent?.Id,
+            CodedValue: null);
+
+        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Create Grade Coded Value",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "420px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is CodedValueDialogResult cvResult)
+        {
+            if (_codedValueDropdown is not null)
+            {
+                await _codedValueDropdown.RefreshAsync();
+            }
+            _codedValueIdNullable = cvResult.CodedValue.Id;
+            _selectedCodedValue = cvResult.CodedValue;
+        }
+    }
+
+    // ── Subjects (coded-value picker pattern) ───────────────────────────────
+
+    /// <summary>
+    /// Called by the subject CodedValueDropdown when the user picks a subject
+    /// coded value. Auto-adds the subject to the grade's assigned list
+    /// (find-or-create by CodedValueId via the API) and shows a compact
+    /// confirmation chip. The picker is then reset to null so the user can
+    /// pick another subject immediately. Duplicate picks for the same coded
+    /// value are no-ops.
+    /// </summary>
+    private async Task OnSubjectCodedValueChanged(Guid? id)
+    {
+        if (!id.HasValue) return;
+        if (_assignedSubjects.Any(s => s.CodedValueId == id)) return;
+
+        _step1Error = null;
+
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            // Fetch the coded value so we have the code/name/displayOrder for
+            // the Subject entity and for the confirmation chip.
+            var cv = await CodedValuesApi.GetByIdAsync(id.Value, ct);
+            if (cv is null) return;
+
+            // Find-or-create the Subject by CodedValueId so we can add it to
+            // the grade's assignment list. If there's no current period we
+            // still allow the local add — the GradeSubjectAssignment will be
+            // skipped on save and the user can add the assignment later.
+            var subject = await Api.GetOrCreateSubjectAsync(new CreateSubjectRequest(
+                cv.Id, cv.Code, cv.Name, cv.DisplayOrder), ct);
+
+            _assignedSubjects.Add(subject);
+            _lastAddedSubjectCodedValue = cv;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to assign subject {CodedValueId}", id);
+            _step1Error = ex.Message;
+        }
+        finally
+        {
+            // Always reset the picker so the next pick is a fresh selection.
+            // Without this the dropdown would stay on the same value and the
+            // user couldn't re-pick the same subject to add it again (the
+            // duplicate guard above would also kick in).
+            _selectedSubjectCodedValueId = null;
+            _selectedSubjectCodedValue = null;
+        }
+    }
+
+    private void RemoveSubject(SchoolCollab.Students.Admin.Services.SubjectDto subject)
+    {
+        _assignedSubjects.Remove(subject);
+    }
+
+    /// <summary>
+    /// Opens the generic CodedValueDialog in Create mode for a new SUBJECT
+    /// coded value. On success, the dropdown is refreshed and the new value
+    /// is auto-selected — the picker's SelectedIdChanged handler then
+    /// auto-adds the new subject to the grade's assigned list.
+    /// </summary>
+    private async Task OpenCreateSubjectDialogAsync()
+    {
+        var parent = await CodedValuesApi.GetByCodeAsync(CodedValueParent.Subjects.ToCode());
+
+        var data = new CodedValueDialogData(
+            Mode: "Create",
+            ParentId: parent?.Id,
+            CodedValue: null);
+
+        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Create Subject Coded Value",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "420px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is CodedValueDialogResult cvResult)
+        {
+            // Refresh the subject dropdown so the new value is visible, then
+            // select it so the user sees the inline confirmation.
+            if (_subjectCodedValueDropdown is not null)
+            {
+                await _subjectCodedValueDropdown.RefreshAsync();
+            }
+            _selectedSubjectCodedValueId = cvResult.CodedValue.Id;
+            _selectedSubjectCodedValue = cvResult.CodedValue;
+        }
+    }
+
+    private async Task LoadStudentsAsync(CancellationToken ct)
+    {
+        try
+        {
+            var students = await Api.ListStudentsAsync(ct) ?? [];
+            _availableStudents = students.Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
+                s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt
+            )).Where(s => !_assignedStudents.Contains(s)).ToArray();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load students");
+        }
+    }
+
+    private void AddStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
+    {
+        if (_assignedStudents.Any(s => s.Id == student.Id)) return;
+        _assignedStudents.Add(student);
+        _availableStudents = _availableStudents.Where(s => s.Id != student.Id).ToArray();
+    }
+
+    private async Task RemoveStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
+    {
+        _assignedStudents.Remove(student);
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        await LoadStudentsAsync(ct);
+    }
+
+    // ── Navigation & save ───────────────────────────────────────────────────
+
+    private Task GoToStepAsync(int stepIndex) =>
+        _wizard?.GoToStepAsync(stepIndex) ?? Task.CompletedTask;
+
+    private void Cancel() => Nav.NavigateTo("/students/grade-levels");
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _error = null;
+        _loadCts ??= new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        try
+        {
+            if (_codedValueIdNullable is null || _selectedCodedValue is null)
+            {
+                _error = "Please select a grade coded value.";
+                return;
+            }
+
+            Logger.LogInformation("User initiated create for grade {CodedValueId}", _codedValueIdNullable);
+
+            // Find-or-create the GradeLevel by CodedValueId (§6.3). The
+            // resolved name (with tenant override applied) is mirrored into
+            // GradeLevel.Name. Level/DisplayOrder come from the coded value
+            // itself (the user never edits them in the wizard).
+            var gradeLevel = await Api.GetOrCreateGradeLevelAsync(
+                new GetOrCreateGradeLevelRequest(
+                    _codedValueIdNullable.Value,
+                    _selectedCodedValue.DisplayOrder,
+                    ResolvedName,
+                    _selectedCodedValue.DisplayOrder), ct);
+            var gradeId = gradeLevel.Id;
+
+            if (_currentPeriod is not null)
+            {
+                foreach (var s in _assignedSubjects)
+                {
+                    await Api.AssignGradeSubjectAsync(
+                        new AssignGradeSubjectRequest(gradeId, s.Id, _currentPeriod.Id), ct);
+                }
+
+                foreach (var st in _assignedStudents)
+                {
+                    await Api.EnrollStudentAsync(
+                        new EnrollStudentRequest(st.Id, _currentPeriod.Id, gradeId, DateOnly.FromDateTime(DateTime.UtcNow)), ct);
+                }
+            }
+
+            Logger.LogInformation("Grade {GradeId} created with {SubjectCount} subjects and {StudentCount} students",
+                gradeId, _assignedSubjects.Count, _assignedStudents.Count);
+
+            Nav.NavigateTo("/students/grade-levels");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create grade level");
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

@@ -51,9 +51,9 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_date");
 
-                    b.Property<Guid?>("GradeCodedValueId")
+                    b.Property<Guid?>("GradeLevelId")
                         .HasColumnType("uuid")
-                        .HasColumnName("grade_coded_value_id");
+                        .HasColumnName("grade_level_id");
 
                     b.Property<int>("GradingFormat")
                         .ValueGeneratedOnAdd()
@@ -78,9 +78,9 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("status");
 
-                    b.Property<Guid>("SubjectCodedValueId")
+                    b.Property<Guid>("SubjectId")
                         .HasColumnType("uuid")
-                        .HasColumnName("subject_coded_value_id");
+                        .HasColumnName("subject_id");
 
                     b.Property<int>("TargetAudienceType")
                         .ValueGeneratedOnAdd()
@@ -108,11 +108,14 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.HasIndex("CreatedByTeacherId")
                         .HasDatabaseName("ix_assignments_teacher_id");
 
+                    b.HasIndex("GradeLevelId")
+                        .HasDatabaseName("ix_assignments_grade_level_id");
+
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_assignments_status");
 
-                    b.HasIndex("SubjectCodedValueId")
-                        .HasDatabaseName("ix_assignments_subject_cv_id");
+                    b.HasIndex("SubjectId")
+                        .HasDatabaseName("ix_assignments_subject_id");
 
                     b.ToTable("assignments", (string)null);
                 });

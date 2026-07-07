@@ -19,6 +19,9 @@ namespace SchoolCollab.Settings.Core.Data;
 public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> options, ITenantProvider tenantProvider)
     : ModuleDbContext(options, tenantProvider)
 {
+    // ── Tenant registry (global — see TenantConfiguration) ──
+    public DbSet<Tenant> Tenants => Set<Tenant>();
+
     // ── CodedValues aggregate ──
     public DbSet<CodedValue> CodedValues => Set<CodedValue>();
     public DbSet<TenantCodedValueOverride> TenantCodedValueOverrides => Set<TenantCodedValueOverride>();
@@ -35,6 +38,9 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        // Tenant registry configuration (global — no query filter)
+        modelBuilder.ApplyConfiguration(new TenantConfiguration());
 
         // CodedValues configurations
         modelBuilder.ApplyConfiguration(new CodedValueConfiguration());

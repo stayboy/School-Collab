@@ -5,199 +5,97 @@
 @inject IDialogService DialogService
 @implements IDisposable
 
-<PageTitle>Children of @_parent?.Name</PageTitle>
-
-<ErrorBoundary>
+<LandingPage TItem="CodedValueDto"
+             Title="@Title"
+             CreateLabel="+ Add Child Value"
+             CreateRoute="@CreateRoute"
+             EmptyMessage="@EmptyMessage"
+             Items="@_items"
+             Loading="_isSearching"
+             Error="@_error"
+             GridSettings="@_gridSettings"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchChanged"
+             SearchPlaceholder="Search children…">
+    <Columns>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
+            <code>@context.Code</code>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
+                @context.Name
+            </FluentAnchor>
+        </TemplateColumn>
+        <PropertyColumn TGridItem="CodedValueDto" TProp="string" Property="@(x => x.Description)" Title="Description" />
+        <PropertyColumn TGridItem="CodedValueDto" TProp="int" Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
+        <TemplateColumn TGridItem="CodedValueDto" Title="Status">
+            @if (context.IsDisabled)
+            {
+                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
+            }
+            else
+            {
+                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Attributes" TooltipText="@(x => string.Join(", ", x.Attributes.Select(a => $"{a.Key}={a.Value}")))">
+            @foreach (var attr in context.Attributes)
+            {
+                var def = _parent?.AttributeDefinitions.FirstOrDefault(d => d.Key == attr.Key);
+                <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">
+                    @attr.Key=@attr.Value
+                    @if (def?.IsRequired == true)
+                    {
+                        <span class="required-marker">*</span>
+                    }
+                </FluentBadge>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="CodedValueDto" Title="Actions">
+            @if (context.IsDisabled)
+            {
+                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))">Enable</FluentAnchor>
+            }
+            else
+            {
+                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))">Disable</FluentAnchor>
+            }
+            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
+        </TemplateColumn>
+    </Columns>
     <ChildContent>
-        <div class="page-container">
-            <div class="breadcrumb-row">
-                <FluentBreadcrumb class="breadcrumb">
-                    <FluentBreadcrumbItem Href="/coded-values">Categories</FluentBreadcrumbItem>
-                    <FluentBreadcrumbItem>@_parent?.Name</FluentBreadcrumbItem>
-                </FluentBreadcrumb>
+        @if (_parent?.AttributeDefinitions.Count > 0)
+        {
+            <div class="mb-3">
+                <h6>Expected Attributes</h6>
+                <div class="attr-list">
+                    @foreach (var def in _parent.AttributeDefinitions)
+                    {
+                        <FluentBadge @key="def.Key" Appearance="Appearance.Lightweight">
+                            @def.Key
+                            @if (!string.IsNullOrEmpty(def.DisplayName))
+                            {
+                                <span class="text-muted">(@def.DisplayName)</span>
+                            }
+                            @if (def.IsRequired)
+                            {
+                                <span class="required-marker"> *</span>
+                            }
+                            <span class="data-type">:@FormatDataType(def.DataType)</span>
+                        </FluentBadge>
+                    }
+                </div>
             </div>
-            <div class="action-bar">
-                <h2 class="page-title">@_parent?.Code — @_parent?.Name</h2>
-                <FluentButton Appearance="Appearance.Accent"
-                              OnClick='() => Nav.NavigateTo($"/coded-values/{Uri.EscapeDataString(ParentCode ?? "")}/children/new")'>
-                    + Add Child Value
-                </FluentButton>
-                <div class="spacer"></div>
-                <FluentTextField Id="search-children"
-                                Placeholder="Search children…"
-                                class="search-box"
-                                Immediate="true"
-                                ImmediateDelay="300"
-                                ValueChanged="@OnSearchValueChanged" />
-            </div>
-            @if (_isSearching && _searchResults is null)
-            {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
-            }
-            else if (!string.IsNullOrWhiteSpace(_searchText) && _searchResults is not null)
-            {
-                if (_searchResults.Length == 0)
-                {
-                    <FluentMessageBar Intent="MessageIntent.Info">No children match '@_searchText'.</FluentMessageBar>
-                }
-                else
-                {
-                    <div class="grid-container">
-                        <FluentDataGrid Items="@_searchResults.AsQueryable()"
-                                        GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
-                                        MultiLine="true"
-                                        TGridItem="CodedValueDto">
-                            <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
-                                <code>@context.Code</code>
-                            </TemplateColumn>
-                           <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                               <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
-                                   @context.Name
-                               </FluentAnchor>
-                           </TemplateColumn>
-                           <PropertyColumn Property="@(x => x.Description)" Title="Description" />
-                            <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
-                            <TemplateColumn Title="Status">
-                                @if (context.IsDisabled)
-                                {
-                                    <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-                                }
-                                else
-                                {
-                                    <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                                }
-                            </TemplateColumn>
-                            <TemplateColumn Title="Attributes">
-                                @foreach (var attr in context.Attributes)
-                                {
-                                    <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">
-                                        @attr.Key=@attr.Value
-                                    </FluentBadge>
-                                }
-                            </TemplateColumn>
-                            <TemplateColumn Title="Actions">
-                                @if (context.IsDisabled)
-                                {
-                                    <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))">Enable</FluentAnchor>
-                                }
-                                else
-                                {
-                                    <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))">Disable</FluentAnchor>
-                                }
-                                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
-                            </TemplateColumn>
-                        </FluentDataGrid>
-                    </div>
-                }
-            }
-            else if (_loading)
-            {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
-            }
-            else if (_children is { Length: 0 })
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">No child values yet.</FluentMessageBar>
-            }
-            else if (_children is not null)
-            {
-                @if (_parent?.AttributeDefinitions.Count > 0)
-                {
-                    <div class="mb-3">
-                        <h6>Expected Attributes</h6>
-                        <div class="attr-list">
-                            @foreach (var def in _parent.AttributeDefinitions)
-                            {
-                                <FluentBadge @key="def.Key" Appearance="Appearance.Lightweight">
-                                    @def.Key
-                                    @if (!string.IsNullOrEmpty(def.DisplayName))
-                                    {
-                                        <span class="text-muted">(@def.DisplayName)</span>
-                                    }
-                                    @if (def.IsRequired)
-                                    {
-                                        <span class="required-marker"> *</span>
-                                    }
-                                    <span class="data-type">:@FormatDataType(def.DataType)</span>
-                                </FluentBadge>
-                            }
-                        </div>
-                    </div>
-                }
-
-                <div class="grid-container">
-                    <FluentDataGrid Items="@_children.AsQueryable()"
-                                    GridTemplateColumns="150px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto"
-                                    MultiLine="true"
-                                    TGridItem="CodedValueDto">
-                        <TemplateColumn Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
-                            <code>@context.Code</code>
-                        </TemplateColumn>
-                       <TemplateColumn Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
-                           <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/coded-values/{Uri.EscapeDataString(context.Code)}/edit")">
-                               @context.Name
-                           </FluentAnchor>
-                       </TemplateColumn>
-                       <PropertyColumn Property="@(x => x.Description)" Title="Description" />
-                        <PropertyColumn Property="@(x => x.DisplayOrder)" Title="Order" Sortable="true" />
-                        <TemplateColumn Title="Status">
-                            @if (context.IsDisabled)
-                            {
-                                <FluentBadge Appearance="Appearance.Neutral">Disabled</FluentBadge>
-                            }
-                            else
-                            {
-                                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                            }
-                        </TemplateColumn>
-                        <TemplateColumn Title="Attributes" TooltipText="@(x => string.Join(", ", x.Attributes.Select(a => $"{a.Key}={a.Value}")))">
-                            @foreach (var attr in context.Attributes)
-                            {
-                                var def = _parent?.AttributeDefinitions.FirstOrDefault(d => d.Key == attr.Key);
-                                <FluentBadge @key="attr.Key" Appearance="Appearance.Lightweight" class="me-1">
-                                    @attr.Key=@attr.Value
-                                    @if (def?.IsRequired == true)
-                                    {
-                                        <span class="required-marker">*</span>
-                                    }
-                                </FluentBadge>
-                            }
-                        </TemplateColumn>
-                        <TemplateColumn Title="Actions">
-                            @if (context.IsDisabled)
-                            {
-                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, false))">Enable</FluentAnchor>
-                            }
-                            else
-                            {
-                                <FluentAnchor Href="#" OnClick="@(() => ToggleAsync(context.Id, true))">Disable</FluentAnchor>
-                            }
-                            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Code))" class="ms-2">Delete</FluentAnchor>
-                        </TemplateColumn>
-                    </FluentDataGrid>
-                </div>
-            }
-
-            @if (!string.IsNullOrEmpty(_error))
-            {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
-            }
-        </div>
+        }
     </ChildContent>
-    <ErrorContent Context="ex">
-        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
-    </ErrorContent>
-</ErrorBoundary>
+</LandingPage>
 
 @code {
     [Parameter] public string? ParentCode { get; set; }
 
     private CodedValueDto? _parent;
     private CodedValueDto[]? _children;
-    private bool _loading = true;
+    private CodedValueDto[]? _searchResults;
     private string? _error;
     private string? _loadedParentCode;
     private CancellationTokenSource? _loadCts;
@@ -205,9 +103,24 @@
 
     // Search state
     private string _searchText = string.Empty;
-    private CodedValueDto[]? _searchResults;
     private bool _isSearching;
     private CancellationTokenSource? _searchCts;
+
+    // The collection rendered by LandingPage. Swaps between search results
+    // and the full child list depending on whether a search is active.
+    private CodedValueDto[]? _items => string.IsNullOrWhiteSpace(_searchText) ? _children : _searchResults;
+
+    private string Title => _parent is null ? "Children" : $"{_parent.Code} — {_parent.Name}";
+    private string CreateRoute => $"/coded-values/{Uri.EscapeDataString(ParentCode ?? string.Empty)}/children/new";
+    private string EmptyMessage => string.IsNullOrWhiteSpace(_searchText)
+        ? "No child values yet."
+        : $"No children match '{_searchText}'.";
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "150px minmax(200px,2fr) minmax(180px,2fr) minmax(60px,0.5fr) minmax(80px,1fr) minmax(180px,2fr) auto",
+        MultiLine = true
+    };
 
     private readonly GridSort<CodedValueDto> _sortByCode =
         GridSort<CodedValueDto>.ByAscending(x => x.Code);
@@ -235,10 +148,10 @@
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
 
-        _loading = true;
-        _error = null;
-        _parent = null;
         _children = null;
+        _searchResults = null;
+        _parent = null;
+        _error = null;
         StateHasChanged();
 
         Logger.LogInformation("Loading children for parent {ParentCode}", ParentCode);
@@ -248,13 +161,13 @@
             if (_parent is null)
             {
                 _error = $"Coded value '{ParentCode}' not found.";
-                _loading = false;
+                _children = Array.Empty<CodedValueDto>();
                 return;
             }
-            _children = await Api.GetChildrenAsync(_parent.Id, ct);
+            _children = await Api.GetChildrenAsync(_parent.Id, ct) ?? Array.Empty<CodedValueDto>();
             _loadedParentCode = ParentCode;
             if (_disposed) return;
-            Logger.LogInformation("Loaded parent {ParentCode} with {Count} children", ParentCode, _children?.Length ?? 0);
+            Logger.LogInformation("Loaded parent {ParentCode} with {Count} children", ParentCode, _children.Length);
         }
         catch (OperationCanceledException)
         {
@@ -265,14 +178,7 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load children for parent {ParentCode}", ParentCode);
             _error = ex.Message;
-        }
-        finally
-        {
-            if (!_disposed)
-            {
-                _loading = false;
-                StateHasChanged();
-            }
+            _children = Array.Empty<CodedValueDto>();
         }
     }
 
@@ -349,7 +255,7 @@
         }
     }
 
-    private async Task OnSearchValueChanged(string? text)
+    private async Task OnSearchChanged(string? text)
     {
         _searchText = text?.Trim() ?? string.Empty;
 
@@ -367,6 +273,8 @@
         var ct = _searchCts.Token;
 
         _isSearching = true;
+        _searchResults = null;
+        StateHasChanged();
         try
         {
             _searchResults = await Api.SearchAsync(_searchText, parentId: _parent.Id, includeDisabled: false, ct);

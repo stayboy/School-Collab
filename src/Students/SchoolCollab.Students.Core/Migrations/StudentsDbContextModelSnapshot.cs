@@ -109,6 +109,7 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasName("pk_grade_levels");
 
                     b.HasIndex("CodedValueId")
+                        .IsUnique()
                         .HasDatabaseName("ix_grade_levels_coded_value_id");
 
                     b.HasIndex("Level")
@@ -497,6 +498,7 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDatabaseName("ix_subjects_code");
 
                     b.HasIndex("CodedValueId")
+                        .IsUnique()
                         .HasDatabaseName("ix_subjects_coded_value_id");
 
                     b.ToTable("subjects", (string)null);

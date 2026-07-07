@@ -19,8 +19,12 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public AssignmentType AssignmentType { get; private set; }
     public GradingFormat GradingFormat { get; private set; }
     public TargetAudienceType TargetAudienceType { get; private set; }
-    public Guid SubjectCodedValueId { get; private set; }
-    public Guid? GradeCodedValueId { get; private set; }
+    // Operational references into the Students bounded context (global GradeLevel/
+    // Subject entities). These replace the former coded-value ids so the assignment
+    // reports against the real operational entities; display names are still
+    // resolved client-side from tenant-resolved coded values (spec §5.7).
+    public Guid SubjectId { get; private set; }
+    public Guid? GradeLevelId { get; private set; }
 
     // Multi-tenancy: all assignments belong to a tenant (e.g., school or organization)
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
@@ -44,12 +48,15 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         AssignmentType assignmentType,
         GradingFormat gradingFormat,
         TargetAudienceType targetAudienceType,
-        Guid subjectCodedValueId,
-        Guid? gradeCodedValueId,
+        Guid subjectId,
+        Guid? gradeLevelId,
         DateTimeOffset? dueDate,
         decimal? maxScore,
         Guid createdByTeacherId)
     {
+        if (subjectId == Guid.Empty)
+            throw new ArgumentException("Subject is required.", nameof(subjectId));
+
         var now = DateTimeOffset.UtcNow;
         var assignment = new Assignment
         {
@@ -59,8 +66,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             AssignmentType = assignmentType,
             GradingFormat = gradingFormat,
             TargetAudienceType = targetAudienceType,
-            SubjectCodedValueId = subjectCodedValueId,
-            GradeCodedValueId = gradeCodedValueId,
+            SubjectId = subjectId,
+            GradeLevelId = gradeLevelId,
             DueDate = dueDate,
             MaxScore = maxScore,
             Status = AssignmentStatus.Draft,
@@ -76,18 +83,20 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
 
     public void Update(string title, string? description, AssignmentType assignmentType,
         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
-        Guid subjectCodedValueId, Guid? gradeCodedValueId, DateTimeOffset? dueDate, decimal? maxScore)
+        Guid subjectId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore)
     {
         if (Status != AssignmentStatus.Draft)
             throw new InvalidOperationException("Only draft assignments can be updated.");
+        if (subjectId == Guid.Empty)
+            throw new ArgumentException("Subject is required.", nameof(subjectId));
 
         Title = title.Trim();
         Description = description?.Trim();
         AssignmentType = assignmentType;
         GradingFormat = gradingFormat;
         TargetAudienceType = targetAudienceType;
-        SubjectCodedValueId = subjectCodedValueId;
-        GradeCodedValueId = gradeCodedValueId;
+        SubjectId = subjectId;
+        GradeLevelId = gradeLevelId;
         DueDate = dueDate;
         MaxScore = maxScore;
         UpdatedAt = DateTimeOffset.UtcNow;

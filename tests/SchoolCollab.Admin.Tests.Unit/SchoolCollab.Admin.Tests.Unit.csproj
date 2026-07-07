@@ -21,6 +21,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\SchoolCollab.Admin\SchoolCollab.Admin.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
+    <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Admin\SchoolCollab.Students.Admin.csproj" />
   </ItemGroup>
 
 </Project>

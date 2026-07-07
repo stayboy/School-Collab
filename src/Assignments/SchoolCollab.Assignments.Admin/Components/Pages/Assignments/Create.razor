@@ -2,11 +2,13 @@
 @using SchoolCollab.Assignments.Contracts
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Assignments.Admin.Helpers
 @inject AssignmentsApiClient Api
-@inject CodedValuesApiClient CodedValuesApi
+@inject StudentsApiClient StudentsApi
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
-@using SchoolCollab.Assignments.Admin.Helpers
+@implements IDisposable
 
 <PageTitle>New Assignment</PageTitle>
 
@@ -201,7 +203,7 @@
                     }
                 </FluentWizardStep>
 
-                @* ── Step 2: Title, Description, Due Date, Max Score ── *@
+                @* ── Step 2: Title, Description, Grade, Subject, Due Date, Max Score ── *@
                 <FluentWizardStep Label="Details"
                                   Summary="Title, date, score"
                                   IconPrevious="@FluentIcons.CheckmarkCircleFilled">
@@ -217,17 +219,37 @@
                         <FluentEditForm Model="_model" class="wizard-form details-form">
                             <FluentStack Orientation="Orientation.Vertical" Gap="1rem" class="details-form-fields">
                                 <FluentTextField @bind-Value="_model.Title" Label="Title *" Placeholder="e.g. Chapter 5 Quiz" class="full-width required-field" Required />
+
+                                @if (_gradeLevels is null || _gradeLevels.Length == 0)
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Warning">
+                                        No grade levels available. Please create grade levels in the Students module first.
+                                    </FluentMessageBar>
+                                }
+                                else
+                                {
+                                    <FluentSelect TOption="GradeLevelOption"
+                                                  Items="@_gradeLevelOptions"
+                                                  @bind-SelectedOption="_selectedGradeLevel"
+                                                  OptionText="@(o => o?.Label ?? "")"
+                                                  OptionValue="@(o => o?.Value ?? "")"
+                                                  Label="Grade Level *"
+                                                  Placeholder="Select a grade level"
+                                                  class="full-width"
+                                                  OnSelectedOptionChanged="OnGradeLevelChangedAsync" />
+                                }
+
+                                <FluentSelect TOption="SubjectOption"
+                                              Items="@_subjectOptions"
+                                              @bind-SelectedOption="_selectedSubject"
+                                              OptionText="@(o => o?.Label ?? "")"
+                                              OptionValue="@(o => o?.Value ?? "")"
+                                              Label="Subject *"
+                                              Placeholder="@(_selectedGradeLevel is null ? "Select a grade level first" : "Select a subject")"
+                                              Disabled="@(_selectedGradeLevel is null || _loadingSubjects)"
+                                              class="full-width" />
+
                                 <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="4" Placeholder="Assignment instructions…" class="full-width" />
-                                <CodedValueDropdown Parent="CodedValueParent.Subjects"
-                                                    Label="Subject *"
-                                                    Placeholder="Select a subject"
-                                                    @bind-SelectedId="_model.SubjectCodedValueId"
-                                                    class="full-width" />
-                                <CodedValueDropdown Parent="CodedValueParent.Grades"
-                                                    Label="Grade"
-                                                    Placeholder="Select a grade (optional)"
-                                                    @bind-SelectedId="_model.GradeCodedValueId"
-                                                    class="full-width" />
                                 <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" Style="width: 12rem;" />
                                 <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" Style="width: 12rem;" />
                             </FluentStack>
@@ -275,12 +297,12 @@
                                     <span class="review-value">@(string.IsNullOrWhiteSpace(_model.Description) ? "—" : _model.Description)</span>
                                 </div>
                                 <div class="review-row">
-                                    <span class="review-label">Subject</span>
-                                    <span class="review-value">@(_model.SubjectCodedValueId.HasValue ? "Selected" : "—")</span>
+                                    <span class="review-label">Grade Level</span>
+                                    <span class="review-value">@(_selectedGradeLevel?.Label ?? "—")</span>
                                 </div>
                                 <div class="review-row">
-                                    <span class="review-label">Grade</span>
-                                    <span class="review-value">@(_model.GradeCodedValueId.HasValue ? "Selected" : "—")</span>
+                                    <span class="review-label">Subject</span>
+                                    <span class="review-value">@(_selectedSubject?.Label ?? "—")</span>
                                 </div>
                                 <div class="review-row">
                                     <span class="review-label">Due Date</span>
@@ -357,6 +379,21 @@
     private GradingFormatDto _selectedGradingFormat = GradingFormatDto.TeacherGraded;
     private TargetAudienceTypeDto _selectedTargetAudience = TargetAudienceTypeDto.AllStudents;
 
+    // Grade Level dropdown state
+    private GradeLevelDto[]? _gradeLevels;
+    private GradeLevelOption? _selectedGradeLevel;
+    private bool _loadingSubjects;
+
+    // Subject dropdown state (filtered by grade)
+    private SubjectDto[]? _subjects;
+    private SubjectOption? _selectedSubject;
+
+    private record GradeLevelOption(string Value, string Label);
+    private GradeLevelOption[] _gradeLevelOptions = [];
+
+    private record SubjectOption(string Value, string Label);
+    private SubjectOption[] _subjectOptions = [];
+
     private string GetCardClass(bool isSelected) => isSelected ? "wizard-card selected" : "wizard-card";
 
     private void SelectType(AssignmentTypeDto type)
@@ -386,6 +423,69 @@
         return Task.CompletedTask;
     }
 
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        try
+        {
+            _gradeLevels = await StudentsApi.ListGradeLevelsAsync(ct);
+            if (_gradeLevels is not null)
+            {
+                _gradeLevelOptions = _gradeLevels
+                    .OrderBy(gl => gl.Level)
+                    .Select(gl => new GradeLevelOption(gl.Id.ToString(), gl.Name))
+                    .ToArray();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load grade levels");
+        }
+    }
+
+    private async Task OnGradeLevelChangedAsync(GradeLevelOption? option)
+    {
+        _selectedGradeLevel = option;
+        _selectedSubject = null;
+        _subjectOptions = [];
+
+        if (option is null)
+        {
+            _subjects = null;
+            return;
+        }
+
+        _loadingSubjects = true;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            var gradeLevelId = Guid.Parse(option.Value);
+            _subjects = await StudentsApi.ListSubjectsByGradeAsync(gradeLevelId, null, ct);
+            if (_subjects is not null)
+            {
+                _subjectOptions = _subjects
+                    .OrderBy(s => s.DisplayOrder)
+                    .Select(s => new SubjectOption(s.Id.ToString(), s.Name))
+                    .ToArray();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects for grade {GradeId}", option.Value);
+        }
+        finally
+        {
+            _loadingSubjects = false;
+        }
+    }
+
     private async Task SubmitAsync()
     {
         _saving = true;
@@ -395,7 +495,7 @@
 
         try
         {
-            if (_model.SubjectCodedValueId is null || _model.SubjectCodedValueId == Guid.Empty)
+            if (_selectedSubject is null || string.IsNullOrEmpty(_selectedSubject.Value))
             {
                 _error = "Please select a subject.";
                 return;
@@ -409,8 +509,8 @@
                 _selectedType ?? AssignmentTypeDto.Manual,
                 _selectedGradingFormat,
                 _selectedTargetAudience,
-                _model.SubjectCodedValueId.Value,
-                _model.GradeCodedValueId,
+                Guid.Parse(_selectedSubject.Value),
+                _selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value),
                 _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
                 _model.MaxScore);
 
@@ -455,9 +555,5 @@
         public DateTime? DueDate { get; set; }
 
         public decimal? MaxScore { get; set; }
-
-        [System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Subject is required.")]
-        public Guid? SubjectCodedValueId { get; set; }
-        public Guid? GradeCodedValueId { get; set; }
     }
 }

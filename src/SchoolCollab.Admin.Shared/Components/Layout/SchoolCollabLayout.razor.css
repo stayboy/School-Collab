@@ -28,6 +28,16 @@
     height: 100%;
     padding-left: 1rem;
     padding-right: 1rem;
+    min-width: 0;
+    overflow: visible;
+}
+
+.brand-page {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 32ch;
+    min-width: 0;
 }
 
 .layout-body {

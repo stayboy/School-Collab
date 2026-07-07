@@ -327,6 +327,44 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.ToTable("flag_audit_entries", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.Tenant", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasDefaultValue("School")
+                        .HasColumnName("type");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tenants");
+
+                    b.HasIndex("Name")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenants_name_unique");
+
+                    b.ToTable("tenants", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantCodedValueAttributeOverride", b =>
                 {
                     b.Property<Guid>("Id")

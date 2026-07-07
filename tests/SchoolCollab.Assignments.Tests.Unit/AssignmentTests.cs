@@ -19,6 +19,43 @@ public class AssignmentTests
         Assignment.Create(title, description, type, grading, audience, SubjectId, null, null, null, TeacherId);
 
     [TestMethod]
+    public void Create_WithEmptySubjectId_Throws()
+    {
+        var act = () => Assignment.Create(
+            "Test",
+            null,
+            AssignmentType.Digital,
+            GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents,
+            Guid.Empty, // empty subject
+            null, null, null,
+            TeacherId);
+
+        act.Should().Throw<ArgumentException>()
+            .WithParameterName("subjectId")
+            .WithMessage("Subject is required.*");
+    }
+
+    [TestMethod]
+    public void Update_WithEmptySubjectId_Throws()
+    {
+        var assignment = CreateTestAssignment();
+
+        var act = () => assignment.Update(
+            "New Title",
+            null,
+            AssignmentType.Digital,
+            GradingFormat.TeacherGraded,
+            TargetAudienceType.AllStudents,
+            Guid.Empty, // empty subject
+            null, null, null);
+
+        act.Should().Throw<ArgumentException>()
+            .WithParameterName("subjectId")
+            .WithMessage("Subject is required.*");
+    }
+
+    [TestMethod]
     public void Create_SetsProperties()
     {
         var dueDate = DateTimeOffset.UtcNow.AddDays(7);
@@ -40,8 +77,8 @@ public class AssignmentTests
         Assert.AreEqual(AssignmentType.Digital, assignment.AssignmentType);
         Assert.AreEqual(GradingFormat.AutoGraded, assignment.GradingFormat);
         Assert.AreEqual(TargetAudienceType.AllStudents, assignment.TargetAudienceType);
-        Assert.AreEqual(SubjectId, assignment.SubjectCodedValueId);
-        Assert.IsNull(assignment.GradeCodedValueId);
+        Assert.AreEqual(SubjectId, assignment.SubjectId);
+        Assert.IsNull(assignment.GradeLevelId);
         Assert.AreEqual(dueDate, assignment.DueDate);
         Assert.AreEqual(100m, assignment.MaxScore);
         Assert.AreEqual(AssignmentStatus.Draft, assignment.Status);
@@ -110,7 +147,7 @@ public class AssignmentTests
         Assert.AreEqual(AssignmentType.SemiManual, assignment.AssignmentType);
         Assert.AreEqual(GradingFormat.InstantGraded, assignment.GradingFormat);
         Assert.AreEqual(TargetAudienceType.SelectedGrades, assignment.TargetAudienceType);
-        Assert.AreEqual(newSubjectId, assignment.SubjectCodedValueId);
+        Assert.AreEqual(newSubjectId, assignment.SubjectId);
         Assert.AreEqual(50m, assignment.MaxScore);
     }
 

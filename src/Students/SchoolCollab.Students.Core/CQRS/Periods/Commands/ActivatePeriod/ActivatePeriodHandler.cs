@@ -23,6 +23,19 @@ public sealed class ActivatePeriodHandler(
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
 
+        // ── "At most one active period" invariant (§5.6): reject if another
+        //    period is already Active. (The overlap rule already prevents two
+        //    periods containing the same day; this guards the status itself.)
+        var activeOther = await repository.GetActivePeriodAsync(
+            excludeId: command.Id, cancellationToken);
+        if (activeOther is not null)
+        {
+            throw new PeriodOverlapException(
+                command.Id,
+                $"Cannot activate period '{period.Name}' because period '{activeOther.Name}' " +
+                $"is already Active.");
+        }
+
         period.Activate();
 
         try

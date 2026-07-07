@@ -30,6 +30,19 @@ public sealed record GradeLevelDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
+public sealed record GradeLevelLandingDto(
+    Guid Id,
+    Guid CodedValueId,
+    int Level,
+    string Name,
+    int DisplayOrder,
+    int SubjectCount,
+    int StudentCount,
+    Guid? CurrentPeriodId,
+    string? CurrentPeriodName,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
 public sealed record SubjectDto(
     Guid Id,
     Guid CodedValueId,
@@ -104,6 +117,12 @@ public record CreateGradeLevelRequest(
     string Name,
     int DisplayOrder);
 
+public record GetOrCreateGradeLevelRequest(
+    Guid CodedValueId,
+    int Level,
+    string Name,
+    int DisplayOrder);
+
 public record UpdateGradeLevelRequest(
     int Level,
     string Name,
@@ -111,6 +130,13 @@ public record UpdateGradeLevelRequest(
 
 public record CreateSubjectRequest(
     Guid CodedValueId,
+    string Code,
+    string Name,
+    int DisplayOrder);
+
+public record CreateSubjectForGradeRequest(
+    Guid GradeLevelId,
+    Guid? CodedValueId,
     string Code,
     string Name,
     int DisplayOrder);
@@ -177,6 +203,14 @@ public sealed class StudentsApiClient
     public async Task<StudentDto[]?> ListDeletedStudentsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<StudentDto[]>("/students/deleted", ct);
 
+    public async Task<StudentDto[]?> ListStudentsByGradeAsync(Guid gradeLevelId, Guid? periodId = null, CancellationToken ct = default)
+    {
+        var url = periodId.HasValue
+            ? $"/students/by-grade/{gradeLevelId}?periodId={periodId}"
+            : $"/students/by-grade/{gradeLevelId}";
+        return await _http.GetFromJsonAsync<StudentDto[]>(url, ct);
+    }
+
     public async Task<StudentDto?> GetStudentByIdAsync(Guid id, CancellationToken ct = default)
     {
         var response = await _http.GetAsync($"/students/{id}", ct);
@@ -215,6 +249,9 @@ public sealed class StudentsApiClient
     public async Task<GradeLevelDto[]?> ListGradeLevelsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<GradeLevelDto[]>("/students/grade-levels", ct);
 
+    public async Task<GradeLevelLandingDto[]?> ListGradeLevelsForLandingAsync(CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<GradeLevelLandingDto[]>("/students/grade-levels/landing", ct);
+
     public async Task<GradeLevelDto?> GetGradeLevelByIdAsync(Guid id, CancellationToken ct = default)
     {
         var response = await _http.GetAsync($"/students/grade-levels/{id}", ct);
@@ -231,13 +268,36 @@ public sealed class StudentsApiClient
         return result!.Id;
     }
 
+    /// <summary>
+    /// Find-or-create a <see cref="GradeLevel"/> by <see cref="GetOrCreateGradeLevelRequest.CodedValueId"/>.
+    /// Returns the resolved <see cref="GradeLevelDto"/> (existing or newly created).
+    /// Used by the wizard save (§6.3).
+    /// </summary>
+    public async Task<GradeLevelDto> GetOrCreateGradeLevelAsync(GetOrCreateGradeLevelRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/grade-levels/get-or-create", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<GradeLevelDto>(ct))!;
+    }
+
     public async Task UpdateGradeLevelAsync(Guid id, UpdateGradeLevelRequest req, CancellationToken ct = default) =>
         (await _http.PutAsJsonAsync($"/students/grade-levels/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteGradeLevelAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/grade-levels/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Subjects ─────────────────────────────────────────────────────────────
 
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<SubjectDto[]>("/students/subjects", ct);
+
+    public async Task<SubjectDto[]?> ListSubjectsByGradeAsync(Guid gradeLevelId, Guid? periodId = null, CancellationToken ct = default)
+    {
+        var url = periodId.HasValue
+            ? $"/students/subjects/by-grade/{gradeLevelId}?periodId={periodId}"
+            : $"/students/subjects/by-grade/{gradeLevelId}";
+        return await _http.GetFromJsonAsync<SubjectDto[]>(url, ct);
+    }
 
     public async Task<SubjectDto?> GetSubjectByIdAsync(Guid id, CancellationToken ct = default)
     {
@@ -255,8 +315,36 @@ public sealed class StudentsApiClient
         return result!.Id;
     }
 
+    /// <summary>
+    /// Find-or-create a <see cref="SubjectDto"/> by CodedValueId. Reuses the
+    /// existing subject (updating mirrored fields) or creates a new one. Used
+    /// by the wizard's "Add to grade" flow so the user can pick a subject
+    /// coded value and wire it to the grade without leaving the wizard.
+    /// </summary>
+    public async Task<SubjectDto> GetOrCreateSubjectAsync(CreateSubjectRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/subjects/get-or-create", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SubjectDto>(ct))!;
+    }
+
+    /// <summary>
+    /// Creates (or reuses) a <see cref="Subject"/> and a
+    /// <see cref="GradeSubjectAssignment"/> for the current period, linking the
+    /// subject to the given grade level (§8.1). Returns the resolved SubjectDto.
+    /// </summary>
+    public async Task<SubjectDto> CreateSubjectForGradeAsync(CreateSubjectForGradeRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/subjects/for-grade", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SubjectDto>(ct))!;
+    }
+
     public async Task UpdateSubjectAsync(Guid id, UpdateSubjectRequest req, CancellationToken ct = default) =>
         (await _http.PutAsJsonAsync($"/students/subjects/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteSubjectAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/subjects/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Periods ──────────────────────────────────────────────────────────────
 

@@ -33,6 +33,11 @@ public static class ModuleServices
         services.AddHttpClient<ConfigFlagsApiClient>(client =>
             client.BaseAddress = new Uri("https+http://settings-api"));
 
+        // TenantsApiClient (dev tenant switcher dropdown) — read-only tenant
+        // registry listing, same settings-api base address.
+        services.AddHttpClient<TenantsApiClient>(client =>
+            client.BaseAddress = new Uri("https+http://settings-api"));
+
         return services;
     }
 }

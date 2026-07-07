@@ -10,7 +10,7 @@ public sealed record CreateAssignmentCommand(
     AssignmentType AssignmentType,
     GradingFormat GradingFormat,
     TargetAudienceType TargetAudienceType,
-    Guid SubjectCodedValueId,
-    Guid? GradeCodedValueId,
+    Guid SubjectId,
+    Guid? GradeLevelId,
     DateTimeOffset? DueDate,
     decimal? MaxScore) : ICommand;

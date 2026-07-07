@@ -15,10 +15,11 @@ public sealed class CodedValueResolver(ICodedValueRepository repository) : ICode
     {
         // 1. Resolve Basic Properties (Code, Name, Description)
         var overrideValue = await repository.GetOverrideAsync(tenantId, cv.Id, ct);
-        
+
         string finalCode = cv.Code; // Code is generally global/immutable
         string finalName = overrideValue?.OverriddenName ?? cv.Name;
         string? finalDescription = overrideValue?.OverriddenDescription ?? cv.Description;
+        bool isOverridden = overrideValue is not null;
 
         // 2. Resolve Attributes (Child attributes)
         var resolvedAttributes = new List<CodedValueAttributeDto>();
@@ -51,6 +52,7 @@ public sealed class CodedValueResolver(ICodedValueRepository repository) : ICode
                 d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
             0,
             cv.IsDeleted,
-            cv.DeletedAt);
+            cv.DeletedAt,
+            isOverridden);
     }
 }

@@ -18,5 +18,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
     <ProjectReference Include="..\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
+    <ProjectReference Include="..\..\Students\SchoolCollab.Students.Admin\SchoolCollab.Students.Admin.csproj" />
   </ItemGroup>
 </Project>

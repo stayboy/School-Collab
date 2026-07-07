@@ -21,6 +21,9 @@ internal sealed class SubjectRepository(StudentsDbContext db)
         return Db.Subjects.AnyAsync(x => x.Code == normalized, cancellationToken);
     }
 
+    public Task<Subject?> GetByCodedValueIdAsync(Guid codedValueId, CancellationToken cancellationToken = default) =>
+        Db.Subjects.FirstOrDefaultAsync(x => x.CodedValueId == codedValueId, cancellationToken);
+
     public override async Task UpdateAsync(Subject subject, CancellationToken cancellationToken = default)
     {
         try

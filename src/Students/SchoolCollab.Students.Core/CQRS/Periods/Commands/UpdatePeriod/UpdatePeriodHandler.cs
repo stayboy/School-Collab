@@ -19,6 +19,19 @@ public sealed class UpdatePeriodHandler(
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
 
+        // ── No-overlap invariant (§5.6): reject if another period's range
+        //    intersects the new [StartDate, EndDate].
+        var overlapping = await repository.GetOverlappingPeriodsAsync(
+            command.StartDate, command.EndDate, excludeId: command.Id, cancellationToken);
+        if (overlapping.Length > 0)
+        {
+            throw new PeriodOverlapException(
+                command.Id,
+                $"Period '{command.Name}' ({command.StartDate:O}–{command.EndDate:O}) " +
+                $"overlaps existing period '{overlapping[0].Name}' " +
+                $"({overlapping[0].StartDate:O}–{overlapping[0].EndDate:O}).");
+        }
+
         period.Update(command.Name, command.StartDate, command.EndDate, command.AllowSubjectOverrides);
 
         try

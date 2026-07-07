@@ -28,8 +28,8 @@ public sealed class CreateAssignmentCommandHandler(
             command.AssignmentType,
             command.GradingFormat,
             command.TargetAudienceType,
-            command.SubjectCodedValueId,
-            command.GradeCodedValueId,
+            command.SubjectId,
+            command.GradeLevelId,
             command.DueDate,
             command.MaxScore,
             createdByTeacherId: Guid.Empty) // TODO: wire up authenticated teacher ID

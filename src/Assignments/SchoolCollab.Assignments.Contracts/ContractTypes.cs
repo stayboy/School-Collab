@@ -46,9 +46,9 @@ public record AssignmentSummaryDto(
     AssignmentTypeDto AssignmentType,
     GradingFormatDto GradingFormat,
     TargetAudienceTypeDto TargetAudienceType,
-    Guid SubjectCodedValueId,
+    Guid SubjectId,
     string? SubjectName,
-    Guid? GradeCodedValueId,
+    Guid? GradeLevelId,
     string? GradeName,
     AssignmentStatusDto Status,
     DateTimeOffset? DueDate,
@@ -63,8 +63,8 @@ public record CreateAssignmentRequest(
     AssignmentTypeDto AssignmentType,
     GradingFormatDto GradingFormat = GradingFormatDto.TeacherGraded,
     TargetAudienceTypeDto TargetAudienceType = TargetAudienceTypeDto.AllStudents,
-    Guid SubjectCodedValueId = default,
-    Guid? GradeCodedValueId = null,
+    Guid SubjectId = default,
+    Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
     decimal? MaxScore = null);
 
@@ -74,8 +74,8 @@ public record UpdateAssignmentRequest(
     AssignmentTypeDto AssignmentType,
     GradingFormatDto GradingFormat = GradingFormatDto.TeacherGraded,
     TargetAudienceTypeDto TargetAudienceType = TargetAudienceTypeDto.AllStudents,
-    Guid SubjectCodedValueId = default,
-    Guid? GradeCodedValueId = null,
+    Guid SubjectId = default,
+    Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
     decimal? MaxScore = null);
 
