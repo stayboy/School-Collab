@@ -39,7 +39,7 @@ public class CodedValueOverrideHandlerTests
 
         public Scope(string dbName)
         {
-            Db = BuildDb(dbName);
+            Db = BuildDb(dbName, Tenants);
             Cache = BuildCache();
             Resolver = new GetCodedValueByIdHandler(Db, Cache);
             Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, Cache, Resolver);
@@ -48,10 +48,16 @@ public class CodedValueOverrideHandlerTests
 
         public void Dispose() => Db.Dispose();
 
-        private static SettingsDbContext BuildDb(string name)
+        private static SettingsDbContext BuildDb(string name, MutableTenantProvider tenants)
         {
             var services = new ServiceCollection();
-            services.AddTenancy();
+            // Register the test's MutableTenantProvider as the ITenantProvider so
+            // the SettingsDbContext (and its CurrentTenantId property) sees the
+            // same tenant as the handler constructors. Without this the DbContext
+            // would use the default TenantProvider (Guid.Empty) and the
+            // GetCodedValueById cache callback would read the global name
+            // instead of the per-tenant override.
+            services.AddSingleton<ITenantProvider>(tenants);
             services.AddDbContext<SettingsDbContext>(o => o.UseInMemoryDatabase(name));
             return services.BuildServiceProvider().GetRequiredService<SettingsDbContext>();
         }
