@@ -26,7 +26,8 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
-    <ProjectReference Include="..\..\SchoolCollab.AI\SchoolCollab.AI.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.AI.Chat\SchoolCollab.AI.Chat.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.AI.Server\SchoolCollab.AI.Server.csproj" />
     <ProjectReference Include="..\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>

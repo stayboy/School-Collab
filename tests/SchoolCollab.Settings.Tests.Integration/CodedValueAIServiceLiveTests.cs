@@ -11,12 +11,13 @@ using Microsoft.Extensions.Logging;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using OpenAI;
+using ChatUpdate = ai::SchoolCollab.AI.Abstractions.ChatUpdate;
 using AI = ai::SchoolCollab.AI;
 
 namespace SchoolCollab.Settings.Tests.Integration;
 
 /// <summary>
-/// Live tests for <see cref="AI.Services.CodedValueAIService.ChatAsync"/> against the real
+/// Live tests for <see cref="AI.Services.AIChatEngine.ChatAsync"/> against the real
 /// OpenRouter endpoint, using the configured model (<c>google/gemma-4-31b-it</c>).
 ///
 /// These build the <see cref="IChatClient"/> exactly as <c>SchoolCollab.AI/Program.cs</c>
@@ -109,10 +110,12 @@ public class CodedValueAIServiceLiveTests
     }
 
     /// <summary>
-    /// Builds a <see cref="AI.Services.CodedValueAIService"/> wired to a real OpenRouter chat client
-    /// and a mocked Coded Values API.
+    /// Builds an <see cref="AI.Services.AIChatEngine"/> wired to a real OpenRouter chat
+    /// client and a mocked Coded Values API, with the CodedValues tool bag
+    /// (<see cref="AI.Tools.CodedValues.CodedValuesToolProvider"/> +
+    /// <see cref="AI.Tools.CodedValues.CodedValuesSystemPromptProvider"/>) plugged in.
     /// </summary>
-    private static AI.Services.CodedValueAIService BuildService(IChatClient chatClient, Mock<AI.Services.ICodedValuesApiClient> mockApi)
+    private static AI.Services.AIChatEngine BuildService(IChatClient chatClient, Mock<AI.Tools.CodedValues.ICodedValuesApiClient> mockApi)
     {
         var mockFactory = new Mock<AI.Services.IChatClientFactory>();
         mockFactory.Setup(f => f.GetClient()).Returns(chatClient);
@@ -120,20 +123,26 @@ public class CodedValueAIServiceLiveTests
         var mockEnv = new Mock<IHostEnvironment>();
         mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
 
-        // Load the AppHost's centralised appsettings so CodedValueAIService
-        // .ResolveDefaultModel picks up the same OpenRouter model the live
-        // client uses. Reading from the AppHost's Parameters:* section keeps
-        // this helper in lock-step with the running AI host.
+        // Load the AppHost's centralised appsettings so AIChatEngine.ResolveDefaultModel
+        // picks up the same OpenRouter model the live client uses. Reading from the
+        // AppHost's Parameters:* section keeps this helper in lock-step with the
+        // running AI host.
         var config = new ConfigurationBuilder()
             .AddJsonFile("appHost-appsettings.json", optional: false)
             .Build();
 
-        return new AI.Services.CodedValueAIService(
-            mockFactory.Object,
+        var toolProvider = new AI.Tools.CodedValues.CodedValuesToolProvider(
             mockApi.Object,
-            new NullLogger<AI.Services.CodedValueAIService>(),
+            new NullLogger<AI.Tools.CodedValues.CodedValuesToolProvider>());
+        var promptProvider = new AI.Tools.CodedValues.CodedValuesSystemPromptProvider(
             mockEnv.Object,
-            config);
+            new NullLogger<AI.Tools.CodedValues.CodedValuesSystemPromptProvider>());
+        return new AI.Services.AIChatEngine(
+            new ai::SchoolCollab.AI.Abstractions.IToolProvider[] { toolProvider },
+            promptProvider,
+            mockFactory.Object,
+            config,
+            new NullLogger<AI.Services.AIChatEngine>());
     }
 
     // =====================================================================
@@ -147,7 +156,7 @@ public class CodedValueAIServiceLiveTests
     [TestMethod]
     public async Task ChatAsync_WithOpenRouter_StreamsSimpleTextResponse()
     {
-        var mockApi = new Mock<AI.Services.ICodedValuesApiClient>(MockBehavior.Loose);
+        var mockApi = new Mock<AI.Tools.CodedValues.ICodedValuesApiClient>(MockBehavior.Loose);
         using var chatClient = BuildOpenRouterClient();
         var service = BuildService(chatClient, mockApi);
 
@@ -180,9 +189,9 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request. Skipping live verification.");
             return;
         }
-        updates.Should().NotContain(u => u is AI.ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
+        updates.Should().NotContain(u => u is ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
 
-        var text = string.Concat(updates.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
+        var text = string.Concat(updates.OfType<ChatUpdate.TextChunk>().Select(t => t.Text));
         text.Should().NotBeNullOrWhiteSpace("ChatAsync should stream a text response for a simple prompt");
         text.ToUpperInvariant().Should().Contain("PONG",
             "the model was asked to reply with PONG and ChatAsync should stream that text to the UI");
@@ -204,7 +213,7 @@ public class CodedValueAIServiceLiveTests
     {
         var categories = new[]
         {
-            new AI.Services.CodedValueDto(
+            new AI.Tools.CodedValues.CodedValueDto(
                 Id: Guid.NewGuid(),
                 Code: "CNTRY",
                 Name: "Countries",
@@ -218,7 +227,7 @@ public class CodedValueAIServiceLiveTests
                 Attributes: [],
                 AttributeDefinitions: [],
                 ChildrenCount: 5),
-            new AI.Services.CodedValueDto(
+            new AI.Tools.CodedValues.CodedValueDto(
                 Id: Guid.NewGuid(),
                 Code: "DOW",
                 Name: "Days of Week",
@@ -234,9 +243,9 @@ public class CodedValueAIServiceLiveTests
                 ChildrenCount: 7)
         };
 
-        var mockApi = new Mock<AI.Services.ICodedValuesApiClient>(MockBehavior.Strict);
+        var mockApi = new Mock<AI.Tools.CodedValues.ICodedValuesApiClient>(MockBehavior.Strict);
         mockApi.Setup(a => a.GetRootValuesAsync(It.IsAny<CancellationToken>()))
-            .Returns(Task.FromResult<AI.Services.CodedValueDto[]?>(categories));
+            .Returns(Task.FromResult<AI.Tools.CodedValues.CodedValueDto[]?>(categories));
 
         using var chatClient = BuildOpenRouterClient();
         var service = BuildService(chatClient, mockApi);
@@ -267,7 +276,7 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request during the tool-call loop. Skipping live verification.");
             return;
         }
-        updates.Should().NotContain(u => u is AI.ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
+        updates.Should().NotContain(u => u is ChatUpdate.Error, "ChatAsync must not yield a ChatUpdate.Error");
 
         // The model should have emitted a list_coded_value_categories function call that
         // ChatAsync parsed and dispatched to the API. Verifying the mock was called proves
@@ -275,11 +284,11 @@ public class CodedValueAIServiceLiveTests
         mockApi.Verify(a => a.GetRootValuesAsync(It.IsAny<CancellationToken>()), Times.AtLeastOnce,
             "the model should call list_coded_value_categories, which ChatAsync must dispatch to the API");
 
-        var toolEnds = updates.OfType<AI.ChatUpdate.ToolCallEnd>().ToList();
+        var toolEnds = updates.OfType<ChatUpdate.ToolCallEnd>().ToList();
         toolEnds.Should().Contain(t => t.FriendlyName == "List Categories" && t.Success,
             "ChatAsync should yield a successful ToolCallEnd for the list categories call");
 
-        var text = string.Concat(updates.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
+        var text = string.Concat(updates.OfType<ChatUpdate.TextChunk>().Select(t => t.Text));
         text.Should().NotBeNullOrWhiteSpace("the model should produce a final summary after the tool call");
     }
 
@@ -293,7 +302,7 @@ public class CodedValueAIServiceLiveTests
     /// turn 1 proposes the country values (looking up the CNTRY parent), turn 2 is the
     /// user's <i>"yes"</i> confirmation which must trigger the bulk creation tool.
     ///
-    /// The Coded Values API is mocked, so <see cref="AI.Services.ICodedValuesApiClient.BulkCreateAsync"/>
+    /// The Coded Values API is mocked, so <see cref="AI.Tools.CodedValues.ICodedValuesApiClient.BulkCreateAsync"/>
     /// being called with country children is the proof that the prompt <i>works to insert</i>.
     /// This is the exact path (cross-turn text-only history + confirm turn) that previously
     /// failed to fire the bulk tool.
@@ -302,7 +311,7 @@ public class CodedValueAIServiceLiveTests
     public async Task ChatAsync_WithOpenRouter_AddCountriesUnderCntry_ConfirmInsertsValues()
     {
         var parentId = Guid.NewGuid();
-        var parentCntry = new AI.Services.CodedValueDto(
+        var parentCntry = new AI.Tools.CodedValues.CodedValueDto(
             Id: parentId,
             Code: "CNTRY",
             Name: "Countries",
@@ -317,13 +326,13 @@ public class CodedValueAIServiceLiveTests
             AttributeDefinitions: [],
             ChildrenCount: 0);
 
-        var capturedChildren = new List<AI.Services.CreateCodedValueRequest>();
-        var mockApi = new Mock<AI.Services.ICodedValuesApiClient>(MockBehavior.Loose);
+        var capturedChildren = new List<AI.Tools.CodedValues.CreateCodedValueRequest>();
+        var mockApi = new Mock<AI.Tools.CodedValues.ICodedValuesApiClient>(MockBehavior.Loose);
         mockApi.Setup(a => a.GetByCodeAsync("CNTRY", It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(parentCntry);
-        mockApi.Setup(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Services.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()))
-            .Callback<Guid, IEnumerable<AI.Services.CreateCodedValueRequest>, CancellationToken>((_, children, _) => capturedChildren.AddRange(children))
-            .Returns(() => Task.FromResult(new AI.Services.BulkCreateResult(capturedChildren.Count, Array.Empty<string>(), parentId)));
+        mockApi.Setup(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Tools.CodedValues.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()))
+            .Callback<Guid, IEnumerable<AI.Tools.CodedValues.CreateCodedValueRequest>, CancellationToken>((_, children, _) => capturedChildren.AddRange(children))
+            .Returns(() => Task.FromResult(new AI.Tools.CodedValues.BulkCreateResult(capturedChildren.Count, Array.Empty<string>(), parentId)));
 
         using var chatClient = BuildOpenRouterClient();
         var service = BuildService(chatClient, mockApi);
@@ -352,9 +361,9 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request on the proposal turn. Skipping live verification.");
             return;
         }
-        updates1.Should().NotContain(u => u is AI.ChatUpdate.Error, "no error should occur on the proposal turn");
+        updates1.Should().NotContain(u => u is ChatUpdate.Error, "no error should occur on the proposal turn");
 
-        var proposalText = string.Concat(updates1.OfType<AI.ChatUpdate.TextChunk>().Select(t => t.Text));
+        var proposalText = string.Concat(updates1.OfType<ChatUpdate.TextChunk>().Select(t => t.Text));
         proposalText.Should().NotBeNullOrWhiteSpace("the model should present a proposal in turn 1");
 
         // ── Turn 2: user confirms — model must invoke the bulk creation tool ──
@@ -383,7 +392,7 @@ public class CodedValueAIServiceLiveTests
             Assert.Inconclusive("OpenRouter rate-limited the request on the confirm turn. Skipping live verification.");
             return;
         }
-        updates2.Should().NotContain(u => u is AI.ChatUpdate.Error, "no error should occur on the confirm turn");
+        updates2.Should().NotContain(u => u is ChatUpdate.Error, "no error should occur on the confirm turn");
 
         // Some models create immediately in turn 1 (skipping the confirm gate); others wait
         // for turn 2. Either way, the prompt <i>works to insert</i> iff BulkCreateAsync was called.
@@ -408,7 +417,7 @@ public class CodedValueAIServiceLiveTests
 
         // The bulk tool should have been reported as a successful ToolCallEnd.
         var allUpdates = updates1.Concat(updates2).ToList();
-        allUpdates.OfType<AI.ChatUpdate.ToolCallEnd>()
+        allUpdates.OfType<ChatUpdate.ToolCallEnd>()
             .Should().Contain(t => t.FriendlyName == "Create Bulk Values" && t.Success,
                 "ChatAsync should yield a successful ToolCallEnd for the bulk creation");
 
@@ -416,7 +425,7 @@ public class CodedValueAIServiceLiveTests
         // be invoked — together these prove the prompt end-to-end persisted coded values.
         mockApi.Verify(a => a.GetByCodeAsync("CNTRY", It.IsAny<Guid?>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce,
             "the CNTRY parent must be looked up (by the model and/or the bulk-create path)");
-        mockApi.Verify(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Services.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce,
+        mockApi.Verify(a => a.BulkCreateAsync(parentId, It.IsAny<IEnumerable<AI.Tools.CodedValues.CreateCodedValueRequest>>(), It.IsAny<CancellationToken>()), Times.AtLeastOnce,
             "the bulk creation API must be called to persist the countries");
     }
 
@@ -425,15 +434,15 @@ public class CodedValueAIServiceLiveTests
     // =====================================================================
 
     /// <summary>
-    /// Drives <c>ChatAsync</c> to completion, collecting all <see cref="AI.ChatUpdate"/>s.
+    /// Drives <c>ChatAsync</c> to completion, collecting all <see cref="ChatUpdate"/>s.
     /// Returns the collected updates, whether the call timed out (cancelled), and any
     /// unexpected exception that escaped <c>ChatAsync</c> (so the test can distinguish a
     /// real break from a transient provider hiccup).
     /// </summary>
-    private static async Task<(List<AI.ChatUpdate> Updates, bool Cancelled, Exception? Error)> DrainAsync(
-        AI.Services.CodedValueAIService service, IReadOnlyList<ChatMessage> history, TimeSpan? timeout = null)
+    private static async Task<(List<ChatUpdate> Updates, bool Cancelled, Exception? Error)> DrainAsync(
+        AI.Services.AIChatEngine service, IReadOnlyList<ChatMessage> history, TimeSpan? timeout = null)
     {
-        var updates = new List<AI.ChatUpdate>();
+        var updates = new List<ChatUpdate>();
         using var cts = new CancellationTokenSource(timeout ?? Timeout);
 
         try
@@ -467,12 +476,12 @@ public class CodedValueAIServiceLiveTests
         IsRateLimitMessage(ex.Message);
 
     /// <summary>
-    /// True when the streamed updates contain a <see cref="AI.ChatUpdate.Error"/> whose
+    /// True when the streamed updates contain a <see cref="ChatUpdate.Error"/> whose
     /// message indicates OpenRouter rate-limiting. The free-tier model surfaces 429s
     /// this way rather than throwing, so the caller should skip as Inconclusive.
     /// </summary>
-    private static bool ContainsRateLimitError(IEnumerable<AI.ChatUpdate> updates) =>
-        updates.OfType<AI.ChatUpdate.Error>().Any(e => IsRateLimitMessage(e.Message));
+    private static bool ContainsRateLimitError(IEnumerable<ChatUpdate> updates) =>
+        updates.OfType<ChatUpdate.Error>().Any(e => IsRateLimitMessage(e.Message));
 
     private static bool IsRateLimitMessage(string? message) => !string.IsNullOrWhiteSpace(message) &&
         (message.Contains("rate-limit", StringComparison.OrdinalIgnoreCase) ||

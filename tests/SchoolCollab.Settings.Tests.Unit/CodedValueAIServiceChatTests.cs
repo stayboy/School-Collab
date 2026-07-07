@@ -8,8 +8,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
-using SchoolCollab.AI;
+using SchoolCollab.AI.Abstractions;
 using SchoolCollab.AI.Services;
+using SchoolCollab.AI.Tools.CodedValues;
 
 namespace SchoolCollab.Settings.Tests.Unit;
 
@@ -27,7 +28,7 @@ public class CodedValueAIServiceChatTests
     /// because <see cref="IChatClientFactory.GetClient"/> is mocked to return the
     /// deterministic <see cref="MockChatClient"/> under test.
     /// </summary>
-    private static CodedValueAIService BuildService(
+    private static AIChatEngine BuildService(
         Mock<IChatClientFactory> mockFactory,
         Mock<ICodedValuesApiClient> mockApi)
     {
@@ -43,12 +44,20 @@ public class CodedValueAIServiceChatTests
             })
             .Build();
 
-        return new CodedValueAIService(
+        // The former CodedValueAIService is now the generic AIChatEngine plus a
+        // pluggable CodedValuesToolProvider (tools + dispatch + SSE formatting)
+        // and CodedValuesSystemPromptProvider (the Coded Values system prompt).
+        // Wiring them here reproduces the pre-refactor ChatAsync behaviour
+        // byte-for-byte — the engine delegates tool creation / dispatch /
+        // formatting to the provider.
+        var toolProvider = new CodedValuesToolProvider(mockApi.Object, new TestLogger<CodedValuesToolProvider>());
+        var promptProvider = new CodedValuesSystemPromptProvider(mockEnv.Object, new TestLogger<CodedValuesSystemPromptProvider>());
+        return new AIChatEngine(
+            new IToolProvider[] { toolProvider },
+            promptProvider,
             mockFactory.Object,
-            mockApi.Object,
-            new TestLogger<CodedValueAIService>(),
-            mockEnv.Object,
-            config);
+            config,
+            new TestLogger<AIChatEngine>());
     }
     /// <summary>
     /// Simulates the prompt "Add hospitals to code values under HSPTL code".

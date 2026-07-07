@@ -1,11 +1,9 @@
 using FluentAssertions;
 using Microsoft.Extensions.AI;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
-using SchoolCollab.AI.Services;
+using SchoolCollab.AI.Tools.CodedValues;
 
 namespace SchoolCollab.Settings.Tests.Unit;
 
@@ -41,8 +39,8 @@ public class CodedValueAIServiceToolSelectionTests
         // The original "smoking-gun" prompt that surfaced the gemma-3 → gemma-4
         // root-cause investigation: this is the user-observed case that shipped
         // only 5 tools after the trim, instead of 9.
-        var service = BuildService();
-        var tools = service.SelectToolsForPrompt([new ChatMessage(ChatRole.User, "add music genres under code 'GENRES'")]);
+        var provider = BuildProvider();
+        var tools = SelectTools(provider, [new ChatMessage(ChatRole.User, "add music genres under code 'GENRES'")]);
 
         var names = tools.Select(t => t.Name).ToList();
         names.Should().BeEquivalentTo(
@@ -61,8 +59,8 @@ public class CodedValueAIServiceToolSelectionTests
     [TestMethod]
     public void SelectToolsForPrompt_UpdateDescription_ShipsReadAndUpdateOnly()
     {
-        var service = BuildService();
-        var tools = service.SelectToolsForPrompt([new ChatMessage(ChatRole.User, "update description for CNTRY")]);
+        var provider = BuildProvider();
+        var tools = SelectTools(provider, [new ChatMessage(ChatRole.User, "update description for CNTRY")]);
 
         var names = tools.Select(t => t.Name).ToList();
         names.Should().BeEquivalentTo(
@@ -76,8 +74,8 @@ public class CodedValueAIServiceToolSelectionTests
     [TestMethod]
     public void SelectToolsForPrompt_DisableCode_ShipsReadAndDisableEnableOnly()
     {
-        var service = BuildService();
-        var tools = service.SelectToolsForPrompt([new ChatMessage(ChatRole.User, "disable HSPTL")]);
+        var provider = BuildProvider();
+        var tools = SelectTools(provider, [new ChatMessage(ChatRole.User, "disable HSPTL")]);
 
         var names = tools.Select(t => t.Name).ToList();
         names.Should().BeEquivalentTo(
@@ -95,8 +93,8 @@ public class CodedValueAIServiceToolSelectionTests
     [TestMethod]
     public void SelectToolsForPrompt_EnableCode_ShipsReadAndDisableEnableOnly()
     {
-        var service = BuildService();
-        var tools = service.SelectToolsForPrompt([new ChatMessage(ChatRole.User, "enable CNTRY")]);
+        var provider = BuildProvider();
+        var tools = SelectTools(provider, [new ChatMessage(ChatRole.User, "enable CNTRY")]);
 
         var names = tools.Select(t => t.Name).ToList();
         names.Should().BeEquivalentTo(
@@ -109,8 +107,8 @@ public class CodedValueAIServiceToolSelectionTests
     [TestMethod]
     public void SelectToolsForPrompt_ReadOnlyListPrompt_ShipsReadOnlyTools()
     {
-        var service = BuildService();
-        var tools = service.SelectToolsForPrompt([new ChatMessage(ChatRole.User, "list all categories")]);
+        var provider = BuildProvider();
+        var tools = SelectTools(provider, [new ChatMessage(ChatRole.User, "list all categories")]);
 
         var names = tools.Select(t => t.Name).ToList();
         names.Should().BeEquivalentTo(
@@ -130,8 +128,8 @@ public class CodedValueAIServiceToolSelectionTests
         // over-aggressive filtering on prompts the heuristic doesn't cover
         // (e.g. "hello", "what's the weather", or anything weird that still
         // needs the full tool surface).
-        var service = BuildService();
-        var tools = service.SelectToolsForPrompt([new ChatMessage(ChatRole.User, "hello there")]);
+        var provider = BuildProvider();
+        var tools = SelectTools(provider, [new ChatMessage(ChatRole.User, "hello there")]);
 
         var names = tools.Select(t => t.Name).ToList();
         names.Should().BeEquivalentTo(AllToolNames,
@@ -141,8 +139,8 @@ public class CodedValueAIServiceToolSelectionTests
     [TestMethod]
     public void SelectToolsForPrompt_EmptyHistory_FallsBackToAllTools()
     {
-        var service = BuildService();
-        var tools = service.SelectToolsForPrompt([]);
+        var provider = BuildProvider();
+        var tools = SelectTools(provider, []);
 
         tools.Select(t => t.Name).Should().BeEquivalentTo(AllToolNames);
     }
@@ -154,14 +152,14 @@ public class CodedValueAIServiceToolSelectionTests
         // message in history overall. An assistant turn + a follow-up user
         // prompt that says "disable it" must classify as disable, not whatever
         // the prior turn was about (e.g. add).
-        var service = BuildService();
+        var provider = BuildProvider();
         var history = new List<ChatMessage>
         {
             new(ChatRole.User, "add music genres under code 'GENRES'"),
             new(ChatRole.Assistant, "Would you like me to create 10 music genres?"),
             new(ChatRole.User, "actually disable that for now"),
         };
-        var tools = service.SelectToolsForPrompt(history);
+        var tools = SelectTools(provider, history);
 
         var names = tools.Select(t => t.Name).ToList();
         names.Should().BeEquivalentTo(
@@ -173,32 +171,26 @@ public class CodedValueAIServiceToolSelectionTests
 
     // --- Helpers ---
 
-    private static CodedValueAIService BuildService()
+    /// <summary>
+    /// Builds a CodedValuesToolProvider against a no-op Coded Values API mock.
+    /// The tool-selection tests don't drive ChatAsync; they only assert the
+    /// per-prompt tool subset that CreateTools (the engine's per-turn tool
+    /// source) returns — which runs the same SelectToolsForPrompt intent
+    /// classifier the former CodedValueAIService used.
+    /// </summary>
+    private static CodedValuesToolProvider BuildProvider()
     {
-        var mockFactory = new Mock<IChatClientFactory>();
-        // The tool-selection tests don't drive ChatAsync, but
-        // IChatClientFactory is required by the constructor. Returning null
-        // is fine — SelectToolsForPrompt only inspects _toolsByName which is
-        // built eagerly in the constructor.
-        mockFactory.Setup(f => f.GetClient()).Returns(() => null!);
-
-        var mockEnv = new Mock<IHostEnvironment>();
-        mockEnv.Setup(e => e.EnvironmentName).Returns("Production");
-
-        var config = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["codedvalue-ai-provider"] = "ollama",
-                ["Ollama:DefaultModel"] = "test-model",
-                ["OpenRouter:DefaultModel"] = "test-model"
-            })
-            .Build();
-
-        return new CodedValueAIService(
-            mockFactory.Object,
-            new Mock<ICodedValuesApiClient>().Object,
-            NullLogger<CodedValueAIService>.Instance,
-            mockEnv.Object,
-            config);
+        var mockApi = new Mock<ICodedValuesApiClient>();
+        return new CodedValuesToolProvider(mockApi.Object, NullLogger<CodedValuesToolProvider>.Instance);
     }
+
+    /// <summary>
+    /// Convenience wrapper: invokes the provider’s per-turn CreateTools (which
+    /// runs SelectToolsForPrompt) with a no-op logger, returning the narrowed
+    /// AITool list. Assertions stay identical to the pre-refactor suite — only
+    /// the call target changed (CodedValueAIService.SelectToolsForPrompt →
+    /// CodedValuesToolProvider.CreateTools).
+    /// </summary>
+    private static IReadOnlyList<AITool> SelectTools(CodedValuesToolProvider provider, IReadOnlyList<ChatMessage> history)
+        => provider.CreateTools(history, NullLogger<CodedValuesToolProvider>.Instance);
 }

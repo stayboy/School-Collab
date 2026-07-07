@@ -1,11 +1,9 @@
 // chatInput.js — JS interop helper for the AI chat input textarea.
 //
-// Loaded lazily by CodedValuesChat via the standard Blazor "import" pattern
+// Loaded lazily by AiChat via the standard Blazor "import" pattern
 // (JS.InvokeAsync<IJSObjectReference>("import", "./_content/.../chatInput.js")).
-// The module is served as a static asset of the Settings.Admin RCL —
-// there is no <script> tag in App.razor for it. (Migrated from
-// CodedValues.Admin/wwwroot/js/chatInput.js as part of the Settings context
-// merge — see documents/solution/settings-context-merge-spec.md §9.)
+// The module is served as a static asset of the SchoolCollab.AI.Chat RCL —
+// there is no <script> tag in App.razor for it.
 //
 // Why a JS listener instead of @onkeydown on FluentTextArea?
 //   FluentTextArea wraps the <fluent-text-area> web component and exposes no
@@ -17,7 +15,7 @@
 //   hands the action off to .NET via a DotNetObjectReference.
 
 /// <summary>
-/// Resolves the editable textarea for a given CodedValuesChat input id.
+/// Resolves the editable textarea for a given AiChat input id.
 /// FluentTextArea puts the id on the <fluent-text-area> host element; the
 /// actual editable surface is the <textarea> inside its (open) shadow DOM.
 /// For a plain native textarea (id directly on it) the element itself is

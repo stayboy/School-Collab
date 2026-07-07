@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace SchoolCollab.AI;
+namespace SchoolCollab.AI.Tools.CodedValues;
 
 /// <summary>
 /// Represents a single child value to create in a bulk creation request.

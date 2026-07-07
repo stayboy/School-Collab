@@ -99,7 +99,7 @@ var settingsApi = builder.AddProject<Projects.SchoolCollab_Settings_Api>("settin
     .WaitFor(redis)
     .WaitForCompletion(migrator);
 
-var settingsAi = builder.AddProject<Projects.SchoolCollab_AI>("settings-ai")
+var settingsAi = builder.AddProject<Projects.SchoolCollab_AI_Server>("settings-ai")
     .WithReference(settingsApi)
     // Env-var names use the double-underscore convention so that ASP.NET
     // Core's EnvironmentVariablesConfigurationProvider maps `__` to `:`

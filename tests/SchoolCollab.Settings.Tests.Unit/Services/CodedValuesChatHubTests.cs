@@ -1,17 +1,17 @@
 using FluentAssertions;
 using Microsoft.Extensions.AI;
-using SchoolCollab.Settings.Admin.Components.Pages.CodedValues;
-using SchoolCollab.Settings.Admin.Services;
+using SchoolCollab.AI.Chat.Components;
+using SchoolCollab.AI.Chat.Services;
 
 namespace SchoolCollab.Settings.Tests.Unit.Services;
 
 [TestClass]
-public class CodedValuesChatHubTests
+public class AiChatHubTests
 {
     [TestMethod]
     public void NewHub_IsEmpty()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
 
         hub.Messages.Should().BeEmpty();
         hub.StreamingState.IsStreaming.Should().BeFalse();
@@ -22,9 +22,9 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void AddMessage_AppendsInOrder()
     {
-        var hub = new CodedValuesChatHub();
-        var a = new CodedValuesChat.ChatMessageItem(ChatRole.User, "hi");
-        var b = new CodedValuesChat.ChatMessageItem(ChatRole.Assistant, "hello");
+        var hub = new AiChatHub();
+        var a = new AiChatMessage(ChatRole.User, "hi");
+        var b = new AiChatMessage(ChatRole.Assistant, "hello");
 
         hub.AddMessage(a);
         hub.AddMessage(b);
@@ -35,11 +35,11 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void AddMessage_RaisesChanged()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
         var raised = 0;
         hub.Changed += () => raised++;
 
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "hi"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "hi"));
 
         raised.Should().Be(1);
     }
@@ -47,13 +47,13 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void AddMessage_RaisesOncePerCall()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
         var raised = 0;
         hub.Changed += () => raised++;
 
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "a"));
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "b"));
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.Assistant, "c"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "a"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "b"));
+        hub.AddMessage(new AiChatMessage(ChatRole.Assistant, "c"));
 
         raised.Should().Be(3);
     }
@@ -61,9 +61,9 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void Clear_RemovesAllMessages()
     {
-        var hub = new CodedValuesChatHub();
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "hi"));
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.Assistant, "hello"));
+        var hub = new AiChatHub();
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "hi"));
+        hub.AddMessage(new AiChatMessage(ChatRole.Assistant, "hello"));
 
         hub.Clear();
 
@@ -73,8 +73,8 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void Clear_RaisesChanged()
     {
-        var hub = new CodedValuesChatHub();
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "hi"));
+        var hub = new AiChatHub();
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "hi"));
         var raised = 0;
         hub.Changed += () => raised++;
 
@@ -86,7 +86,7 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void Clear_OnEmptyHub_DoesNotRaiseChanged()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
         var raised = 0;
         hub.Changed += () => raised++;
 
@@ -98,7 +98,7 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void AddMessage_NullMessage_Throws()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
 
         Action act = () => hub.AddMessage(null!);
 
@@ -108,13 +108,13 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void UnsubscribedDelegate_IsNotCalled()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
         var raised = 0;
         Action handler = () => raised++;
         hub.Changed += handler;
         hub.Changed -= handler;
 
-        hub.AddMessage(new CodedValuesChat.ChatMessageItem(ChatRole.User, "hi"));
+        hub.AddMessage(new AiChatMessage(ChatRole.User, "hi"));
 
         raised.Should().Be(0);
     }
@@ -122,10 +122,10 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void SetStreamingState_StoresAndRaisesChanged()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
         var raised = 0;
         hub.Changed += () => raised++;
-        var state = new CodedValuesChat.ChatStreamingState(
+        var state = new AiChatStreamingState(
             IsStreaming: true,
             StreamingText: "partial",
             ActiveToolCalls: null);
@@ -139,9 +139,9 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void SetStreamingState_OverwritesPreviousState()
     {
-        var hub = new CodedValuesChatHub();
-        var first = new CodedValuesChat.ChatStreamingState(true, "first", null);
-        var second = new CodedValuesChat.ChatStreamingState(true, "second", null);
+        var hub = new AiChatHub();
+        var first = new AiChatStreamingState(true, "first", null);
+        var second = new AiChatStreamingState(true, "second", null);
 
         hub.SetStreamingState(first);
         hub.SetStreamingState(second);
@@ -152,7 +152,7 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void SetStreamingState_NullState_Throws()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
 
         Action act = () => hub.SetStreamingState(null!);
 
@@ -162,8 +162,8 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void Clear_ResetsStreamingState()
     {
-        var hub = new CodedValuesChatHub();
-        hub.SetStreamingState(new CodedValuesChat.ChatStreamingState(true, "typing", null));
+        var hub = new AiChatHub();
+        hub.SetStreamingState(new AiChatStreamingState(true, "typing", null));
 
         hub.Clear();
 
@@ -175,7 +175,7 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void Clear_WhenIdleAndEmpty_DoesNotRaiseChanged()
     {
-        var hub = new CodedValuesChatHub();
+        var hub = new AiChatHub();
         var raised = 0;
         hub.Changed += () => raised++;
 
@@ -187,8 +187,8 @@ public class CodedValuesChatHubTests
     [TestMethod]
     public void Clear_WhenStreamingButNoMessages_RaisesChanged()
     {
-        var hub = new CodedValuesChatHub();
-        hub.SetStreamingState(new CodedValuesChat.ChatStreamingState(true, "typing", null));
+        var hub = new AiChatHub();
+        hub.SetStreamingState(new AiChatStreamingState(true, "typing", null));
         var raised = 0;
         hub.Changed += () => raised++;
 

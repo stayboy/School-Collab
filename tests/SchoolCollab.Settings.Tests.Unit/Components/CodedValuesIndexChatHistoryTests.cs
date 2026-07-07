@@ -8,8 +8,8 @@ using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Settings.Admin.Components.Pages.CodedValues;
-using SchoolCollab.Settings.Admin.Services;
+using SchoolCollab.AI.Chat.Components;
+using SchoolCollab.AI.Chat.Services;
 using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Settings.Tests.Unit.Components;
@@ -27,7 +27,7 @@ public class CodedValuesIndexChatHistoryTests : BunitContext
     {
         Services.AddFluentUIComponents();
         JSInterop.Mode = JSRuntimeMode.Loose;
-        Services.AddScoped<CodedValuesChatHub>();
+        Services.AddScoped<AiChatHub>();
         Services.AddSingleton<IFeatureFlagService, AlwaysOnFeatureFlagService>();
 
         _handler = new CapturingHandler();
@@ -48,7 +48,7 @@ public class CodedValuesIndexChatHistoryTests : BunitContext
         var cut = Render<CodedValuesPageHost>();
         cut.WaitForElement(".input-area");
 
-        var inlineChat = cut.FindComponent<CodedValuesChat>();
+        var inlineChat = cut.FindComponent<AiChat>();
         SetInputText(inlineChat.Instance, "Add countries under CNTRY");
         await cut.InvokeAsync(async () => await inlineChat.Instance.SubmitFromKeyAsync());
 
@@ -91,7 +91,7 @@ public class CodedValuesIndexChatHistoryTests : BunitContext
         var cut = Render<CodedValuesPageHost>();
         cut.WaitForElement(".input-area");
 
-        var inlineChat = cut.FindComponent<CodedValuesChat>();
+        var inlineChat = cut.FindComponent<AiChat>();
         SetInputText(inlineChat.Instance, "Add countries under CNTRY");
         await cut.InvokeAsync(async () => await inlineChat.Instance.SubmitFromKeyAsync());
         cut.WaitForState(() => _handler.ChatBodies.Count >= 1, TimeSpan.FromSeconds(5));
@@ -113,9 +113,9 @@ public class CodedValuesIndexChatHistoryTests : BunitContext
             "re-opening the drawer without a new prompt must NOT re-fire the last prompt");
     }
 
-    private static void SetInputText(CodedValuesChat chat, string text)
+    private static void SetInputText(AiChat chat, string text)
     {
-        var field = typeof(CodedValuesChat).GetField("_inputText",
+        var field = typeof(AiChat).GetField("_inputText",
             BindingFlags.NonPublic | BindingFlags.Instance);
         field.Should().NotBeNull();
         field!.SetValue(chat, text);

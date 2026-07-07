@@ -1,6 +1,7 @@
+using System.Net.Http.Json;
 using System.Net;
 
-namespace SchoolCollab.AI.Services;
+namespace SchoolCollab.AI.Tools.CodedValues;
 
 public record CodedValueAttributeDto(string Key, string Value);
 

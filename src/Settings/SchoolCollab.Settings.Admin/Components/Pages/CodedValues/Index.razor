@@ -2,11 +2,11 @@
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Settings.Admin.Components.Pages.CodedValues
-@using SchoolCollab.Settings.Admin.Services
 @inject CodedValuesApiClient Api
 @inject ILogger<Index> Logger
 @inject IDialogService DialogService
-@inject CodedValuesChatHub ChatHub
+@inject AiChatHub ChatHub
+@inject NavigationManager Nav
 @inject IFeatureFlagService FeatureFlags
 @implements IDisposable
 
@@ -106,17 +106,21 @@
            the conversation history. -- *@
         @if (_aiChatEnabled == true)
         {
-            <CodedValuesChat Mode="CodedValuesChat.CodedValuesChatMode.InputOnly"
-                             ShowIntro="true"
-                             OnPromptSubmitted="@OnPromptSubmittedAsync" />
+            <AiChat Mode="AiChatMode.InputOnly"
+                     ShowIntro="true"
+                     Placeholder="Ask me to create coded values..."
+                     Enabled="@(_aiChatEnabled == true)"
+                     OnPromptSubmitted="@OnPromptSubmittedAsync" />
         }
     </Footer>
     <ChildContent>
         @if (_aiChatEnabled == true)
         {
-            <CodedValuesChatPanel Open="_chatDrawerOpen"
-                                   OpenChanged="@OnDrawerOpenChangedAsync"
-                                   Prompt="@_pendingPrompt" />
+            <AiChatPanel Open="_chatDrawerOpen"
+                             OpenChanged="@OnDrawerOpenChangedAsync"
+                             Prompt="@_pendingPrompt"
+                             Enabled="@(_aiChatEnabled == true)"
+                             OnToolCallCompleted="@OnToolCallCompletedAsync" />
         }
     </ChildContent>
 </LandingPage>
@@ -289,6 +293,44 @@
             _pendingPrompt = null;
         }
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Handler for the drawer chat's <see cref="AiChat.OnToolCallCompleted"/> callback.
+    /// The chat itself never acts on a tool call (the RCL is domain-agnostic);
+    /// it raises every successful tool completion here and the landing page
+    /// decides what to do. For the CodedValues context, a successful
+    /// "Create Bulk Values" tool call navigates to the new parent's children
+    /// page — replacing the in-component <c>Nav.NavigateTo</c> the old
+    /// <c>CodedValuesChat</c> used to perform internally before the RCL extraction.
+    /// </summary>
+    private Task OnToolCallCompletedAsync(ToolCallDisplay toolCall)
+    {
+        if (_disposed) return Task.CompletedTask;
+        if (toolCall.FriendlyName == "Create Bulk Values" && toolCall.Success == true)
+        {
+            var parentCode = ExtractParentCode(toolCall.ArgsSummary);
+            if (parentCode is not null)
+            {
+                Nav.NavigateTo($"/coded-values/{Uri.EscapeDataString(parentCode)}/children");
+            }
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Extracts the parent code from a bulk-create args summary like "parent: CNTRY".
+    /// Moved here from the old CodedValuesChat when the navigation became a
+    /// consumer-side concern.
+    /// </summary>
+    private static string? ExtractParentCode(string? argsSummary)
+    {
+        if (string.IsNullOrWhiteSpace(argsSummary)) return null;
+        var prefix = "parent: ";
+        var idx = argsSummary.IndexOf(prefix, StringComparison.Ordinal);
+        if (idx < 0) return null;
+        var code = argsSummary[(idx + prefix.Length)..].Trim();
+        return string.IsNullOrEmpty(code) ? null : code;
     }
 
     private async Task OnRecoverAsync(Guid id, string code)

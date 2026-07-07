@@ -1,4 +1,4 @@
-namespace SchoolCollab.AI;
+namespace SchoolCollab.AI.Abstractions;
 
 /// <summary>Marker class to avoid Program type collision with Admin project.</summary>
 public sealed class AiProgramMarker { }

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
-using SchoolCollab.AI;
+using SchoolCollab.AI.Abstractions;
 using SchoolCollab.AI.Services;
+using SchoolCollab.AI.Tools.CodedValues;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -64,15 +65,21 @@ builder.Services.AddSingleton<IChatClientFactory>(sp =>
     return new ChatClientFactory(ollamaClient, openRouterClient, defaultProvider, logger);
 });
 
-// HttpClient for calling the Settings REST API (service discovery) — replaces
-// the legacy Coded Values host. The settings-api project exposes the CodedValues
-// aggregate endpoints under /api/coded-values/* alongside the FeatureFlag aggregate
-// endpoints under /api/config/* + /api/features/*. See
-// documents/solution/settings-context-merge-spec.md §8.
-builder.Services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(client =>
+// HttpClient for calling the Settings REST API (service discovery) + the
+// CodedValues AI tool bag (9 tools, per-turn SelectToolsForPrompt narrowing,
+// SSE formatting) + the CodedValues system-prompt provider. All three are
+// wired by AddCodedValuesAiTools; the engine (AIChatEngine) picks them up as
+// an IToolProvider + an ISystemPromptProvider. The settings-api project
+// exposes the CodedValues aggregate endpoints under /api/coded-values/*
+// alongside the FeatureFlag aggregate endpoints under /api/config/* +
+// /api/features/*. See documents/solution/settings-context-merge-spec.md §8.
+builder.Services.AddCodedValuesAiTools(client =>
     client.BaseAddress = new Uri("https+http://settings-api"));
 
-builder.Services.AddSingleton<CodedValueAIService>();
+// Generic AI chat engine — drives /api/ai/chat for every registered
+// IToolProvider / ISystemPromptProvider. Adding a second bounded context is a
+// parallel AddXxxAiTools() call.
+builder.Services.AddSingleton<AIChatEngine>();
 
 var app = builder.Build();
 
@@ -93,7 +100,7 @@ app.MapGet("/api/ai/config", (IConfiguration configuration) =>
 });
 
 // SSE streaming chat endpoint
-app.MapPost("/api/ai/chat", async (HttpContext context, CodedValueAIService aiService) =>
+app.MapPost("/api/ai/chat", async (HttpContext context, AIChatEngine aiService) =>
 {
     var request = await context.Request.ReadFromJsonAsync<ChatRequest>(context.RequestAborted);
     if (request is null || request.Messages is null || request.Messages.Count == 0)
