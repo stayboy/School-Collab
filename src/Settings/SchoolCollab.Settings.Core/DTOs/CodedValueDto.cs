@@ -15,5 +15,6 @@ public record CodedValueDto(
     IReadOnlyCollection<CodedValueAttributeDefinitionDto> AttributeDefinitions,
     int ChildrenCount = 0,
     bool IsDeleted = false,
-    DateTimeOffset? DeletedAt = null);
+    DateTimeOffset? DeletedAt = null,
+    bool IsOverridden = false);
 

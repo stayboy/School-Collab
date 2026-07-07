@@ -46,15 +46,23 @@ public class ListSubjectsByGradeHandlerTests
     }
 
     [TestMethod]
-    public async Task NoCurrentPeriod_ReturnsEmpty()
+    public async Task NoCurrentPeriod_ReturnsAllAssignedSubjects()
     {
+        // Subjects are global; what is period-scoped is the GradeSubjectAssignment.
+        // So when no period is specified the handler returns every subject ever
+        // assigned to the grade (across all periods), even if no current period
+        // exists. This keeps the Subjects landing page useful.
         using var s = new StudentsTestScope("subjects-noperiod");
+        var pastPeriodId = await SeedPastPeriodAsync(s, "Term 0");
         var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
-        await SeedSubjectAsync(s, Guid.NewGuid(), "MATH", "Mathematics", 1);
+        var mathId = await SeedSubjectAsync(s, Guid.NewGuid(), "MATH", "Mathematics", 1);
+
+        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(glId, mathId, pastPeriodId));
+        await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListSubjectsByGrade(glId));
 
-        result.Should().BeEmpty("no current period exists");
+        result.Should().ContainSingle(x => x.Code == "MATH");
     }
 
     [TestMethod]
@@ -95,13 +103,13 @@ public class ListSubjectsByGradeHandlerTests
         var result = await NewHandler(s).HandleAsync(new ListSubjectsByGrade(glId, pastPeriodId));
         result.Should().ContainSingle(x => x.Code == "MATH");
 
-        // Query with explicit current period → should be empty
+        // Query with explicit current period → should be empty (not assigned to current)
         result = await NewHandler(s).HandleAsync(new ListSubjectsByGrade(glId, currentPeriodId));
         result.Should().BeEmpty();
 
-        // Query with no period (derives current) → should be empty
+        // Query with no period (returns all assignments across periods) → should find the subject
         result = await NewHandler(s).HandleAsync(new ListSubjectsByGrade(glId));
-        result.Should().BeEmpty();
+        result.Should().ContainSingle(x => x.Code == "MATH");
     }
 
     [TestMethod]

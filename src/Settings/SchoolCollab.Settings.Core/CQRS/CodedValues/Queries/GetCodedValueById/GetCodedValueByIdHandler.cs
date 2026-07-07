@@ -61,7 +61,8 @@ public sealed class GetCodedValueByIdHandler(
                     cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
                     0,
                     cv.IsDeleted,
-                    cv.DeletedAt);
+                    cv.DeletedAt,
+                    overrideVal is not null);
             },
             CacheOptions,
             tags: ["coded-values"],

@@ -17,11 +17,22 @@ namespace SchoolCollab.Settings.Tests.Unit.Handlers;
 [TestClass]
 public class CodedValueOverrideHandlerTests
 {
+    /// <summary>
+    /// Mutable tenant provider so individual tests can opt into either the
+    /// "default" tenant (no real tenant, overrides rewrite the global blueprint)
+    /// or a real tenant (overrides create per-tenant rows).
+    /// </summary>
+    private sealed class MutableTenantProvider : ITenantProvider
+    {
+        public TenantContext Current { get; set; } = new(Guid.Empty, "System", TenantType.Organization);
+        public TenantContext GetTenantContext() => Current;
+    }
+
     private sealed class Scope : IDisposable
     {
         public SettingsDbContext Db { get; }
         public HybridCache Cache { get; }
-        public ITenantProvider Tenants { get; } = new TenantProvider();
+        public MutableTenantProvider Tenants { get; } = new();
         public GetCodedValueByIdHandler Resolver { get; }
         public UpsertCodedValueOverrideHandler Upsert { get; }
         public RemoveCodedValueOverrideHandler Remove { get; }
@@ -30,8 +41,6 @@ public class CodedValueOverrideHandlerTests
         {
             Db = BuildDb(dbName);
             Cache = BuildCache();
-            // The TenantProvider defaults to a System/Empty tenant — consistent for
-            // both the write (override row) and the read (override resolution).
             Resolver = new GetCodedValueByIdHandler(Db, Cache);
             Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, Cache, Resolver);
             Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, Cache);
@@ -56,31 +65,34 @@ public class CodedValueOverrideHandlerTests
         }
     }
 
-    private static async Task<Guid> SeedCodedValueAsync(SettingsDbContext db, string code, string name)
+    private static async Task<Guid> SeedCodedValueAsync(SettingsDbContext db, string code, string name, int displayOrder = 0)
     {
-        var cv = CodedValue.Create(code, name, null, null, 0);
+        var cv = CodedValue.Create(code, name, null, null, displayOrder);
         db.CodedValues.Add(cv);
         await db.SaveChangesAsync();
         return cv.Id;
     }
 
+    // ── Real-tenant branch: per-tenant override rows ─────────────────────────
+
     [TestMethod]
-    public async Task Upsert_CreatesOverride_AndReturnsResolvedDto()
+    public async Task Upsert_ForRealTenant_CreatesOverrideRow()
     {
         using var s = new Scope("override-create");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
         var id = await SeedCodedValueAsync(s.Db, "GRADE_1", "Grade 1");
 
         var dto = await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Standard 1", null));
 
         dto.Name.Should().Be("Standard 1");
-        // The override row exists for the current (System) tenant.
         s.Db.TenantCodedValueOverrides.Should().ContainSingle(o => o.GlobalCodedValueId == id);
     }
 
     [TestMethod]
-    public async Task Upsert_UpdatesExistingOverride()
+    public async Task Upsert_ForRealTenant_UpdatesExistingOverride()
     {
         using var s = new Scope("override-update");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
         var id = await SeedCodedValueAsync(s.Db, "GRADE_2", "Grade 2");
 
         await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "First", null));
@@ -91,9 +103,10 @@ public class CodedValueOverrideHandlerTests
     }
 
     [TestMethod]
-    public async Task Remove_FallsBackToBlueprintName()
+    public async Task Remove_ForRealTenant_FallsBackToBlueprintName()
     {
         using var s = new Scope("override-remove");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
         var id = await SeedCodedValueAsync(s.Db, "GRADE_3", "Grade 3");
 
         await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Standard 3", null));
@@ -107,15 +120,73 @@ public class CodedValueOverrideHandlerTests
     }
 
     [TestMethod]
-    public async Task Remove_WhenNoOverride_IsIdempotent()
+    public async Task Remove_ForRealTenant_WhenNoOverride_IsIdempotent()
     {
         using var s = new Scope("override-remove-nop");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
         var id = await SeedCodedValueAsync(s.Db, "GRADE_4", "Grade 4");
 
         // Removing a non-existent override must not throw.
         var act = async () => await s.Remove.HandleAsync(new RemoveCodedValueOverride(id));
         await act.Should().NotThrowAsync();
     }
+
+    // ── Default-tenant branch: rewrites the global blueprint ─────────────────
+
+    [TestMethod]
+    public async Task Upsert_ForDefaultTenant_UpdatesGlobalCodedValue()
+    {
+        // No real tenant → no override row; the "override" rewrites the
+        // global CodedValue.Name so the wizard's "Override name" action still
+        // has a visible effect.
+        using var s = new Scope("override-default-update");
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_5", "Grade 5", displayOrder: 7);
+
+        var dto = await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Standard 5", "Renamed for dev"));
+
+        dto.Name.Should().Be("Standard 5");
+        dto.Description.Should().Be("Renamed for dev");
+        s.Db.TenantCodedValueOverrides.Should().BeEmpty("no real tenant → no override row");
+        var stored = await s.Db.CodedValues.SingleAsync(x => x.Id == id);
+        stored.Name.Should().Be("Standard 5");
+        stored.Description.Should().Be("Renamed for dev");
+        stored.DisplayOrder.Should().Be(7, "DisplayOrder is metadata, not part of the override");
+    }
+
+    [TestMethod]
+    public async Task Remove_ForDefaultTenant_IsNoOp()
+    {
+        // The "override" was a direct update of the global blueprint, so there
+        // is no override row to remove and nothing to revert automatically.
+        using var s = new Scope("override-default-remove");
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_6", "Grade 6");
+
+        await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Standard 6", null));
+
+        var act = async () => await s.Remove.HandleAsync(new RemoveCodedValueOverride(id));
+        await act.Should().NotThrowAsync();
+
+        // The global rename persists; remove is a no-op for the default tenant.
+        var stored = await s.Db.CodedValues.SingleAsync(x => x.Id == id);
+        stored.Name.Should().Be("Standard 6");
+    }
+
+    [TestMethod]
+    public async Task Upsert_ForDefaultTenant_UpdatesExistingGlobalName()
+    {
+        // A second override call updates the same global row (not a new row).
+        using var s = new Scope("override-default-repeat");
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_7", "Grade 7");
+
+        await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "First", null));
+        await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Second", null));
+
+        s.Db.TenantCodedValueOverrides.Should().BeEmpty();
+        var stored = await s.Db.CodedValues.SingleAsync(x => x.Id == id);
+        stored.Name.Should().Be("Second");
+    }
+
+    // ── Common error path ────────────────────────────────────────────────────
 
     [TestMethod]
     public async Task Upsert_ForMissingCodedValue_ThrowsNotFound()
