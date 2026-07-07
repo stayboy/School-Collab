@@ -31,8 +31,6 @@
 
             <FluentSpacer />
 
-            @HeaderActions
-
             <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
 
             <FluentButton Appearance="Appearance.Stealth"
@@ -42,9 +40,10 @@
                           class="toolbar-icon-button">
                 <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
             </FluentButton>
+
+            @HeaderActions
         </FluentStack>
     </FluentHeader>
-
     <div class="layout-body">
         @SidebarContent
 
@@ -80,9 +79,9 @@
     [Parameter] public Func<string, string?>? TitleResolver { get; set; }
 
     /// <summary>
-    /// Optional content rendered in the header toolbar (right-aligned, between the
-    /// spacer and the theme switcher). The unified admin host uses this to mount the
-    /// dev-only tenant switcher.
+    /// Optional content rendered at the far right of the header toolbar (after
+    /// the theme switcher and settings button). The unified admin host uses
+    /// this to mount the dev-only tenant switcher.
     /// </summary>
     [Parameter] public RenderFragment? HeaderActions { get; set; }
 
