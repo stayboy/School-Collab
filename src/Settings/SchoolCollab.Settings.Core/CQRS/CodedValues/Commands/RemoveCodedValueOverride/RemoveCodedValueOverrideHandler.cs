@@ -45,6 +45,15 @@ public sealed class RemoveCodedValueOverrideHandler(
         db.TenantCodedValueOverrides.Remove(existing);
         await db.SaveChangesAsync(ct);
 
+        // Remove the specific GetCodedValueById cache entry by key. This is
+        // the authoritative invalidation — RemoveByTagAsync alone has been
+        // observed not to clear the L1 in-memory layer in some HybridCache
+        // versions, which then serves the stale (pre-delete) override on the
+        // next read. Removing the exact key is unambiguous.
+        await cache.RemoveAsync($"coded-value:{command.GlobalCodedValueId}", ct);
+
+        // Belt-and-braces: also evict by tag for any other entries that share
+        // the tag (e.g. future list queries tagged "coded-values").
         await cache.RemoveByTagAsync("coded-values", ct);
         await cache.RemoveByTagAsync($"tenant:{tenantId}", ct);
     }

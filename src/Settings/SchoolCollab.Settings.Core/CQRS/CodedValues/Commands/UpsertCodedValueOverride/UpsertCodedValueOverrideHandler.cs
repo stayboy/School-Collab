@@ -69,7 +69,7 @@ public sealed class UpsertCodedValueOverrideHandler(
 
         await db.SaveChangesAsync(ct);
 
-        await InvalidateCacheAsync(tenantId, ct);
+        await InvalidateCacheAsync(tenantId, command.GlobalCodedValueId, ct);
 
         // Return the fully-resolved DTO (override applied, attributes/definitions
         // populated) by re-reading through the existing query handler. The cache
@@ -80,12 +80,17 @@ public sealed class UpsertCodedValueOverrideHandler(
         return resolved;
     }
 
-    private async Task InvalidateCacheAsync(Guid tenantId, CancellationToken ct)
+    private async Task InvalidateCacheAsync(Guid tenantId, Guid codedValueId, CancellationToken ct)
     {
-        // `coded-values` covers the per-coded-value read cache (GetCodedValueById);
-        // `tenant:{tenantId}` covers the (future) tenant-scoped landing caches.
-        // RemoveByTagAsync on a tag with no entries is a no-op, so the tenant tag
-        // is safe to evict even before PR 3 introduces entries tagged with it.
+        // Remove the specific GetCodedValueById cache entry by key. This is
+        // the authoritative invalidation — RemoveByTagAsync alone has been
+        // observed not to clear the L1 in-memory layer in some HybridCache
+        // versions, which then serves the stale (pre-update) value on the
+        // next read. Removing the exact key is unambiguous.
+        await cache.RemoveAsync($"coded-value:{codedValueId}", ct);
+
+        // Belt-and-braces: also evict by tag for any other entries that share
+        // the tag (e.g. future list queries tagged "coded-values").
         await cache.RemoveByTagAsync("coded-values", ct);
         await cache.RemoveByTagAsync($"tenant:{tenantId}", ct);
     }
