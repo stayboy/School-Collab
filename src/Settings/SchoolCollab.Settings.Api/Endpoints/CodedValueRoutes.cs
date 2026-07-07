@@ -6,7 +6,9 @@ using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.DeleteCodedValue;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.DisableCodedValue;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.EnableCodedValue;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RecoverCodedValue;
+using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RemoveCodedValueOverride;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.UpdateCodedValue;
+using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.UpsertCodedValueOverride;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValueByCode;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValueById;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValuesByIds;
@@ -226,10 +228,47 @@ public static class CodedValueRoutes
             }
         });
 
+        // ── Tenant coded-value overrides (current tenant from ITenantProvider) ──────
+        // PUT creates/updates the override; DELETE removes it (idempotent). The
+        // handler resolves the current tenant from ITenantProvider (not the URL),
+        // so these are the per-tenant display-name overrides consumed by the
+        // wizard's override dialog (§6.2). See spec §5.1.
+        group.MapPut("/{id:guid}/override", async (
+            Guid id,
+            [FromBody] UpsertOverrideRequest req,
+            [FromServices] ICommandHandler<UpsertCodedValueOverride, CodedValueDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var dto = await handler.HandleAsync(
+                    new UpsertCodedValueOverride(id, req.Name, req.Description), ct);
+                return Results.Ok(dto);
+            }
+            catch (CodedValueNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        group.MapDelete("/{id:guid}/override", async (
+            Guid id,
+            [FromServices] ICommandHandler<RemoveCodedValueOverride> handler,
+            CancellationToken ct) =>
+        {
+            await handler.HandleAsync(new RemoveCodedValueOverride(id), ct);
+            return Results.NoContent();
+        });
+
         return group;
     }
 }
 
 internal record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
+internal record UpsertOverrideRequest(string? Name, string? Description);
 internal record BulkCreateCodedValuesRequest(Guid ParentId, List<BulkCreateChildRequest> Children);
 internal record BulkCreateChildRequest(string Code, string Name, string? Description, int DisplayOrder);

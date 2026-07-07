@@ -1,0 +1,141 @@
+@page "/students/grade-levels/{Id:guid}/edit"
+@using SchoolCollab.Students.Admin.Services
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Edit> Logger
+@implements IDisposable
+
+<PageTitle>Edit Grade Level</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (_item is null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">Grade level not found.</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="mt-2">Back to List</FluentButton>
+        }
+        else
+        {
+            <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="form-container">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <FluentTextField @bind-Value="_model.Name" Label="Name *" class="full-width mb-3" Required />
+                <FluentNumberField @bind-Value="_model.Level" Label="Level" class="full-width mb-3" />
+                <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="full-width mb-3" />
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
+                }
+
+                <div>
+                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                        @(_saving ? "Saving…" : "Save")
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="ms-2">Cancel</FluentButton>
+                </div>
+            </EditForm>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private GradeLevelDto? _item;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private readonly EditFormModel _model = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        try
+        {
+            Logger.LogInformation("Loading grade level {Id} for edit", Id);
+            _item = await Api.GetGradeLevelByIdAsync(Id, ct);
+
+            if (_disposed) return;
+
+            if (_item is not null)
+            {
+                _model.Name = _item.Name;
+                _model.Level = _item.Level;
+                _model.DisplayOrder = _item.DisplayOrder;
+            }
+
+            Logger.LogInformation("Loaded grade level {Id} for edit", Id);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load grade level {Id}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _saving = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            if (_item is null) return;
+
+            Logger.LogInformation("Updating grade level {Id}", Id);
+            await Api.UpdateGradeLevelAsync(Id, new UpdateGradeLevelRequest(_model.Level, _model.Name!, _model.DisplayOrder), ct);
+            Nav.NavigateTo("/students/grade-levels");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update grade level {Id}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/students/grade-levels");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+
+    private sealed class EditFormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+
+        public int Level { get; set; }
+        public int DisplayOrder { get; set; }
+    }
+}

@@ -36,10 +36,8 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             .IsRequired()
             .HasDefaultValue(TargetAudienceType.AllStudents);
 
-        builder.Property(x => x.SubjectCodedValueId)
-            .IsRequired();
-
-        builder.Property(x => x.GradeCodedValueId);
+        builder.Property(x => x.SubjectId);
+        builder.Property(x => x.GradeLevelId);
 
         builder.Property(x => x.DueDate);
 
@@ -54,8 +52,11 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             .IsRequired();
 
 
-        builder.HasIndex(x => x.SubjectCodedValueId)
-            .HasDatabaseName("ix_assignments_subject_cv_id");
+        builder.HasIndex(x => x.SubjectId)
+            .HasDatabaseName("ix_assignments_subject_id");
+
+        builder.HasIndex(x => x.GradeLevelId)
+            .HasDatabaseName("ix_assignments_grade_level_id");
 
         builder.HasIndex(x => x.Status)
             .HasDatabaseName("ix_assignments_status");

@@ -1,9 +1,13 @@
 @page "/students"
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
 @inject ILogger<Index> Logger
 @inject IDialogService DialogService
+@inject NavigationManager Nav
 @implements IDisposable
 
 <LandingPage TItem="StudentDto"
@@ -12,12 +16,23 @@
              CreateRoute="/students/create"
              EmptyMessage="@CurrentEmptyMessage"
              Items="@_filteredItems"
-             Loading="@(_items is null)"
+             Loading="@(_items is null || _gradeLevels is null && _filterGradeLevelId.HasValue)"
              GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
              SearchPlaceholder="Search students…">
     <ToolbarFilters>
+        @if (_filterGradeLevel is not null)
+        {
+            <FluentBadge Appearance="Appearance.Neutral" Style="margin-right: 8px;">
+                Grade: @_filterGradeLevel.Name
+                <FluentButton Appearance="Appearance.Neutral"
+                             Style="margin-left: 4px; padding: 0; min-width: 20px; height: 20px;"
+                             OnClick="ClearGradeFilter">
+                    <FluentIcon Icon="@(Icons.Regular.Size16.Dismiss)" Size="IconSize.Small" />
+                </FluentButton>
+            </FluentBadge>
+        }
         <FluentCheckbox @bind-Value="@_showDeleted" @bind-Value:after="OnShowDeletedChanged"
                         Label="Show deleted" />
     </ToolbarFilters>
@@ -56,26 +71,27 @@
 </LandingPage>
 
 @code {
+    [SupplyParameterFromQuery] public Guid? GradeLevelId { get; set; }
+    [SupplyParameterFromQuery] public Guid? PeriodId { get; set; }
+
     private StudentDto[]? _items;
     private StudentDto[]? _deletedItems;
+    private GradeLevelDto[]? _gradeLevels;
+    private GradeLevelDto? _filterGradeLevel;
     private bool _showDeleted;
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
     private string _searchText = string.Empty;
+    private Guid? _filterGradeLevelId;
+    private Guid? _filterPeriodId;
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
         GridTemplateColumns = "120px minmax(180px,2fr) minmax(180px,2fr) minmax(200px,2fr) 120px 100px auto"
     };
 
-    /// <summary>
-    /// The array bound to the grid: the active list plus the deleted list when
-    /// "Show deleted" is on (the deleted rows render with a Deleted status badge
-    /// and a Recover action via the per-row column templates), then narrowed by
-    /// the client-side search filter.
-    /// </summary>
     private StudentDto[] _filteredItems
     {
         get
@@ -90,18 +106,21 @@
         }
     }
 
-    /// <summary>
-    /// Empty-state message. While loading the wrapper shows the spinner (Loading
-    /// is true), so this is only read when _items is populated. A non-empty
-    /// search with no matches yields "No students match …"; otherwise "No
-    /// students yet."
-    /// </summary>
-    private string CurrentEmptyMessage =>
-        !string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
-            ? $"No students match '{_searchText}'."
-            : "No students yet.";
+    private string CurrentEmptyMessage
+    {
+        get
+        {
+            if (_filterGradeLevelId.HasValue && (_items is null || _items.Length == 0))
+                return "No students enrolled in this grade level for the current period.";
 
-    private readonly GridSort<StudentDto> _sortByStudentNumber =
+            if (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0)
+                return $"No students match '{_searchText}'.";
+
+            return "No students yet.";
+        }
+    }
+
+    private static readonly GridSort<StudentDto> _sortByStudentNumber =
         GridSort<StudentDto>.ByAscending(x => x.StudentNumber);
 
     private bool MatchesSearch(StudentDto s)
@@ -119,23 +138,64 @@
         var token = _loadCts.Token;
 
         Logger.LogInformation("Loading students list");
+
         try
         {
-            _items = await Api.ListStudentsAsync(token);
+            // Load grade levels for filter resolution
+            _gradeLevels = await Api.ListGradeLevelsAsync(token);
+            if (_disposed) return;
+
+            // Apply query params if present
+            if (GradeLevelId.HasValue)
+            {
+                _filterGradeLevelId = GradeLevelId;
+                _filterPeriodId = PeriodId;
+                _filterGradeLevel = _gradeLevels?.FirstOrDefault(gl => gl.Id == GradeLevelId.Value);
+
+                // Load students filtered by grade
+                _items = await Api.ListStudentsByGradeAsync(GradeLevelId.Value, PeriodId, token);
+            }
+            else
+            {
+                // Load all students
+                _items = await Api.ListStudentsAsync(token);
+            }
 
             if (_disposed) return;
 
             Logger.LogInformation("Loaded {Count} students", _items?.Length ?? 0);
         }
-        catch (OperationCanceledException)
-        {
-            // user navigated away
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load students");
             _error = ex.Message;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // If query params change, reload with filter
+        if (GradeLevelId != _filterGradeLevelId && GradeLevelId.HasValue)
+        {
+            _filterGradeLevelId = GradeLevelId;
+            _filterPeriodId = PeriodId;
+            _filterGradeLevel = _gradeLevels?.FirstOrDefault(gl => gl.Id == GradeLevelId.Value);
+
+            _loadCts ??= new CancellationTokenSource();
+            try
+            {
+                _items = await Api.ListStudentsByGradeAsync(GradeLevelId.Value, PeriodId, _loadCts.Token);
+                if (_disposed) return;
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to load students by grade");
+                _error = ex.Message;
+            }
         }
     }
 
@@ -155,6 +215,16 @@
                 _error = ex.Message;
             }
         }
+    }
+
+    private void ClearGradeFilter()
+    {
+        _filterGradeLevelId = null;
+        _filterPeriodId = null;
+        _filterGradeLevel = null;
+
+        // Navigate to clear the query params
+        Nav.NavigateTo("/students");
     }
 
     private async Task OnDeleteAsync(Guid id, string studentNumber)
@@ -188,7 +258,7 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to delete student {Id}", id);
-            _items = previous; // rollback
+            _items = previous;
             _error = ex.Message;
             StateHasChanged();
         }
@@ -208,7 +278,6 @@
         {
             await Api.RecoverStudentAsync(id);
             if (_disposed) return;
-            // Remove from deleted list, re-fetch active list
             _deletedItems = _deletedItems?.Where(x => x.Id != id).ToArray();
             _items = await Api.ListStudentsAsync();
             if (_disposed) return;

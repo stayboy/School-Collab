@@ -2,8 +2,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.Subjects.Commands.AssignLessonStrand;
 using SchoolCollab.Students.Core.CQRS.Subjects.Commands.CreateSubject;
+using SchoolCollab.Students.Core.CQRS.Subjects.Commands.CreateSubjectForGrade;
 using SchoolCollab.Students.Core.CQRS.Subjects.Commands.CreateSubjectLesson;
 using SchoolCollab.Students.Core.CQRS.Subjects.Commands.CreateSubjectStrand;
+using SchoolCollab.Students.Core.CQRS.Subjects.Commands.DeleteSubject;
 using SchoolCollab.Students.Core.CQRS.Subjects.Commands.RemoveSubjectLesson;
 using SchoolCollab.Students.Core.CQRS.Subjects.Commands.RemoveSubjectStrand;
 using SchoolCollab.Students.Core.CQRS.Subjects.Commands.UpdateSubject;
@@ -15,6 +17,7 @@ using SchoolCollab.Students.Core.CQRS.Subjects.Queries.GetSubjectById;
 using SchoolCollab.Students.Core.CQRS.Subjects.Queries.ListSubjectLessons;
 using SchoolCollab.Students.Core.CQRS.Subjects.Queries.ListSubjectStrands;
 using SchoolCollab.Students.Core.CQRS.Subjects.Queries.ListSubjects;
+using SchoolCollab.Students.Core.CQRS.Subjects.Queries.ListSubjectsByGrade;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -47,6 +50,13 @@ public static class SubjectRoutes
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
+        group.MapGet("/subjects/by-grade/{gradeLevelId:guid}", async (
+            Guid gradeLevelId,
+            Guid? periodId,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListSubjectsByGrade, SchoolCollab.Students.Core.DTOs.SubjectDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListSubjectsByGrade(gradeLevelId, periodId), ct)));
+
         group.MapPost("/subjects", async (
             [FromBody] CreateSubject command,
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<CreateSubject, Guid> handler,
@@ -56,6 +66,32 @@ public static class SubjectRoutes
             {
                 var id = await handler.HandleAsync(command, ct);
                 return Results.Created($"/subjects/{id}", new { id });
+            }
+            catch (DuplicateSubjectCodeException ex)
+            {
+                return Results.Conflict(new { ex.Message });
+            }
+        });
+
+        // ── Create Subject + GradeSubjectAssignment for the current period (§8.1) ─
+        group.MapPost("/subjects/for-grade", async (
+            [FromBody] CreateSubjectForGradeRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<CreateSubjectForGrade, SchoolCollab.Students.Core.DTOs.SubjectDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var dto = await handler.HandleAsync(
+                    new CreateSubjectForGrade(req.GradeLevelId, req.CodedValueId, req.Code, req.Name, req.DisplayOrder), ct);
+                return Results.Ok(dto);
+            }
+            catch (GradeLevelNotFoundException)
+            {
+                return Results.NotFound(new { Message = $"Grade level '{req.GradeLevelId}' not found." });
+            }
+            catch (NoCurrentPeriodException ex)
+            {
+                return Results.Conflict(new { ex.Message });
             }
             catch (DuplicateSubjectCodeException ex)
             {
@@ -81,6 +117,26 @@ public static class SubjectRoutes
             catch (ConcurrencyException ex)
             {
                 return Results.Conflict(new { ex.Message });
+            }
+        });
+
+        group.MapDelete("/subjects/{id:guid}", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<DeleteSubject> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new DeleteSubject(id), ct);
+                return Results.NoContent();
+            }
+            catch (SubjectNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (SubjectReferencedException ex)
+            {
+                return Results.Conflict(new { ex.Message, ex.References });
             }
         });
 
@@ -210,3 +266,10 @@ internal record UpdateSubjectRequest(string Name, int DisplayOrder);
 internal record UpdateSubjectStrandRequest(string Name, string? Description, int DisplayOrder);
 internal record UpdateSubjectLessonRequest(string Name, string? Description, DateOnly? StartDate, DateOnly? EndDate, int DisplayOrder);
 internal record AssignLessonStrandRequest(Guid? StrandId);
+
+internal record CreateSubjectForGradeRequest(
+    Guid GradeLevelId,
+    Guid? CodedValueId,
+    string Code,
+    string Name,
+    int DisplayOrder);

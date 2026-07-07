@@ -64,6 +64,8 @@ OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromCon
 
 // Register CodedValueSeeder
 builder.Services.AddScoped<CodedValueSeeder>();
+builder.Services.AddScoped<TenantSeeder>();
+builder.Services.AddScoped<AssignmentBackfillService>();
 
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
@@ -89,6 +91,12 @@ try
             var seeder = scope.ServiceProvider.GetRequiredService<CodedValueSeeder>();
             await seeder.SeedAsync();
             await SeedEnableCodedValuesAiChatAsync(settingsDb, logger);
+
+            // Seed the real Tenant registry ('Hydeson School' + 'Little Legends') so
+            // tenancy overrides have a target tenant. Idempotent by Name. See
+            // documents/specs/grade-level-setup.md §5.5 / PR 1.
+            var tenantSeeder = scope.ServiceProvider.GetRequiredService<TenantSeeder>();
+            await tenantSeeder.SeedAsync();
         }
         catch (Exception ex)
         {
@@ -124,6 +132,23 @@ try
         {
             logger.LogError(ex, "Students migration failed");
             exitCode = 1;
+        }
+
+        // ── Assignment backfill (PR 4: SubjectId/GradeLevelId from coded-value IDs) ──
+        // Must run AFTER Assignments and Students migrations both succeed.
+        // See documents/specs/grade-level-setup-progress.md §PR 4.
+        if (exitCode == 0)
+        {
+            try
+            {
+                var backfillService = scope.ServiceProvider.GetRequiredService<AssignmentBackfillService>();
+                await backfillService.BackfillAsync();
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Assignment backfill failed");
+                exitCode = 1;
+            }
         }
     }
 

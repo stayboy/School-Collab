@@ -1,14 +1,19 @@
 @inherits LayoutComponentBase
 @using SchoolCollab.Admin.Shared.Components.Layout
+@using SchoolCollab.Admin.Components.Layout
 @implements IDisposable
 @inject NavigationManager Nav
 
 <SchoolCollabLayout Body="@Body"
                     DefaultTitle="School Collab"
                     SidebarContent="@SidebarContent"
+                    HeaderActions="@HeaderActions"
                     TitleResolver="@ResolveTitle" />
 
 @code {
+    private RenderFragment? HeaderActions => __builder => {
+        <DevTenantSwitcher />
+    };
     private RenderFragment? SidebarContent => _showSidebar ? __builder => {
         <NavMenu />
     } : null;

@@ -1,0 +1,467 @@
+@page "/students/grade-levels/create"
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<GradeLevelWizard> Logger
+
+<PageTitle>Create Grade Level</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" class="page-container">
+    <div class="title-row">
+        <h1 class="page-title">Create Grade Level</h1>
+    </div>
+
+    <div class="wizard-progress">
+        <div class="step @(Step == 1 ? "active" : "")">1. Basic Info</div>
+        <div class="step @(Step == 2 ? "active" : "")">2. Subjects</div>
+        <div class="step @(Step == 3 ? "active" : "")">3. Students</div>
+        <div class="step @(Step == 4 ? "active" : "")">4. Summary</div>
+    </div>
+
+    <div class="wizard-content">
+        @if (Step == 1)
+        {
+            <FluentStack Orientation="Orientation.Vertical" vertical-gap="20">
+                <div>
+                    <CodedValueDropdown Parent="CodedValueParent.Grades" Label="Grade Level" SelectedId="_codedValueIdNullable" SelectedIdChanged="OnCodedValueChanged" />
+                    <div class="coded-value-actions">
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      OnClick="OpenOverrideDialogAsync"
+                                      Disabled="@(!_codedValueIdNullable.HasValue)">
+                            Override name
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      OnClick="OpenCreateDialogAsync">
+                            Create new
+                        </FluentButton>
+                    </div>
+                </div>
+                <FluentTextField Label="Name" @bind-Value="_name" Required />
+                <FluentNumberField Label="Level" @bind-Value="_level" />
+                <FluentNumberField Label="Display Order" @bind-Value="_displayOrder" />
+            </FluentStack>
+        }
+        else if (Step == 2)
+        {
+            @if (_currentPeriod is null)
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    No period covers today. Create a period whose date range includes today before assigning subjects.
+                </FluentMessageBar>
+            }
+            else
+            {
+                <FluentStack Orientation="Orientation.Vertical" vertical-gap="20">
+                    <h3>Assign Subjects</h3>
+                    <p>Select existing subjects or create a new one to assign to this grade level.</p>
+
+                    <FluentButton Icon="FluentIcon.Add" OnClick="OpenCreateSubjectDialog">Create New Subject</FluentButton>
+
+                    <div class="grid-container">
+                        <FluentDataGrid Items="@_availableSubjects.AsQueryable()" TGridItem="SchoolCollab.Students.Core.DTOs.SubjectDto">
+                            <PropertyColumn Property="@(x => x.Code)" Title="Code" />
+                            <PropertyColumn Property="@(x => x.Name)" Title="Name" />
+                            <TemplateColumn Title="Action">
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              OnClick="@(() => AddSubject(context))">Add</FluentButton>
+                            </TemplateColumn>
+                        </FluentDataGrid>
+                    </div>
+
+                    <div class="assigned-list">
+                        <h4>Assigned Subjects</h4>
+                        <ul>
+                            @foreach (var s in _assignedSubjects)
+                            {
+                                <li>@s.Name <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => RemoveSubject(s))">Remove</FluentButton></li>
+                            }
+                        </ul>
+                    </div>
+                </FluentStack>
+            }
+        }
+        else if (Step == 3)
+        {
+            @if (_currentPeriod is null)
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    No period covers today. Create a period whose date range includes today before enrolling students.
+                </FluentMessageBar>
+            }
+            else
+            {
+                <FluentStack Orientation="Orientation.Vertical" vertical-gap="20">
+                    <h3>Assign Students</h3>
+                    <p>Enroll students into this grade level.</p>
+
+                    <div class="grid-container">
+                        <FluentDataGrid Items="@_availableStudents.AsQueryable()" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto">
+                            <PropertyColumn Property="@(x => x.StudentNumber)" Title="Number" />
+                            <PropertyColumn Property="@(x => x.FirstName)" Title="First Name" />
+                            <PropertyColumn Property="@(x => x.LastName)" Title="Last Name" />
+                            <TemplateColumn Title="Action">
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              OnClick="@(() => AddStudent(context))">Enroll</FluentButton>
+                            </TemplateColumn>
+                        </FluentDataGrid>
+                    </div>
+
+                    <div class="assigned-list">
+                        <h4>Enrolled Students</h4>
+                        <ul>
+                            @foreach (var s in _assignedStudents)
+                            {
+                                <li>@s.FirstName @s.LastName <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => RemoveStudent(s))">Remove</FluentButton></li>
+                            }
+                        </ul>
+                    </div>
+                </FluentStack>
+            }
+        }
+        else if (Step == 4)
+        {
+            <FluentStack Orientation="Orientation.Vertical" vertical-gap="20">
+                <h3>Summary</h3>
+                <div class="summary-card">
+                    <p><strong>Name:</strong> @_name</p>
+                    <p><strong>Level:</strong> @_level</p>
+                    <p><strong>Display Order:</strong> @_displayOrder</p>
+                    <p><strong>Period:</strong> @(_currentPeriod?.Name ?? "No current period")</p>
+                    <p><strong>Subjects:</strong> @_assignedSubjects.Count</p>
+                    <p><strong>Students:</strong> @_assignedStudents.Count</p>
+                </div>
+            </FluentStack>
+        }
+    </div>
+
+    <div class="wizard-actions">
+        @if (Step > 1)
+        {
+            <FluentButton OnClick="PrevStep">Back</FluentButton>
+        }
+        @if (Step < 4)
+        {
+            <FluentButton Appearance="Appearance.Accent" OnClick="NextStep" Disabled="!CanAdvance">Next</FluentButton>
+        }
+        else
+        {
+            <FluentButton Appearance="Appearance.Accent" OnClick="SaveAll" Disabled="!CanFinish">Save and Finish</FluentButton>
+        }
+    </div>
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_errorMessage</FluentMessageBar>
+    }
+</FluentStack>
+
+<style>
+    .wizard-progress {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 30px;
+        padding: 0 20px;
+    }
+    .step {
+        padding: 10px 20px;
+        border-bottom: 3px solid #ccc;
+        color: #888;
+        font-weight: bold;
+    }
+    .step.active {
+        border-bottom-color: var(--accent-color);
+        color: var(--accent-color);
+    }
+    .wizard-content {
+        min-height: 400px;
+    }
+    .wizard-actions {
+        display: flex;
+        justify-content: space-between;
+        margin-top: 30px;
+    }
+    .summary-card {
+        border: 1px solid #ddd;
+        padding: 20px;
+        border-radius: 8px;
+        background: #f9f9f9;
+    }
+    .assigned-list {
+        margin-top: 20px;
+        padding: 10px;
+        background: #eee;
+        border-radius: 4px;
+    }
+    .coded-value-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+    }
+</style>
+
+@code {
+    private int Step = 1;
+    private Guid? _codedValueIdNullable = null;
+    private string _name = "";
+    private int _level;
+    private int _displayOrder;
+    private string? _errorMessage;
+
+    // Current period (derived client-side from ListPeriodsAsync — same rule as
+    // the server: StartDate <= today && EndDate >= today). Null = no current
+    // period, which blocks steps 2–4 (§6.3).
+    private SchoolCollab.Students.Admin.Services.PeriodDto? _currentPeriod;
+
+    private bool CanAdvance => Step switch
+    {
+        1 => !string.IsNullOrWhiteSpace(_name) && _codedValueIdNullable.HasValue,
+        // Steps 2–3 require a current period (§6.3)
+        2 or 3 => _currentPeriod is not null,
+        _ => true
+    };
+
+    private bool CanFinish => CanAdvance && _level >= 0 && _displayOrder >= 0;
+
+    private SchoolCollab.Students.Core.DTOs.SubjectDto[] _availableSubjects = [];
+    private List<SchoolCollab.Students.Core.DTOs.SubjectDto> _assignedSubjects = new();
+    private SchoolCollab.Students.Core.DTOs.StudentDto[] _availableStudents = [];
+    private List<SchoolCollab.Students.Core.DTOs.StudentDto> _assignedStudents = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Derive the current period once on load (§6.3).
+        await DeriveCurrentPeriodAsync();
+    }
+
+    private async Task DeriveCurrentPeriodAsync()
+    {
+        try
+        {
+            var periods = await Api.ListPeriodsAsync() ?? [];
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            _currentPeriod = periods.FirstOrDefault(p => p.StartDate <= today && p.EndDate >= today);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to derive current period");
+        }
+    }
+
+    private void NextStep()
+    {
+        _errorMessage = null;
+        Step++;
+    }
+
+    private void PrevStep()
+    {
+        _errorMessage = null;
+        Step--;
+    }
+
+    private async Task OnCodedValueChanged(Guid? id)
+    {
+        _codedValueIdNullable = id;
+        _errorMessage = null;
+        if (id.HasValue)
+        {
+            // Fetch the coded value to seed the name if the user hasn't typed one yet.
+            var cv = await CodedValuesApi.GetByIdAsync(id.Value);
+            if (cv is not null && string.IsNullOrWhiteSpace(_name))
+            {
+                _name = cv.Name;
+                if (_level == 0) _level = cv.DisplayOrder;
+                if (_displayOrder == 0) _displayOrder = cv.DisplayOrder;
+            }
+        }
+    }
+
+    // ── Grade-coded-value dialog (§6.2) ──────────────────────────────────────
+
+    private async Task OpenOverrideDialogAsync()
+    {
+        if (!_codedValueIdNullable.HasValue) return;
+
+        var cv = await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
+        if (cv is null) return;
+
+        var data = new GradeCodedValueDialogData(
+            Mode: "Override",
+            ParentId: cv.ParentId,
+            CodedValue: new CodedValueDto(
+                cv.Id, cv.Code, cv.Name, cv.Description, cv.ParentId, cv.ParentCode,
+                cv.IsDisabled, cv.DisplayOrder, cv.CreatedAt, cv.UpdatedAt,
+                cv.Attributes, cv.AttributeDefinitions, cv.ChildrenCount, cv.IsDeleted, cv.DeletedAt),
+            HasOverride: false);
+
+        var dialog = await DialogService.ShowDialogAsync<GradeCodedValueDialog, GradeCodedValueDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Override Grade Name",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "420px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is GradeCodedValueDialogResult cvResult)
+        {
+            // The dropdown re-fetches tenant-resolved names on next render;
+            // update the seeded name to the overridden value.
+            _name = cvResult.CodedValue.Name;
+        }
+    }
+
+    private async Task OpenCreateDialogAsync()
+    {
+        // Resolve the GRADE parent coded value id.
+        var parent = await CodedValuesApi.GetByCodeAsync(CodedValueParent.Grades.ToCode());
+
+        var data = new GradeCodedValueDialogData(
+            Mode: "Create",
+            ParentId: parent?.Id,
+            CodedValue: null);
+
+        var dialog = await DialogService.ShowDialogAsync<GradeCodedValueDialog, GradeCodedValueDialogData>(
+            data,
+            new DialogParameters
+            {
+                Title = "Create Grade Coded Value",
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Width = "420px",
+                PreventDismissOnOverlayClick = true,
+            });
+
+        var result = await dialog.Result;
+        if (!result.Cancelled && result.Data is GradeCodedValueDialogResult cvResult)
+        {
+            // Select the newly created coded value.
+            _codedValueIdNullable = cvResult.CodedValue.Id;
+            _name = cvResult.CodedValue.Name;
+            _displayOrder = cvResult.CodedValue.DisplayOrder;
+        }
+    }
+
+    private async Task LoadStepData()
+    {
+        if (Step == 2)
+        {
+            var subjects = await Api.ListSubjectsAsync() ?? [];
+            _availableSubjects = subjects.Select(s => new SchoolCollab.Students.Core.DTOs.SubjectDto(
+                s.Id, s.CodedValueId, s.Code, s.Name, s.DisplayOrder, s.CreatedAt, s.UpdatedAt
+            )).Where(s => !_assignedSubjects.Contains(s)).ToArray();
+        }
+        else if (Step == 3)
+        {
+            var students = await Api.ListStudentsAsync() ?? [];
+            _availableStudents = students.Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
+                s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt
+            )).Where(s => !_assignedStudents.Contains(s)).ToArray();
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) return;
+        // Only reload data when landing on subjects/students steps for the first time this render.
+        if ((Step == 2 && !_availableSubjects.Any()) || (Step == 3 && !_availableStudents.Any()))
+        {
+            await LoadStepData();
+        }
+    }
+
+    private void AddSubject(SchoolCollab.Students.Core.DTOs.SubjectDto subject)
+    {
+        _assignedSubjects.Add(subject);
+        _availableSubjects = _availableSubjects.Where(s => s.Id != subject.Id).ToArray();
+    }
+
+    private async Task RemoveSubject(SchoolCollab.Students.Core.DTOs.SubjectDto subject)
+    {
+        _assignedSubjects.Remove(subject);
+        var subjects = await Api.ListSubjectsAsync() ?? []; // Refresh
+        _availableSubjects = subjects.Select(s => new SchoolCollab.Students.Core.DTOs.SubjectDto(
+            s.Id, s.CodedValueId, s.Code, s.Name, s.DisplayOrder, s.CreatedAt, s.UpdatedAt
+        )).Where(s => !_assignedSubjects.Contains(s)).ToArray();
+    }
+
+    private void AddStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
+    {
+        _assignedStudents.Add(student);
+        _availableStudents = _availableStudents.Where(s => s.Id != student.Id).ToArray();
+    }
+
+    private async Task RemoveStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
+    {
+        _assignedStudents.Remove(student);
+        var students = await Api.ListStudentsAsync() ?? []; // Refresh
+        _availableStudents = students.Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
+            s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt
+        )).Where(s => !_assignedStudents.Contains(s)).ToArray();
+    }
+
+    private void OpenCreateSubjectDialog()
+    {
+        // Navigate to the subjects create page.
+        Nav.NavigateTo("/students/subjects/create");
+    }
+
+    private async Task SaveAll()
+    {
+        _errorMessage = null;
+
+        if (!_codedValueIdNullable.HasValue)
+        {
+            _errorMessage = "Please select a grade level coded value.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            _errorMessage = "Grade level name is required.";
+            return;
+        }
+
+        try
+        {
+            // 1. Find-or-create the GradeLevel by CodedValueId (§6.3).
+            var gradeLevel = await Api.GetOrCreateGradeLevelAsync(
+                new GetOrCreateGradeLevelRequest(_codedValueIdNullable.Value, _level, _name, _displayOrder));
+            var gradeId = gradeLevel.Id;
+
+            // 2. Assign Subjects against the current period (derived above).
+            if (_currentPeriod is not null)
+            {
+                foreach (var s in _assignedSubjects)
+                {
+                    await Api.AssignGradeSubjectAsync(new AssignGradeSubjectRequest(gradeId, s.Id, _currentPeriod.Id));
+                }
+            }
+
+            // 3. Enroll Students against the current period.
+            if (_currentPeriod is not null)
+            {
+                foreach (var st in _assignedStudents)
+                {
+                    await Api.EnrollStudentAsync(new EnrollStudentRequest(st.Id, _currentPeriod.Id, gradeId, DateOnly.FromDateTime(DateTime.Now)));
+                }
+            }
+
+            Nav.NavigateTo("/students/grade-levels");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error saving grade level wizard");
+            _errorMessage = $"Failed to save grade level: {ex.Message}";
+        }
+    }
+}

@@ -1,0 +1,140 @@
+@page "/students/subjects/create"
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject NavigationManager Nav
+@inject ILogger<Create> Logger
+
+<PageTitle>Create Subject</PageTitle>
+
+<FluentStack Orientation="Orientation.Vertical" class="page-container" vertical-gap="20">
+    <div class="title-row">
+        <h1 class="page-title">Create Subject</h1>
+    </div>
+
+    @if (_gradeLevelId is null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">
+            No grade level selected. Please create a subject from the Subjects landing page after selecting a grade level.
+        </FluentMessageBar>
+        <FluentButton OnClick="@(() => Nav.NavigateTo("/students/subjects"))">Back to Subjects</FluentButton>
+    }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="SaveAsync">
+            <DataAnnotationsValidator />
+
+            <FluentStack Orientation="Orientation.Vertical" vertical-gap="16">
+                <div>
+                    <CodedValueDropdown Parent="CodedValueParent.Subjects"
+                                        Label="Pick existing subject coded value (optional)"
+                                        SelectedId="_model.CodedValueId"
+                                        SelectedIdChanged="OnCodedValueChanged" />
+                    <p class="hint">Leave empty to create a new subject from scratch.</p>
+                </div>
+
+                <FluentTextField @bind-Value="_model.Code" Label="Code *" Placeholder="e.g. MATH" Required class="full-width" />
+                <FluentTextField @bind-Value="_model.Name" Label="Name *" Placeholder="e.g. Mathematics" Required class="full-width" />
+                <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="full-width" />
+
+                @if (!string.IsNullOrEmpty(_errorMessage))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error">@_errorMessage</FluentMessageBar>
+                }
+
+                <div class="button-row">
+                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo("/students/subjects"))">Cancel</FluentButton>
+                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                        @(_saving ? "Creating..." : "Create & Assign to Grade")
+                    </FluentButton>
+                </div>
+            </FluentStack>
+        </EditForm>
+    }
+</FluentStack>
+
+<style>
+    .full-width { width: 100%; }
+    .hint { color: var(--neutral-foreground-hint); font-size: 0.85em; margin-top: 4px; }
+    .button-row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? GradeLevelId { get; set; }
+
+    private Guid? _gradeLevelId;
+    private bool _saving;
+    private string? _errorMessage;
+
+    private readonly CreateModel _model = new();
+
+    protected override void OnInitialized()
+    {
+        _gradeLevelId = GradeLevelId;
+    }
+
+    private async Task OnCodedValueChanged(Guid? id)
+    {
+        _model.CodedValueId = id;
+        if (id.HasValue)
+        {
+            // Seed code/name from the selected coded value.
+            var cv = await CodedValuesApi.GetByIdAsync(id.Value);
+            if (cv is not null)
+            {
+                _model.Code = cv.Code;
+                _model.Name = cv.Name;
+                _model.DisplayOrder = cv.DisplayOrder;
+            }
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_gradeLevelId is null) return;
+
+        if (string.IsNullOrWhiteSpace(_model.Code) || string.IsNullOrWhiteSpace(_model.Name))
+        {
+            _errorMessage = "Code and Name are required.";
+            return;
+        }
+
+        _saving = true;
+        _errorMessage = null;
+
+        try
+        {
+            await Api.CreateSubjectForGradeAsync(new CreateSubjectForGradeRequest(
+                _gradeLevelId.Value,
+                _model.CodedValueId,
+                _model.Code.Trim().ToUpperInvariant(),
+                _model.Name.Trim(),
+                _model.DisplayOrder ?? 0));
+
+            // Navigate back to the subjects page with the grade filter applied.
+            Nav.NavigateTo($"/students/subjects?gradeLevelId={_gradeLevelId.Value}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create subject for grade");
+            _errorMessage = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private sealed class CreateModel
+    {
+        public Guid? CodedValueId { get; set; }
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Code { get; set; }
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+        public int? DisplayOrder { get; set; }
+    }
+}

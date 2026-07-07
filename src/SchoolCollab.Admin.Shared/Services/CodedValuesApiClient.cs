@@ -149,6 +149,24 @@ public sealed class CodedValuesApiClient(HttpClient http)
 
     public Task<CodedValueDto[]?> GetDeletedAsync(CancellationToken ct = default) =>
         http.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values/deleted", ct);
+
+    // ── Tenant coded-value overrides (current tenant resolved server-side) ──────
+    // Consumed by the wizard's override dialog (§6.2). PUT upserts the current
+    // tenant's display-name override and returns the resolved CodedValueDto;
+    // DELETE removes it (falls back to the global blueprint name). See spec §5.1.
+    public async Task<CodedValueDto> UpsertOverrideAsync(
+        Guid codedValueId, string? name, string? description, CancellationToken ct = default)
+    {
+        var response = await http.PutAsJsonAsync(
+            $"/api/coded-values/{codedValueId}/override", new { name, description }, ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            throw new KeyNotFoundException($"Coded value {codedValueId} not found.");
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<CodedValueDto>(ct))!;
+    }
+
+    public async Task RemoveOverrideAsync(Guid codedValueId, CancellationToken ct = default) =>
+        (await http.DeleteAsync($"/api/coded-values/{codedValueId}/override", ct)).EnsureSuccessStatusCode();
 }
 
 public record AttributeDefinitionRequest(

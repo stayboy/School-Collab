@@ -1,0 +1,108 @@
+@using Microsoft.Extensions.Configuration
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Core.Auth
+@inject TenantsApiClient TenantsApi
+@inject IDevTenantSelection DevTenant
+@inject NavigationManager Nav
+@inject IConfiguration Config
+@inject ILogger<DevTenantSwitcher> Logger
+
+@if (!_show)
+{
+    return;
+}
+
+<div class="dev-tenant-switcher">
+    @if (_tenants is null)
+    {
+        <span class="dev-tenant-loading">Loading tenants…</span>
+    }
+    else if (_tenants.Length == 0)
+    {
+        <span class="dev-tenant-empty"
+              title="No tenants seeded yet. Run the migration service to seed 'Hydeson School' and 'Little Legends'.">
+            No tenants
+        </span>
+    }
+    else
+    {
+        <FluentSelect TOption="TenantOption"
+                      Items="@_options"
+                      SelectedOption="@_selectedOption"
+                      SelectedOptionChanged="@OnSelectionChanged"
+                      OptionText="@(o => o?.Label ?? string.Empty)"
+                      OptionValue="@(o => o?.Value ?? string.Empty)"
+                      AriaLabel="Switch the dev tenant (auth disabled)" />
+    }
+</div>
+
+@code {
+    // Only shown when OIDC auth is disabled (dev / TestAuth mode). With real auth
+    // the tenant arrives via the tenant_id claim from Keycloak, so the switcher is
+    // meaningless. The key matches AuthTenancyExtensions / the startup auth-mode
+    // switch (NOT a runtime feature flag).
+    private bool _show;
+
+    private TenantDto[]? _tenants;
+    private TenantOption[] _options = [];
+    private TenantOption? _selectedOption;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var disabled = bool.TryParse(
+            Config["FeatureFlags:FEATURE:DisableOIDCAuth"], out var d) && d;
+        _show = disabled;
+
+        if (!_show)
+            return;
+
+        try
+        {
+            _tenants = await TenantsApi.ListTenantsAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load tenants for dev switcher");
+            _tenants = [];
+        }
+
+        // The "(default tenant)" option (empty value) clears the selection so the
+        // dev user can return to TestAuthHandler's configured default tenant.
+        TenantOption[] defaults = [new TenantOption("(default tenant)", "")];
+        _options = defaults
+            .Concat(_tenants.Select(t => new TenantOption(t.Name, t.Id.ToString())))
+            .ToArray();
+
+        var selectedId = await DevTenant.GetSelectedTenantIdAsync();
+        _selectedOption = selectedId.HasValue
+            ? _options.FirstOrDefault(o => o.Value == selectedId.Value.ToString())
+            : _options.FirstOrDefault(o => o.Value == "");
+    }
+
+    private async Task OnSelectionChanged(TenantOption? option)
+    {
+        _selectedOption = option;
+
+        var tenantId = string.IsNullOrEmpty(option?.Value)
+            ? (Guid?)null
+            : Guid.Parse(option.Value);
+
+        try
+        {
+            await DevTenant.SetSelectedTenantIdAsync(tenantId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to set dev tenant selection");
+            return;
+        }
+
+        // Force a full reload so every page re-fetches data under the new tenant.
+        // Each API's TestAuthHandler reads the new selection from the shared
+        // distributed cache (Redis) on its next request.
+        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+    }
+
+    /// <summary>Internal option type for the FluentSelect.</summary>
+    public sealed record TenantOption(string Label, string Value);
+}

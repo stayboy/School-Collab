@@ -9,6 +9,7 @@ using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentById;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentByStudentNumber;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ListDeletedStudents;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.ListStudents;
+using SchoolCollab.Students.Core.CQRS.Students.Queries.ListStudentsByGrade;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -45,6 +46,13 @@ public static class StudentRoutes
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListDeletedStudents, SchoolCollab.Students.Core.DTOs.StudentDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListDeletedStudents(), ct)));
+
+        group.MapGet("/by-grade/{gradeLevelId:guid}", async (
+            Guid gradeLevelId,
+            Guid? periodId,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListStudentsByGrade, SchoolCollab.Students.Core.DTOs.StudentDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListStudentsByGrade(gradeLevelId, periodId), ct)));
 
         group.MapPost("/", async (
             [FromBody] CreateStudent command,

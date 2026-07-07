@@ -48,7 +48,7 @@ public static class AssignmentRoutes
             var cmd = new CreateAssignmentCommand(
                 req.Title, req.Description, (AssignmentType)req.AssignmentType,
                 (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
-                req.SubjectCodedValueId, req.GradeCodedValueId,
+                req.SubjectId, req.GradeLevelId,
                 req.DueDate, req.MaxScore);
             var id = await handler.HandleAsync(cmd, ct);
             return Results.Created($"/assignments/{id}", new { id });
@@ -65,7 +65,7 @@ public static class AssignmentRoutes
                 var cmd = new UpdateAssignmentCommand(
                     id, req.Title, req.Description, (AssignmentType)req.AssignmentType,
                     (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
-                    req.SubjectCodedValueId, req.GradeCodedValueId,
+                    req.SubjectId, req.GradeLevelId,
                     req.DueDate, req.MaxScore);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();

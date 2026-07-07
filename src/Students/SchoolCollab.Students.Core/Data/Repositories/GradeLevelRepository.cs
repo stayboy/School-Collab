@@ -30,4 +30,8 @@ internal sealed class GradeLevelRepository(StudentsDbContext db)
                 0, 0,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
+
+    public Task<GradeLevel?> GetByCodedValueIdAsync(Guid codedValueId, CancellationToken cancellationToken = default)
+        => Db.GradeLevels
+            .FirstOrDefaultAsync(x => x.CodedValueId == codedValueId, cancellationToken);
 }

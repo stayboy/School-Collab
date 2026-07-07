@@ -1,5 +1,6 @@
 using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain.Events;
+using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Core.Domain;
 
@@ -50,6 +51,21 @@ public sealed class Subject : IEntity, IAuditableEntity, IHasRowVersion
         DisplayOrder = displayOrder;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new SubjectUpdatedEvent(Id, Code));
+    }
+
+    /// <summary>
+    /// Marks the subject for deletion. Call <see cref="CanDelete"/> first to
+    /// verify no references exist.
+    /// </summary>
+    /// <exception cref="SubjectReferencedException">
+    /// Thrown if grade-subject assignments or student-subject assignments reference this subject.
+    /// </exception>
+    public void Delete()
+    {
+        // Delete is a hard delete. The repository enforces referential integrity
+        // by checking for GradeSubjectAssignments and StudentSubjectAssignments before
+        // allowing the delete. See DeleteSubjectHandler.
+        _domainEvents.Add(new SubjectDeletedEvent(Id, Code));
     }
 
     public void ClearDomainEvents() => _domainEvents.Clear();

@@ -63,3 +63,12 @@ public sealed class DuplicateSubjectCodeException : Exception
         : base($"A subject with code '{code}' already exists.")
         => Code = code;
 }
+
+/// <summary>
+/// Thrown when an operation requires a current period (one whose
+/// [StartDate, EndDate] contains today) but none exists. See spec §5.3 / §6.3 / §8.1.
+/// </summary>
+public sealed class NoCurrentPeriodException : Exception
+{
+    public NoCurrentPeriodException(string message) : base(message) { }
+}

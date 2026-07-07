@@ -1,5 +1,6 @@
 using SchoolCollab.Core.Data;
 using SchoolCollab.Students.Core.Domain.Events;
+using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Core.Domain;
 
@@ -51,6 +52,21 @@ public sealed class GradeLevel : IEntity, IAuditableEntity, IHasRowVersion
         DisplayOrder = displayOrder;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new GradeLevelUpdatedEvent(Id, Name));
+    }
+
+    /// <summary>
+    /// Marks the grade level for deletion. Call <see cref="CanDelete"/> first to
+    /// verify no references exist.
+    /// </summary>
+    /// <exception cref="GradeLevelReferencedException">
+    /// Thrown if students or subjects are assigned to this grade level.
+    /// </exception>
+    public void Delete()
+    {
+        // Delete is a hard delete. The repository enforces referential integrity
+        // by checking for StudentEnrollments and GradeSubjectAssignments before
+        // allowing the delete. See DeleteGradeLevelHandler.
+        _domainEvents.Add(new GradeLevelDeletedEvent(Id, Name));
     }
 
     public void ClearDomainEvents() => _domainEvents.Clear();

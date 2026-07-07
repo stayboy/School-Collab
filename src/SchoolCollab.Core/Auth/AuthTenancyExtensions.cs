@@ -32,6 +32,12 @@ public static class AuthTenancyExtensions
         // Bridge from ClaimsPrincipal -> TenantContext
         services.AddScoped<IClaimsTransformation, TenantClaimsTransformation>();
 
+        // Dev tenant switcher store (auth-disabled / TestAuth mode only). Backed by
+        // the shared IDistributedCache (Redis in dev) so the selection made in the
+        // admin shell propagates to every API host's TestAuthHandler. Only consulted
+        // by TestAuthHandler, which is registered solely when DisableOIDCAuth is on.
+        services.TryAddSingleton<IDevTenantSelection, DevTenantSelection>();
+
         // Register configuration and feature flag service only if not already registered
         services.AddSingleton<IConfiguration>(configuration);
         services.TryAddSingleton<IFeatureFlagService, ConfigurationFeatureFlagService>();

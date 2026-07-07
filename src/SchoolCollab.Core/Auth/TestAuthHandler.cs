@@ -32,13 +32,30 @@ internal sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOpt
         UrlEncoder encoder)
         : base(options, logger, encoder) { }
 
-    protected override Task<AuthenticateResult> HandleAuthenticateAsync()
+    protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
+        // Default to the configured test tenant.
+        var tenantId = Options.TenantId;
+
+        // Dev tenant switcher (auth-disabled only): if the admin shell's
+        // DevTenantSwitcher has selected a real tenant, use it instead of the
+        // fixed default so this host's tenant query filters resolve the selected
+        // tenant's data and coded-value overrides. Resolved per-request from the
+        // HTTP request scope; if IDevTenantSelection isn't registered or no
+        // tenant is selected, falls back to Options.TenantId.
+        var devSelection = Context.RequestServices.GetService<IDevTenantSelection>();
+        if (devSelection is not null)
+        {
+            var selected = await devSelection.GetSelectedTenantIdAsync(Context.RequestAborted);
+            if (selected.HasValue)
+                tenantId = selected.Value;
+        }
+
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, "test-user-id"),
             new Claim(ClaimTypes.Name, "Test User"),
-            new Claim("tenant_id", Options.TenantId.ToString()),
+            new Claim("tenant_id", tenantId.ToString()),
             new Claim("tenant_name", "Test Tenant"),
             new Claim("tenant_type", "School"),
         };
@@ -47,7 +64,7 @@ internal sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOpt
         var principal = new ClaimsPrincipal(identity);
         var ticket = new AuthenticationTicket(principal, Scheme.Name);
 
-        return Task.FromResult(AuthenticateResult.Success(ticket));
+        return AuthenticateResult.Success(ticket);
     }
 }
 

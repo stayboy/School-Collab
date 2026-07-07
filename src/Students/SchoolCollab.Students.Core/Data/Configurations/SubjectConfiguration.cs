@@ -32,6 +32,7 @@ internal sealed class SubjectConfiguration : EntityTypeConfigurationBase<Subject
             .HasDatabaseName("ix_subjects_code");
 
         builder.HasIndex(x => x.CodedValueId)
+            .IsUnique()
             .HasDatabaseName("ix_subjects_coded_value_id");
 
         builder.Ignore(x => x.DomainEvents);

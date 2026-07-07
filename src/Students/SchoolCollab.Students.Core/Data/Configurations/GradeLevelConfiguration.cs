@@ -26,6 +26,7 @@ internal sealed class GradeLevelConfiguration : EntityTypeConfigurationBase<Grad
 
 
         builder.HasIndex(x => x.CodedValueId)
+            .IsUnique()
             .HasDatabaseName("ix_grade_levels_coded_value_id");
 
         builder.HasIndex(x => x.Level)

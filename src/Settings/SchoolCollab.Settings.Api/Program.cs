@@ -64,6 +64,7 @@ app.UseSerilogRequestLogging();
 var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
 // Map both legacy endpoint groups in this single host. See spec §8.
 app.MapCodedValueEndpoints(featureFlags);
+app.MapTenantEndpoints(featureFlags);
 app.MapConfigEndpoints(featureFlags);
 
 app.Run();

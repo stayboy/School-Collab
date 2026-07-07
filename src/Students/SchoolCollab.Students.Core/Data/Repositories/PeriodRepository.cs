@@ -35,4 +35,29 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         await Db.Periods
             .Where(x => x.Status == PeriodStatus.Active && x.EndDate < date)
             .ToArrayAsync(cancellationToken);
+
+    public async Task<Period[]> GetOverlappingPeriodsAsync(
+        DateOnly startDate,
+        DateOnly endDate,
+        Guid? excludeId = null,
+        CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .Where(p => p.StartDate <= endDate
+                && p.EndDate >= startDate
+                && (excludeId == null || p.Id != excludeId))
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<Period?> GetActivePeriodAsync(Guid? excludeId = null, CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .Where(p => p.Status == PeriodStatus.Active
+                && (excludeId == null || p.Id != excludeId))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<Period?> GetCurrentPeriodAsync(CancellationToken cancellationToken = default)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return await Db.Periods
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.StartDate <= today && p.EndDate >= today, cancellationToken);
+    }
 }

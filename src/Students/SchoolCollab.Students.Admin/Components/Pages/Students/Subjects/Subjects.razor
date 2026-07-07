@@ -1,0 +1,256 @@
+@page "/students/subjects"
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<Subjects> Logger
+@implements IDisposable
+
+<LandingPage TItem="SubjectDto"
+             Title="Subjects"
+             CreateLabel="+ New Subject"
+             CreateRoute="@(_selectedGradeLevel is null ? "#" : $"/students/subjects/create?gradeLevelId={_selectedGradeLevel.Value}")"
+             CreateEnabled="@(_selectedGradeLevel is not null)"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@_filteredItems"
+             Loading="@(_items is null || _gradeLevels is null)"
+             GridSettings="@_gridSettings"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchValueChanged"
+             SearchPlaceholder="Search subjects…">
+    <ToolbarFilters>
+        <FluentSelect TOption="GradeLevelOption"
+                      Items="@_gradeLevelOptions"
+                      @bind-SelectedOption="_selectedGradeLevel"
+                      OptionText="@(o => o?.Label ?? "")"
+                      OptionValue="@(o => o?.Value ?? "")"
+                      Label="Grade Level"
+                      Placeholder="Select a grade level"
+                      class="grade-filter" />
+    </ToolbarFilters>
+    <Columns>
+        <TemplateColumn TGridItem="SubjectDto" Title="Code" SortBy="@_sortByCode" Sortable="true">
+            <code>@context.Code</code>
+        </TemplateColumn>
+        <PropertyColumn TGridItem="SubjectDto" TProp="string" Property="@(x => x.Name)" Sortable="true" Title="Name" />
+        <PropertyColumn TGridItem="SubjectDto" TProp="int" Property="@(x => x.DisplayOrder)" Sortable="true" Title="Display Order" />
+        <TemplateColumn TGridItem="SubjectDto" Title="Created">
+            @context.CreatedAt.ToLocalTime().ToString("d")
+        </TemplateColumn>
+        <TemplateColumn TGridItem="SubjectDto" Title="Actions">
+            <FluentAnchor Href="@($"/students/subjects/{context.Id}/edit")">Edit</FluentAnchor>
+            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Name))" class="ms-2">Delete</FluentAnchor>
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
+
+<style>
+    .grade-filter {
+        min-width: 200px;
+    }
+    .muted {
+        color: var(--neutral-foreground-hint);
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? GradeLevelId { get; set; }
+    [SupplyParameterFromQuery] public Guid? PeriodId { get; set; }
+
+    private GradeLevelDto[]? _gradeLevels;
+    private SubjectDto[]? _items;
+    private string _searchText = string.Empty;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private GradeLevelOption? _selectedGradeLevel;
+    private GradeLevelOption[] _gradeLevelOptions = [];
+
+    private record GradeLevelOption(string Value, string Label);
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "100px minmax(200px,2fr) 120px 140px auto"
+    };
+
+    private static readonly GridSort<SubjectDto> _sortByCode =
+        GridSort<SubjectDto>.ByAscending(x => x.Code);
+
+    private SubjectDto[] _filteredItems =>
+        string.IsNullOrWhiteSpace(_searchText)
+            ? (_items ?? [])
+            : (_items ?? []).Where(MatchesSearch).ToArray();
+
+    private string CurrentEmptyMessage
+    {
+        get
+        {
+            if (_gradeLevels is null || _gradeLevels.Length == 0)
+                return "No grade levels exist. Create a grade level first.";
+
+            if (_selectedGradeLevel is null)
+                return "Select a grade level to view its subjects.";
+
+            if (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0)
+                return $"No subjects match '{_searchText}'.";
+
+            return _items?.Length == 0
+                ? "No subjects assigned to this grade level for the current period."
+                : "No subjects yet.";
+        }
+    }
+
+    private bool MatchesSearch(SubjectDto s)
+    {
+        var search = _searchText.Trim();
+        return s.Code.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || s.Name.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        Logger.LogInformation("Loading subjects page");
+
+        try
+        {
+            // Load grade levels first (for the filter)
+            _gradeLevels = await Api.ListGradeLevelsAsync(token);
+            if (_disposed) return;
+
+            if (_gradeLevels is not null && _gradeLevels.Length > 0)
+            {
+                // Build options for the dropdown
+                _gradeLevelOptions = _gradeLevels
+                    .OrderBy(gl => gl.Level)
+                    .Select(gl => new GradeLevelOption(gl.Id.ToString(), gl.Name))
+                    .ToArray();
+
+                // If query param has gradeLevelId, select it
+                if (GradeLevelId.HasValue)
+                {
+                    _selectedGradeLevel = _gradeLevelOptions
+                        .FirstOrDefault(o => o.Value == GradeLevelId.Value.ToString());
+                }
+                // Otherwise default to first grade level
+                else if (_gradeLevelOptions.Length > 0)
+                {
+                    _selectedGradeLevel = _gradeLevelOptions[0];
+                }
+            }
+
+            // Load subjects for selected grade level
+            await LoadSubjectsAsync(token);
+
+            Logger.LogInformation("Loaded {Count} subjects", _items?.Length ?? 0);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects");
+            _error = ex.Message;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // If query param changes, update selection
+        if (GradeLevelId.HasValue && _gradeLevelOptions.Length > 0)
+        {
+            var match = _gradeLevelOptions.FirstOrDefault(o => o.Value == GradeLevelId.Value.ToString());
+            if (match is not null && !Equals(_selectedGradeLevel, match))
+            {
+                _selectedGradeLevel = match;
+                _items = null;
+                _loadCts ??= new CancellationTokenSource();
+                await LoadSubjectsAsync(_loadCts.Token);
+            }
+        }
+    }
+
+    private async Task LoadSubjectsAsync(CancellationToken token)
+    {
+        if (_selectedGradeLevel is null || !Guid.TryParse(_selectedGradeLevel.Value, out var gradeLevelId))
+        {
+            _items = [];
+            return;
+        }
+
+        try
+        {
+            // Use the period from query param, or null to derive current period server-side
+            _items = await Api.ListSubjectsByGradeAsync(gradeLevelId, PeriodId, token);
+            if (_disposed) return;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects for grade {GradeId}", gradeLevelId);
+            _error = ex.Message;
+            _items = [];
+        }
+    }
+
+    private async Task OnDeleteAsync(Guid id, string name)
+    {
+        if (_disposed) return;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Are you sure you want to delete subject '{name}'? This cannot be undone if grade-subject assignments exist.",
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        var previous = _items;
+        _items = _items?.Where(x => x.Id != id).ToArray();
+        StateHasChanged();
+
+        try
+        {
+            await Api.DeleteSubjectAsync(id);
+            if (_disposed) return;
+            Logger.LogInformation("Deleted subject {Id}", id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete subject {Id}", id);
+            _items = previous;
+            _error = ex.Message.Contains("referenced", StringComparison.OrdinalIgnoreCase)
+                ? "Cannot delete: this subject is assigned to grade levels."
+                : ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSelectedGradeLevelChangedAsync(GradeLevelOption? option)
+    {
+        _selectedGradeLevel = option;
+        _items = null;
+        _loadCts ??= new CancellationTokenSource();
+        await LoadSubjectsAsync(_loadCts.Token);
+        StateHasChanged();
+    }
+
+    private void OnSearchValueChanged(string? text)
+    {
+        _searchText = text?.Trim() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

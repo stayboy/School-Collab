@@ -187,8 +187,8 @@
                 (AssignmentTypeDto)int.Parse(_selectedType!.Value),
                 _selectedGradingFormat is not null ? (GradingFormatDto)int.Parse(_selectedGradingFormat.Value) : _item!.GradingFormat,
                 _selectedTargetAudience is not null ? (TargetAudienceTypeDto)int.Parse(_selectedTargetAudience.Value) : _item!.TargetAudienceType,
-                _item!.SubjectCodedValueId,
-                _item.GradeCodedValueId,
+                _item!.SubjectId,
+                _item.GradeLevelId,
                 _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
                 _model.MaxScore);
 

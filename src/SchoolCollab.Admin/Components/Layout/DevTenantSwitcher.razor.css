@@ -1,0 +1,17 @@
+.dev-tenant-switcher {
+    display: inline-flex;
+    align-items: center;
+    min-width: 180px;
+}
+
+.dev-tenant-switcher ::deep .fluent-select,
+.dev-tenant-switcher ::deep select {
+    min-width: 160px;
+}
+
+.dev-tenant-loading,
+.dev-tenant-empty {
+    font-size: 0.8rem;
+    opacity: 0.7;
+    white-space: nowrap;
+}

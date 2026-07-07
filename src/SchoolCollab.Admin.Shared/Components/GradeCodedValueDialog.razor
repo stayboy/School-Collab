@@ -1,0 +1,217 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Services
+@implements IDialogContentComponent<GradeCodedValueDialogData>
+@inject CodedValuesApiClient CodedValuesApi
+
+<div class="dialog-container">
+    @if (Mode == "Create")
+    {
+        <EditForm Model="_createModel" OnValidSubmit="CreateAsync">
+            <DataAnnotationsValidator />
+
+            <FluentTextField @bind-Value="_createModel.Code" Label="Code *" Placeholder="e.g. GRADE9" Required class="full-width mb-3" />
+            <FluentTextField @bind-Value="_createModel.Name" Label="Name *" Placeholder="e.g. Grade 9" Required class="full-width mb-3" />
+            <FluentTextField @bind-Value="_createModel.Description" Label="Description" Rows="2" class="full-width mb-3" />
+            <FluentNumberField @bind-Value="_createModel.DisplayOrder" Label="Display Order" class="full-width mb-3" />
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
+            }
+
+            <div class="button-row">
+                <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+                <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                    @(_saving ? "Creating..." : "Create")
+                </FluentButton>
+            </div>
+        </EditForm>
+    }
+    else if (Mode == "Override")
+    {
+        <EditForm Model="_overrideModel" OnValidSubmit="OverrideAsync">
+            <DataAnnotationsValidator />
+
+            <p class="hint">Overriding: <strong>@_codedValue?.Name</strong></p>
+            <FluentTextField @bind-Value="_overrideModel.Name" Label="Override Name" Placeholder="Enter custom name for your tenant" class="full-width mb-3" />
+            <FluentTextArea @bind-Value="_overrideModel.Description" Label="Description (optional)" Rows="2" class="full-width mb-3" />
+
+            @if (_hasOverride)
+            {
+                <FluentButton Appearance="Appearance.Neutral" OnClick="RemoveOverrideAsync" Disabled="@_removing" class="mb-3">
+                    @if (_removing) { <FluentProgressRing Style="width: 16px; height: 16px;" /> }
+                    else { <span>Reset to default</span> }
+                </FluentButton>
+            }
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
+            }
+
+            <div class="button-row">
+                <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+                <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                    @(_saving ? "Saving..." : "Save Override")
+                </FluentButton>
+            </div>
+        </EditForm>
+    }
+</div>
+
+<style>
+    .dialog-container { padding: 16px; max-width: 400px; }
+    .full-width { width: 100%; }
+    .mb-3 { margin-bottom: 12px; }
+    .button-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .hint { color: var(--neutral-foreground-hint); margin-bottom: 12px; }
+</style>
+
+@code {
+    [Parameter] public GradeCodedValueDialogData Content { get; set; } = default!;
+    [CascadingParameter] public FluentDialog Dialog { get; set; } = default!;
+
+    private string Mode => Content.Mode;
+    private CodedValueDto? _codedValue => Content.CodedValue;
+
+    private bool _saving;
+    private bool _removing;
+    private bool _hasOverride;
+    private string? _error;
+
+    private readonly CreateModel _createModel = new();
+    private readonly OverrideModel _overrideModel = new();
+
+    protected override void OnInitialized()
+    {
+        if (Mode == "Override" && _codedValue is not null)
+        {
+            _overrideModel.Name = _codedValue.Name;
+            _overrideModel.Description = _codedValue.Description;
+            // If there's an overridden name, it will be in the Name field (resolved by server)
+            // We track if this was an override by checking if we're in Override mode
+            _hasOverride = Content.HasOverride;
+        }
+    }
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_createModel.Code) || string.IsNullOrWhiteSpace(_createModel.Name))
+        {
+            _error = "Code and Name are required.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            // Create the coded value
+            await CodedValuesApi.CreateAsync(new CreateCodedValueRequest(
+                _createModel.Code.Trim().ToUpperInvariant(),
+                _createModel.Name.Trim(),
+                _createModel.Description,
+                Content.ParentId,
+                _createModel.DisplayOrder ?? 0));
+
+            // Fetch the created coded value by code to return it
+            var created = await CodedValuesApi.GetByCodeAsync(_createModel.Code.Trim().ToUpperInvariant(), Content.ParentId);
+            if (created is null)
+            {
+                _error = "Created but could not fetch the new coded value.";
+                return;
+            }
+
+            await Dialog.CloseAsync(new GradeCodedValueDialogResult(created));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OverrideAsync()
+    {
+        if (_codedValue is null)
+        {
+            _error = "No coded value selected.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+
+        try
+        {
+            var result = await CodedValuesApi.UpsertOverrideAsync(
+                _codedValue.Id,
+                string.IsNullOrWhiteSpace(_overrideModel.Name) ? null : _overrideModel.Name.Trim(),
+                string.IsNullOrWhiteSpace(_overrideModel.Description) ? null : _overrideModel.Description);
+
+            _hasOverride = true;
+            await Dialog.CloseAsync(new GradeCodedValueDialogResult(result));
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RemoveOverrideAsync()
+    {
+        if (_codedValue is null) return;
+
+        _removing = true;
+        _error = null;
+
+        try
+        {
+            await CodedValuesApi.RemoveOverrideAsync(_codedValue.Id);
+            _hasOverride = false;
+            
+            // Re-fetch to get the original name
+            var original = await CodedValuesApi.GetByIdAsync(_codedValue.Id);
+            if (original is not null)
+            {
+                _overrideModel.Name = original.Name;
+                _overrideModel.Description = original.Description;
+                await Dialog.CloseAsync(new GradeCodedValueDialogResult(original));
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _removing = false;
+        }
+    }
+
+    private async Task CancelAsync() => await Dialog.CancelAsync();
+
+    private sealed class CreateModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Code { get; set; }
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public int? DisplayOrder { get; set; }
+    }
+
+    private sealed class OverrideModel
+    {
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+    }
+}

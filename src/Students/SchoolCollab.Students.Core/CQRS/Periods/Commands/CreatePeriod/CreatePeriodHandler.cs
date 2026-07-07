@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
+using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 
@@ -14,6 +15,19 @@ public sealed class CreatePeriodHandler(
     public async Task<Guid> HandleAsync(CreatePeriod command, CancellationToken cancellationToken = default)
     {
         logger.LogDebug("Handling CreatePeriod {Name}", command.Name);
+
+        // ── No-overlap invariant (§5.6): reject if another period's range
+        //    intersects [StartDate, EndDate]. Checked in the handler (which can
+        //    query the repository) rather than the domain entity.
+        var overlapping = await repository.GetOverlappingPeriodsAsync(
+            command.StartDate, command.EndDate, excludeId: null, cancellationToken);
+        if (overlapping.Length > 0)
+        {
+            throw new PeriodOverlapException(
+                $"Period '{command.Name}' ({command.StartDate:O}–{command.EndDate:O}) " +
+                $"overlaps existing period '{overlapping[0].Name}' " +
+                $"({overlapping[0].StartDate:O}–{overlapping[0].EndDate:O}).");
+        }
 
         var period = Period.Create(
             command.Name,
