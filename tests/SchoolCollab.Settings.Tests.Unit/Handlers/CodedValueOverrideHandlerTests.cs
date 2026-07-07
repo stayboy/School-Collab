@@ -31,7 +31,6 @@ public class CodedValueOverrideHandlerTests
     private sealed class Scope : IDisposable
     {
         public SettingsDbContext Db { get; }
-        public HybridCache Cache { get; }
         public MutableTenantProvider Tenants { get; } = new();
         public GetCodedValueByIdHandler Resolver { get; }
         public UpsertCodedValueOverrideHandler Upsert { get; }
@@ -40,10 +39,11 @@ public class CodedValueOverrideHandlerTests
         public Scope(string dbName)
         {
             Db = BuildDb(dbName, Tenants);
-            Cache = BuildCache();
-            Resolver = new GetCodedValueByIdHandler(Db, Cache);
-            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, Cache, Resolver);
-            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, Cache);
+            // No HybridCache in scope — GetCodedValueById reads directly from the DB.
+            Resolver = new GetCodedValueByIdHandler(Db);
+            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, Resolver,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<UpsertCodedValueOverrideHandler>.Instance);
+            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants);
         }
 
         public void Dispose() => Db.Dispose();
@@ -55,19 +55,11 @@ public class CodedValueOverrideHandlerTests
             // the SettingsDbContext (and its CurrentTenantId property) sees the
             // same tenant as the handler constructors. Without this the DbContext
             // would use the default TenantProvider (Guid.Empty) and the
-            // GetCodedValueById cache callback would read the global name
-            // instead of the per-tenant override.
+            // GetCodedValueById handler would read the global name instead of
+            // the per-tenant override.
             services.AddSingleton<ITenantProvider>(tenants);
             services.AddDbContext<SettingsDbContext>(o => o.UseInMemoryDatabase(name));
             return services.BuildServiceProvider().GetRequiredService<SettingsDbContext>();
-        }
-
-        private static HybridCache BuildCache()
-        {
-            var services = new ServiceCollection();
-            services.AddDistributedMemoryCache();
-            services.AddHybridCache();
-            return services.BuildServiceProvider().GetRequiredService<HybridCache>();
         }
     }
 
