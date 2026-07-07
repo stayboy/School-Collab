@@ -18,13 +18,15 @@ namespace SchoolCollab.Core.Auth;
 public class TestAuthHandlerOptions : AuthenticationSchemeOptions
 {
     /// <summary>
-    /// The tenant ID the test user will be associated with.
-    /// Defaults to a well-known test GUID.
+    /// The tenant ID to use when no tenant is explicitly selected via the dev
+    /// tenant switcher. Defaults to <see cref="Guid.Empty"/> (no tenant) so that
+    /// the per-tenant UI is hidden until a real tenant is selected. Tests can
+    /// override this to simulate a specific tenant context.
     /// </summary>
-    public Guid TenantId { get; set; } = Guid.Parse("00000000-0000-0000-0000-000000000001");
+    public Guid TenantId { get; set; } = Guid.Empty;
 }
 
-internal sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
+public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptions>
 {
     public TestAuthHandler(
         IOptionsMonitor<TestAuthHandlerOptions> options,
@@ -34,21 +36,26 @@ internal sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOpt
 
     protected override async Task<AuthenticateResult> HandleAuthenticateAsync()
     {
-        // Default to the configured test tenant.
+        // Default: use the configured TenantId (Guid.Empty unless tests override it).
+        // When IDevTenantSelection is registered (auth-disabled / TestAuth mode),
+        // the dev tenant switcher can override this with a user-selected tenant.
         var tenantId = Options.TenantId;
 
         // Dev tenant switcher (auth-disabled only): if the admin shell's
         // DevTenantSwitcher has selected a real tenant, use it instead of the
-        // fixed default so this host's tenant query filters resolve the selected
+        // default so this host's tenant query filters resolve the selected
         // tenant's data and coded-value overrides. Resolved per-request from the
-        // HTTP request scope; if IDevTenantSelection isn't registered or no
-        // tenant is selected, falls back to Options.TenantId.
+        // HTTP request scope; if IDevTenantSelection isn't registered, falls back
+        // to Options.TenantId.
         var devSelection = Context.RequestServices.GetService<IDevTenantSelection>();
         if (devSelection is not null)
         {
             var selected = await devSelection.GetSelectedTenantIdAsync(Context.RequestAborted);
             if (selected.HasValue)
                 tenantId = selected.Value;
+            // If selected is null, the user cleared the selection (selected
+            // "(default tenant)" in the switcher) → use Options.TenantId which
+            // defaults to Guid.Empty (no tenant).
         }
 
         var claims = new[]

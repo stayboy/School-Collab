@@ -1,8 +1,10 @@
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using SchoolCollab.Core.Auth;
 using SchoolCollab.Settings.Core.Data;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
@@ -56,6 +58,11 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
         {
             services.RemoveAll<DbContextOptions<SettingsDbContext>>();
             services.RemoveAll<SettingsDbContext>();
+
+            // Configure TestAuth to use the well-known test tenant (the default
+            // changed to Guid.Empty so tests must explicitly opt in to a tenant).
+            services.Configure<TestAuthHandlerOptions>(options =>
+                options.TenantId = TestTenant);
 
             // Re-point both the scoped context (handlers) and the factory (outbox
             // publisher) at the test container. AddConfigCore registered both with
