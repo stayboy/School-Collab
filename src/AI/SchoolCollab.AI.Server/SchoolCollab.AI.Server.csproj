@@ -27,6 +27,6 @@
   <ItemGroup>
     <ProjectReference Include="..\SchoolCollab.AI.Abstractions\SchoolCollab.AI.Abstractions.csproj" />
     <ProjectReference Include="..\SchoolCollab.AI.Tools.CodedValues\SchoolCollab.AI.Tools.CodedValues.csproj" />
-    <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
+    <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
   </ItemGroup>
 </Project>

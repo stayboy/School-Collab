@@ -21,9 +21,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Api\SchoolCollab.Settings.Api.csproj" />
     <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
-    <ProjectReference Include="..\..\src\SchoolCollab.AI.Server\SchoolCollab.AI.Server.csproj" Aliases="ai" />
-    <ProjectReference Include="..\..\src\SchoolCollab.AI.Abstractions\SchoolCollab.AI.Abstractions.csproj" Aliases="ai" />
-    <ProjectReference Include="..\..\src\SchoolCollab.AI.Tools.CodedValues\SchoolCollab.AI.Tools.CodedValues.csproj" Aliases="ai" />
+    <ProjectReference Include="..\..\src\AI\SchoolCollab.AI.Server\SchoolCollab.AI.Server.csproj" Aliases="ai" />
+    <ProjectReference Include="..\..\src\AI\SchoolCollab.AI.Abstractions\SchoolCollab.AI.Abstractions.csproj" Aliases="ai" />
+    <ProjectReference Include="..\..\src\AI\SchoolCollab.AI.Tools.CodedValues\SchoolCollab.AI.Tools.CodedValues.csproj" Aliases="ai" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="MSTest" />
