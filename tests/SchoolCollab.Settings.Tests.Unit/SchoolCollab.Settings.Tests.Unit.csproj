@@ -21,7 +21,7 @@
     <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Admin\SchoolCollab.Settings.Admin.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Admin\SchoolCollab.Admin.csproj" />
-    <ProjectReference Include="..\..\src\SchoolCollab.AI.Server\SchoolCollab.AI.Server.csproj" />
+    <ProjectReference Include="..\..\src\AI\SchoolCollab.AI.Server\SchoolCollab.AI.Server.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="bunit" />
