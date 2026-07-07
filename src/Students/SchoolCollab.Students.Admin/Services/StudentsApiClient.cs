@@ -316,6 +316,19 @@ public sealed class StudentsApiClient
     }
 
     /// <summary>
+    /// Find-or-create a <see cref="SubjectDto"/> by CodedValueId. Reuses the
+    /// existing subject (updating mirrored fields) or creates a new one. Used
+    /// by the wizard's "Add to grade" flow so the user can pick a subject
+    /// coded value and wire it to the grade without leaving the wizard.
+    /// </summary>
+    public async Task<SubjectDto> GetOrCreateSubjectAsync(CreateSubjectRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/subjects/get-or-create", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SubjectDto>(ct))!;
+    }
+
+    /// <summary>
     /// Creates (or reuses) a <see cref="Subject"/> and a
     /// <see cref="GradeSubjectAssignment"/> for the current period, linking the
     /// subject to the given grade level (§8.1). Returns the resolved SubjectDto.

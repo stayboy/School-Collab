@@ -73,6 +73,18 @@ public static class SubjectRoutes
             }
         });
 
+        // ── Find-or-create Subject by CodedValueId (wizard's "Add to grade" flow) ─
+        group.MapPost("/subjects/get-or-create", async (
+            [FromBody] CreateSubject command,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<SchoolCollab.Students.Core.CQRS.Subjects.Commands.GetOrCreateSubject.GetOrCreateSubject, SchoolCollab.Students.Core.DTOs.SubjectDto> handler,
+            CancellationToken ct) =>
+        {
+            var dto = await handler.HandleAsync(
+                new SchoolCollab.Students.Core.CQRS.Subjects.Commands.GetOrCreateSubject.GetOrCreateSubject(
+                    command.CodedValueId, command.Code, command.Name, command.DisplayOrder), ct);
+            return Results.Ok(dto);
+        });
+
         // ── Create Subject + GradeSubjectAssignment for the current period (§8.1) ─
         group.MapPost("/subjects/for-grade", async (
             [FromBody] CreateSubjectForGradeRequest req,

@@ -1,6 +1,6 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Admin.Shared.Services
-@implements IDialogContentComponent<GradeCodedValueDialogData>
+@implements IDialogContentComponent<CodedValueDialogData>
 @inject CodedValuesApiClient CodedValuesApi
 
 <div class="dialog-container">
@@ -68,7 +68,7 @@
 </style>
 
 @code {
-    [Parameter] public GradeCodedValueDialogData Content { get; set; } = default!;
+    [Parameter] public CodedValueDialogData Content { get; set; } = default!;
     [CascadingParameter] public FluentDialog Dialog { get; set; } = default!;
 
     private string Mode => Content.Mode;
@@ -123,7 +123,7 @@
                 return;
             }
 
-            await Dialog.CloseAsync(new GradeCodedValueDialogResult(created));
+            await Dialog.CloseAsync(new CodedValueDialogResult(created));
         }
         catch (Exception ex)
         {
@@ -154,7 +154,7 @@
                 string.IsNullOrWhiteSpace(_overrideModel.Description) ? null : _overrideModel.Description);
 
             _hasOverride = true;
-            await Dialog.CloseAsync(new GradeCodedValueDialogResult(result));
+            await Dialog.CloseAsync(new CodedValueDialogResult(result));
         }
         catch (Exception ex)
         {
@@ -184,7 +184,7 @@
             {
                 _overrideModel.Name = original.Name;
                 _overrideModel.Description = original.Description;
-                await Dialog.CloseAsync(new GradeCodedValueDialogResult(original));
+                await Dialog.CloseAsync(new CodedValueDialogResult(original));
             }
         }
         catch (Exception ex)
