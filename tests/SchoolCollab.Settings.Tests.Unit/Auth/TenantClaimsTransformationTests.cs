@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Tenancy;
 
@@ -13,7 +14,7 @@ public class TenantClaimsTransformationTests
     {
         var tenantId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var provider = new TenantProvider();
-        var transformer = new TenantClaimsTransformation(provider);
+        var transformer = new TenantClaimsTransformation(provider, NullLogger<TenantClaimsTransformation>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("tenant_id", tenantId.ToString()),
@@ -32,7 +33,7 @@ public class TenantClaimsTransformationTests
     {
         var tenantId = Guid.NewGuid();
         var provider = new TenantProvider();
-        var transformer = new TenantClaimsTransformation(provider);
+        var transformer = new TenantClaimsTransformation(provider, NullLogger<TenantClaimsTransformation>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("tenant_id", tenantId.ToString())
@@ -48,7 +49,7 @@ public class TenantClaimsTransformationTests
     {
         var tenantId = Guid.NewGuid();
         var provider = new TenantProvider();
-        var transformer = new TenantClaimsTransformation(provider);
+        var transformer = new TenantClaimsTransformation(provider, NullLogger<TenantClaimsTransformation>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("tenant_id", tenantId.ToString()),
@@ -66,7 +67,7 @@ public class TenantClaimsTransformationTests
         var existingTenant = new TenantContext(Guid.NewGuid(), "Existing Tenant", TenantType.Organization);
         var provider = new TenantProvider();
         provider.SetTenant(existingTenant);
-        var transformer = new TenantClaimsTransformation(provider);
+        var transformer = new TenantClaimsTransformation(provider, NullLogger<TenantClaimsTransformation>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
             new Claim("tenant_id", "not-a-guid")
@@ -81,7 +82,7 @@ public class TenantClaimsTransformationTests
     public async Task TransformAsync_WithoutClaimsIdentity_ReturnsPrincipalUnchangedAndDoesNotSetTenant()
     {
         var provider = new TenantProvider();
-        var transformer = new TenantClaimsTransformation(provider);
+        var transformer = new TenantClaimsTransformation(provider, NullLogger<TenantClaimsTransformation>.Instance);
         var principal = new ClaimsPrincipal();
 
         var transformed = await transformer.TransformAsync(principal);

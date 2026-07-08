@@ -67,9 +67,14 @@ if (!app.Environment.IsDevelopment())
 
 
 app.UseHttpsRedirection();
+
+// Always use authentication - required for both OIDC (production) and TestAuth (development).
+// TestAuthHandler reads the tenant from Redis via IDevTenantSelection and sets the tenant_id claim,
+// which TenantClaimsTransformation then propagates to TenantProvider.
+app.UseAuthentication();
+
 if (!disableOIDC)
 {
-    app.UseAuthentication();
     app.UseAuthorization();
 }
 

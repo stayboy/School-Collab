@@ -51,11 +51,20 @@ public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptio
         if (devSelection is not null)
         {
             var selected = await devSelection.GetSelectedTenantIdAsync(Context.RequestAborted);
+            
+            // DEBUG: Log tenant selection from Redis
+            Logger.LogDebug("TestAuthHandler: IDevTenantSelection returned {SelectedTenantId} (Options.TenantId={OptionsTenantId})", 
+                selected?.ToString() ?? "null", Options.TenantId);
+            
             if (selected.HasValue)
                 tenantId = selected.Value;
             // If selected is null, the user cleared the selection (selected
             // "(default tenant)" in the switcher) → use Options.TenantId which
             // defaults to Guid.Empty (no tenant).
+        }
+        else
+        {
+            Logger.LogDebug("TestAuthHandler: No IDevTenantSelection registered, using Options.TenantId={TenantId}", tenantId);
         }
 
         var claims = new[]

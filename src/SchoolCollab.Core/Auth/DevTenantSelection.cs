@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Logging;
 
 namespace SchoolCollab.Core.Auth;
 
@@ -44,7 +45,9 @@ public interface IDevTenantSelection
 /// string under a single fixed cache key with no expiration (the selection
 /// persists for the dev session).
 /// </summary>
-internal sealed class DevTenantSelection(IDistributedCache cache) : IDevTenantSelection
+internal sealed class DevTenantSelection(
+    IDistributedCache cache,
+    ILogger<DevTenantSelection> logger) : IDevTenantSelection
 {
     private const string Key = "dev:tenant-selection";
 
@@ -52,10 +55,18 @@ internal sealed class DevTenantSelection(IDistributedCache cache) : IDevTenantSe
     {
         var bytes = await cache.GetAsync(Key, ct);
         if (bytes is null || bytes.Length == 0)
+        {
+            logger.LogDebug("DevTenantSelection.GetSelectedTenantIdAsync: No tenant stored in cache (key={Key})", Key);
             return null;
+        }
 
         var text = Encoding.UTF8.GetString(bytes);
-        return Guid.TryParse(text, out var tenantId) ? tenantId : null;
+        var result = Guid.TryParse(text, out var tenantId) ? tenantId : (Guid?)null;
+        
+        logger.LogDebug("DevTenantSelection.GetSelectedTenantIdAsync: Retrieved tenant {TenantId} from cache (key={Key})", 
+            result?.ToString() ?? "null", Key);
+        
+        return result;
     }
 
     public async Task SetSelectedTenantIdAsync(Guid? tenantId, CancellationToken ct = default)
@@ -63,10 +74,13 @@ internal sealed class DevTenantSelection(IDistributedCache cache) : IDevTenantSe
         if (tenantId is null)
         {
             await cache.RemoveAsync(Key, ct);
+            logger.LogDebug("DevTenantSelection.SetSelectedTenantIdAsync: Cleared tenant from cache (key={Key})", Key);
             return;
         }
 
         var bytes = Encoding.UTF8.GetBytes(tenantId.Value.ToString());
         await cache.SetAsync(Key, bytes, ct);
+        logger.LogDebug("DevTenantSelection.SetSelectedTenantIdAsync: Stored tenant {TenantId} in cache (key={Key})", 
+            tenantId.Value, Key);
     }
 }

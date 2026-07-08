@@ -2,7 +2,7 @@
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Core.DTOs
-@using SchoolCollab.Core.Tenancy
+@using Microsoft.AspNetCore.Components.Authorization
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Components
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -11,7 +11,7 @@
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
-@inject ITenantProvider TenantProvider
+@inject AuthenticationStateProvider AuthenticationStateProvider
 @inject ILogger<GradeLevelWizard> Logger
 @implements IDisposable
 
@@ -60,7 +60,7 @@
                                                           Title="Override the default name for this tenant"
                                                           OnClick="OpenOverrideDialogAsync"
                                                           Disabled="@(!_codedValueIdNullable.HasValue)">
-                                                Override name
+                                                Override Name
                                             </FluentButton>
                                         }
                                         <FluentButton Appearance="Appearance.Neutral"
@@ -152,21 +152,6 @@
                                                 {
                                                     <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
                                                 }
-                                                @if (IsRealTenant)
-                                                {
-                                                    if (_lastAddedSubjectCodedValue.IsOverridden)
-                                                    {
-                                                        <FluentAnchor Href="#" OnClick="OpenSubjectOverrideDialogAsync" class="grade-confirm-reset">Reset to default</FluentAnchor>
-                                                    }
-                                                    else
-                                                    {
-                                                        <FluentButton Appearance="Appearance.Lightweight"
-                                                                      Title="Override the default name for this tenant"
-                                                                      OnClick="OpenSubjectOverrideDialogAsync">
-                                                            Override name
-                                                        </FluentButton>
-                                                    }
-                                                }
                                             </FluentStack>
                                         </FluentCard>
                                     }
@@ -194,8 +179,26 @@
                                         {
                                             <li>
                                                 <span>@s.Name</span>
-                                                <FluentButton Appearance="Appearance.Lightweight"
-                                                              OnClick="@(() => RemoveSubject(s))">Remove</FluentButton>
+                                                @if (s.IsOverridden)
+                                                {
+                                                    <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
+                                                }
+                                                <span class="assigned-subject-actions">
+                                                    @if (IsRealTenant)
+                                                    {
+                                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                                      Title="Override the default name for this tenant"
+                                                                      OnClick="@(() => OverrideSubjectAsync(s))"
+                                                                      Disabled="@(_overridingSubjectId == s.Id)">
+                                                            Override Name
+                                                        </FluentButton>
+                                                    }
+                                                    <FluentButton Appearance="Appearance.Lightweight"
+                                                                  OnClick="@(() => RemoveSubject(s))"
+                                                                  Disabled="@(_overridingSubjectId == s.Id)">
+                                                        Remove
+                                                    </FluentButton>
+                                                </span>
                                             </li>
                                         }
                                     </ul>
@@ -409,10 +412,10 @@
     // is no per-tenant concept for the UI to manage. Hide the override
     // button and reset link in that case.
     //
-    // Stored as a field (not a computed property) so it can be refreshed
-    // explicitly in OnAfterRender — Blazor's diffing won't re-evaluate a
-    // property whose backing store (the singleton TenantProvider's
-    // AsyncLocal) changes without a [Parameter] change or a state event.
+    // The value is read from the authenticated user's tenant_id claim in
+    // OnInitializedAsync (via AuthenticationStateProvider) because the
+    // shared ITenantProvider is backed by AsyncLocal and is not reliably
+    // available inside a Blazor Server circuit.
     private bool _isRealTenant;
 
     private bool IsRealTenant => _isRealTenant;
@@ -429,6 +432,10 @@
     // picker to confirm the add. Cleared when the user picks a different one.
     private CodedValueDto? _lastAddedSubjectCodedValue;
 
+    // Tracks which subject row is currently opening the override dialog so
+    // the row actions can be disabled and the dialog is not reopened.
+    private Guid? _overridingSubjectId;
+
     private List<SchoolCollab.Students.Admin.Services.SubjectDto> _assignedSubjects = new();
     private SchoolCollab.Students.Core.DTOs.StudentDto[] _availableStudents = [];
     private List<SchoolCollab.Students.Core.DTOs.StudentDto> _assignedStudents = new();
@@ -438,9 +445,12 @@
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
 
-        // Snapshot the tenant on init so the override buttons know whether
-        // a real tenant is in scope.
-        _isRealTenant = !TenantProvider.GetTenantContext().IsDefault;
+        // Resolve the tenant from the auth state. The ITenantProvider singleton
+        // uses AsyncLocal and is not reliably available in a Blazor Server
+        // circuit, so the override actions must read tenant_id directly from
+        // the authenticated user's claims.
+        AuthenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        await RefreshTenantFromAuthStateAsync();
 
         // Derive the current period once on load (§6.3) — used by step 2.
         await DeriveCurrentPeriodAsync(ct);
@@ -450,23 +460,35 @@
         await LoadStudentsAsync(ct);
     }
 
-    protected override void OnAfterRender(bool firstRender)
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
     {
-        // The TenantProvider is a singleton backed by AsyncLocal<TenantContext>
-        // and Blazor's diffing won't re-evaluate our override visibility
-        // when the underlying context changes (no [Parameter] changes). On
-        // every render, re-read the tenant and request a re-render if it
-        // differs from what we last saw — this catches tenant switches that
-        // happen while the wizard is open (the dev tenant switcher uses
-        // Nav.NavigateTo(forceLoad: true) which tears down the circuit, so
-        // OnInitialized re-snapshots the value; this is a safety net for
-        // any future in-place tenant switch).
-        var current = !TenantProvider.GetTenantContext().IsDefault;
-        if (current != _isRealTenant)
+        if (_disposed) return;
+
+        try
         {
-            _isRealTenant = current;
-            StateHasChanged();
+            var authState = await task;
+            var tenantId = authState.User.FindFirst("tenant_id")?.Value;
+            var current = Guid.TryParse(tenantId, out var id) && id != Guid.Empty;
+            if (current != _isRealTenant)
+            {
+                _isRealTenant = current;
+                await InvokeAsync(StateHasChanged);
+            }
         }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to handle authentication state change in GradeLevelWizard");
+        }
+    }
+
+    private async Task RefreshTenantFromAuthStateAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var tenantIdClaim = authState.User.FindFirst("tenant_id")?.Value;
+        _isRealTenant = Guid.TryParse(tenantIdClaim, out var tenantId) && tenantId != Guid.Empty;
+
+        Logger.LogDebug("GradeLevelWizard.RefreshTenantFromAuthStateAsync: tenant_id={TenantIdClaim}, _isRealTenant={IsRealTenant}",
+            tenantIdClaim ?? "null", _isRealTenant);
     }
 
     private async Task DeriveCurrentPeriodAsync(CancellationToken ct)
@@ -563,7 +585,7 @@
                 cv.Id, cv.Code, cv.Name, cv.Description, cv.ParentId, cv.ParentCode,
                 cv.IsDisabled, cv.DisplayOrder, cv.CreatedAt, cv.UpdatedAt,
                 cv.Attributes, cv.AttributeDefinitions, cv.ChildrenCount, cv.IsDeleted, cv.DeletedAt,
-                cv.IsOverridden),
+                cv.IsOverridden, cv.DefaultName),
             HasOverride: cv.IsOverridden);
 
         var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
@@ -589,14 +611,57 @@
     }
 
     /// <summary>
-    /// Opens the CodedValueDialog in Override mode for the most recently
-    /// added subject. Mirrors <see cref="OpenOverrideDialogAsync"/> but
-    /// targets the subject dropdown / last-added cached value.
+    /// Opens the CodedValueDialog in Override mode for a specific subject
+    /// coded value and updates the matching row in the assigned-subjects list.
     /// </summary>
-    private async Task OpenSubjectOverrideDialogAsync()
+    private async Task OverrideSubjectAsync(SchoolCollab.Students.Admin.Services.SubjectDto subject)
     {
-        if (_lastAddedSubjectCodedValue is null) return;
+        if (_overridingSubjectId == subject.Id) return;
+        _overridingSubjectId = subject.Id;
 
+        try
+        {
+            var updatedCv = await OpenSubjectOverrideDialogCoreAsync(subject.CodedValueId);
+            if (updatedCv is not null)
+            {
+                // Keep the last-added chip in sync if it points to the same
+                // coded value that was just overridden from the list.
+                if (_lastAddedSubjectCodedValue?.Id == updatedCv.Id)
+                {
+                    _lastAddedSubjectCodedValue = updatedCv;
+                }
+
+                var index = _assignedSubjects.FindIndex(s => s.Id == subject.Id);
+                if (index >= 0)
+                {
+                    _assignedSubjects[index] = _assignedSubjects[index] with
+                    {
+                        Name = updatedCv.Name,
+                        IsOverridden = updatedCv.IsOverridden
+                    };
+                }
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to override subject {SubjectId}", subject.Id);
+            _step1Error = ex.Message;
+        }
+        finally
+        {
+            _overridingSubjectId = null;
+        }
+    }
+
+    /// <summary>
+    /// Shared core that opens the subject override dialog for a given coded
+    /// value id and returns the freshly resolved coded value after a successful
+    /// override/reset. Returns null if the dialog was cancelled or errored.
+    /// </summary>
+    private async Task<CodedValueDto?> OpenSubjectOverrideDialogCoreAsync(Guid codedValueId)
+    {
         // Refresh the dropdown first so the dialog sees the current resolved
         // name (e.g. after a prior override) rather than a stale snapshot.
         if (_subjectCodedValueDropdown is not null)
@@ -604,8 +669,8 @@
             await _subjectCodedValueDropdown.RefreshAsync();
         }
 
-        var cv = await CodedValuesApi.GetByIdAsync(_lastAddedSubjectCodedValue.Id);
-        if (cv is null) return;
+        var cv = await CodedValuesApi.GetByIdAsync(codedValueId);
+        if (cv is null) return null;
 
         var data = new CodedValueDialogData(
             Mode: "Override",
@@ -614,7 +679,7 @@
                 cv.Id, cv.Code, cv.Name, cv.Description, cv.ParentId, cv.ParentCode,
                 cv.IsDisabled, cv.DisplayOrder, cv.CreatedAt, cv.UpdatedAt,
                 cv.Attributes, cv.AttributeDefinitions, cv.ChildrenCount, cv.IsDeleted, cv.DeletedAt,
-                cv.IsOverridden),
+                cv.IsOverridden, cv.DefaultName),
             HasOverride: cv.IsOverridden);
 
         var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
@@ -635,9 +700,12 @@
             {
                 await _subjectCodedValueDropdown.RefreshAsync();
             }
-            // Update the chip to reflect the new resolved name + override state.
-            _lastAddedSubjectCodedValue = await CodedValuesApi.GetByIdAsync(_lastAddedSubjectCodedValue.Id);
+            // Return the freshly resolved coded value so callers can update
+            // their local UI (chip or assigned-subjects row).
+            return await CodedValuesApi.GetByIdAsync(codedValueId);
         }
+
+        return null;
     }
 
     private async Task OpenCreateDialogAsync()
@@ -704,7 +772,7 @@
             var subject = await Api.GetOrCreateSubjectAsync(new CreateSubjectRequest(
                 cv.Id, cv.Code, cv.Name, cv.DisplayOrder), ct);
 
-            _assignedSubjects.Add(subject);
+            _assignedSubjects.Add(subject with { IsOverridden = cv.IsOverridden });
             _lastAddedSubjectCodedValue = cv;
         }
         catch (OperationCanceledException) { }
@@ -873,6 +941,7 @@
     public void Dispose()
     {
         _disposed = true;
+        AuthenticationStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;

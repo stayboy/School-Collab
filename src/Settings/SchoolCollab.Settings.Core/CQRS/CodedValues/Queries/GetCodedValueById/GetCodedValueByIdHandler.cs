@@ -67,6 +67,7 @@ public sealed class GetCodedValueByIdHandler(
             0,
             cv.IsDeleted,
             cv.DeletedAt,
-            overrideVal is not null);
+            overrideVal is not null,
+            cv.Name); // DefaultName is the global name (before tenant override)
     }
 }

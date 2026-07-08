@@ -49,6 +49,7 @@ public sealed record SubjectDto(
     string Code,
     string Name,
     int DisplayOrder,
+    bool IsOverridden,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 

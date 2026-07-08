@@ -32,8 +32,8 @@
         <EditForm Model="_overrideModel" OnValidSubmit="OverrideAsync">
             <DataAnnotationsValidator />
 
-            <p class="hint">Overriding: <strong>@_codedValue?.Name</strong></p>
-            <FluentTextField @bind-Value="_overrideModel.Name" Label="Override Name" Placeholder="Enter custom name for your tenant" class="full-width mb-3" />
+            <p class="hint">Overriding: <strong>@GetDefaultName()</strong></p>
+            <FluentTextField @bind-Value="_overrideModel.Name" Label="Override Name" Placeholder="@GetPlaceholder()" class="full-width mb-3" />
             <FluentTextArea @bind-Value="_overrideModel.Description" Label="Description (optional)" Rows="2" class="full-width mb-3" />
 
             @if (_hasOverride)
@@ -60,11 +60,16 @@
 </div>
 
 <style>
-    .dialog-container { padding: 16px; max-width: 400px; }
-    .full-width { width: 100%; }
+    .dialog-container {
+        padding: 16px;
+        box-sizing: border-box;
+        width: 100%;
+        overflow-wrap: break-word;
+    }
+    .full-width { width: 100%; min-width: 0; box-sizing: border-box; }
     .mb-3 { margin-bottom: 12px; }
-    .button-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
-    .hint { color: var(--neutral-foreground-hint); margin-bottom: 12px; }
+    .button-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+    .hint { color: var(--neutral-foreground-hint); margin-bottom: 12px; word-wrap: break-word; }
 </style>
 
 @code {
@@ -86,12 +91,39 @@
     {
         if (Mode == "Override" && _codedValue is not null)
         {
-            _overrideModel.Name = _codedValue.Name;
-            _overrideModel.Description = _codedValue.Description;
-            // If there's an overridden name, it will be in the Name field (resolved by server)
-            // We track if this was an override by checking if we're in Override mode
+            // Start the input field empty so the user can see they're entering
+            // a new override. The placeholder shows the default (non-tenant) name
+            // as a hint. The "Overriding: ..." label above also shows the default
+            // name, not the currently-resolved (possibly overridden) name.
+            _overrideModel.Name = string.Empty;
+            _overrideModel.Description = string.Empty;
+            // Track if this coded value already has a tenant override so we can
+            // show the "Reset to default" button.
             _hasOverride = Content.HasOverride;
         }
+    }
+
+    /// <summary>
+    /// Returns the default (non-tenant) name of the coded value being overridden.
+    /// Used in the "Overriding: ..." hint and as the input field placeholder.
+    /// Falls back to the resolved name if DefaultName is not populated.
+    /// </summary>
+    private string GetDefaultName()
+    {
+        if (_codedValue is null) return string.Empty;
+        return _codedValue.DefaultName ?? _codedValue.Name;
+    }
+
+    /// <summary>
+    /// Returns the placeholder text for the override name input field.
+    /// Shows the default name so the user knows what they're overriding.
+    /// </summary>
+    private string GetPlaceholder()
+    {
+        var defaultName = GetDefaultName();
+        return string.IsNullOrEmpty(defaultName)
+            ? "Enter custom name for your tenant"
+            : $"e.g. {defaultName}";
     }
 
     private async Task CreateAsync()

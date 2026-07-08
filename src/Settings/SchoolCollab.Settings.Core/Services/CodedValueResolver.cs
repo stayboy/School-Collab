@@ -53,6 +53,7 @@ public sealed class CodedValueResolver(ICodedValueRepository repository) : ICode
             0,
             cv.IsDeleted,
             cv.DeletedAt,
-            isOverridden);
+            isOverridden,
+            cv.Name); // DefaultName is the global name (before tenant override)
     }
 }
