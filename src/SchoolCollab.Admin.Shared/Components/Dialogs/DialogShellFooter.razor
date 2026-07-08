@@ -1,0 +1,70 @@
+@* Shared footer for every DialogShellBase-derived dialog. Renders the
+   inline error message bar (when set) and the Cancel / Submit button
+   row, plus the shared CSS.
+
+   IMPORTANT: place this component INSIDE the derived dialog's
+   <EditForm OnValidSubmit="HandleSubmitAsync"> ... </EditForm>. The
+   Submit button below is Type="ButtonType.Submit" with no @onclick, so
+   clicking it submits the enclosing EditForm and fires its
+   OnValidSubmit (which calls DialogShellBase.HandleSubmitAsync →
+   SubmitAsync). The Cancel button uses OnClick (it is not a Submit
+   button) so it does not trigger form validation.
+
+   Parameters:
+     Saving      — disables both buttons and swaps the submit label for
+                   "Saving..." while the submit is in flight.
+     Error       — when non-empty, renders a red FluentMessageBar above
+                   the button row.
+     SubmitText  — the submit button label (default "Save").
+     OnCancel    — invoked when the Cancel button is clicked (typically
+                   bound to DialogShellBase.HandleCancelAsync). *@
+
+@if (!string.IsNullOrEmpty(Error))
+{
+    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@Error</FluentMessageBar>
+}
+
+<div class="button-row">
+    <FluentButton Appearance="Appearance.Outline"
+                  OnClick="OnCancel"
+                  Disabled="@Saving">
+        Cancel
+    </FluentButton>
+    <FluentButton Type="ButtonType.Submit"
+                  Appearance="Appearance.Accent"
+                  Disabled="@Saving">
+        @(Saving ? SavingText : SubmitText)
+    </FluentButton>
+</div>
+
+<style>
+    /* Shared with derived dialogs. Inline style block in a .razor is
+       global, so these rules are available to the host dialog's markup
+       too. Duplicated .mb-3 definitions across components are harmless
+       (identical rules). */
+    .button-row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 16px;
+        flex-wrap: wrap;
+    }
+    .mb-3 { margin-bottom: 12px; }
+</style>
+
+@code {
+    /// <summary>True while the submit is in flight; disables both buttons.</summary>
+    [Parameter] public bool Saving { get; set; }
+
+    /// <summary>When non-empty, rendered as a red message bar above the buttons.</summary>
+    [Parameter] public string? Error { get; set; }
+
+    /// <summary>Submit button label. Default: "Save".</summary>
+    [Parameter] public string SubmitText { get; set; } = "Save";
+
+    /// <summary>Label shown while <paramref name="Saving"/> is true. Default: "Saving...".</summary>
+    [Parameter] public string SavingText { get; set; } = "Saving...";
+
+    /// <summary>Invoked when the Cancel button is clicked.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+}

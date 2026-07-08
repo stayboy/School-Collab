@@ -578,29 +578,11 @@
         var cv = await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
         if (cv is null) return;
 
-        var data = new CodedValueDialogData(
-            Mode: "Override",
-            ParentId: cv.ParentId,
-            CodedValue: new CodedValueDto(
-                cv.Id, cv.Code, cv.Name, cv.Description, cv.ParentId, cv.ParentCode,
-                cv.IsDisabled, cv.DisplayOrder, cv.CreatedAt, cv.UpdatedAt,
-                cv.Attributes, cv.AttributeDefinitions, cv.ChildrenCount, cv.IsDeleted, cv.DeletedAt,
-                cv.IsOverridden, cv.DefaultName),
-            HasOverride: cv.IsOverridden);
+        var result = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
+            CodedValueFormModel.ForOverride(cv, cv.IsOverridden),
+            title: "Override Grade Name");
 
-        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
-            data,
-            new DialogParameters
-            {
-                Title = "Override Grade Name",
-                PrimaryAction = null,
-                SecondaryAction = null,
-                Width = "420px",
-                PreventDismissOnOverlayClick = true,
-            });
-
-        var result = await dialog.Result;
-        if (!result.Cancelled && result.Data is CodedValueDialogResult)
+        if (result is not null)
         {
             if (_codedValueDropdown is not null)
             {
@@ -672,29 +654,11 @@
         var cv = await CodedValuesApi.GetByIdAsync(codedValueId);
         if (cv is null) return null;
 
-        var data = new CodedValueDialogData(
-            Mode: "Override",
-            ParentId: cv.ParentId,
-            CodedValue: new CodedValueDto(
-                cv.Id, cv.Code, cv.Name, cv.Description, cv.ParentId, cv.ParentCode,
-                cv.IsDisabled, cv.DisplayOrder, cv.CreatedAt, cv.UpdatedAt,
-                cv.Attributes, cv.AttributeDefinitions, cv.ChildrenCount, cv.IsDeleted, cv.DeletedAt,
-                cv.IsOverridden, cv.DefaultName),
-            HasOverride: cv.IsOverridden);
+        var updated = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
+            CodedValueFormModel.ForOverride(cv, cv.IsOverridden),
+            title: "Override Subject Name");
 
-        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
-            data,
-            new DialogParameters
-            {
-                Title = "Override Subject Name",
-                PrimaryAction = null,
-                SecondaryAction = null,
-                Width = "420px",
-                PreventDismissOnOverlayClick = true,
-            });
-
-        var result = await dialog.Result;
-        if (!result.Cancelled && result.Data is CodedValueDialogResult)
+        if (updated is not null)
         {
             if (_subjectCodedValueDropdown is not null)
             {
@@ -712,31 +676,18 @@
     {
         var parent = await CodedValuesApi.GetByCodeAsync(CodedValueParent.Grades.ToCode());
 
-        var data = new CodedValueDialogData(
-            Mode: "Create",
-            ParentId: parent?.Id,
-            CodedValue: null);
+        var cvResult = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
+            CodedValueFormModel.ForCreate(parent?.Id),
+            title: "Create Grade Coded Value");
 
-        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
-            data,
-            new DialogParameters
-            {
-                Title = "Create Grade Coded Value",
-                PrimaryAction = null,
-                SecondaryAction = null,
-                Width = "420px",
-                PreventDismissOnOverlayClick = true,
-            });
-
-        var result = await dialog.Result;
-        if (!result.Cancelled && result.Data is CodedValueDialogResult cvResult)
+        if (cvResult is not null)
         {
             if (_codedValueDropdown is not null)
             {
                 await _codedValueDropdown.RefreshAsync();
             }
-            _codedValueIdNullable = cvResult.CodedValue.Id;
-            _selectedCodedValue = cvResult.CodedValue;
+            _codedValueIdNullable = cvResult.Id;
+            _selectedCodedValue = cvResult;
         }
     }
 
@@ -808,24 +759,11 @@
     {
         var parent = await CodedValuesApi.GetByCodeAsync(CodedValueParent.Subjects.ToCode());
 
-        var data = new CodedValueDialogData(
-            Mode: "Create",
-            ParentId: parent?.Id,
-            CodedValue: null);
+        var cvResult = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
+            CodedValueFormModel.ForCreate(parent?.Id),
+            title: "Create Subject Coded Value");
 
-        var dialog = await DialogService.ShowDialogAsync<CodedValueDialog, CodedValueDialogData>(
-            data,
-            new DialogParameters
-            {
-                Title = "Create Subject Coded Value",
-                PrimaryAction = null,
-                SecondaryAction = null,
-                Width = "420px",
-                PreventDismissOnOverlayClick = true,
-            });
-
-        var result = await dialog.Result;
-        if (!result.Cancelled && result.Data is CodedValueDialogResult cvResult)
+        if (cvResult is not null)
         {
             // Refresh the subject dropdown so the new value is visible, then
             // select it so the user sees the inline confirmation.
@@ -833,8 +771,8 @@
             {
                 await _subjectCodedValueDropdown.RefreshAsync();
             }
-            _selectedSubjectCodedValueId = cvResult.CodedValue.Id;
-            _selectedSubjectCodedValue = cvResult.CodedValue;
+            _selectedSubjectCodedValueId = cvResult.Id;
+            _selectedSubjectCodedValue = cvResult;
         }
     }
 

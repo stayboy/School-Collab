@@ -1,0 +1,33 @@
+@* Fixture for the auto-close acceptance criteria. Self-closes on first
+   render to simulate either a cancel (AC-4/AC-5) or a foreign close where
+   the result data is NOT a DialogShellResult<T> (AC-7). SubmitAsync is
+   never invoked for these cases so it throws NIE if reached. *@
+@inherits DialogShellBase<TestShellAutoModel, TestShellResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="dialog-container">
+    @* Minimal body — the dialog closes itself before any interaction. *@
+    <p>auto-close fixture</p>
+</div>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (Model.Cancel)
+        {
+            await Dialog.CancelAsync();
+        }
+        else
+        {
+            // Close with a payload that is NOT a DialogShellResult<TestShellResult>,
+            // so ShowShellDialogAsync's `result.Data is DialogShellResult<TResult>`
+            // check fails and it returns null (AC-7).
+            await Dialog.CloseAsync("foreign");
+        }
+    }
+
+    protected override Task<TestShellResult?> SubmitAsync(TestShellAutoModel model)
+        => throw new NotImplementedException("TestShellDialogAuto never submits.");
+}

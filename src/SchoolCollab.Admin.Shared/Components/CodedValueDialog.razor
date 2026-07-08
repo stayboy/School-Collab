@@ -1,60 +1,64 @@
-@using Microsoft.FluentUI.AspNetCore.Components
+@* Coded value Create / Override dialog. Consolidated onto DialogShellBase:
+   the saving/error/Cancel/Close boilerplate and the Cancel/Save footer live
+   in the base + DialogShellFooter; this component contributes only the form
+   fields (per Mode) and the SubmitAsync side effect.
+
+   The "Reset to default" button in Override mode is a non-shell secondary
+   action — it is rendered inside the body and closes the dialog directly
+   with a DialogShellResult<CodedValueDto> so the caller's
+   ShowShellDialogAsync unwraps it uniformly. *@
+@inherits DialogShellBase<CodedValueFormModel, CodedValueDto>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Services
-@implements IDialogContentComponent<CodedValueDialogData>
+@using Microsoft.FluentUI.AspNetCore.Components
 @inject CodedValuesApiClient CodedValuesApi
 
 <div class="dialog-container">
     @if (Mode == "Create")
     {
-        <EditForm Model="_createModel" OnValidSubmit="CreateAsync">
+        <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
             <DataAnnotationsValidator />
 
-            <FluentTextField @bind-Value="_createModel.Code" Label="Code *" Placeholder="e.g. GRADE9" Required class="full-width mb-3" />
-            <FluentTextField @bind-Value="_createModel.Name" Label="Name *" Placeholder="e.g. Grade 9" Required class="full-width mb-3" />
-            <FluentTextField @bind-Value="_createModel.Description" Label="Description" Rows="2" class="full-width mb-3" />
-            <FluentNumberField @bind-Value="_createModel.DisplayOrder" Label="Display Order" class="full-width mb-3" />
+            <FluentTextField @bind-Value="Model.Code" Label="Code *" Placeholder="e.g. GRADE9" Required class="full-width mb-3" />
+            <FluentTextField @bind-Value="Model.Name" Label="Name *" Placeholder="e.g. Grade 9" Required class="full-width mb-3" />
+            <FluentTextField @bind-Value="Model.Description" Label="Description" Rows="2" class="full-width mb-3" />
+            <FluentNumberField @bind-Value="Model.DisplayOrder" Label="Display Order" class="full-width mb-3" />
 
-            @if (!string.IsNullOrEmpty(_error))
-            {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
-            }
-
-            <div class="button-row">
-                <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-                <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
-                    @(_saving ? "Creating..." : "Create")
-                </FluentButton>
-            </div>
+            <DialogShellFooter Saving="@Saving"
+                               Error="@Error"
+                               SubmitText="@SubmitText"
+                               SavingText="@SavingText"
+                               OnCancel="HandleCancelAsync" />
         </EditForm>
     }
     else if (Mode == "Override")
     {
-        <EditForm Model="_overrideModel" OnValidSubmit="OverrideAsync">
+        <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
             <DataAnnotationsValidator />
 
             <p class="hint">Overriding: <strong>@GetDefaultName()</strong></p>
-            <FluentTextField @bind-Value="_overrideModel.Name" Label="Override Name" Placeholder="@GetPlaceholder()" class="full-width mb-3" />
-            <FluentTextArea @bind-Value="_overrideModel.Description" Label="Description (optional)" Rows="2" class="full-width mb-3" />
+            <FluentTextField @bind-Value="Model.Name" Label="Override Name" Placeholder="@GetPlaceholder()" class="full-width mb-3" />
+            <FluentTextArea @bind-Value="Model.Description" Label="Description (optional)" Rows="2" class="full-width mb-3" />
 
             @if (_hasOverride)
             {
-                <FluentButton Appearance="Appearance.Neutral" OnClick="RemoveOverrideAsync" Disabled="@_removing" class="mb-3">
-                    @if (_removing) { <FluentProgressRing Style="width: 16px; height: 16px;" /> }
-                    else { <span>Reset to default</span> }
+                <FluentButton Appearance="Appearance.Neutral" OnClick="RemoveOverrideAndCloseAsync" Disabled="@_removing" class="mb-3">
+                    @if (_removing)
+                    {
+                        <FluentProgressRing Style="width: 16px; height: 16px;" />
+                    }
+                    else
+                    {
+                        <span>Reset to default</span>
+                    }
                 </FluentButton>
             }
 
-            @if (!string.IsNullOrEmpty(_error))
-            {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
-            }
-
-            <div class="button-row">
-                <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-                <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
-                    @(_saving ? "Saving..." : "Save Override")
-                </FluentButton>
-            </div>
+            <DialogShellFooter Saving="@Saving"
+                               Error="@Error"
+                               SubmitText="@SubmitText"
+                               SavingText="@SavingText"
+                               OnCancel="HandleCancelAsync" />
         </EditForm>
     }
 </div>
@@ -68,160 +72,109 @@
     }
     .full-width { width: 100%; min-width: 0; box-sizing: border-box; }
     .mb-3 { margin-bottom: 12px; }
-    .button-row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
     .hint { color: var(--neutral-foreground-hint); margin-bottom: 12px; word-wrap: break-word; }
 </style>
 
 @code {
-    [Parameter] public CodedValueDialogData Content { get; set; } = default!;
-    [CascadingParameter] public FluentDialog Dialog { get; set; } = default!;
+    private string Mode => Model.Mode;
+    private CodedValueDto? _codedValue => Model.CodedValue;
 
-    private string Mode => Content.Mode;
-    private CodedValueDto? _codedValue => Content.CodedValue;
-
-    private bool _saving;
     private bool _removing;
     private bool _hasOverride;
-    private string? _error;
 
-    private readonly CreateModel _createModel = new();
-    private readonly OverrideModel _overrideModel = new();
+    protected override string SubmitText => Mode == "Create" ? "Create" : "Save Override";
 
-    protected override void OnInitialized()
+    /// <summary>Preserves the original Create-mode "Creating..." in-flight label (the shared footer defaults to "Saving...").</summary>
+    protected override string SavingText => Mode == "Create" ? "Creating..." : "Saving...";
+
+    protected override void OnModelInitialized(CodedValueFormModel model)
     {
-        if (Mode == "Override" && _codedValue is not null)
-        {
-            // Start the input field empty so the user can see they're entering
-            // a new override. The placeholder shows the default (non-tenant) name
-            // as a hint. The "Overriding: ..." label above also shows the default
-            // name, not the currently-resolved (possibly overridden) name.
-            _overrideModel.Name = string.Empty;
-            _overrideModel.Description = string.Empty;
-            // Track if this coded value already has a tenant override so we can
-            // show the "Reset to default" button.
-            _hasOverride = Content.HasOverride;
-        }
+        // Name / Description are left at their default (null) so the Override
+        // input shows the default-name placeholder rather than the current
+        // resolved value — same UX as the pre-consolidation dialog. The
+        // "Overriding: ..." hint above shows the default name explicitly.
+        _hasOverride = model.HasOverride;
     }
 
-    /// <summary>
-    /// Returns the default (non-tenant) name of the coded value being overridden.
-    /// Used in the "Overriding: ..." hint and as the input field placeholder.
-    /// Falls back to the resolved name if DefaultName is not populated.
-    /// </summary>
-    private string GetDefaultName()
+    protected override async Task<CodedValueDto?> SubmitAsync(CodedValueFormModel model)
     {
-        if (_codedValue is null) return string.Empty;
-        return _codedValue.DefaultName ?? _codedValue.Name;
+        if (model.Mode == "Create")
+        {
+            return await CreateAsync(model);
+        }
+        return await OverrideAsync(model);
     }
 
-    /// <summary>
-    /// Returns the placeholder text for the override name input field.
-    /// Shows the default name so the user knows what they're overriding.
-    /// </summary>
-    private string GetPlaceholder()
+    private async Task<CodedValueDto?> CreateAsync(CodedValueFormModel model)
     {
-        var defaultName = GetDefaultName();
-        return string.IsNullOrEmpty(defaultName)
-            ? "Enter custom name for your tenant"
-            : $"e.g. {defaultName}";
+        if (string.IsNullOrWhiteSpace(model.Code) || string.IsNullOrWhiteSpace(model.Name))
+        {
+            Error = "Code and Name are required.";
+            return null;
+        }
+
+        await CodedValuesApi.CreateAsync(new CreateCodedValueRequest(
+            model.Code.Trim().ToUpperInvariant(),
+            model.Name.Trim(),
+            model.Description,
+            model.ParentId,
+            model.DisplayOrder ?? 0));
+
+        var created = await CodedValuesApi.GetByCodeAsync(model.Code.Trim().ToUpperInvariant(), model.ParentId);
+        if (created is null)
+        {
+            Error = "Created but could not fetch the new coded value.";
+            return null;
+        }
+
+        return created;
     }
 
-    private async Task CreateAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_createModel.Code) || string.IsNullOrWhiteSpace(_createModel.Name))
-        {
-            _error = "Code and Name are required.";
-            return;
-        }
-
-        _saving = true;
-        _error = null;
-
-        try
-        {
-            // Create the coded value
-            await CodedValuesApi.CreateAsync(new CreateCodedValueRequest(
-                _createModel.Code.Trim().ToUpperInvariant(),
-                _createModel.Name.Trim(),
-                _createModel.Description,
-                Content.ParentId,
-                _createModel.DisplayOrder ?? 0));
-
-            // Fetch the created coded value by code to return it
-            var created = await CodedValuesApi.GetByCodeAsync(_createModel.Code.Trim().ToUpperInvariant(), Content.ParentId);
-            if (created is null)
-            {
-                _error = "Created but could not fetch the new coded value.";
-                return;
-            }
-
-            await Dialog.CloseAsync(new CodedValueDialogResult(created));
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
-            _saving = false;
-        }
-    }
-
-    private async Task OverrideAsync()
+    private async Task<CodedValueDto?> OverrideAsync(CodedValueFormModel model)
     {
         if (_codedValue is null)
         {
-            _error = "No coded value selected.";
-            return;
+            Error = "No coded value selected.";
+            return null;
         }
 
-        _saving = true;
-        _error = null;
+        var result = await CodedValuesApi.UpsertOverrideAsync(
+            _codedValue.Id,
+            string.IsNullOrWhiteSpace(model.Name) ? null : model.Name.Trim(),
+            string.IsNullOrWhiteSpace(model.Description) ? null : model.Description);
 
-        try
-        {
-            var result = await CodedValuesApi.UpsertOverrideAsync(
-                _codedValue.Id,
-                string.IsNullOrWhiteSpace(_overrideModel.Name) ? null : _overrideModel.Name.Trim(),
-                string.IsNullOrWhiteSpace(_overrideModel.Description) ? null : _overrideModel.Description);
-
-            _hasOverride = true;
-            await Dialog.CloseAsync(new CodedValueDialogResult(result));
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
-            _saving = false;
-        }
+        _hasOverride = true;
+        return result;
     }
 
-    private async Task RemoveOverrideAsync()
+    /// <summary>
+    /// Non-shell secondary action: removes the tenant override and closes the
+    /// dialog with the freshly re-fetched (default) coded value, wrapped in a
+    /// <see cref="DialogShellResult{TResult}"/> so the caller's
+    /// <c>ShowShellDialogAsync</c> unwraps it the same as the submit path.
+    /// </summary>
+    private async Task RemoveOverrideAndCloseAsync()
     {
-        if (_codedValue is null) return;
+        if (_codedValue is null || _removing) return;
 
         _removing = true;
-        _error = null;
+        Error = null;
 
         try
         {
             await CodedValuesApi.RemoveOverrideAsync(_codedValue.Id);
             _hasOverride = false;
-            
-            // Re-fetch to get the original name
+
+            // Re-fetch to get the original (non-overridden) name.
             var original = await CodedValuesApi.GetByIdAsync(_codedValue.Id);
             if (original is not null)
             {
-                _overrideModel.Name = original.Name;
-                _overrideModel.Description = original.Description;
-                await Dialog.CloseAsync(new CodedValueDialogResult(original));
+                await Dialog.CloseAsync(new DialogShellResult<CodedValueDto>(original));
             }
         }
         catch (Exception ex)
         {
-            _error = ex.Message;
+            Error = ex.Message;
         }
         finally
         {
@@ -229,21 +182,18 @@
         }
     }
 
-    private async Task CancelAsync() => await Dialog.CancelAsync();
-
-    private sealed class CreateModel
+    /// <summary>Default (non-tenant) name, for the "Overriding: ..." hint and the input placeholder.</summary>
+    private string GetDefaultName()
     {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Code { get; set; }
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Name { get; set; }
-        public string? Description { get; set; }
-        public int? DisplayOrder { get; set; }
+        if (_codedValue is null) return string.Empty;
+        return _codedValue.DefaultName ?? _codedValue.Name;
     }
 
-    private sealed class OverrideModel
+    private string GetPlaceholder()
     {
-        public string? Name { get; set; }
-        public string? Description { get; set; }
+        var defaultName = GetDefaultName();
+        return string.IsNullOrEmpty(defaultName)
+            ? "Enter custom name for your tenant"
+            : $"e.g. {defaultName}";
     }
 }
