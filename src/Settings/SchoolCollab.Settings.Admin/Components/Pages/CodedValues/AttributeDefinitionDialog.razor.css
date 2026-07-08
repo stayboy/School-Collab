@@ -30,11 +30,3 @@
 .form-field {
     flex: 1;
 }
-
-/* Button row */
-.button-row {
-    display: flex;
-    gap: 8px;
-    margin-top: 1.5rem;
-    justify-content: flex-end;
-}

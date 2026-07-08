@@ -1,21 +1,28 @@
+@* Add / Edit attribute-definition dialog. Consolidated onto DialogShellBase:
+   the saving/error/Cancel/Close boilerplate and the Cancel/Save footer live
+   in the base + DialogShellFooter; this component contributes only the form
+   fields and the SubmitAsync side effect (which is purely local — it builds
+   an AttributeDefinitionResult from the bound model + the two FluentSelect
+   selections; the caller persists it). *@
+@inherits DialogShellBase<AttributeDefinitionFormModel, AttributeDefinitionResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
-@implements IDialogContentComponent<AttributeDefinitionDialogData>
 
 <div class="dialog-container">
-    <EditForm Model="_model" OnValidSubmit="SaveAsync">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
         <ul class="form-list">
             <li class="form-row">
                 <label class="form-label form-label-required" for="def-key">Key *</label>
-                <FluentTextField id="def-key" @bind-Value="_model.Key"
+                <FluentTextField id="def-key" @bind-Value="Model.Key"
                                  Placeholder="e.g. color"
                                  Required
                                  class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label form-label-required" for="def-displayname">Display Name *</label>
-                <FluentTextField id="def-displayname" @bind-Value="_model.DisplayName"
+                <FluentTextField id="def-displayname" @bind-Value="Model.DisplayName"
                                  Placeholder="e.g. Color"
                                  class="form-field" />
             </li>
@@ -40,52 +47,38 @@
             </li>
             <li class="form-row">
                 <label class="form-label">Required</label>
-                <FluentCheckbox @bind-Value="_model.IsRequired" />
+                <FluentCheckbox @bind-Value="Model.IsRequired" />
             </li>
             <li class="form-row">
                 <label class="form-label">Allow Multiple</label>
-                <FluentCheckbox @bind-Value="_model.AllowMultiple" />
+                <FluentCheckbox @bind-Value="Model.AllowMultiple" />
             </li>
             <li class="form-row">
                 <label class="form-label" for="def-minlen">Min Length</label>
-                <FluentNumberField id="def-minlen" @bind-Value="_model.MinLength" class="form-field" />
+                <FluentNumberField id="def-minlen" @bind-Value="Model.MinLength" class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label" for="def-maxlen">Max Length</label>
-                <FluentNumberField id="def-maxlen" @bind-Value="_model.MaxLength" class="form-field" />
+                <FluentNumberField id="def-maxlen" @bind-Value="Model.MaxLength" class="form-field" />
             </li>
             <li class="form-row">
                 <label class="form-label" for="def-regex">Regex Pattern</label>
-                <FluentTextField id="def-regex" @bind-Value="_model.RegexPattern" class="form-field" />
+                <FluentTextField id="def-regex" @bind-Value="Model.RegexPattern" class="form-field" />
             </li>
         </ul>
 
-        @if (!string.IsNullOrEmpty(_error))
-        {
-            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
-        }
-
-        <div class="button-row">
-            <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-            <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
-                @(_saving ? "Saving..." : "Save Definition")
-            </FluentButton>
-        </div>
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@SubmitText"
+                           OnCancel="HandleCancelAsync" />
     </EditForm>
 </div>
 
 @code {
-    [Parameter] public AttributeDefinitionDialogData Content { get; set; } = default!;
-    [CascadingParameter] public FluentDialog Dialog { get; set; } = default!;
-
-    private AttributeDefinitionDialogData _data = default!;
-    private bool _saving;
-    private string? _error;
+    protected override string SubmitText => "Save Definition";
 
     private DataTypeOption? _selectedDataType = new("Text", AttributeDataType.Text);
     private ParentCodedValueOption? _selectedSourceCode;
-
-    private readonly DialogModel _model = new();
 
     private readonly DataTypeOption[] _dataTypes =
     [
@@ -101,78 +94,49 @@
 
     private IReadOnlyList<ParentCodedValueOption> _parentCodedValues = [];
 
-    protected override void OnInitialized()
+    protected override void OnModelInitialized(AttributeDefinitionFormModel model)
     {
-        _data = Content;
-        _parentCodedValues = (_data.ParentValues ?? [])
+        _parentCodedValues = (model.ParentValues ?? [])
             .Select(pv => new ParentCodedValueOption(pv.Id, pv.Code, pv.Name))
             .ToList();
 
-        if (_data.ExistingDefinition is not null)
+        if (model.ExistingDefinition is not null)
         {
-            _model.Key = _data.ExistingDefinition.Key;
-            _model.DisplayName = _data.ExistingDefinition.DisplayName;
-            _model.IsRequired = _data.ExistingDefinition.IsRequired;
-            _model.AllowMultiple = _data.ExistingDefinition.AllowMultiple;
-            _model.MinLength = _data.ExistingDefinition.MinLength;
-            _model.MaxLength = _data.ExistingDefinition.MaxLength;
-            _model.RegexPattern = _data.ExistingDefinition.RegexPattern;
-            _selectedDataType = _dataTypes.FirstOrDefault(d => d.Value == _data.ExistingDefinition.DataType)
+            var def = model.ExistingDefinition;
+            model.Key = def.Key;
+            model.DisplayName = def.DisplayName;
+            model.IsRequired = def.IsRequired;
+            model.AllowMultiple = def.AllowMultiple;
+            model.MinLength = def.MinLength;
+            model.MaxLength = def.MaxLength;
+            model.RegexPattern = def.RegexPattern;
+            _selectedDataType = _dataTypes.FirstOrDefault(d => d.Value == def.DataType)
                                 ?? new("Text", AttributeDataType.Text);
-            _selectedSourceCode = _parentCodedValues.FirstOrDefault(p => p.Code == _data.ExistingDefinition.SourceCode);
+            _selectedSourceCode = _parentCodedValues.FirstOrDefault(p => p.Code == def.SourceCode);
         }
     }
 
-    private async Task SaveAsync()
+    protected override Task<AttributeDefinitionResult?> SubmitAsync(AttributeDefinitionFormModel model)
     {
-        if (string.IsNullOrWhiteSpace(_model.Key))
+        // [Required] on Key lets whitespace through, so re-check here (the
+        // pre-consolidation dialog did the same).
+        if (string.IsNullOrWhiteSpace(model.Key))
         {
-            _error = "Key is required.";
-            return;
+            Error = "Key is required.";
+            return Task.FromResult<AttributeDefinitionResult?>(null);
         }
 
-        _saving = true;
-        _error = null;
-
-        try
-        {
-            var dataType = _selectedDataType?.Value ?? AttributeDataType.Text;
-            var sourceCode = _selectedSourceCode?.Code;
-            var result = new AttributeDefinitionResult(
-                _model.Key.Trim(),
-                _model.DisplayName,
-                dataType,
-                sourceCode,
-                _model.IsRequired,
-                _model.AllowMultiple,
-                _model.MinLength,
-                _model.MaxLength,
-                _model.RegexPattern);
-
-            await Dialog.CloseAsync(result);
-        }
-        catch (Exception ex)
-        {
-            _error = ex.Message;
-        }
-        finally
-        {
-            _saving = false;
-        }
-    }
-
-    private async Task CancelAsync() => await Dialog.CancelAsync();
-
-    private sealed class DialogModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Key { get; set; }
-
-        public string? DisplayName { get; set; }
-        public bool IsRequired { get; set; }
-        public bool AllowMultiple { get; set; }
-        public int? MinLength { get; set; }
-        public int? MaxLength { get; set; }
-        public string? RegexPattern { get; set; }
+        var dataType = _selectedDataType?.Value ?? AttributeDataType.Text;
+        var sourceCode = _selectedSourceCode?.Code;
+        return Task.FromResult<AttributeDefinitionResult?>(new AttributeDefinitionResult(
+            model.Key.Trim(),
+            model.DisplayName,
+            dataType,
+            sourceCode,
+            model.IsRequired,
+            model.AllowMultiple,
+            model.MinLength,
+            model.MaxLength,
+            model.RegexPattern));
     }
 }

@@ -1,0 +1,41 @@
+@* Spike + fixture for DialogShellTests. Proves that a .razor can do
+   @inherits DialogShellBase<TModel, TResult> and render its form fields +
+   DialogShellFooter inside an EditForm — the composition at the heart of
+   the consolidation. The test class drives the Behavior enum to exercise
+   the success / stay-open-with-error / throw paths. *@
+@inherits DialogShellBase<TestShellModel, TestShellResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Forms
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+        <FluentTextField @bind-Value="Model.Value" Label="Value" />
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@SubmitText"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    protected override string SubmitText => "Test Submit";
+
+    protected override Task<TestShellResult?> SubmitAsync(TestShellModel model)
+    {
+        return model.Behavior switch
+        {
+            TestSubmitBehavior.ReturnResult => Task.FromResult<TestShellResult?>(new TestShellResult(model.ResultValue)),
+            TestSubmitBehavior.ReturnNullWithError => SetErrorAndReturnNull(model.ErrorMessage),
+            TestSubmitBehavior.Throw => throw new InvalidOperationException(model.ErrorMessage),
+            _ => Task.FromResult<TestShellResult?>(new TestShellResult(model.ResultValue)),
+        };
+    }
+
+    private Task<TestShellResult?> SetErrorAndReturnNull(string message)
+    {
+        Error = message;
+        return Task.FromResult<TestShellResult?>(null);
+    }
+}

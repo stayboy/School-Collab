@@ -215,20 +215,12 @@
         if (_item is null || _loadCts is null) return;
         var ct = _loadCts.Token;
         var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
-        var data = new AttributeDefinitionDialogData(Api, _item.Id, ParentValues: parentValues.Where(p => p.Id != _item.Id).ToArray());
-        var dialog = await DialogService.ShowDialogAsync<AttributeDefinitionDialog, AttributeDefinitionDialogData>(
-            data,
-            new DialogParameters
-            {
-                Title = "Add Attribute Definition",
-                PrimaryAction = null,
-                SecondaryAction = null,
-                Width = "560px",
-                PreventDismissOnOverlayClick = true,
-            });
+        var defResult = await DialogService.ShowShellDialogAsync<AttributeDefinitionDialog, AttributeDefinitionFormModel, AttributeDefinitionResult>(
+            AttributeDefinitionFormModel.ForCreate(parentValues.Where(p => p.Id != _item.Id).ToArray()),
+            title: "Add Attribute Definition",
+            size: DialogSize.Medium);
 
-        var result = await dialog.Result;
-        if (!result.Cancelled && result.Data is AttributeDefinitionResult defResult)
+        if (defResult is not null)
         {
             await SaveDefinitionFromResultAsync(defResult, ct);
         }
@@ -239,20 +231,12 @@
         if (_item is null || _loadCts is null) return;
         var ct = _loadCts.Token;
         var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
-        var data = new AttributeDefinitionDialogData(Api, _item.Id, existing, ParentValues: parentValues.Where(p => p.Id != _item.Id).ToArray());
-        var dialog = await DialogService.ShowDialogAsync<AttributeDefinitionDialog, AttributeDefinitionDialogData>(
-            data,
-            new DialogParameters
-            {
-                Title = "Edit Attribute Definition",
-                PrimaryAction = null,
-                SecondaryAction = null,
-                Width = "560px",
-                PreventDismissOnOverlayClick = true,
-            });
+        var defResult = await DialogService.ShowShellDialogAsync<AttributeDefinitionDialog, AttributeDefinitionFormModel, AttributeDefinitionResult>(
+            AttributeDefinitionFormModel.ForEdit(existing, parentValues.Where(p => p.Id != _item.Id).ToArray()),
+            title: "Edit Attribute Definition",
+            size: DialogSize.Medium);
 
-        var result = await dialog.Result;
-        if (!result.Cancelled && result.Data is AttributeDefinitionResult defResult)
+        if (defResult is not null)
         {
             await SaveDefinitionFromResultAsync(defResult, ct);
         }
