@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.Auth;
 
 namespace SchoolCollab.Core.Tests.Unit.Auth;
@@ -12,6 +13,7 @@ public class DevTenantSelectionTests
     {
         var services = new ServiceCollection();
         services.AddDistributedMemoryCache();
+        services.AddLogging(); // Required for ILogger<DevTenantSelection>
         // DevTenantSelection is internal; resolve via the interface registered the
         // same way AddAuthAndTenancy registers it.
         services.AddAuthAndTenancy(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
@@ -57,6 +59,7 @@ public class DevTenantSelectionTests
         // Write garbage directly into the cache key the implementation uses.
         var services = new ServiceCollection();
         services.AddDistributedMemoryCache();
+        services.AddLogging(); // Required for ILogger<DevTenantSelection>
         services.AddAuthAndTenancy(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build());
         var sp = services.BuildServiceProvider();
         var cache = sp.GetRequiredService<IDistributedCache>();

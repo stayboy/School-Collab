@@ -16,5 +16,6 @@ public record CodedValueDto(
     int ChildrenCount = 0,
     bool IsDeleted = false,
     DateTimeOffset? DeletedAt = null,
-    bool IsOverridden = false);
+    bool IsOverridden = false,
+    string? DefaultName = null);
 

@@ -109,7 +109,9 @@ internal sealed class CodedValueRepository(SettingsDbContext db) : ICodedValueRe
             cv.AttributeDefinitions.Select(d => new CodedValueAttributeDefinitionDto(d.Key, d.DisplayName, d.DataType, d.SourceCode, d.IsRequired, d.AllowMultiple, d.MinLength, d.MaxLength, d.RegexPattern)).ToArray(),
             0,
             cv.IsDeleted,
-            cv.DeletedAt)).ToArray();
+            cv.DeletedAt,
+            false,
+            cv.Name)).ToArray(); // No override applied here; DefaultName == Name
     }
 
     public async Task<TenantCodedValueOverride?> GetOverrideAsync(Guid tenantId, Guid codedValueId, CancellationToken cancellationToken = default) =>

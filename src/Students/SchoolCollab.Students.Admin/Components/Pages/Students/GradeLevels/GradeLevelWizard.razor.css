@@ -127,11 +127,18 @@
 .assigned-list li {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    gap: 8px;
     padding: 6px 10px;
     background: var(--neutral-fill-rest);
     border-radius: 4px;
     font-size: 0.9rem;
+}
+
+.assigned-subject-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
 }
 
 /* ── Wizard actions (Bottom button bar) ─────────────────────────── */

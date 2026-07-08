@@ -129,59 +129,89 @@ public class CodedValueOverrideHandlerTests
         await act.Should().NotThrowAsync();
     }
 
-    // ── Default-tenant branch: rewrites the global blueprint ─────────────────
+    // ── Default-tenant branch: dedicated override row keyed by Guid.Empty ─────
 
     [TestMethod]
-    public async Task Upsert_ForDefaultTenant_UpdatesGlobalCodedValue()
+    public async Task Upsert_ForDefaultTenant_CreatesOverrideRowWithEmptyTenantId()
     {
-        // No real tenant → no override row; the "override" rewrites the
-        // global CodedValue.Name so the wizard's "Override name" action still
-        // has a visible effect.
-        using var s = new Scope("override-default-update");
+        // The default tenant gets its own override row keyed by Guid.Empty.
+        // The global CodedValue blueprint is never rewritten, so real tenants
+        // can never see this override.
+        using var s = new Scope("override-default-create");
         var id = await SeedCodedValueAsync(s.Db, "GRADE_5", "Grade 5", displayOrder: 7);
 
-        var dto = await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Standard 5", "Renamed for dev"));
+        var dto = await s.Upsert.HandleAsync(
+            new UpsertCodedValueOverride(id, "Standard 5", "Renamed for dev"));
 
         dto.Name.Should().Be("Standard 5");
         dto.Description.Should().Be("Renamed for dev");
-        s.Db.TenantCodedValueOverrides.Should().BeEmpty("no real tenant → no override row");
+        s.Db.TenantCodedValueOverrides.Should().ContainSingle(o =>
+            o.GlobalCodedValueId == id && o.TenantId == Guid.Empty);
         var stored = await s.Db.CodedValues.SingleAsync(x => x.Id == id);
-        stored.Name.Should().Be("Standard 5");
-        stored.Description.Should().Be("Renamed for dev");
-        stored.DisplayOrder.Should().Be(7, "DisplayOrder is metadata, not part of the override");
+        stored.Name.Should().Be("Grade 5", "global blueprint must not be rewritten");
+        stored.DisplayOrder.Should().Be(7);
     }
 
     [TestMethod]
-    public async Task Remove_ForDefaultTenant_IsNoOp()
+    public async Task Remove_ForDefaultTenant_RemovesDefaultTenantOverride()
     {
-        // The "override" was a direct update of the global blueprint, so there
-        // is no override row to remove and nothing to revert automatically.
+        // The default tenant's override is a real row keyed by Guid.Empty, so
+        // remove targets it and leaves the global blueprint untouched.
         using var s = new Scope("override-default-remove");
         var id = await SeedCodedValueAsync(s.Db, "GRADE_6", "Grade 6");
 
         await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Standard 6", null));
+        await s.Remove.HandleAsync(new RemoveCodedValueOverride(id));
 
-        var act = async () => await s.Remove.HandleAsync(new RemoveCodedValueOverride(id));
-        await act.Should().NotThrowAsync();
-
-        // The global rename persists; remove is a no-op for the default tenant.
+        s.Db.TenantCodedValueOverrides.Should().BeEmpty();
         var stored = await s.Db.CodedValues.SingleAsync(x => x.Id == id);
-        stored.Name.Should().Be("Standard 6");
+        stored.Name.Should().Be("Grade 6", "global blueprint must remain untouched");
     }
 
     [TestMethod]
-    public async Task Upsert_ForDefaultTenant_UpdatesExistingGlobalName()
+    public async Task Upsert_ForDefaultTenant_UpdatesExistingDefaultOverride()
     {
-        // A second override call updates the same global row (not a new row).
+        // A second override call updates the same Guid.Empty row (not a new row).
         using var s = new Scope("override-default-repeat");
         var id = await SeedCodedValueAsync(s.Db, "GRADE_7", "Grade 7");
 
         await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "First", null));
         await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Second", null));
 
-        s.Db.TenantCodedValueOverrides.Should().BeEmpty();
-        var stored = await s.Db.CodedValues.SingleAsync(x => x.Id == id);
-        stored.Name.Should().Be("Second");
+        s.Db.TenantCodedValueOverrides.Should().ContainSingle(o =>
+            o.GlobalCodedValueId == id && o.TenantId == Guid.Empty);
+        var row = s.Db.TenantCodedValueOverrides.Single();
+        row.OverriddenName.Should().Be("Second");
+    }
+
+    [TestMethod]
+    public async Task DefaultAndRealTenant_OverridesAreIsolated()
+    {
+        // The default tenant's override (Guid.Empty) must never be visible to
+        // a real tenant, and vice versa. This is the core tenancy-isolation
+        // guarantee the per-tenant row model provides.
+        using var s = new Scope("override-isolation");
+        var realTenantId = Guid.NewGuid();
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_8", "Grade 8");
+
+        // Default tenant sets an override.
+        await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Default-Name", null));
+
+        // Real tenant sets its own override.
+        s.Tenants.Current = new TenantContext(realTenantId, "Hydeson", TenantType.School);
+        await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Real-Name", null));
+
+        // Two separate rows, one per tenant.
+        s.Db.TenantCodedValueOverrides.Should().HaveCount(2);
+        s.Db.TenantCodedValueOverrides.Should().Contain(o =>
+            o.TenantId == Guid.Empty && o.OverriddenName == "Default-Name");
+        s.Db.TenantCodedValueOverrides.Should().Contain(o =>
+            o.TenantId == realTenantId && o.OverriddenName == "Real-Name");
+
+        // The real tenant resolves its own name; the default-tenant override is
+        // invisible because the resolver filters by the current tenant id.
+        var resolved = await s.Resolver.HandleAsync(new GetCodedValueById(id));
+        resolved!.Name.Should().Be("Real-Name");
     }
 
     // ── Common error path ────────────────────────────────────────────────────
