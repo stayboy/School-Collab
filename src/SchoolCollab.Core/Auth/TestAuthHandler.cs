@@ -41,30 +41,43 @@ public sealed class TestAuthHandler : AuthenticationHandler<TestAuthHandlerOptio
         // the dev tenant switcher can override this with a user-selected tenant.
         var tenantId = Options.TenantId;
 
-        // Dev tenant switcher (auth-disabled only): if the admin shell's
-        // DevTenantSwitcher has selected a real tenant, use it instead of the
-        // default so this host's tenant query filters resolve the selected
-        // tenant's data and coded-value overrides. Resolved per-request from the
-        // HTTP request scope; if IDevTenantSelection isn't registered, falls back
-        // to Options.TenantId.
-        var devSelection = Context.RequestServices.GetService<IDevTenantSelection>();
-        if (devSelection is not null)
+        // Prefer the x-tenant-id header propagated by the admin shell's
+        // HttpClient (see TenantPropagationDelegatingHandler). This is
+        // topology-independent and works even when the shared Redis cache
+        // (IDevTenantSelection) is unavailable. Only honored in TestAuth (dev)
+        // mode, so it cannot be spoofed in production OIDC.
+        var headerTenant = Context.Request.Headers["x-tenant-id"].ToString();
+        if (Guid.TryParse(headerTenant, out var headerTenantId) && headerTenantId != Guid.Empty)
         {
-            var selected = await devSelection.GetSelectedTenantIdAsync(Context.RequestAborted);
-            
-            // DEBUG: Log tenant selection from Redis
-            Logger.LogDebug("TestAuthHandler: IDevTenantSelection returned {SelectedTenantId} (Options.TenantId={OptionsTenantId})", 
-                selected?.ToString() ?? "null", Options.TenantId);
-            
-            if (selected.HasValue)
-                tenantId = selected.Value;
-            // If selected is null, the user cleared the selection (selected
-            // "(default tenant)" in the switcher) → use Options.TenantId which
-            // defaults to Guid.Empty (no tenant).
+            tenantId = headerTenantId;
         }
         else
         {
-            Logger.LogDebug("TestAuthHandler: No IDevTenantSelection registered, using Options.TenantId={TenantId}", tenantId);
+            // Dev tenant switcher (auth-disabled only): if the admin shell's
+            // DevTenantSwitcher has selected a real tenant, use it instead of the
+            // default so this host's tenant query filters resolve the selected
+            // tenant's data and coded-value overrides. Resolved per-request from the
+            // HTTP request scope; if IDevTenantSelection isn't registered, falls back
+            // to Options.TenantId.
+            var devSelection = Context.RequestServices.GetService<IDevTenantSelection>();
+            if (devSelection is not null)
+            {
+                var selected = await devSelection.GetSelectedTenantIdAsync(Context.RequestAborted);
+
+                // DEBUG: Log tenant selection from Redis
+                Logger.LogDebug("TestAuthHandler: IDevTenantSelection returned {SelectedTenantId} (Options.TenantId={OptionsTenantId})",
+                    selected?.ToString() ?? "null", Options.TenantId);
+
+                if (selected.HasValue)
+                    tenantId = selected.Value;
+                // If selected is null, the user cleared the selection (selected
+                // "(default tenant)" in the switcher) → use Options.TenantId which
+                // defaults to Guid.Empty (no tenant).
+            }
+            else
+            {
+                Logger.LogDebug("TestAuthHandler: No IDevTenantSelection registered, using Options.TenantId={TenantId}", tenantId);
+            }
         }
 
         var claims = new[]

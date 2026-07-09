@@ -1,8 +1,10 @@
 @page "/students/{id:guid}/edit"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Edit> Logger
+@inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
 <PageTitle>Edit Student — @(_student?.StudentNumber ?? "Loading…")</PageTitle>
@@ -14,6 +16,8 @@
                 <h1 class="page-title">Edit Student</h1>
             </div>
 
+            <TenantGate>
+                <ChildContent>
             @if (_student is null)
             {
                 <div class="spinner-container">
@@ -58,6 +62,13 @@
                     <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}")'>Cancel</FluentButton>
                 </div>
             }
+                </ChildContent>
+                <Fallback>
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                    </FluentMessageBar>
+                </Fallback>
+            </TenantGate>
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
@@ -79,9 +90,14 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+    private bool _isRealTenant;
 
     protected override async Task OnInitializedAsync()
     {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant) return;
+
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
 
@@ -121,7 +137,7 @@
 
     private async Task OnSaveAsync()
     {
-        if (_student is null || _disposed) return;
+        if (!_isRealTenant || _student is null || _disposed) return;
 
         _error = null;
 

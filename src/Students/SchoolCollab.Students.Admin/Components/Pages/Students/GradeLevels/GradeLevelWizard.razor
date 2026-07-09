@@ -12,6 +12,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject VisibleTenantService VisibleTenant
 @inject ILogger<GradeLevelWizard> Logger
 @implements IDisposable
 
@@ -19,6 +20,8 @@
 
 <ErrorBoundary>
     <ChildContent>
+        <TenantGate>
+            <ChildContent>
         <FluentWizard StepperPosition="StepperPosition.Top"
                       StepSequence="WizardStepSequence.Visited"
                       Width="960px"
@@ -54,15 +57,13 @@
                                                             SelectedIdChanged="OnCodedValueChanged" />
                                     </div>
                                     <div class="coded-value-actions">
-                                        @if (IsRealTenant)
-                                        {
+
                                             <FluentButton Appearance="Appearance.Neutral"
                                                           Title="Override the default name for this tenant"
                                                           OnClick="OpenOverrideDialogAsync"
                                                           Disabled="@(!_codedValueIdNullable.HasValue)">
                                                 Override Name
                                             </FluentButton>
-                                        }
                                         <FluentButton Appearance="Appearance.Neutral"
                                                       Title="Create a new grade coded value"
                                                       OnClick="OpenCreateDialogAsync">
@@ -94,10 +95,8 @@
                                             @if (_selectedCodedValue.IsOverridden)
                                             {
                                                 <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
-                                                @if (IsRealTenant)
-                                                {
+
                                                     <FluentAnchor Href="#" OnClick="OpenOverrideDialogAsync" class="grade-confirm-reset">Reset to default</FluentAnchor>
-                                                }
                                             }
                                         </FluentStack>
                                     </FluentStack>
@@ -184,20 +183,9 @@
                                                     <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
                                                 }
                                                 <span class="assigned-subject-actions">
-                                                    @if (IsRealTenant)
-                                                    {
-                                                        <FluentButton Appearance="Appearance.Lightweight"
-                                                                      Title="Override the default name for this tenant"
-                                                                      OnClick="@(() => OverrideSubjectAsync(s))"
-                                                                      Disabled="@(_overridingSubjectId == s.Id)">
-                                                            Override Name
-                                                        </FluentButton>
-                                                    }
-                                                    <FluentButton Appearance="Appearance.Lightweight"
-                                                                  OnClick="@(() => RemoveSubject(s))"
-                                                                  Disabled="@(_overridingSubjectId == s.Id)">
-                                                        Remove
-                                                    </FluentButton>
+
+                                                        <FluentButton Appearance="Appearance.Lightweight" Title="Override the default name for this tenant" OnClick="@(() => OverrideSubjectAsync(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Edit)" /></FluentButton>
+                                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove subject" OnClick="@(() => RemoveSubject(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Delete)" /></FluentButton>
                                                 </span>
                                             </li>
                                         }
@@ -377,6 +365,13 @@
                 </div>
             </ButtonTemplate>
         </FluentWizard>
+        </ChildContent>
+        <Fallback>
+            <FluentMessageBar Intent="MessageIntent.Warning">
+                You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
+            </FluentMessageBar>
+        </Fallback>
+        </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -406,19 +401,17 @@
     private string ResolvedName => _selectedCodedValue?.Name ?? string.Empty;
 
     // True when the current tenant is a real tenant (not the default/system
-    // tenant). The override actions on the grade and subject confirmations
-    // are only meaningful for real tenants — in default-tenant mode the
-    // override handler rewrites the global coded value directly, so there
-    // is no per-tenant concept for the UI to manage. Hide the override
-    // button and reset link in that case.
+    // tenant). Drives the <TenantGate> re-render when the tenant changes
+    // mid-session (AuthenticationStateChanged), and guards OnInitializedAsync
+    // (skip tenant-scoped loads) and SaveAsync. The wizard's override
+    // buttons are no longer gated here — the parent <TenantGate> hides the
+    // entire wizard when there is no real tenant.
     //
     // The value is read from the authenticated user's tenant_id claim in
     // OnInitializedAsync (via AuthenticationStateProvider) because the
     // shared ITenantProvider is backed by AsyncLocal and is not reliably
     // available inside a Blazor Server circuit.
     private bool _isRealTenant;
-
-    private bool IsRealTenant => _isRealTenant;
 
     // Subject coded-value picker (step 1, "Assign Subjects" section). Picking
     // a subject coded value auto-adds it to the grade's assigned list — no
@@ -452,6 +445,12 @@
         AuthenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
         await RefreshTenantFromAuthStateAsync();
 
+        // No visible tenancy: do not load tenant-scoped data (periods, students)
+        // or render the wizard steps. The markup below shows the tenant prompt
+        // instead, and SaveAsync is also guarded as defense-in-depth.
+        if (!_isRealTenant)
+            return;
+
         // Derive the current period once on load (§6.3) — used by step 2.
         await DeriveCurrentPeriodAsync(ct);
 
@@ -466,9 +465,10 @@
 
         try
         {
-            var authState = await task;
-            var tenantId = authState.User.FindFirst("tenant_id")?.Value;
-            var current = Guid.TryParse(tenantId, out var id) && id != Guid.Empty;
+            // Observe the change (so the awaited task's exception, if any, is
+            // observed) then re-resolve the tenant rule from the shared service.
+            await task;
+            var current = (await VisibleTenant.GetScopeAsync()).IsRealTenant;
             if (current != _isRealTenant)
             {
                 _isRealTenant = current;
@@ -483,12 +483,12 @@
 
     private async Task RefreshTenantFromAuthStateAsync()
     {
-        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
-        var tenantIdClaim = authState.User.FindFirst("tenant_id")?.Value;
-        _isRealTenant = Guid.TryParse(tenantIdClaim, out var tenantId) && tenantId != Guid.Empty;
+        // Delegate the "real tenant" rule to the shared VisibleTenantService
+        // (single source of truth, mirrors GradeLevelWizard's prior claim check).
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
 
-        Logger.LogDebug("GradeLevelWizard.RefreshTenantFromAuthStateAsync: tenant_id={TenantIdClaim}, _isRealTenant={IsRealTenant}",
-            tenantIdClaim ?? "null", _isRealTenant);
+        Logger.LogDebug("GradeLevelWizard.RefreshTenantFromAuthStateAsync: _isRealTenant={IsRealTenant}", _isRealTenant);
     }
 
     private async Task DeriveCurrentPeriodAsync(CancellationToken ct)
@@ -820,6 +820,12 @@
         _error = null;
         _loadCts ??= new CancellationTokenSource();
         var ct = _loadCts.Token;
+
+        if (!_isRealTenant)
+        {
+            _error = "You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.";
+            return;
+        }
 
         try
         {

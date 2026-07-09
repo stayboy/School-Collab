@@ -156,6 +156,7 @@ public class GradeLevelWizardTenancyTests : BunitContext
         Services.AddSingleton<AuthenticationStateProvider>(authProvider);
         Services.AddSingleton(new CodedValuesApiClient(http));
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance));
+        Services.AddSingleton(new VisibleTenantService(authProvider, NullLogger<VisibleTenantService>.Instance));
 
         return authProvider;
     }
@@ -221,10 +222,12 @@ public class GradeLevelWizardTenancyTests : BunitContext
         // Act: render the wizard
         var cut = RenderWizard();
 
-        // Assert: the New grade button is still present (global create still
-        // works), but the Override name button is hidden.
-        HasNewGradeButton(cut).Should().BeTrue("New grade button is always present");
+        // Assert: for a default tenant the wizard (and its New grade / Override
+        // name buttons) is hidden and the tenant prompt is shown instead of
+        // loading tenant-scoped data.
+        HasNewGradeButton(cut).Should().BeFalse("the wizard is hidden for a default tenant");
         HasOverrideButton(cut).Should().BeFalse("Override name button must be hidden when the default tenant is in scope");
+        cut.Markup.Should().Contain("You have no tenant assigned", "the tenant prompt must show for a default tenant");
     }
 
     [TestMethod]
@@ -278,6 +281,7 @@ public class GradeLevelWizardTenancyTests : BunitContext
         Services.AddSingleton<AuthenticationStateProvider>(authProvider);
         Services.AddSingleton(new CodedValuesApiClient(http));
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance));
+        Services.AddSingleton(new VisibleTenantService(authProvider, NullLogger<VisibleTenantService>.Instance));
 
         // Act: render with default tenant
         var cut = RenderWizard();
