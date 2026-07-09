@@ -1,0 +1,116 @@
+@using Microsoft.AspNetCore.Components.Authorization
+@inject VisibleTenantService VisibleTenant
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@implements IDisposable
+
+@* Declarative, reusable gate for strict-tenant UI surfaces — the Blazor-idiomatic
+  analog of [Authorize], but for tenant *visibility* instead of authentication.
+  Resolves the tenant from VisibleTenantService (the authenticated user's tenant_id
+  claim) and shows/hides or disables its content accordingly. Re-resolves on each
+  page load and also subscribes to AuthenticationStateChanged, so switching tenant
+  in-session (e.g. via the dev tenant switcher) updates the gate without a reload.
+
+  Modes:
+    Hide    (default) — renders ChildContent only when a real tenant is selected;
+                        otherwise renders Fallback, or a default warning banner.
+    Disable — always renders ChildContent, but wrapped in a disabled <fieldset>
+              when no real tenant is selected (use for "disable the buttons" cases).
+
+  Usage (hide + default banner):
+      <TenantGate>
+          <GradeLevelWizard />
+      </TenantGate>
+
+  Usage (hide + custom fallback):
+      <TenantGate>
+          <ChildContent><StudentCreateForm /></ChildContent>
+          <Fallback><MudAlert>Pick a tenant first.</MudAlert></Fallback>
+      </TenantGate>
+
+  Usage (disable children instead of hiding):
+      <TenantGate Mode="TenantGateMode.Disable">
+          <FluentButton OnClick="CreateAsync">Create</FluentButton>
+      </TenantGate>
+
+  Note: any module that uses <TenantGate> must have VisibleTenantService registered
+  (the Students Admin module already does). *@
+
+@if (_initialized)
+{
+    if (Mode == TenantGateMode.Disable)
+    {
+        <fieldset disabled="@(!_scope.IsRealTenant)" class="tenant-gate-fieldset">
+            @ChildContent
+        </fieldset>
+    }
+    else if (_scope.IsRealTenant)
+    {
+        @ChildContent
+    }
+    else if (Fallback is not null)
+    {
+        @Fallback
+    }
+    else
+    {
+        <FluentMessageBar Title="No tenant selected">
+            Select a tenant using the dev tenant switcher to use this feature.
+        </FluentMessageBar>
+    }
+}
+
+@code {
+    private TenantScope _scope = new(false, null, null);
+    private bool _initialized;
+
+    /// <summary>The content shown when a real tenant is available (or, in
+    /// <see cref="TenantGateMode.Disable"/> mode, always).</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Optional content shown instead of the default banner when no real
+    /// tenant is selected and <see cref="Mode"/> is <see cref="TenantGateMode.Hide"/>.</summary>
+    [Parameter] public RenderFragment? Fallback { get; set; }
+
+    /// <summary>Hide (default) or disable the gated content when no real tenant is selected.</summary>
+    [Parameter] public TenantGateMode Mode { get; set; } = TenantGateMode.Hide;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _scope = await VisibleTenant.GetScopeAsync();
+        _initialized = true;
+        AuthenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        try
+        {
+            await task;
+            var scope = await VisibleTenant.GetScopeAsync();
+            if (scope.IsRealTenant != _scope.IsRealTenant)
+            {
+                _scope = scope;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch
+        {
+            // Ignore auth-change resolution errors — keep the last known gate state.
+        }
+    }
+
+    public void Dispose()
+    {
+        AuthenticationStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+
+    /// <summary>How <see cref="TenantGate"/> behaves when no real tenant is selected.</summary>
+    public enum TenantGateMode
+    {
+        /// <summary>Render <see cref="ChildContent"/> only with a real tenant; show <see cref="Fallback"/> (or a default banner) otherwise.</summary>
+        Hide,
+
+        /// <summary>Always render <see cref="ChildContent"/>, but disable it (via a disabled &lt;fieldset&gt;) without a real tenant.</summary>
+        Disable
+    }
+}
