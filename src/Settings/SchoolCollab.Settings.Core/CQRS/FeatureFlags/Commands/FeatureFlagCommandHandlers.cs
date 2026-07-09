@@ -1,4 +1,7 @@
 using Microsoft.EntityFrameworkCore;
+using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Contracts.Events;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -152,7 +155,8 @@ public sealed class RecoverFeatureFlagHandler(
 public sealed class UpsertTenantFlagOverrideHandler(
     SettingsDbContext db,
     FeatureFlagAuditor auditor,
-    IIntegrationEventPublisher publisher) : ICommandHandler<UpsertTenantFlagOverride, TenantFlagOverrideDto>
+    IIntegrationEventPublisher publisher,
+    ITenantContextAccessor tenantContext) : ICommandHandler<UpsertTenantFlagOverride, TenantFlagOverrideDto>
 {
     public async Task<TenantFlagOverrideDto> HandleAsync(UpsertTenantFlagOverride command, CancellationToken ct = default)
     {
@@ -163,39 +167,50 @@ public sealed class UpsertTenantFlagOverrideHandler(
             .IgnoreQueryFilters(["Tenant"])
             .SingleOrDefaultAsync(o => o.TenantId == command.TenantId && o.FeatureFlagId == flag.Id && !o.IsDeleted, ct);
 
-        FlagChangeKind kind;
+        FlagChangeKind kind = default;
         bool? previous = null;
 
-        if (existing is null)
+        // FR-6: the override row is owned by command.TenantId, which may differ from the
+        // ambient (admin) context. Run the write under the target tenant so the save-guard
+        // (PrepareChanges) accepts the cross-tenant write. See global-tenant-filter.md §override.
+        var dto = await tenantContext.RunWithExplicitTenantAsync(command.TenantId, async ct2 =>
         {
-            var created = TenantFeatureFlagOverride.Create(
-                command.TenantId, flag.Id, command.IsEnabled, command.Reason, command.EffectiveFrom, command.EffectiveTo);
-            db.TenantFlagOverrides.Add(created);
-            existing = created;
-            kind = FlagChangeKind.OverrideCreated;
-        }
-        else
-        {
-            previous = existing.IsEnabled;
-            existing.Update(command.IsEnabled, command.Reason, command.EffectiveFrom, command.EffectiveTo);
-            kind = FlagChangeKind.OverrideUpdated;
-        }
+            if (existing is null)
+            {
+                var created = TenantFeatureFlagOverride.Create(
+                    command.TenantId, flag.Id, command.IsEnabled, command.Reason, command.EffectiveFrom, command.EffectiveTo);
+                db.TenantFlagOverrides.Add(created);
+                existing = created;
+                kind = FlagChangeKind.OverrideCreated;
+            }
+            else
+            {
+                previous = existing.IsEnabled;
+                existing.Update(command.IsEnabled, command.Reason, command.EffectiveFrom, command.EffectiveTo);
+                kind = FlagChangeKind.OverrideUpdated;
+            }
 
-        auditor.Record(db, command.TenantId, flag.Id, flag.Key, kind,
-            previousIsEnabled: previous, newIsEnabled: command.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
+            auditor.Record(db, command.TenantId, flag.Id, flag.Key, kind,
+                previousIsEnabled: previous, newIsEnabled: command.IsEnabled, command.Reason);
+            await db.SaveChangesAsync(ct2);
 
+            return FeatureFlagCommandHelpers.ToDto(existing);
+        }, ct);
+
+        // Publish outside the explicit tenant scope so the outbox row stays global
+        // (feature-flag changes are global config), consistent with the other handlers.
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, command.TenantId, kind.ToString(), command.IsEnabled, existing.UpdatedAt), ct);
 
-        return FeatureFlagCommandHelpers.ToDto(existing);
+        return dto;
     }
 }
 
 public sealed class DeleteTenantFlagOverrideHandler(
     SettingsDbContext db,
     FeatureFlagAuditor auditor,
-    IIntegrationEventPublisher publisher) : ICommandHandler<DeleteTenantFlagOverride>
+    IIntegrationEventPublisher publisher,
+    ITenantContextAccessor tenantContext) : ICommandHandler<DeleteTenantFlagOverride>
 {
     public async Task HandleAsync(DeleteTenantFlagOverride command, CancellationToken ct = default)
     {
@@ -208,10 +223,17 @@ public sealed class DeleteTenantFlagOverrideHandler(
             ?? throw new KeyNotFoundException($"Tenant override for flag '{key}' and tenant {command.TenantId} not found.");
 
         var previous = existing.IsEnabled;
-        existing.MarkAsDeleted();
-        auditor.Record(db, command.TenantId, flag.Id, flag.Key, FlagChangeKind.OverrideDeleted,
-            previousIsEnabled: previous, newIsEnabled: null, command.Reason);
-        await db.SaveChangesAsync(ct);
+
+        // FR-6: the override row is owned by command.TenantId (possibly != ambient context).
+        // Run the soft-delete under the target tenant so the save-guard accepts it.
+        await tenantContext.RunWithExplicitTenantAsync(command.TenantId, async ct2 =>
+        {
+            existing.MarkAsDeleted();
+            auditor.Record(db, command.TenantId, flag.Id, flag.Key, FlagChangeKind.OverrideDeleted,
+                previousIsEnabled: previous, newIsEnabled: null, command.Reason);
+            await db.SaveChangesAsync(ct2);
+            return 0;
+        }, ct);
 
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, command.TenantId, nameof(FlagChangeKind.OverrideDeleted), NewIsEnabled: null, existing.UpdatedAt), ct);
