@@ -1,15 +1,22 @@
 using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class Period : IEntity, IAuditableEntity, IHasRowVersion
+public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
     private Period() { }
 
     public Guid Id { get; private set; }
+
+    // Multi-tenancy: each row belongs to a tenant (global-tenant-filter.md §3.2 Strict).
+    // The "at most one current period" invariant is per-tenant (§3.5/§5.6).
+    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
+    public Guid TenantId { get; private set; }
+
     public string Name { get; private set; } = default!;
     public DateOnly StartDate { get; private set; }
     public DateOnly EndDate { get; private set; }

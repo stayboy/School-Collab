@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -10,10 +11,14 @@ namespace SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 public sealed class CreatePeriodHandler(
     IPeriodRepository repository,
     HybridCache cache,
+    ITenantProvider tenantProvider,
     ILogger<CreatePeriodHandler> logger) : ICommandHandler<CreatePeriod, Guid>
 {
     public async Task<Guid> HandleAsync(CreatePeriod command, CancellationToken cancellationToken = default)
     {
+        // FR-4: no strict entity may be created with an empty tenant.
+        tenantProvider.RequireTenantContext(nameof(CreatePeriod), typeof(Period));
+
         logger.LogDebug("Handling CreatePeriod {Name}", command.Name);
 
         // ── No-overlap invariant (§5.6): reject if another period's range
@@ -33,7 +38,8 @@ public sealed class CreatePeriodHandler(
             command.Name,
             command.StartDate,
             command.EndDate,
-            command.AllowSubjectOverrides);
+            command.AllowSubjectOverrides)
+            .WithTenant(tenantProvider);
 
         await repository.AddAsync(period, cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);

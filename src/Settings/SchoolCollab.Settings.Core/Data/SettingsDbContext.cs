@@ -35,6 +35,31 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
 
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
+    /// <summary>
+    /// Global entities in this context (no "Tenant" query filter). Per
+    /// global-tenant-filter.md §3.2:
+    /// <list type="bullet">
+    /// <item><see cref="Tenant"/> — the tenant registry itself.</item>
+    /// <item><see cref="User"/> — Keycloak-sourced identity lookup (cross-tenant).</item>
+    /// <item><see cref="FeatureFlag"/>, <see cref="FlagAuditEntry"/> — admin-created
+    ///   infrastructure; tenants toggle via <see cref="TenantFeatureFlagOverride"/>, they
+    ///   do not create flags (Q-2).</item>
+    /// <item><see cref="OutboxMessage"/> — queue table; TenantId is dispatch-routing
+    ///   payload (FR-15), not a scope filter.</item>
+    /// </list>
+    /// <para>All other entities (<see cref="CodedValue"/>, the two override tables,
+    /// <see cref="TenantFeatureFlagOverride"/>) carry a "Tenant" filter — hybrid for
+    /// <see cref="CodedValue"/>, strict for the rest.</para>
+    /// </summary>
+    protected override Type[] GlobalEntityAllowList =>
+    [
+        typeof(Tenant),
+        typeof(User),
+        typeof(FeatureFlag),
+        typeof(FlagAuditEntry),
+        typeof(OutboxMessage),
+    ];
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -43,8 +68,8 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
         modelBuilder.ApplyConfiguration(new TenantConfiguration());
 
         // CodedValues configurations
-        modelBuilder.ApplyConfiguration(new CodedValueConfiguration());
-        modelBuilder.ApplyConfiguration(new TenantCodedValueOverrideConfiguration());
+        modelBuilder.ApplyConfiguration(new CodedValueConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TenantCodedValueOverrideConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantCodedValueAttributeOverrideConfiguration(() => CurrentTenantId));
 
         // FeatureFlag configurations
@@ -53,5 +78,10 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
         modelBuilder.ApplyConfiguration(new FlagAuditEntryConfiguration());
 
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<SettingsDbContext>()));
+
+        // FR-18 / AC-17: build-time model audit — every non-allow-listed, non-owned
+        // entity MUST have a "Tenant" named query filter. Fails fast at model build
+        // if a new entity is added without proper tenancy configuration.
+        ValidateTenantFilters(modelBuilder);
     }
 }

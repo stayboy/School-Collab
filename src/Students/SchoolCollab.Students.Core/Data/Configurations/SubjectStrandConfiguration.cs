@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
@@ -5,9 +6,15 @@ using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class SubjectStrandConfiguration : EntityTypeConfigurationBase<SubjectStrand>
+/// <summary>
+/// Strict tenant entity (global-tenant-filter.md §3.2). Inherits the subject's
+/// tenant.
+/// </summary>
+internal sealed class SubjectStrandConfiguration : TenantEntityTypeConfigurationBase<SubjectStrand>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<SubjectStrand> builder)
+    public SubjectStrandConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<SubjectStrand> builder)
     {
         builder.ToTable("subject_strands");
 
@@ -24,8 +31,9 @@ internal sealed class SubjectStrandConfiguration : EntityTypeConfigurationBase<S
             .HasForeignKey(x => x.SubjectId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        builder.HasIndex(x => x.SubjectId)
-            .HasDatabaseName("ix_subject_strands_subject");
+        // NFR-3 hot path (tenant_id leading).
+        builder.HasIndex(x => new { x.TenantId, x.SubjectId })
+            .HasDatabaseName("ix_subject_strands_tenant_subject");
 
         builder.Ignore(x => x.DomainEvents);
     }

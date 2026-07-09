@@ -42,6 +42,28 @@ internal sealed class CodedValueRepository(SettingsDbContext db) : ICodedValueRe
             : db.CodedValues.AnyAsync(x => x.Code == normalisedCode && x.ParentId == null, cancellationToken);
     }
 
+    public Task<CodedValue?> FindConflictingByCodeAndParentAsync(
+        string code,
+        Guid? parentId,
+        Guid? tenantId,
+        CancellationToken cancellationToken = default)
+    {
+        var normalisedCode = code.Trim().ToUpperInvariant();
+        // Ignore the "Tenant" filter so shared-blueprint (NULL) rows AND any
+        // tenant-owned rows are visible. The soft-delete filter is retained (a
+        // deleted row is not a conflict). Match the existing (parent, code) pair;
+        // prefer a shared-blueprint row when both shared and owned exist so the
+        // guard directs the tenant to override the shared name (FR-6).
+        var candidates = db.CodedValues
+            .IgnoreQueryFilters(["Tenant"])
+            .Where(x => x.Code == normalisedCode
+                && (parentId.HasValue ? x.ParentId == parentId : x.ParentId == null)
+                && (x.TenantId == null || x.TenantId == tenantId));
+        return candidates
+            .OrderBy(x => x.TenantId == null ? 0 : 1) // shared (NULL) first
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
     public async Task AddAsync(CodedValue codedValue, CancellationToken cancellationToken = default)
     {
         await db.CodedValues.AddAsync(codedValue, cancellationToken);
@@ -116,7 +138,7 @@ internal sealed class CodedValueRepository(SettingsDbContext db) : ICodedValueRe
 
     public async Task<TenantCodedValueOverride?> GetOverrideAsync(Guid tenantId, Guid codedValueId, CancellationToken cancellationToken = default) =>
         await db.TenantCodedValueOverrides
-            .IgnoreQueryFilters()
+            .IgnoreQueryFilters(["Tenant"])
             .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.GlobalCodedValueId == codedValueId, cancellationToken);
 
     public async Task UpsertOverrideAsync(TenantCodedValueOverride overrideValue, CancellationToken cancellationToken = default)

@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
@@ -5,9 +6,15 @@ using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class GradeSubjectAssignmentConfiguration : EntityTypeConfigurationBase<GradeSubjectAssignment>
+/// <summary>
+/// Strict tenant entity (global-tenant-filter.md §3.2). Tenant-owned; the unique
+/// index is composite <c>(tenant_id, grade_level_id, subject_id, period_id)</c>.
+/// </summary>
+internal sealed class GradeSubjectAssignmentConfiguration : TenantEntityTypeConfigurationBase<GradeSubjectAssignment>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<GradeSubjectAssignment> builder)
+    public GradeSubjectAssignmentConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<GradeSubjectAssignment> builder)
     {
         builder.ToTable("grade_subject_assignments");
 
@@ -30,13 +37,12 @@ internal sealed class GradeSubjectAssignmentConfiguration : EntityTypeConfigurat
             .HasForeignKey(x => x.SubjectLessonId)
             .OnDelete(DeleteBehavior.SetNull);
 
-
-        builder.HasIndex(x => new { x.GradeLevelId, x.SubjectId, x.PeriodId })
+        builder.HasIndex(x => new { x.TenantId, x.GradeLevelId, x.SubjectId, x.PeriodId })
             .IsUnique()
-            .HasDatabaseName("ix_grade_subject_assignments_unique");
+            .HasDatabaseName("ix_grade_subject_assignments_tenant_unique");
 
-        builder.HasIndex(x => x.PeriodId)
-            .HasDatabaseName("ix_grade_subject_assignments_period");
+        builder.HasIndex(x => new { x.TenantId, x.PeriodId })
+            .HasDatabaseName("ix_grade_subject_assignments_tenant_period");
 
         builder.Ignore(x => x.DomainEvents);
     }

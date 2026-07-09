@@ -11,6 +11,21 @@ public interface ICodedValueRepository
     Task<CodedValue?> GetIncludingDeletedAsync(Guid id, CancellationToken cancellationToken = default);
     Task<bool> ExistsByCodeAsync(string code, CancellationToken cancellationToken = default);
     Task<bool> ExistsByCodeInParentAsync(string code, Guid? parentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Duplicate-code guard lookup (FR-6 / §3.4). Returns the existing coded value
+    /// with the same normalized <paramref name="code"/> and <paramref name="parentId"/>
+    /// in the tenant-visible scope — <b>ignoring the "Tenant" query filter</b> so both
+    /// shared-blueprint (<c>NULL</c>) rows and the current tenant's owned rows are
+    /// considered. <c>tenantId</c> scopes the owned-row check (pass the current
+    /// tenant; pass <see langword="null"/> for the default/dev blueprint path which
+    /// only checks shared rows). Returns <see langword="null"/> if no conflict.
+    /// </summary>
+    Task<CodedValue?> FindConflictingByCodeAndParentAsync(
+        string code,
+        Guid? parentId,
+        Guid? tenantId,
+        CancellationToken cancellationToken = default);
     Task AddAsync(CodedValue codedValue, CancellationToken cancellationToken = default);
     Task AddRangeAsync(IEnumerable<CodedValue> codedValues, CancellationToken cancellationToken = default);
     Task UpdateAsync(CodedValue codedValue, CancellationToken cancellationToken = default);

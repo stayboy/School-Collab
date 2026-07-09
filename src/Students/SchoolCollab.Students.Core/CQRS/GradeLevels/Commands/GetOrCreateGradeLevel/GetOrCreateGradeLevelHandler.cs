@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
@@ -16,12 +17,16 @@ namespace SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.GetOrCreateGradeL
 public sealed class GetOrCreateGradeLevelHandler(
     IGradeLevelRepository repository,
     HybridCache cache,
+    ITenantProvider tenantProvider,
     ILogger<GetOrCreateGradeLevelHandler> logger) : ICommandHandler<GetOrCreateGradeLevel, GradeLevelDto>
 {
     public async Task<GradeLevelDto> HandleAsync(
         GetOrCreateGradeLevel command,
         CancellationToken cancellationToken = default)
     {
+        // FR-4: no strict entity may be created with an empty tenant.
+        tenantProvider.RequireTenantContext(nameof(GetOrCreateGradeLevel), typeof(GradeLevel));
+
         logger.LogDebug("Handling GetOrCreateGradeLevel for CodedValueId {Id}", command.CodedValueId);
 
         var existing = await repository.GetByCodedValueIdAsync(command.CodedValueId, cancellationToken);
@@ -40,7 +45,8 @@ public sealed class GetOrCreateGradeLevelHandler(
         }
         else
         {
-            gradeLevel = GradeLevel.Create(command.CodedValueId, command.Level, command.Name, command.DisplayOrder);
+            gradeLevel = GradeLevel.Create(command.CodedValueId, command.Level, command.Name, command.DisplayOrder)
+                .WithTenant(tenantProvider);
             await repository.AddAsync(gradeLevel, cancellationToken);
             created = true;
             logger.LogInformation("GradeLevel {Id} created for CodedValueId {CodedValueId}",

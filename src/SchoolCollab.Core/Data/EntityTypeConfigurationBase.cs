@@ -109,6 +109,50 @@ public abstract class TenantEntityTypeConfigurationBase<TEntity>
 }
 
 /// <summary>
+/// Base EF Core configuration for **hybrid** tenant entities — rows that may
+/// belong to a specific tenant (<c>TenantId</c> is a real <see cref="Guid"/>) or
+/// be a shared blueprint visible to all tenants (<c>TenantId</c> is <see langword="null"/>).
+/// Applies the nullable tenant column and the named "Tenant" hybrid query filter
+/// (<c>TenantId == CurrentTenantId OR TenantId == null</c>).
+/// </summary>
+/// <remarks>
+/// The only hybrid entity is <c>CodedValue</c> (reusable across tenancy).
+/// See <c>documents/specs/global-tenant-filter.md</c> §3.2–§3.3.
+/// </remarks>
+/// <typeparam name="TEntity">The hybrid tenant entity type.</typeparam>
+public abstract class TenantOrGlobalEntityTypeConfigurationBase<TEntity>
+    : EntityTypeConfigurationBase<TEntity>
+    where TEntity : class, IEntity, IHybridTenantEntity
+{
+    private readonly Expression<Func<Guid>> _tenantIdAccessor;
+
+    /// <summary>
+    /// Initialises a new instance of the hybrid tenant configuration base class.
+    /// </summary>
+    /// <param name="tenantIdAccessor">
+    /// An expression that returns the current tenant id from the active <see cref="DbContext"/>.
+    /// Spliced into the hybrid filter so EF Core evaluates it per query.
+    /// </param>
+    protected TenantOrGlobalEntityTypeConfigurationBase(Expression<Func<Guid>> tenantIdAccessor) =>
+        _tenantIdAccessor = tenantIdAccessor;
+
+    /// <inheritdoc />
+    public sealed override void Configure(EntityTypeBuilder<TEntity> builder)
+    {
+        base.Configure(builder);
+        builder.ConfigureTenantOrGlobalProperties();
+        builder.ConfigureTenantOrGlobalQueryFilter(_tenantIdAccessor);
+        ConfigureHybridEntity(builder);
+    }
+
+    /// <summary>
+    /// Configures entity-specific table, column, relationship, owned type, and index mappings.
+    /// </summary>
+    /// <param name="builder">The EF Core entity type builder.</param>
+    protected abstract void ConfigureHybridEntity(EntityTypeBuilder<TEntity> builder);
+}
+
+/// <summary>
 /// Shared EF Core mapping helpers for common entity conventions.
 /// </summary>
 public static class EntityTypeBuilderExtensions
@@ -176,6 +220,44 @@ public static class EntityTypeBuilderExtensions
         var tenantIdProperty = typeof(ITenantEntity).GetProperty(nameof(ITenantEntity.TenantId))!;
         var left = Expression.Property(entityParam, tenantIdProperty);
         var body = Expression.Equal(left, tenantIdAccessor.Body);
+        var lambda = Expression.Lambda<Func<TEntity, bool>>(body, entityParam);
+        builder.HasQueryFilter("Tenant", lambda);
+    }
+
+    /// <summary>
+    /// Maps the nullable tenant isolation column for hybrid entities (NULL = shared blueprint).
+    /// </summary>
+    public static void ConfigureTenantOrGlobalProperties<TEntity>(this EntityTypeBuilder<TEntity> builder)
+        where TEntity : class, IHybridTenantEntity
+    {
+        // Nullable: NULL = shared blueprint (visible to all tenants); real Guid = tenant-owned.
+        builder.Property<Guid?>(nameof(IHybridTenantEntity.TenantId));
+    }
+
+    /// <summary>
+    /// Adds the hybrid tenant query filter using the named filter "Tenant":
+    /// <c>TenantId == CurrentTenantId OR TenantId == null</c>. Shared-blueprint rows
+    /// (NULL) are visible to all tenants; tenant-owned rows are isolated.
+    /// The tenant id accessor expression is spliced into the filter so EF Core
+    /// evaluates it per query (NFR-1).
+    /// </summary>
+    public static void ConfigureTenantOrGlobalQueryFilter<TEntity>(
+        this EntityTypeBuilder<TEntity> builder,
+        Expression<Func<Guid>> tenantIdAccessor)
+        where TEntity : class, IHybridTenantEntity
+    {
+        var entityParam = Expression.Parameter(typeof(TEntity), "entity");
+        var tenantIdProperty = typeof(IHybridTenantEntity).GetProperty(nameof(IHybridTenantEntity.TenantId))!;
+        var tenantIdAccess = Expression.Property(entityParam, tenantIdProperty); // Guid?
+
+        // e.TenantId == null  →  SQL: tenant_id IS NULL (shared blueprint)
+        var isNull = Expression.Equal(tenantIdAccess, Expression.Constant(null, typeof(Guid?)));
+
+        // e.TenantId == CurrentTenantId  (convert Guid → Guid? for lifted equality)
+        var currentTenantConverted = Expression.Convert(tenantIdAccessor.Body, typeof(Guid?));
+        var equalsCurrent = Expression.Equal(tenantIdAccess, currentTenantConverted);
+
+        var body = Expression.OrElse(isNull, equalsCurrent);
         var lambda = Expression.Lambda<Func<TEntity, bool>>(body, entityParam);
         builder.HasQueryFilter("Tenant", lambda);
     }

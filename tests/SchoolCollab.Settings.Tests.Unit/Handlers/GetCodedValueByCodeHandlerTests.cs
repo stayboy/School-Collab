@@ -168,7 +168,12 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         _db.TenantCodedValueAttributeOverrides.AddRange(
             new TenantCodedValueAttributeOverride(tenantAId, value.Id, "region", "Tenant A Region"),
             new TenantCodedValueAttributeOverride(tenantBId, value.Id, "region", "Tenant B Region"));
-        _db.SaveChanges();
+        // The attribute overrides belong to tenantA/tenantB but the current context is a
+        // different tenant. Suppress the save-guard (FR-6) for this cross-tenant test setup.
+        using (new TenantContextAccessor(new TenantProvider()).SuppressTenantGuard())
+        {
+            _db.SaveChanges();
+        }
 
         _tenantProvider.Setup(tp => tp.GetTenantContext())
             .Returns(new TenantContext(tenantAId, "Tenant A", TenantType.School));

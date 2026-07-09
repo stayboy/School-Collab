@@ -732,3 +732,31 @@ Implementation notes:
    filter chips (Students query params; Subjects pre-selects grade). Order
    before or with PR 7/PR 8 so the grade-level stat links have live targets.
 10. **PR 10 — Docs** (`grade-level-setup.md`, solution index entry).
+---
+
+## Appendix: Supersession notice (2026-07-08)
+
+> The approved spec `documents/specs/global-tenant-filter.md` (v3, **Approved**)
+> revises the following locked decisions in this document:
+>
+> - **§3.1 / §3.5 tenancy** for `GradeLevel`/`Subject` ("global, no TenantId")
+>   → **strict operational**, NOT NULL `tenant_id`, filter `TenantId == CurrentTenantId`.
+> - **§3.1** the `coded_value_id` unique index → `(tenant_id, coded_value_id)`;
+>   "exactly one `GradeLevel` per grade coded value" → "one `GradeLevel` per
+>   **(tenant, coded value)**." `Assignment.GradeLevelId` references the tenant's
+>   own `GradeLevel`. By symmetry `Subject` is strict operational.
+> - **§5.6** Period invariant ("at most one current period") → unchanged in
+>   spirit but **per-tenant**.
+>
+> The following decisions in this document **STAND** (not superseded):
+>
+> - **§3.3** (CodedValue global blueprint + `TenantCodedValueOverride` +
+>   `CodedValueResolver`). `CodedValue` becomes **hybrid** (nullable `tenant_id`:
+>   `NULL` = shared blueprint, real = tenant-owned) but the blueprint-and-override
+>   model is retained unchanged for `NULL` rows.
+> - **§5.4** (client-side name overlay). `GradeLevel.Name` remains the
+>   denormalized mirror of the resolved CodedValue name.
+> - **§0 decision 1** (Assignments pair to `GradeLevel.Id`), **§0 decision 2**
+>   (real `Tenant` table), and all other decisions — these stand.
+>
+> See `global-tenant-filter.md` §11.1 for the full reconciliation.

@@ -154,25 +154,55 @@ The `.WithTenant(tenantProvider)` extension uses reflection on `ITenantEntity.Te
 once, centrally. This is acceptable because the target is an interface property — the
 contract is compiler-validated. No per-aggregate `WithTenant` method is needed.
 
-### 4.3 Filtering Queries by Tenant
+### 4.3 Filtering Queries by Tenant (global query filter)
 
-All read operations must filter by the current tenant:
+All read operations are **automatically scoped to the current tenant** by a
+**named EF Core 10 query filter** (`"Tenant"`) installed on every
+`ITenantEntity` / `IHybridTenantEntity` entity by the configuration base
+classes. The filter's lambda uses `() => CurrentTenantId` from
+`ModuleDbContext`, which reads from the singleton `ITenantProvider`
+(`AsyncLocal<TenantContext>`). This means **handlers and repositories
+should NOT add `Where(a => a.TenantId == tenantId)`** — the filter does
+it, and adding a redundant predicate risks mistakes (e.g., the wrong
+tenant id, a stale snapshot, or accidentally bypassing the named filter
+on a different path).
+
+If a handler needs the full set across tenants, it MUST use
+`IgnoreQueryFilters(["Tenant"])` — never the unnamed
+`IgnoreQueryFilters()`. The unnamed form bypasses **all** filters
+including `"SoftDelete"`, which is almost always wrong. (A Roslyn
+analyzer `SC0001` will be added in a future iteration to enforce this.)
+
+For raw SQL or `FromSqlRaw` queries, the filter does not apply. Use
+`WithTenant()` and `EnsureTenantAccess()` (see §4.5) explicitly.
+
+Example — what NOT to do:
 
 ```csharp
-public async Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? status, CancellationToken ct)
-{
-    var tenantId = _tenantProvider.GetTenantContext().TenantId;
-    var query = _db.Assignments.AsNoTracking().Where(a => a.TenantId == tenantId);
-    // ...
-}
+// ANTI-PATTERN: redundant predicate, risk of bugs
+var query = _db.Assignments.AsNoTracking()
+    .Where(a => a.TenantId == tenantId)  // <-- filter already does this
+    .Where(a => a.Status == status);
 ```
 
-Repository `GetAsync(id)` methods must also filter by tenant to prevent cross-tenant
-access via direct ID:
+Example — what to do:
+
+```csharp
+// CORRECT: trust the global filter; add only business predicates
+var query = _db.Assignments.AsNoTracking()
+    .Where(a => a.Status == status);
+```
+
+Repository `GetAsync(id)` methods MUST still filter by tenant to prevent
+cross-tenant access via direct ID — but because the global filter
+already applies, the explicit `&& a.TenantId == tenantId` is redundant
+unless the query is being composed across multiple `DbSet`s or the
+filter is being ignored elsewhere in the call chain:
 
 ```csharp
 public async Task<Assignment?> GetAsync(Guid id, CancellationToken ct) =>
-    await _db.Assignments.SingleOrDefaultAsync(a => a.Id == id && a.TenantId == tenantId, ct);
+    await _db.Assignments.SingleOrDefaultAsync(a => a.Id == id, ct);
+// (global filter already scopes this to the current tenant)
 ```
 
 ### 4.4 Tenant-Aware Cache Keys
@@ -196,6 +226,60 @@ need an explicit check (e.g., loading via a non-repository path), use
 var entity = await db.Entities.FindAsync([id], ct) ?? throw new NotFoundException(id);
 entity.EnsureTenantAccess(tenantProvider); // throws TenantAccessException on mismatch
 ```
+
+### 4.6 Sanctioned Bypass — `ITenantContextAccessor`
+
+In a few well-defined cases, application code MUST step outside the global
+`"Tenant"` query filter and the `ModuleDbContext` save-guard — cross-tenant admin
+views, the outbox dispatcher reconstructing a publisher's tenant per message,
+the `PromotionService` worker enumerating tenants, design-time factories,
+migration/seed services, and the `CodedValue` blueprint-edit path. The **only**
+sanctioned way to do this is `ITenantContextAccessor`
+(`SchoolCollab.Core.Tenancy`), a singleton backed by the same `AsyncLocal`
+context as `ITenantProvider`. Two methods:
+
+```csharp
+// 1. Run work under an explicit tenant (or no tenant, when tenantId is null).
+//    The prior ITenantProvider context is saved and restored in try/finally
+//    so scopes unwind correctly even when nested. Pass `null` to run as a
+//    global / blueprint operation (e.g. an admin aggregate view).
+var result = await tenantContextAccessor.RunWithExplicitTenantAsync(
+    tenantId,
+    async ct => await db.Entities.Where(...).ToListAsync(ct),
+    cancellationToken);
+
+// 2. Suppress the ModuleDbContext save-guard for an async flow. Use only for
+//    writes that the guard would legitimately reject — seeder / design-time /
+//    outbox dispatcher / CodedValue blueprint edit. Always in a `using` block.
+using (tenantContextAccessor.SuppressTenantGuard())
+{
+    await db.CodedValues.AddRangeAsync(blueprintRows, ct);
+    await db.SaveChangesAsync(ct);
+}
+```
+
+**Sanctioned call sites (every site MUST carry a comment naming the justifying
+spec section):**
+
+| Site | Method | Why |
+|---|---|---|
+| `OutboxDispatcher` per message | `RunWithExplicitTenantAsync(msg.TenantId, …)` | Reconstruct the publisher's tenant before any handler runs. |
+| `PromotionService` per tenant | `RunWithExplicitTenantAsync(tenantId, …)` | The worker has no ambient tenant; it must enumerate and run per tenant. |
+| Admin / cross-tenant aggregate views | `RunWithExplicitTenantAsync(null, …)` + `IgnoreQueryFilters(["Tenant"])` on a reviewed endpoint | Lifts the filter for an admin-only read. |
+| `CodedValueSeeder` / `TenantSeeder` | `SuppressTenantGuard()` | Seeders run under the default context and write `NULL`-blueprint rows. |
+| `CodedValue` blueprint edit (default-tenant path) | `SuppressTenantGuard()` | The default-tenant vocabulary-edit affordance writes shared rows. |
+| `IDesignTimeDbContextFactory` | `SuppressTenantGuard()` | Migrations generate under `Guid.Empty`. |
+
+**Forbidden patterns** (use one of the above instead):
+
+- `db.Entities.IgnoreQueryFilters()` (unnamed) — bypasses `"SoftDelete"` too.
+- `db.Entities.IgnoreQueryFilters(["SoftDelete"])` then cross-tenant logic.
+- Manually `tenantProvider.SetTenant(...)` and forgetting to restore.
+- Casting a row's `TenantId` via reflection to read another tenant.
+
+For per-tenant cache keys, see §4.4. For the full behavioural contract and
+acceptance criteria, see `documents/specs/global-tenant-filter.md` §8.3 / FR-10 /
+NFR-4 / AC-4 / EC-8.
 
 ## 5. Claim Contract with Keycloak
 

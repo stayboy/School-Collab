@@ -28,7 +28,7 @@ public sealed class ListDeletedStudentsHandler(
             static async (state, ct) =>
             {
                 var results = await state.Students
-                    .IgnoreQueryFilters()
+                    .IgnoreQueryFilters(["SoftDelete"])
                     .AsNoTracking()
                     .Where(x => x.IsDeleted)
                     .OrderBy(x => x.LastName)

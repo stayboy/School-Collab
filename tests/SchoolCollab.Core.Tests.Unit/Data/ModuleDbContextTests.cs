@@ -93,7 +93,12 @@ public class ModuleDbContextTests
         };
 
         context.Entities.Add(entity);
-        await context.SaveChangesAsync();
+        // The save-guard (FR-6) now rejects cross-tenant writes. Suppress to verify
+        // the explicit tenant is still respected (not overwritten by the auto-default).
+        using (new TenantContextAccessor(provider).SuppressTenantGuard())
+        {
+            await context.SaveChangesAsync();
+        }
 
         entity.TenantId.Should().Be(explicitTenantId);
     }

@@ -39,11 +39,15 @@ public class CodedValueOverrideHandlerTests
         public Scope(string dbName)
         {
             Db = BuildDb(dbName, Tenants);
+            // The handlers only use SuppressTenantGuard() (a static AsyncLocal flag),
+            // so a TenantContextAccessor backed by a throwaway TenantProvider is fine —
+            // the flag is shared across all accessor instances.
+            var accessor = new TenantContextAccessor(new TenantProvider());
             // No HybridCache in scope — GetCodedValueById reads directly from the DB.
             Resolver = new GetCodedValueByIdHandler(Db);
-            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, Resolver,
+            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, accessor, Resolver,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<UpsertCodedValueOverrideHandler>.Instance);
-            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants);
+            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, accessor);
         }
 
         public void Dispose() => Db.Dispose();
@@ -201,11 +205,14 @@ public class CodedValueOverrideHandlerTests
         s.Tenants.Current = new TenantContext(realTenantId, "Hydeson", TenantType.School);
         await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Real-Name", null));
 
-        // Two separate rows, one per tenant.
-        s.Db.TenantCodedValueOverrides.Should().HaveCount(2);
-        s.Db.TenantCodedValueOverrides.Should().Contain(o =>
+        // Two separate rows, one per tenant. Read with the "Tenant" filter bypassed
+        // so both rows are visible for this raw-storage assertion (the filter scopes
+        // enumeration to the current real tenant, which would hide the Guid.Empty row).
+        var allOverrides = await s.Db.TenantCodedValueOverrides.IgnoreQueryFilters(["Tenant"]).ToListAsync();
+        allOverrides.Should().HaveCount(2);
+        allOverrides.Should().Contain(o =>
             o.TenantId == Guid.Empty && o.OverriddenName == "Default-Name");
-        s.Db.TenantCodedValueOverrides.Should().Contain(o =>
+        allOverrides.Should().Contain(o =>
             o.TenantId == realTenantId && o.OverriddenName == "Real-Name");
 
         // The real tenant resolves its own name; the default-tenant override is

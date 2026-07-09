@@ -10,7 +10,7 @@ Not all entities should follow this pattern. You must distinguish between **Refe
 
 | Data Type | Example | Tenancy Pattern | Logic |
 | :--- | :--- | :--- | :--- |
-| **Reference Data** | Coded Values, Grade Levels | **Override Pattern** | Global Blueprint $\rightarrow$ Tenant Override $\rightarrow$ Resolved Value |
+| **Reference Data** | Coded Values, Grade Levels (codes) | **Hybrid Override Pattern** (see below) | Shared blueprint (NULL tenant) + Tenant-owned rows; per-tenant name overlay via override. |
 | **Operational Data** | Students, Assignments, Grades | **Direct Tenancy** | Entity belongs to one `TenantId`. No global version exists. |
 
 **Rule of Thumb:**
@@ -19,6 +19,39 @@ Not all entities should follow this pattern. You must distinguish between **Refe
 
 **Permission-Based Overrides**:
 For operational data (Students/Assignments), do not use the blueprint pattern. Any specific overrides or specialized access must be managed via a dedicated **Permissions/ACL system**, not via the reference data override mechanism.
+
+## Hybrid Override Model (CodedValue / reference data)
+
+`documents/specs/global-tenant-filter.md` §3.2–§3.3 narrows the blueprint/override
+model to a **hybrid** tenancy contract for reference entities like `CodedValue`.
+Reference rows are either:
+
+- **Shared blueprint** — `tenant_id IS NULL`. CSV-seeded by the migration
+  service under `SuppressTenantGuard()`. Visible to all tenants via the
+  hybrid filter `TenantId == CurrentTenantId OR TenantId IS NULL`. Tenants
+  customise the displayed `Name` (and any overlaid attributes) per-tenant via
+  `TenantCodedValueOverride` / `TenantCodedValueAttributeOverride`.
+- **Tenant-owned** — `tenant_id = <real>`. Created by a tenant-facing path
+  (e.g. the Grade-Level wizard's "create new" under a real tenant) for codes
+  the shared blueprint does not provide. Isolated to that tenant; no override
+  row targets it — the tenant edits the row's own `Name` / `IsDisabled`.
+
+`Guid.Empty` is **never** a valid `CodedValue.TenantId`. The two
+`CreateCodedValueHandler` paths reflect this:
+
+- `CurrentTenantId != Guid.Empty` $\rightarrow$ stamps `TenantId = current`
+  (tenant-owned row). The duplicate-code guard (FR-6) rejects creation if a
+  shared row with the same `(parent, code)` already exists — the tenant is
+  directed to **override the shared row's name** rather than create a
+  duplicate.
+- `CurrentTenantId == Guid.Empty` (default/dev only; prod guarantees a real
+  claim via the API pipeline) $\rightarrow$ writes `TenantId = NULL` under
+  `SuppressTenantGuard()` — the dev/admin vocabulary-edit affordance.
+
+The resolver is unchanged: `overrideValue?.OverriddenName ?? cv.Name`
+transparently returns the owned row's own name (no override row exists) and
+the shared row's overridden name. The override pattern is **retained**, not
+deprecated.
 
 ## Implementation Workflow
 
@@ -60,3 +93,4 @@ public async Task<<EntityEntityDto> ResolveAsync(GlobalEntity global, Guid tenan
 - [ ] Is the resolver using the `TenantOverride ?? Global` merge pattern?
 - [ ] Are cache keys prefixed with `tenant:{id}`?
 - [ ] Did you run `dotnet build` and create unit tests for the resolver?
+- [ ] If the reference entity is `CodedValue` (or any other `IHybridTenantEntity`): does the `Create` handler stamp `TenantId = current` (real tenant) or `TenantId = null` (default tenant, under `SuppressTenantGuard`)? Does the duplicate-code guard reject creation when a shared row with the same `(parent, code)` already exists, directing the tenant to override the shared row's name?

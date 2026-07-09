@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Core.Messaging;
 
@@ -30,6 +31,7 @@ public sealed class OutboxIntegrationEventPublisher<TContext> : IIntegrationEven
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IDbContextFactory<TContext> _contextFactory;
+    private readonly ITenantProvider _tenantProvider;
     private readonly ILogger<OutboxIntegrationEventPublisher<TContext>> _logger;
 
     /// <summary>
@@ -37,9 +39,11 @@ public sealed class OutboxIntegrationEventPublisher<TContext> : IIntegrationEven
     /// </summary>
     public OutboxIntegrationEventPublisher(
         IDbContextFactory<TContext> contextFactory,
+        ITenantProvider tenantProvider,
         ILogger<OutboxIntegrationEventPublisher<TContext>> logger)
     {
         _contextFactory = contextFactory;
+        _tenantProvider = tenantProvider;
         _logger = logger;
     }
 
@@ -51,12 +55,18 @@ public sealed class OutboxIntegrationEventPublisher<TContext> : IIntegrationEven
 
         await using var dbContext = await _contextFactory.CreateDbContextAsync(cancellationToken);
 
+        // FR-15: stamp the publisher's tenant. Guid.Empty (no tenant context) → null
+        // (global event). A real tenant → that tenant's id, so the dispatcher/consumer
+        // can reconstruct the tenant context before touching tenant-scoped data.
+        var currentTenant = _tenantProvider.GetTenantContext().TenantId;
+
         var row = new OutboxMessage
         {
             Id = Guid.NewGuid(),
             OccurredAt = DateTimeOffset.UtcNow,
             Type = message.GetType().FullName ?? message.GetType().Name,
             Payload = JsonSerializer.Serialize(message, SerializerOptions),
+            TenantId = currentTenant == Guid.Empty ? null : currentTenant,
         };
 
         dbContext.Set<OutboxMessage>().Add(row);

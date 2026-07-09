@@ -7,6 +7,7 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using RabbitMQ.Client;
 using SchoolCollab.Core.Messaging;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Core.Tests.Unit.Messaging;
 
@@ -67,6 +68,7 @@ public class OutboxExtensionsTests
         // Arrange
         var services = new ServiceCollection();
         services.AddLogging();
+        services.AddTenancy(); // FR-15: OutboxDispatcher/OutboxIntegrationEventPublisher require ITenantContextAccessor/ITenantProvider
         services.AddDbContextFactory<FakeDbContext>(opt => opt.UseInMemoryDatabase("outbox-extensions-test"));
         // The dispatcher constructor takes a RabbitMQ IConnection. We don't
         // exercise the dispatcher in this test (no broker available); we just
@@ -110,6 +112,7 @@ public class OutboxExtensionsTests
     {
         // Arrange
         var services = new ServiceCollection();
+        services.AddTenancy();
         services.AddDbContextFactory<FakeDbContext>(opt => opt.UseInMemoryDatabase("outbox-extensions-default-section"));
         var config = BuildConfiguration(new Dictionary<string, string?>
         {
@@ -130,6 +133,7 @@ public class OutboxExtensionsTests
     {
         // Arrange
         var services = new ServiceCollection();
+        services.AddTenancy();
         services.AddDbContextFactory<FakeDbContext>(opt => opt.UseInMemoryDatabase("outbox-extensions-custom-section"));
         var config = BuildConfiguration(new Dictionary<string, string?>
         {

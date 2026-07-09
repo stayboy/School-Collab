@@ -20,6 +20,9 @@ public sealed class CreateStudentHandler(
 {
     public async Task<Guid> HandleAsync(CreateStudent command, CancellationToken cancellationToken = default)
     {
+        // FR-4: no strict entity may be created with an empty tenant.
+        tenantProvider.RequireTenantContext(nameof(CreateStudent), typeof(Student));
+
         logger.LogDebug("Handling CreateStudent {StudentNumber}", command.StudentNumber);
 
         if (await repository.ExistsByStudentNumberAsync(command.StudentNumber, cancellationToken))

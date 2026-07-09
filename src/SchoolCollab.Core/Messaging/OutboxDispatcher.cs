@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RabbitMQ.Client;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Core.Messaging;
 
@@ -31,6 +32,7 @@ public sealed class OutboxDispatcher<TContext> : BackgroundService
     private readonly IServiceScopeFactory _scopeFactory;
     private readonly IConnection _connection;
     private readonly IOptionsMonitor<OutboxOptions> _optionsMonitor;
+    private readonly ITenantContextAccessor _tenantContextAccessor;
     private readonly ILogger<OutboxDispatcher<TContext>> _logger;
 
     /// <summary>
@@ -40,11 +42,13 @@ public sealed class OutboxDispatcher<TContext> : BackgroundService
         IServiceScopeFactory scopeFactory,
         IConnection connection,
         IOptionsMonitor<OutboxOptions> optionsMonitor,
+        ITenantContextAccessor tenantContextAccessor,
         ILogger<OutboxDispatcher<TContext>> logger)
     {
         _scopeFactory = scopeFactory;
         _connection = connection;
         _optionsMonitor = optionsMonitor;
+        _tenantContextAccessor = tenantContextAccessor;
         _logger = logger;
     }
 
@@ -123,30 +127,52 @@ public sealed class OutboxDispatcher<TContext> : BackgroundService
 
         var now = DateTimeOffset.UtcNow;
 
+        // The dispatcher is a background service with no ambient tenant and touches
+        // only the global OutboxMessage table + RabbitMQ. Suppress the guard for the
+        // whole batch so a future tenant-scoped addition here can't trip the guard.
+        using (_tenantContextAccessor.SuppressTenantGuard())
+        {
         foreach (var msg in batch)
         {
             try
             {
-                var body = Encoding.UTF8.GetBytes(msg.Payload);
-                var props = new BasicProperties
-                {
-                    ContentType = "application/json",
-                    DeliveryMode = DeliveryModes.Persistent,
-                    MessageId = msg.Id.ToString(),
-                    Type = msg.Type,
-                    Timestamp = new AmqpTimestamp(msg.OccurredAt.ToUnixTimeSeconds()),
-                };
+                // FR-15 / EC-2: set the tenant context for this message so any
+                // downstream handler (or SaveChanges on tenant-scoped data) runs
+                // under the publisher's tenant. null TenantId = global event → the
+                // callback runs under the default context with the guard suppressed
+                // (above) so it may touch only global allow-list data.
+                await _tenantContextAccessor.RunWithExplicitTenantAsync<object?>(
+                    msg.TenantId,
+                    async ct =>
+                    {
+                        var body = Encoding.UTF8.GetBytes(msg.Payload);
+                        var props = new BasicProperties
+                        {
+                            ContentType = "application/json",
+                            DeliveryMode = DeliveryModes.Persistent,
+                            MessageId = msg.Id.ToString(),
+                            Type = msg.Type,
+                            Timestamp = new AmqpTimestamp(msg.OccurredAt.ToUnixTimeSeconds()),
+                            // Carry the tenant through to the consumer so it can
+                            // reconstruct the tenant context before processing.
+                            Headers = msg.TenantId is { } tenantId
+                                ? new Dictionary<string, object?> { ["x-tenant-id"] = tenantId.ToByteArray() }
+                                : null,
+                        };
 
-                await channel.BasicPublishAsync(
-                    exchange: options.ExchangeName,
-                    routingKey: msg.Type,
-                    mandatory: true,
-                    basicProperties: props,
-                    body: body,
-                    cancellationToken: stoppingToken);
+                        await channel.BasicPublishAsync(
+                            exchange: options.ExchangeName,
+                            routingKey: msg.Type,
+                            mandatory: true,
+                            basicProperties: props,
+                            body: body,
+                            cancellationToken: ct);
 
-                msg.DispatchedAt = now;
-                msg.LastError = null;
+                        msg.DispatchedAt = now;
+                        msg.LastError = null;
+                        return null;
+                    },
+                    stoppingToken);
             }
             catch (Exception ex)
             {
@@ -159,6 +185,8 @@ public sealed class OutboxDispatcher<TContext> : BackgroundService
         }
 
         await dbContext.SaveChangesAsync(stoppingToken);
+        } // end SuppressTenantGuard
+
         await tx.CommitAsync(stoppingToken);
 
         var succeeded = batch.Count(m => m.DispatchedAt is not null);

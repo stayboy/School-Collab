@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
@@ -5,9 +6,15 @@ using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class StudentEnrollmentConfiguration : EntityTypeConfigurationBase<StudentEnrollment>
+/// <summary>
+/// Strict tenant entity (global-tenant-filter.md §3.2). Inherits the student's
+/// tenant; the unique index is composite <c>(tenant_id, student_id, period_id)</c>.
+/// </summary>
+internal sealed class StudentEnrollmentConfiguration : TenantEntityTypeConfigurationBase<StudentEnrollment>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<StudentEnrollment> builder)
+    public StudentEnrollmentConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<StudentEnrollment> builder)
     {
         builder.ToTable("student_enrollments");
 
@@ -25,15 +32,16 @@ internal sealed class StudentEnrollmentConfiguration : EntityTypeConfigurationBa
             .IsRequired()
             .HasDefaultValue(EnrollmentStatus.Active);
 
+        builder.HasIndex(x => new { x.TenantId, x.StudentId, x.PeriodId })
+            .IsUnique()
+            .HasDatabaseName("ix_student_enrollments_tenant_student_period");
 
-        builder.HasIndex(x => new { x.StudentId, x.PeriodId })
-            .HasDatabaseName("ix_student_enrollments_student_period");
+        // NFR-3 hot paths (tenant_id leading).
+        builder.HasIndex(x => new { x.TenantId, x.PeriodId })
+            .HasDatabaseName("ix_student_enrollments_tenant_period");
 
-        builder.HasIndex(x => x.PeriodId)
-            .HasDatabaseName("ix_student_enrollments_period");
-
-        builder.HasIndex(x => x.GradeLevelId)
-            .HasDatabaseName("ix_student_enrollments_grade_level");
+        builder.HasIndex(x => new { x.TenantId, x.GradeLevelId })
+            .HasDatabaseName("ix_student_enrollments_tenant_grade_level");
 
         builder.HasIndex(x => x.Status)
             .HasDatabaseName("ix_student_enrollments_status");

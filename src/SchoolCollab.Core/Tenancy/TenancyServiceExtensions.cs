@@ -22,6 +22,10 @@ public static class TenancyServiceExtensions
         services.TryAddSingleton<TenantProvider>();
         services.TryAddSingleton<ITenantProvider>(sp => sp.GetRequiredService<TenantProvider>());
 
+        // The sanctioned tenant-filter / save-guard bypass. Singleton — backed by
+        // AsyncLocal so it flows per async context. See global-tenant-filter.md FR-8/FR-10.
+        services.TryAddSingleton<ITenantContextAccessor, TenantContextAccessor>();
+
         return services;
     }
 }

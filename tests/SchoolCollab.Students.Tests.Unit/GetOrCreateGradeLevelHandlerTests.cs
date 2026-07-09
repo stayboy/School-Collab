@@ -10,7 +10,7 @@ namespace SchoolCollab.Students.Tests.Unit;
 public class GetOrCreateGradeLevelHandlerTests
 {
     private static GetOrCreateGradeLevelHandler NewHandler(StudentsTestScope s) =>
-        new(s.GradeLevels, s.Cache, NullLogger<GetOrCreateGradeLevelHandler>.Instance);
+        new(s.GradeLevels, s.Cache, s.Tenants, NullLogger<GetOrCreateGradeLevelHandler>.Instance);
 
     [TestMethod]
     public async Task GetOrCreate_CreatesWhenAbsent()

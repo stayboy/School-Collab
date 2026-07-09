@@ -83,6 +83,10 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("jsonb")
                         .HasColumnName("payload");
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(500)
@@ -95,6 +99,9 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.HasIndex("OccurredAt")
                         .HasDatabaseName("ix_outbox_messages_pending")
                         .HasFilter("dispatched_at IS NULL");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_outbox_messages_tenant_id");
 
                     b.ToTable("outbox_messages", (string)null);
                 });
@@ -158,6 +165,10 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -170,6 +181,10 @@ namespace SchoolCollab.Settings.Core.Migrations
 
                     b.HasIndex("ParentId")
                         .HasDatabaseName("ix_coded_values_parent_id");
+
+                    b.HasIndex("TenantId", "ParentId")
+                        .HasDatabaseName("ix_coded_values_owned_tenant_parent")
+                        .HasFilter("tenant_id IS NOT NULL");
 
                     b.ToTable("coded_values", (string)null);
                 });

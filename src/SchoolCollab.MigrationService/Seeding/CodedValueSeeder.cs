@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
 
@@ -18,13 +19,21 @@ namespace SchoolCollab.MigrationService.Seeding;
 public sealed class CodedValueSeeder(
     SettingsDbContext db,
     IConfiguration configuration,
+    ITenantContextAccessor tenantContextAccessor,
     ILogger<CodedValueSeeder> logger)
 {
     public async Task SeedAsync(CancellationToken ct = default)
     {
-        await SeedCodedValuesAsync(ct);
-        await SeedAttributeDefinitionsAsync(ct);
-        await SeedAttributeValuesAsync(ct);
+        // The seeder runs under the default (Guid.Empty) context and writes NULL-
+        // blueprint CodedValue rows (hybrid guard allows null). Suppress the guard
+        // for the whole pass as the sanctioned seed bypass (global-tenant-filter.md
+        // §12 Step 5) so the writes are never rejected regardless of caller context.
+        using (tenantContextAccessor.SuppressTenantGuard())
+        {
+            await SeedCodedValuesAsync(ct);
+            await SeedAttributeDefinitionsAsync(ct);
+            await SeedAttributeValuesAsync(ct);
+        }
     }
 
     private async Task SeedCodedValuesAsync(CancellationToken ct)
