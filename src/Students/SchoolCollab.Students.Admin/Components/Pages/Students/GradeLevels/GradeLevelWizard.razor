@@ -20,8 +20,8 @@
 
 <ErrorBoundary>
     <ChildContent>
-        @if (_isRealTenant)
-        {
+        <TenantGate>
+            <ChildContent>
         <FluentWizard StepperPosition="StepperPosition.Top"
                       StepSequence="WizardStepSequence.Visited"
                       Width="960px"
@@ -57,15 +57,13 @@
                                                             SelectedIdChanged="OnCodedValueChanged" />
                                     </div>
                                     <div class="coded-value-actions">
-                                        @if (IsRealTenant)
-                                        {
+
                                             <FluentButton Appearance="Appearance.Neutral"
                                                           Title="Override the default name for this tenant"
                                                           OnClick="OpenOverrideDialogAsync"
                                                           Disabled="@(!_codedValueIdNullable.HasValue)">
                                                 Override Name
                                             </FluentButton>
-                                        }
                                         <FluentButton Appearance="Appearance.Neutral"
                                                       Title="Create a new grade coded value"
                                                       OnClick="OpenCreateDialogAsync">
@@ -97,10 +95,8 @@
                                             @if (_selectedCodedValue.IsOverridden)
                                             {
                                                 <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
-                                                @if (IsRealTenant)
-                                                {
+
                                                     <FluentAnchor Href="#" OnClick="OpenOverrideDialogAsync" class="grade-confirm-reset">Reset to default</FluentAnchor>
-                                                }
                                             }
                                         </FluentStack>
                                     </FluentStack>
@@ -187,20 +183,9 @@
                                                     <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
                                                 }
                                                 <span class="assigned-subject-actions">
-                                                    @if (IsRealTenant)
-                                                    {
-                                                        <FluentButton Appearance="Appearance.Lightweight"
-                                                                      Title="Override the default name for this tenant"
-                                                                      OnClick="@(() => OverrideSubjectAsync(s))"
-                                                                      Disabled="@(_overridingSubjectId == s.Id)">
-                                                            Override Name
-                                                        </FluentButton>
-                                                    }
-                                                    <FluentButton Appearance="Appearance.Lightweight"
-                                                                  OnClick="@(() => RemoveSubject(s))"
-                                                                  Disabled="@(_overridingSubjectId == s.Id)">
-                                                        Remove
-                                                    </FluentButton>
+
+                                                        <FluentButton Appearance="Appearance.Lightweight" Title="Override the default name for this tenant" OnClick="@(() => OverrideSubjectAsync(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Edit)" /></FluentButton>
+                                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove subject" OnClick="@(() => RemoveSubject(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Delete)" /></FluentButton>
                                                 </span>
                                             </li>
                                         }
@@ -380,13 +365,13 @@
                 </div>
             </ButtonTemplate>
         </FluentWizard>
-        }
-        else
-        {
+        </ChildContent>
+        <Fallback>
             <FluentMessageBar Intent="MessageIntent.Warning">
                 You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
             </FluentMessageBar>
-        }
+        </Fallback>
+        </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -416,19 +401,17 @@
     private string ResolvedName => _selectedCodedValue?.Name ?? string.Empty;
 
     // True when the current tenant is a real tenant (not the default/system
-    // tenant). The override actions on the grade and subject confirmations
-    // are only meaningful for real tenants — in default-tenant mode the
-    // override handler rewrites the global coded value directly, so there
-    // is no per-tenant concept for the UI to manage. Hide the override
-    // button and reset link in that case.
+    // tenant). Drives the <TenantGate> re-render when the tenant changes
+    // mid-session (AuthenticationStateChanged), and guards OnInitializedAsync
+    // (skip tenant-scoped loads) and SaveAsync. The wizard's override
+    // buttons are no longer gated here — the parent <TenantGate> hides the
+    // entire wizard when there is no real tenant.
     //
     // The value is read from the authenticated user's tenant_id claim in
     // OnInitializedAsync (via AuthenticationStateProvider) because the
     // shared ITenantProvider is backed by AsyncLocal and is not reliably
     // available inside a Blazor Server circuit.
     private bool _isRealTenant;
-
-    private bool IsRealTenant => _isRealTenant;
 
     // Subject coded-value picker (step 1, "Assign Subjects" section). Picking
     // a subject coded value auto-adds it to the grade's assigned list — no

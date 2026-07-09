@@ -17,14 +17,9 @@
         <h1 class="page-title">Create Subject</h1>
     </div>
 
-    @if (!_isRealTenant)
-    {
-        <FluentMessageBar Intent="MessageIntent.Warning">
-            You have no tenant assigned. Subject records are tenant-scoped — pick a tenant to continue.
-        </FluentMessageBar>
-        <FluentButton OnClick="@(() => Nav.NavigateTo("/students/subjects"))">Back to Subjects</FluentButton>
-    }
-    else if (_gradeLevelId is null)
+    <TenantGate>
+        <ChildContent>
+    @if (_gradeLevelId is null)
     {
         <FluentMessageBar Intent="MessageIntent.Warning">
             No grade level selected. Please create a subject from the Subjects landing page after selecting a grade level.
@@ -63,6 +58,14 @@
             </FluentStack>
         </EditForm>
     }
+        </ChildContent>
+        <Fallback>
+            <FluentMessageBar Intent="MessageIntent.Warning">
+                You have no tenant assigned. Subject records are tenant-scoped — pick a tenant to continue.
+            </FluentMessageBar>
+            <FluentButton OnClick="@(() => Nav.NavigateTo("/students/subjects"))">Back to Subjects</FluentButton>
+        </Fallback>
+    </TenantGate>
 </FluentStack>
 
 <style>

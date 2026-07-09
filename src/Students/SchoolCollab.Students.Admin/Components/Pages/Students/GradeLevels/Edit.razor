@@ -11,14 +11,9 @@
 
 <ErrorBoundary>
     <ChildContent>
-        @if (!_isRealTenant)
-        {
-            <FluentMessageBar Intent="MessageIntent.Warning">
-                You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
-            </FluentMessageBar>
-            <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="mt-2">Back to List</FluentButton>
-        }
-        else if (_loading)
+        <TenantGate>
+            <ChildContent>
+        @if (_loading)
         {
             <FluentProgressRing />
         }
@@ -50,6 +45,14 @@
                 </div>
             </EditForm>
         }
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+                <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="mt-2">Back to List</FluentButton>
+            </Fallback>
+        </TenantGate>
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>

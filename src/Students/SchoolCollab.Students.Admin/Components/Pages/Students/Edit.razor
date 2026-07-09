@@ -16,13 +16,9 @@
                 <h1 class="page-title">Edit Student</h1>
             </div>
 
-            @if (!_isRealTenant)
-            {
-                <FluentMessageBar Intent="MessageIntent.Warning">
-                    You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
-                </FluentMessageBar>
-            }
-            else if (_student is null)
+            <TenantGate>
+                <ChildContent>
+            @if (_student is null)
             {
                 <div class="spinner-container">
                     <FluentProgressRing />
@@ -66,6 +62,13 @@
                     <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}")'>Cancel</FluentButton>
                 </div>
             }
+                </ChildContent>
+                <Fallback>
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                    </FluentMessageBar>
+                </Fallback>
+            </TenantGate>
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">

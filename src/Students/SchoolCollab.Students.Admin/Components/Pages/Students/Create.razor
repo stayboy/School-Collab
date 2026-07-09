@@ -16,8 +16,8 @@
                 <h1 class="page-title">New Student</h1>
             </div>
 
-            @if (_isRealTenant)
-            {
+            <TenantGate>
+                <ChildContent>
                 <EditForm Model="_model" OnValidSubmit="OnSaveAsync" class="form-container">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
@@ -56,13 +56,13 @@
                     <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo("/students"))">Cancel</FluentButton>
                 </div>
                 </EditForm>
-            }
-            else
-            {
+            </ChildContent>
+            <Fallback>
                 <FluentMessageBar Intent="MessageIntent.Warning">
                     You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
                 </FluentMessageBar>
-            }
+            </Fallback>
+            </TenantGate>
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">

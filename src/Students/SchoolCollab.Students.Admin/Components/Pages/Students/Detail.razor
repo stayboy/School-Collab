@@ -20,13 +20,9 @@
                 }
             </div>
 
-            @if (!_isRealTenant)
-            {
-                <FluentMessageBar Intent="MessageIntent.Warning">
-                    You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
-                </FluentMessageBar>
-            }
-            else if (_student is null)
+            <TenantGate>
+                <ChildContent>
+            @if (_student is null)
             {
                 <div class="spinner-container">
                     <FluentProgressRing />
@@ -99,6 +95,13 @@
                     </FluentDataGrid>
                 }
             }
+                </ChildContent>
+                <Fallback>
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                    </FluentMessageBar>
+                </Fallback>
+            </TenantGate>
 
             <div class="action-bar">
                 <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo("/students")'>Back</FluentButton>
