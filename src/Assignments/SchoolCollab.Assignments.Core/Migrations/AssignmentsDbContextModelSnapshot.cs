@@ -147,6 +147,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("text")
                         .HasColumnName("payload");
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -159,6 +163,9 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.HasIndex("OccurredAt")
                         .HasDatabaseName("ix_outbox_messages_pending")
                         .HasFilter("dispatched_at IS NULL");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_outbox_messages_tenant_id");
 
                     b.ToTable("outbox_messages", (string)null);
                 });

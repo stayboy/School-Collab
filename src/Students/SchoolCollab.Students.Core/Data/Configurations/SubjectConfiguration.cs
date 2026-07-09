@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
@@ -5,9 +6,15 @@ using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class SubjectConfiguration : EntityTypeConfigurationBase<Subject>
+/// <summary>
+/// Strict tenant entity (global-tenant-filter.md §3.2). Unique indexes on
+/// <c>code</c> and <c>coded_value_id</c> are composite <c>(tenant_id, …)</c> (FR-7).
+/// </summary>
+internal sealed class SubjectConfiguration : TenantEntityTypeConfigurationBase<Subject>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<Subject> builder)
+    public SubjectConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<Subject> builder)
     {
         builder.ToTable("subjects");
 
@@ -26,14 +33,14 @@ internal sealed class SubjectConfiguration : EntityTypeConfigurationBase<Subject
 
         builder.Property(x => x.DisplayOrder).IsRequired();
 
-
-        builder.HasIndex(x => x.Code)
+        // FR-7: unique per (tenant, code) and (tenant, coded_value) — were global.
+        builder.HasIndex(x => new { x.TenantId, x.Code })
             .IsUnique()
-            .HasDatabaseName("ix_subjects_code");
+            .HasDatabaseName("ix_subjects_tenant_code");
 
-        builder.HasIndex(x => x.CodedValueId)
+        builder.HasIndex(x => new { x.TenantId, x.CodedValueId })
             .IsUnique()
-            .HasDatabaseName("ix_subjects_coded_value_id");
+            .HasDatabaseName("ix_subjects_tenant_coded_value_id");
 
         builder.Ignore(x => x.DomainEvents);
     }

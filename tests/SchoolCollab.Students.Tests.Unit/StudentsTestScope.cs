@@ -19,6 +19,7 @@ internal sealed class StudentsTestScope : IDisposable
     public StudentsDbContext Db { get; }
     public HybridCache Cache { get; }
     public ITenantProvider Tenants { get; }
+    public ITenantContextAccessor TenantAccessor { get; }
     public PeriodRepository Periods { get; }
     public GradeLevelRepository GradeLevels { get; }
     public SubjectRepository Subjects { get; }
@@ -38,6 +39,14 @@ internal sealed class StudentsTestScope : IDisposable
         // Same singleton the DbContext resolved, so SetTenant (if used) is visible
         // to the context's query filters.
         Tenants = sp.GetRequiredService<ITenantProvider>();
+        // The sanctioned bypass for test setup that writes cross-tenant data.
+        TenantAccessor = sp.GetRequiredService<ITenantContextAccessor>();
+        // Set a real tenant so the save-guard (FR-5) allows strict-entity creation.
+        // The default Guid.Empty context is rejected by the guard.
+        ((TenantProvider)Tenants).SetTenant(new TenantContext(
+            Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            "TestSchool",
+            TenantType.School));
         Periods = new PeriodRepository(Db);
         GradeLevels = new GradeLevelRepository(Db);
         Subjects = new SubjectRepository(Db);

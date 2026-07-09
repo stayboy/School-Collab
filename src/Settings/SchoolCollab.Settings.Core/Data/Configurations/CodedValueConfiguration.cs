@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
@@ -5,9 +6,21 @@ using SchoolCollab.Settings.Core.Domain;
 
 namespace SchoolCollab.Settings.Core.Data.Configurations;
 
-internal sealed class CodedValueConfiguration : EntityTypeConfigurationBase<CodedValue>
+/// <summary>
+/// Configures <see cref="CodedValue"/> as a <b>hybrid</b> tenant entity
+/// (global-tenant-filter.md §3.2–§3.3): nullable <c>tenant_id</c> with the named
+/// "Tenant" filter <c>TenantId == CurrentTenantId OR TenantId == null</c>, so
+/// shared-blueprint rows (CSV-seeded, <c>NULL</c>) are visible to all tenants and
+/// tenant-owned rows (wizard "create new") are isolated. The override pattern
+/// (<c>TenantCodedValueOverride</c> + <c>CodedValueResolver</c>) is retained for
+/// shared rows.
+/// </summary>
+internal sealed class CodedValueConfiguration : TenantOrGlobalEntityTypeConfigurationBase<CodedValue>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<CodedValue> builder)
+    public CodedValueConfiguration(Expression<Func<Guid>> tenantIdAccessor)
+        : base(tenantIdAccessor) { }
+
+    protected override void ConfigureHybridEntity(EntityTypeBuilder<CodedValue> builder)
     {
         builder.ToTable("coded_values");
 
@@ -26,6 +39,17 @@ internal sealed class CodedValueConfiguration : EntityTypeConfigurationBase<Code
         // remain unique among other roots, while child codes are scoped to their parent.
         builder.HasIndex(x => x.Code)
             .HasDatabaseName("ix_coded_values_code");
+
+        // NFR-3 (global-tenant-filter.md): hot-path composite index for hybrid
+        // tenant scoping. Tenant-owned rows are found by (tenant_id, parent_id).
+        // Shared-blueprint rows are covered by the unfiltered ix_coded_values_parent_id
+        // below (FK support). The two partial UNIQUE indexes that backstop the
+        // duplicate-code guard (FR-7) use COALESCE(parent_id, sentinel) and are
+        // created via raw SQL in the migration (EF Core cannot express COALESCE in
+        // index columns).
+        builder.HasIndex(x => new { x.TenantId, x.ParentId })
+            .HasDatabaseName("ix_coded_values_owned_tenant_parent")
+            .HasFilter("tenant_id IS NOT NULL");
 
         builder.Property(x => x.Name)
             .IsRequired()

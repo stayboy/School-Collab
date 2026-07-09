@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -18,12 +19,16 @@ public sealed class CreateSubjectForGradeHandler(
     IGradeLevelRepository gradeLevelRepository,
     IPeriodRepository periodRepository,
     HybridCache cache,
+    ITenantProvider tenantProvider,
     ILogger<CreateSubjectForGradeHandler> logger) : ICommandHandler<CreateSubjectForGrade, SubjectDto>
 {
     public async Task<SubjectDto> HandleAsync(
         CreateSubjectForGrade command,
         CancellationToken cancellationToken = default)
     {
+        // FR-4: no strict entity may be created with an empty tenant.
+        tenantProvider.RequireTenantContext(nameof(CreateSubjectForGrade), typeof(Subject));
+
         logger.LogDebug(
             "Handling CreateSubjectForGrade for grade {GradeLevelId}, code {Code}",
             command.GradeLevelId, command.Code);
@@ -70,7 +75,8 @@ public sealed class CreateSubjectForGradeHandler(
                 throw new DuplicateSubjectCodeException(command.Code);
 
             var codedValueId = command.CodedValueId ?? Guid.NewGuid();
-            subject = Subject.Create(codedValueId, command.Code, command.Name, command.DisplayOrder);
+            subject = Subject.Create(codedValueId, command.Code, command.Name, command.DisplayOrder)
+                .WithTenant(tenantProvider);
             await subjectRepository.AddAsync(subject, cancellationToken);
             subjectCreated = true;
             logger.LogInformation("Subject {Id} created for grade {GradeLevelId}", subject.Id, command.GradeLevelId);
@@ -86,7 +92,8 @@ public sealed class CreateSubjectForGradeHandler(
             var assignment = GradeSubjectAssignment.Create(
                 command.GradeLevelId,
                 subject.Id,
-                currentPeriod.Id);
+                currentPeriod.Id)
+                .WithTenant(tenantProvider);
 
             await assignmentRepository.AddAsync(assignment, cancellationToken);
             assignment.ClearDomainEvents();

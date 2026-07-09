@@ -17,7 +17,8 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RemoveCodedValueO
 /// </summary>
 public sealed class RemoveCodedValueOverrideHandler(
     SettingsDbContext db,
-    ITenantProvider tenantProvider) : ICommandHandler<RemoveCodedValueOverride>
+    ITenantProvider tenantProvider,
+    ITenantContextAccessor tenantContextAccessor) : ICommandHandler<RemoveCodedValueOverride>
 {
     public async Task HandleAsync(RemoveCodedValueOverride command, CancellationToken ct = default)
     {
@@ -30,6 +31,20 @@ public sealed class RemoveCodedValueOverrideHandler(
             return; // idempotent — DELETE returns 204 regardless.
 
         db.TenantCodedValueOverrides.Remove(existing);
-        await db.SaveChangesAsync(ct);
+
+        // FR-8/FR-10: suppress the strict save-guard for the default/dev tenant's
+        // Guid.Empty row on delete (sanctioned bypass). Real-tenant deletes satisfy
+        // the guard and are not suppressed.
+        if (tenantId == Guid.Empty)
+        {
+            using (tenantContextAccessor.SuppressTenantGuard())
+            {
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        else
+        {
+            await db.SaveChangesAsync(ct);
+        }
     }
 }

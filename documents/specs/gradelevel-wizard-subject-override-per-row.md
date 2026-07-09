@@ -183,3 +183,22 @@ The wizard reads `tenant_id` from `AuthenticationStateProvider` instead of `ITen
 - `dotnet test tests/SchoolCollab.Admin.Tests.Unit` — 25/25 passed.
 
 A Playwright smoke test exercising the full per-row override interaction (open dialog, save override, row updates) is recommended as a follow-up.
+
+---
+
+## Appendix: Supersession notice (2026-07-08)
+
+> The approved spec `documents/specs/global-tenant-filter.md` (v3, **Approved**)
+> extends this spec's per-row override UX with one noted branch under the new
+> hybrid `CodedValue` model:
+>
+> - When the referenced `CodedValue` is **tenant-owned** (`TenantId == current`),
+>   the row action becomes **"Rename"** — it edits the tenant-owned
+>   `CodedValue.Name` directly (and mirrors into `GradeLevel.Name`).
+> - When the referenced `CodedValue` is **shared** (`TenantId IS NULL`), the row
+>   action is **"Override Name"** — it upserts `TenantCodedValueOverride` (and
+>   mirrors) — exactly this spec's current behavior.
+>
+> This spec's FR-2 (`IsRealTenant` gating) and §11.1 (Blazor Server
+> `AuthenticationStateProvider` tenant propagation) **stand**. See
+> `global-tenant-filter.md` §11.1 for the full reconciliation.

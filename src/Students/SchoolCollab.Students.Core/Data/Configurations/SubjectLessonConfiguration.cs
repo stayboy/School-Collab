@@ -1,3 +1,4 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 using SchoolCollab.Core.Data;
@@ -5,9 +6,15 @@ using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
-internal sealed class SubjectLessonConfiguration : EntityTypeConfigurationBase<SubjectLesson>
+/// <summary>
+/// Strict tenant entity (global-tenant-filter.md §3.2). Inherits the subject's
+/// tenant.
+/// </summary>
+internal sealed class SubjectLessonConfiguration : TenantEntityTypeConfigurationBase<SubjectLesson>
 {
-    protected override void ConfigureEntity(EntityTypeBuilder<SubjectLesson> builder)
+    public SubjectLessonConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<SubjectLesson> builder)
     {
         builder.ToTable("subject_lessons");
 
@@ -29,8 +36,9 @@ internal sealed class SubjectLessonConfiguration : EntityTypeConfigurationBase<S
             .HasForeignKey(x => x.StrandId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        builder.HasIndex(x => x.SubjectId)
-            .HasDatabaseName("ix_subject_lessons_subject");
+        // NFR-3 hot paths (tenant_id leading).
+        builder.HasIndex(x => new { x.TenantId, x.SubjectId })
+            .HasDatabaseName("ix_subject_lessons_tenant_subject");
 
         builder.HasIndex(x => x.StrandId)
             .HasDatabaseName("ix_subject_lessons_strand");

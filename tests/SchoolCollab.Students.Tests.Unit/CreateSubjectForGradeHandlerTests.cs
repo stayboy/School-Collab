@@ -18,6 +18,7 @@ public class CreateSubjectForGradeHandlerTests
             s.GradeLevels,
             s.Periods,
             s.Cache,
+            s.Tenants,
             NullLogger<CreateSubjectForGradeHandler>.Instance);
 
     private static async Task<Guid> SeedGradeLevelAsync(StudentsTestScope s, Guid codedValueId, int level, string name)

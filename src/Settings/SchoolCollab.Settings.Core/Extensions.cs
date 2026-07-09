@@ -9,6 +9,7 @@ using SchoolCollab.Settings.Core.Services;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Settings.Core.Tenancy;
 
 namespace SchoolCollab.Settings.Core;
 
@@ -42,6 +43,10 @@ public static class Extensions
         // CodedValues aggregate services
         services.AddScoped<ICodedValueRepository, CodedValueRepository>();
         services.AddScoped<ICodedValueResolver, CodedValueResolver>();
+
+        // Cross-context tenant directory (FR-16): lets workers enumerate tenants
+        // without a direct SettingsDbContext dependency at the DbContext level.
+        services.TryAddSingleton<ITenantDirectory, TenantDirectory>();
 
         // FeatureFlag aggregate services — default system actor; a host with
         // an authenticated principal (the API) replaces this with a
@@ -98,6 +103,35 @@ public static class Extensions
                   .UsePartialIndexOnOccurredAt();
         });
 
+        return services;
+    }
+
+    /// <summary>
+    /// Lightweight registration for cross-context workers (e.g. the Students
+    /// <c>PromotionService</c>) that need to enumerate tenants via
+    /// <see cref="ITenantDirectory"/> but do NOT need the full Settings aggregate
+    /// (CodedValues, FeatureFlags, handlers, outbox). Registers only a
+    /// <see cref="SettingsDbContext"/> factory (for the tenant read) and
+    /// <see cref="ITenantDirectory"/>. Also ensures <see cref="ITenantProvider"/>
+    /// / <see cref="ITenantContextAccessor"/> are present (via
+    /// <see cref="TenancyServiceExtensions.AddTenancy"/>). See
+    /// <c>global-tenant-filter.md</c> §8.4 / FR-16.
+    /// </summary>
+    public static IServiceCollection AddTenantDirectory(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services.AddTenancy();
+
+        var connectionString = configuration.GetConnectionString("settings-db")
+            ?? configuration["ConnectionStrings:settings-db"]
+            ?? "Host=localhost;Port=5432;Database=schoolcollab_settings;Username=postgres;Password=postgres";
+
+        services.AddDbContextFactory<SettingsDbContext>(opts =>
+            opts.UseNpgsql(connectionString)
+                .UseSnakeCaseNamingConvention());
+
+        services.TryAddSingleton<ITenantDirectory, TenantDirectory>();
         return services;
     }
 }

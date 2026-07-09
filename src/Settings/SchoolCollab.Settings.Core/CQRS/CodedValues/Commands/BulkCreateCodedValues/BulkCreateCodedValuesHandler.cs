@@ -1,14 +1,32 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.CreateCodedValue;
 
+/// <summary>
+/// Bulk-creates coded values. <b>Dual-mode tenancy</b> (global-tenant-filter.md
+/// §3.3 / FR-5) — same pattern as <see cref="CreateCodedValueHandler"/>:
+/// <list type="bullet">
+/// <item><b>Real tenant</b> (<c>CurrentTenantId != Guid.Empty</c>): stamps
+///   <b>tenant-owned</b> rows (<c>TenantId = current</c>), isolated to that tenant.</item>
+/// <item><b>Default/dev tenant</b> (<c>CurrentTenantId == Guid.Empty</c>): writes
+///   <b>shared blueprint</b> rows (<c>TenantId = null</c>) under a suppressed guard —
+///   the dev/admin vocabulary-edit affordance. In production the API pipeline
+///   guarantees a real <c>tenant_id</c> claim (FR-19), so <c>Guid.Empty</c> only
+///   occurs in dev/test.</item>
+/// </list>
+/// <para>Intra-batch duplicates are rejected before any DB work. Codes that
+/// already exist in the tenant-visible scope are skipped (idempotent on retry).</para>
+/// </summary>
 public sealed class BulkCreateCodedValuesHandler(
     ICodedValueRepository repository,
+    ITenantProvider tenantProvider,
+    ITenantContextAccessor tenantContextAccessor,
     HybridCache cache,
     ILogger<BulkCreateCodedValuesHandler> logger) : ICommandHandler<BulkCreateCodedValues, BulkCreateResult>
 {
@@ -16,6 +34,11 @@ public sealed class BulkCreateCodedValuesHandler(
     {
         logger.LogDebug("Handling BulkCreateCodedValues for parent {ParentId} with {Count} children",
             command.ParentId, command.Children.Count);
+
+        // FR-5: determine the target tenant for this batch.
+        var currentTenantId = tenantProvider.GetTenantContext().TenantId;
+        var isDefaultTenant = currentTenantId == Guid.Empty;
+        var targetTenantId = isDefaultTenant ? (Guid?)null : currentTenantId;
 
         var parent = await repository.GetAsync(command.ParentId, cancellationToken);
         if (parent is null)
@@ -50,14 +73,33 @@ public sealed class BulkCreateCodedValuesHandler(
         if (toCreate.Count > 0)
         {
             var entities = toCreate.Select(child =>
-                CodedValue.Create(child.Code, child.Name, child.Description, command.ParentId, child.DisplayOrder))
-                .ToList();
+            {
+                var cv = CodedValue.Create(child.Code, child.Name, child.Description, command.ParentId, child.DisplayOrder);
+                // FR-5: stamp the target tenant — real tenant → owned row, default → NULL blueprint.
+                cv.SetTenant(targetTenantId);
+                return cv;
+            }).ToList();
 
-            await repository.AddRangeAsync(entities, cancellationToken);
+            // FR-5: the default/dev path writes NULL-blueprint rows under a suppressed
+            // guard (the hybrid save-guard permits NULL, but this is belt-and-suspenders
+            // and documents intent).
+            if (isDefaultTenant)
+            {
+                using (tenantContextAccessor.SuppressTenantGuard())
+                {
+                    await repository.AddRangeAsync(entities, cancellationToken);
+                }
+            }
+            else
+            {
+                await repository.AddRangeAsync(entities, cancellationToken);
+            }
+
             await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
-            logger.LogInformation("Bulk created {Count} coded values under parent {ParentId}, skipped {SkippedCount} existing codes",
-                entities.Count, command.ParentId, skippedCodes.Count);
+            logger.LogInformation(
+                "Bulk created {Count} coded values under parent {ParentId} (tenant={TenantKind}), skipped {SkippedCount} existing codes",
+                entities.Count, command.ParentId, isDefaultTenant ? "shared-blueprint" : "tenant-owned", skippedCodes.Count);
         }
         else
         {

@@ -99,7 +99,11 @@ public class ListGradeLevelsForLandingHandlerTests
             .WithTenant(otherTenant);
         s.Db.Students.Add(s2);
         s.Db.StudentEnrollments.Add(StudentEnrollment.Create(s2.Id, periodId, glId));
-        await s.Db.SaveChangesAsync();
+        // s2 belongs to another tenant — suppress the save-guard (FR-6) for this test setup.
+        using (s.TenantAccessor.SuppressTenantGuard())
+        {
+            await s.Db.SaveChangesAsync();
+        }
 
         var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
 

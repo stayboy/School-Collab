@@ -30,14 +30,25 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         // available to tenant-aware configuration base classes. Do not use
         // ApplyConfigurationsFromAssembly here because it cannot inject arguments.
         modelBuilder.ApplyConfiguration(new StudentConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new GradeLevelConfiguration());
-        modelBuilder.ApplyConfiguration(new SubjectConfiguration());
-        modelBuilder.ApplyConfiguration(new PeriodConfiguration());
-        modelBuilder.ApplyConfiguration(new StudentEnrollmentConfiguration());
-        modelBuilder.ApplyConfiguration(new GradeSubjectAssignmentConfiguration());
-        modelBuilder.ApplyConfiguration(new StudentSubjectAssignmentConfiguration());
-        modelBuilder.ApplyConfiguration(new SubjectStrandConfiguration());
-        modelBuilder.ApplyConfiguration(new SubjectLessonConfiguration());
+        modelBuilder.ApplyConfiguration(new GradeLevelConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new SubjectConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new PeriodConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new StudentEnrollmentConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new GradeSubjectAssignmentConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new StudentSubjectAssignmentConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new SubjectStrandConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new SubjectLessonConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<StudentsDbContext>()));
+
+        // FR-18 / AC-17: build-time model audit — every non-allow-listed, non-owned
+        // entity MUST have a "Tenant" named query filter.
+        ValidateTenantFilters(modelBuilder);
     }
+
+    /// <summary>
+    /// Global entities in this context (no tenant filter). <see cref="OutboxMessage"/>
+    /// is the queue table (TenantId is dispatch-routing payload, FR-15). Every other
+    /// Students entity is strict tenant-scoped (§3.2).
+    /// </summary>
+    protected override Type[] GlobalEntityAllowList => [typeof(OutboxMessage)];
 }

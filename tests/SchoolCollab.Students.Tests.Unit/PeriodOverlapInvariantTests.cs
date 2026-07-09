@@ -16,7 +16,7 @@ namespace SchoolCollab.Students.Tests.Unit;
 public class PeriodOverlapInvariantTests
 {
     private static CreatePeriodHandler NewCreate(StudentsTestScope s) =>
-        new(s.Periods, s.Cache, NullLogger<CreatePeriodHandler>.Instance);
+        new(s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
     private static UpdatePeriodHandler NewUpdate(StudentsTestScope s) =>
         new(s.Periods, s.Cache, NullLogger<UpdatePeriodHandler>.Instance);

@@ -93,7 +93,7 @@ To prevent system lock-out, the system requires a "Bootstrap" process:
 
 - Configure Keycloak claim mappings (`options.ClaimActions`) in `AddOpenIdConnect` once Keycloak setup is finalized.
 - Add integration tests: anonymous → 401; different tenant_ids → isolated data.
-- Extend tenant scoping to remaining Students entities (GradeLevel, Subject, Period, etc.).
+- ~~Extend tenant scoping to remaining Students entities (GradeLevel, Subject, Period, etc.).~~ **Delivered** by `documents/specs/global-tenant-filter.md` (Step 3): `GradeLevel`, `Subject`, `Period`, `StudentEnrollment`, `GradeSubjectAssignment`, `StudentSubjectAssignment`, `SubjectStrand`, `SubjectLesson` are now strict-tenant entities; `CodedValue` is the hybrid reference; the per-tenant "at most one current period" invariant and `(tenant_id, coded_value_id)` / `(tenant_id, student_number)` composite indexes are in place.
 - Remove legacy `DbInitializer` marker class from CodedValues.Api entirely.
 - Implement seeding in MigrationService (System tenant, SuperAdmin user).
-- Consider EF Core global query filters for automatic tenant scoping.
+- ~~Consider EF Core global query filters for automatic tenant scoping.~~ **Delivered** by `documents/specs/global-tenant-filter.md` (Steps 1–5): named `"Tenant"` filter on every `ITenantEntity` / `IHybridTenantEntity`; `ModuleDbContext` save-guard refuses empty/mismatched `TenantId`; `ITenantContextAccessor` is the only sanctioned bypass; `OnModelCreating` audit throws `TenantFilterMissingException` for any non-allow-listed entity without the filter.

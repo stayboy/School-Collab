@@ -1,16 +1,22 @@
 using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain.Events;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class GradeLevel : IEntity, IAuditableEntity, IHasRowVersion
+public sealed class GradeLevel : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
     private GradeLevel() { }
 
     public Guid Id { get; private set; }
+
+    // Multi-tenancy: each row belongs to a tenant (global-tenant-filter.md §3.2 Strict).
+    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
+    public Guid TenantId { get; private set; }
+
     public Guid CodedValueId { get; private set; }
     // The following are kept for performance/indexing, but the source of truth
     // for metadata should be the CodedValue system + Tenant Overrides.

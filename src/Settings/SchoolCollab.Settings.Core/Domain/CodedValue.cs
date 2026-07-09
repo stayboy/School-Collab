@@ -1,10 +1,10 @@
-using SchoolCollab.Settings.Core.Domain.Events;
-
 using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Settings.Core.Domain.Events;
 
 namespace SchoolCollab.Settings.Core.Domain;
 
-public sealed class CodedValue : IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
+public sealed class CodedValue : IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion, IHybridTenantEntity
 {
     private readonly List<CodedValueAttribute> _attributes = [];
     private readonly List<CodedValueAttributeDefinition> _attributeDefinitions = [];
@@ -21,6 +21,31 @@ public sealed class CodedValue : IEntity, IAuditableEntity, ISoftDeletableEntity
     public bool IsDeleted { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
     public int DisplayOrder { get; private set; }
+
+    // ── Hybrid tenancy (global-tenant-filter.md §3.2–§3.3) ──
+    // null  = shared blueprint (CSV-seeded, reusable across all tenants, overlaid
+    //          per tenant via TenantCodedValueOverride).
+    // real  = tenant-owned (wizard "create new" under a real tenant, isolated).
+    // Guid.Empty is never valid.
+    public Guid? TenantId { get; private set; }
+
+    Guid? IHybridTenantEntity.TenantId
+    {
+        get => TenantId;
+        set => TenantId = value;
+    }
+
+    internal void SetTenant(Guid? tenantId)
+    {
+        if (tenantId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "Guid.Empty is not a valid CodedValue tenant. Use null for a shared blueprint " +
+                "or a real tenant id for a tenant-owned row.", nameof(tenantId));
+        }
+        TenantId = tenantId;
+    }
+
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }

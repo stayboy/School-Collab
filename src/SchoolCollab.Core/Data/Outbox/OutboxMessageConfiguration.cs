@@ -73,6 +73,16 @@ public sealed class OutboxMessageConfiguration : EntityTypeConfigurationBase<Out
 
         builder.Property(x => x.LastError);
 
+        // FR-15: publisher's tenant at enqueue time (null = global event). This is
+        // routing/provenance payload, not a filter key — OutboxMessage is a global
+        // allow-list entity with no "Tenant" query filter.
+        builder.Property(x => x.TenantId);
+
+        // Hot path: the dispatcher reads pending rows by occurred_at; a tenant-
+        // scoped consumer lookup can filter by tenant_id.
+        builder.HasIndex(x => x.TenantId)
+            .HasDatabaseName("ix_outbox_messages_tenant_id");
+
         if (_flags.UsePartialIndex)
         {
             // Single partial index for the dispatcher's pending-rows query.

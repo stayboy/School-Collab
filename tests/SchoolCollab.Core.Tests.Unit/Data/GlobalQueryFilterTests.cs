@@ -16,6 +16,8 @@ public class GlobalQueryFilterTests
     public void ResetTenant()
     {
         SharedProvider.SetTenant(new TenantContext(Guid.NewGuid(), "Test", TenantType.School));
+        // Reset the save-guard suppression flag between tests (FR-8).
+        TenantContextAccessor.GuardSuppressed.Value = false;
     }
 
     [TestMethod]
@@ -32,7 +34,12 @@ public class GlobalQueryFilterTests
 
         db.Entities.Add(new TenantFilteredEntity { Id = idA, TenantId = tenantA, Name = "A" });
         db.Entities.Add(new TenantFilteredEntity { Id = idB, TenantId = tenantB, Name = "B" });
-        await db.SaveChangesAsync();
+        // The save-guard (FR-6) rejects cross-tenant writes. Suppress to insert
+        // tenant B's row under tenant A's context — test setup, not a real write.
+        using (new TenantContextAccessor(SharedProvider).SuppressTenantGuard())
+        {
+            await db.SaveChangesAsync();
+        }
 
         var results = await db.Entities.ToListAsync();
 
@@ -90,7 +97,11 @@ public class GlobalQueryFilterTests
         var softDeletedB = new TenantSoftDeleteEntity { Id = Guid.NewGuid(), TenantId = tenantB, Name = "Deleted B", IsDeleted = true };
 
         db.TenantSoftDeleteEntities.AddRange(softDeletedA, softDeletedB);
-        await db.SaveChangesAsync();
+        // The save-guard (FR-6) rejects cross-tenant writes. Suppress for test setup.
+        using (new TenantContextAccessor(SharedProvider).SuppressTenantGuard())
+        {
+            await db.SaveChangesAsync();
+        }
 
         var resultsForA = await db.TenantSoftDeleteEntities
             .IgnoreQueryFilters(["SoftDelete"])

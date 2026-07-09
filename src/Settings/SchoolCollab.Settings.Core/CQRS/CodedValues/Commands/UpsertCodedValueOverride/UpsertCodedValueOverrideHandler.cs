@@ -29,6 +29,7 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.UpsertCodedValueO
 public sealed class UpsertCodedValueOverrideHandler(
     SettingsDbContext db,
     ITenantProvider tenantProvider,
+    ITenantContextAccessor tenantContextAccessor,
     IQueryHandler<GetCodedValueById, CodedValueDto?> resolver,
     ILogger<UpsertCodedValueOverrideHandler> logger) : ICommandHandler<UpsertCodedValueOverride, CodedValueDto>
 {
@@ -60,7 +61,22 @@ public sealed class UpsertCodedValueOverrideHandler(
             "Override upserted for tenant {TenantId} (isDefault={IsDefault}), coded value {Id}",
             tenantId, tenantContext.IsDefault, command.GlobalCodedValueId);
 
-        await db.SaveChangesAsync(ct);
+        // FR-8/FR-10: the default/dev tenant (Guid.Empty) stores its override as a
+        // real row keyed by Guid.Empty. The strict save-guard rejects Guid.Empty on
+        // Added/Modified, so suppress it for the dev affordance (sanctioned bypass).
+        // Real-tenant saves satisfy the guard (TenantId == current) and are NOT
+        // suppressed, preserving the mismatch defense.
+        if (tenantId == Guid.Empty)
+        {
+            using (tenantContextAccessor.SuppressTenantGuard())
+            {
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        else
+        {
+            await db.SaveChangesAsync(ct);
+        }
 
         // Return the fully-resolved DTO (override applied, attributes/definitions
         // populated) by re-reading through the existing query handler. No cache

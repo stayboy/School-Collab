@@ -146,7 +146,7 @@ public static class CodedValueRoutes
                 var id = await handler.HandleAsync(command, ct);
                 return Results.Created($"/api/coded-values/{id}", new { id });
             }
-            catch (DuplicateCodeException ex)
+            catch (CodedValueCodeConflictException ex)
             {
                 return Results.Conflict(new { ex.Message });
             }

@@ -24,8 +24,16 @@ namespace SchoolCollab.MigrationService.Seeding;
 /// </remarks>
 public sealed class TenantSeeder(
     SettingsDbContext db,
+    ITenantContextAccessor tenantContextAccessor,
     ILogger<TenantSeeder> logger)
 {
+    /// <summary>
+    /// The well-known System tenant id — a backfill sink for unattributable strict
+    /// rows (global-tenant-filter.md §9.3 / Q-1). Seeded idempotently by the
+    /// <c>AddSystemTenant</c> Settings migration. No end-users authenticate as System.
+    /// </summary>
+    public static readonly Guid SystemTenantId =
+        Guid.Parse("00000000-0000-0000-0000-000000000001");
     /// <summary>
     /// The sample tenants seeded in development/test environments to exercise
     /// tenancy overrides. School type matches the most common tenant shape.
@@ -102,6 +110,12 @@ public sealed class TenantSeeder(
     /// (e.g. if the coded-value seed file is trimmed) so the seeder never hard-fails
     /// on optional demo data.
     /// </summary>
+    /// <remarks>
+    /// FR-10: the override rows target real tenants but the seeder runs under the
+    /// default (Guid.Empty) context, so the writes are wrapped in a suppressed
+    /// save-guard (sanctioned bypass for seed services) and the existence check
+    /// bypasses the "Tenant" filter (cross-tenant read).
+    /// </remarks>
     private async Task SeedSampleGradeOverridesAsync(
         Dictionary<string, Guid> tenantIdsByName,
         CancellationToken ct)
@@ -131,6 +145,7 @@ public sealed class TenantSeeder(
         var neededCodedValueIds = codeToCodedValueId.Values.ToList();
 
         var existingOverrideKeys = await db.TenantCodedValueOverrides
+            .IgnoreQueryFilters(["Tenant"])
             .Where(o => sampleTenantIds.Contains(o.TenantId)
                 && neededCodedValueIds.Contains(o.GlobalCodedValueId))
             .Select(o => new { o.TenantId, o.GlobalCodedValueId })
@@ -142,6 +157,10 @@ public sealed class TenantSeeder(
 
         var inserted = 0;
 
+        // FR-10: suppress the strict save-guard for the whole override-seed pass —
+        // the rows belong to real tenants but the seeder runs under the default context.
+        using (tenantContextAccessor.SuppressTenantGuard())
+        {
         foreach (var (tenantName, code, overriddenName) in SampleGradeOverrides)
         {
             if (!tenantIdsByName.TryGetValue(tenantName, out var tenantId))
@@ -177,5 +196,6 @@ public sealed class TenantSeeder(
             logger.LogInformation("Seeded {Count} sample grade overrides successfully", inserted);
         else
             logger.LogInformation("All sample grade overrides already exist. Nothing to insert");
+        } // end SuppressTenantGuard
     }
 }

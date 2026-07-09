@@ -49,6 +49,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("text")
                         .HasColumnName("payload");
 
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -63,6 +67,9 @@ namespace SchoolCollab.Students.Core.Migrations
 
                     b.HasIndex("OccurredAt")
                         .HasDatabaseName("ix_outbox_messages_occurred_at");
+
+                    b.HasIndex("TenantId")
+                        .HasDatabaseName("ix_outbox_messages_tenant_id");
 
                     b.ToTable("outbox_messages", (string)null);
                 });
@@ -101,6 +108,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -108,12 +119,12 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_grade_levels");
 
-                    b.HasIndex("CodedValueId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_grade_levels_coded_value_id");
-
                     b.HasIndex("Level")
                         .HasDatabaseName("ix_grade_levels_level");
+
+                    b.HasIndex("TenantId", "CodedValueId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_grade_levels_tenant_coded_value_id");
 
                     b.ToTable("grade_levels", (string)null);
                 });
@@ -154,6 +165,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("subject_strand_id");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -161,18 +176,18 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_grade_subject_assignments");
 
-                    b.HasIndex("PeriodId")
-                        .HasDatabaseName("ix_grade_subject_assignments_period");
-
                     b.HasIndex("SubjectLessonId")
                         .HasDatabaseName("ix_grade_subject_assignments_subject_lesson_id");
 
                     b.HasIndex("SubjectStrandId")
                         .HasDatabaseName("ix_grade_subject_assignments_subject_strand_id");
 
-                    b.HasIndex("GradeLevelId", "SubjectId", "PeriodId")
+                    b.HasIndex("TenantId", "PeriodId")
+                        .HasDatabaseName("ix_grade_subject_assignments_tenant_period");
+
+                    b.HasIndex("TenantId", "GradeLevelId", "SubjectId", "PeriodId")
                         .IsUnique()
-                        .HasDatabaseName("ix_grade_subject_assignments_unique");
+                        .HasDatabaseName("ix_grade_subject_assignments_tenant_unique");
 
                     b.ToTable("grade_subject_assignments", (string)null);
                 });
@@ -223,6 +238,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("status");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -233,8 +252,8 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasIndex("StartDate")
                         .HasDatabaseName("ix_periods_start_date");
 
-                    b.HasIndex("Status")
-                        .HasDatabaseName("ix_periods_status");
+                    b.HasIndex("TenantId", "Status")
+                        .HasDatabaseName("ix_periods_tenant_status");
 
                     b.ToTable("periods", (string)null);
                 });
@@ -319,12 +338,12 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasIndex("IsDeleted")
                         .HasDatabaseName("ix_students_is_deleted");
 
-                    b.HasIndex("StudentNumber")
-                        .IsUnique()
-                        .HasDatabaseName("ix_students_student_number");
-
                     b.HasIndex("TenantId", "IsDeleted")
                         .HasDatabaseName("ix_students_tenant_id_is_deleted");
+
+                    b.HasIndex("TenantId", "StudentNumber")
+                        .IsUnique()
+                        .HasDatabaseName("ix_students_tenant_student_number");
 
                     b.ToTable("students", (string)null);
                 });
@@ -371,6 +390,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("student_id");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -378,17 +401,18 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_student_enrollments");
 
-                    b.HasIndex("GradeLevelId")
-                        .HasDatabaseName("ix_student_enrollments_grade_level");
-
-                    b.HasIndex("PeriodId")
-                        .HasDatabaseName("ix_student_enrollments_period");
-
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_student_enrollments_status");
 
-                    b.HasIndex("StudentId", "PeriodId")
-                        .HasDatabaseName("ix_student_enrollments_student_period");
+                    b.HasIndex("TenantId", "GradeLevelId")
+                        .HasDatabaseName("ix_student_enrollments_tenant_grade_level");
+
+                    b.HasIndex("TenantId", "PeriodId")
+                        .HasDatabaseName("ix_student_enrollments_tenant_period");
+
+                    b.HasIndex("TenantId", "StudentId", "PeriodId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_student_enrollments_tenant_student_period");
 
                     b.ToTable("student_enrollments", (string)null);
                 });
@@ -433,6 +457,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("subject_id");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -440,12 +468,12 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_student_subject_assignments");
 
-                    b.HasIndex("PeriodId")
-                        .HasDatabaseName("ix_student_subject_assignments_period");
+                    b.HasIndex("TenantId", "PeriodId")
+                        .HasDatabaseName("ix_student_subject_assignments_tenant_period");
 
-                    b.HasIndex("StudentId", "SubjectId", "PeriodId")
+                    b.HasIndex("TenantId", "StudentId", "SubjectId", "PeriodId")
                         .IsUnique()
-                        .HasDatabaseName("ix_student_subject_assignments_unique");
+                        .HasDatabaseName("ix_student_subject_assignments_tenant_unique");
 
                     b.ToTable("student_subject_assignments", (string)null);
                 });
@@ -486,6 +514,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -493,13 +525,13 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_subjects");
 
-                    b.HasIndex("Code")
+                    b.HasIndex("TenantId", "Code")
                         .IsUnique()
-                        .HasDatabaseName("ix_subjects_code");
+                        .HasDatabaseName("ix_subjects_tenant_code");
 
-                    b.HasIndex("CodedValueId")
+                    b.HasIndex("TenantId", "CodedValueId")
                         .IsUnique()
-                        .HasDatabaseName("ix_subjects_coded_value_id");
+                        .HasDatabaseName("ix_subjects_tenant_coded_value_id");
 
                     b.ToTable("subjects", (string)null);
                 });
@@ -551,6 +583,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("subject_id");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -562,7 +598,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDatabaseName("ix_subject_lessons_strand");
 
                     b.HasIndex("SubjectId")
-                        .HasDatabaseName("ix_subject_lessons_subject");
+                        .HasDatabaseName("ix_subject_lessons_subject_id");
+
+                    b.HasIndex("TenantId", "SubjectId")
+                        .HasDatabaseName("ix_subject_lessons_tenant_subject");
 
                     b.ToTable("subject_lessons", (string)null);
                 });
@@ -602,6 +641,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("subject_id");
 
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
@@ -610,7 +653,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasName("pk_subject_strands");
 
                     b.HasIndex("SubjectId")
-                        .HasDatabaseName("ix_subject_strands_subject");
+                        .HasDatabaseName("ix_subject_strands_subject_id");
+
+                    b.HasIndex("TenantId", "SubjectId")
+                        .HasDatabaseName("ix_subject_strands_tenant_subject");
 
                     b.ToTable("subject_strands", (string)null);
                 });

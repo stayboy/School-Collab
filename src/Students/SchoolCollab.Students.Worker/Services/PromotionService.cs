@@ -3,10 +3,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using SchoolCollab.Core.Messaging;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Events;
-using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.Students.Worker.Services;
 
@@ -16,6 +17,17 @@ namespace SchoolCollab.Students.Worker.Services;
 /// 2. Promotes students from completed periods to their designated next period
 ///    (creating new enrollments, copying grade-subject and student-subject assignments).
 /// </summary>
+/// <remarks>
+/// <para><b>Tenancy (global-tenant-filter.md FR-16 / AC-12).</b> This service runs as a
+/// background host with no ambient tenant. Every entity it touches (Period,
+/// StudentEnrollment, GradeSubjectAssignment, StudentSubjectAssignment) is strict
+/// tenant-scoped, so the service MUST enumerate tenants via
+/// <see cref="ITenantDirectory"/> and run the promotion body per tenant inside
+/// <see cref="ITenantContextAccessor.RunWithExplicitTenantAsync"/>. A fresh DI scope
+/// (and thus a fresh <see cref="StudentsDbContext"/>) is created per tenant so the
+/// change tracker never crosses tenant boundaries. The "at most one current period"
+/// invariant is automatically per-tenant because the Period query is tenant-filtered.</para>
+/// </remarks>
 public sealed class PromotionService(
     IServiceScopeFactory scopeFactory,
     IOptions<PromotionOptions> options,
@@ -53,78 +65,133 @@ public sealed class PromotionService(
     {
         logger.LogDebug("Running promotion cycle");
 
+        // FR-16: enumerate tenants via the cross-context directory (NOT db.Tenants —
+        // that DbSet is on SettingsDbContext, unavailable here). A fresh scope per
+        // tenant gives a clean StudentsDbContext so the change tracker never mixes
+        // tenants. The tenant directory read itself uses its own SettingsDbContext.
+        IReadOnlyList<Guid> tenantIds;
+        using (var dirScope = scopeFactory.CreateScope())
+        {
+            var directory = dirScope.ServiceProvider.GetRequiredService<ITenantDirectory>();
+            tenantIds = await directory.GetAllTenantIdsAsync(ct);
+        }
+
+        if (tenantIds.Count == 0)
+        {
+            logger.LogWarning("PromotionService found no tenants; skipping cycle");
+            return;
+        }
+
+        logger.LogDebug("PromotionService running for {Count} tenants", tenantIds.Count);
+
+        var tenantContextAccessor = scopeFactory.CreateScope()
+            .ServiceProvider.GetRequiredService<ITenantContextAccessor>();
+
+        var totalCompleted = 0;
+        var totalPromoted = 0;
+
+        foreach (var tenantId in tenantIds)
+        {
+            try
+            {
+                var (completed, promoted) = await tenantContextAccessor.RunWithExplicitTenantAsync(
+                    tenantId,
+                    innerCt => RunForTenantAsync(tenantId, innerCt),
+                    ct);
+
+                totalCompleted += completed;
+                totalPromoted += promoted;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Promotion cycle failed for tenant {TenantId}; continuing with next tenant", tenantId);
+            }
+        }
+
+        logger.LogInformation(
+            "Promotion cycle complete across {TenantCount} tenants: {Completed} periods completed, {Promoted} students promoted",
+            tenantIds.Count, totalCompleted, totalPromoted);
+    }
+
+    /// <summary>
+    /// Runs the promotion body for a single tenant. The caller has already set the
+    /// tenant context via <see cref="ITenantContextAccessor.RunWithExplicitTenantAsync"/>;
+    /// a fresh scope + DbContext is created here so the change tracker is tenant-pure.
+    /// </summary>
+    private async Task<(int completed, int promoted)> RunForTenantAsync(Guid tenantId, CancellationToken ct)
+    {
         await using var scope = scopeFactory.CreateAsyncScope();
         var dbContext = scope.ServiceProvider.GetRequiredService<StudentsDbContext>();
         var eventPublisher = scope.ServiceProvider.GetRequiredService<IIntegrationEventPublisher>();
 
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
 
-        // Step 1: Auto-complete active periods whose EndDate has passed
+        // Step 1: Auto-complete this tenant's active periods whose EndDate has passed.
+        // (Per-tenant — the Period query is tenant-filtered by the current context.)
         var expiredPeriods = await dbContext.Periods
             .Where(p => p.Status == PeriodStatus.Active && p.EndDate < today)
             .ToListAsync(ct);
 
         foreach (var period in expiredPeriods)
         {
-            logger.LogInformation("Auto-completing expired period {PeriodId} ({Name})", period.Id, period.Name);
+            logger.LogInformation(
+                "Auto-completing expired period {PeriodId} ({Name}) for tenant {TenantId}",
+                period.Id, period.Name, tenantId);
             period.Complete();
         }
 
         if (expiredPeriods.Count > 0)
         {
             await dbContext.SaveChangesAsync(ct);
-            logger.LogInformation("Auto-completed {Count} expired periods", expiredPeriods.Count);
+            logger.LogInformation(
+                "Auto-completed {Count} expired periods for tenant {TenantId}",
+                expiredPeriods.Count, tenantId);
         }
 
-        // Step 2: Promote students from completed periods with a NextPeriodId
+        // Step 2: Promote students from this tenant's completed periods with a NextPeriodId.
         var completedWithNext = await dbContext.Periods
             .Where(p => p.Status == PeriodStatus.Completed && p.NextPeriodId != null)
             .ToListAsync(ct);
 
-        var totalPromoted = 0;
+        var promoted = 0;
 
         foreach (var fromPeriod in completedWithNext)
         {
             var toPeriodId = fromPeriod.NextPeriodId!.Value;
 
-            // Verify next period exists and is active
-            var toPeriod = await dbContext.Periods.FindAsync([toPeriodId], ct);
+            // Look up the next period through the tenant-filtered query (NOT FindAsync,
+            // which can surface a change-tracked row from another tenant). Per-tenant,
+            // the next period must belong to the same tenant.
+            var toPeriod = await dbContext.Periods
+                .FirstOrDefaultAsync(p => p.Id == toPeriodId, ct);
+
             if (toPeriod is null)
             {
                 logger.LogWarning(
-                    "Next period {NextPeriodId} not found for period {PeriodId}; skipping promotion",
-                    toPeriodId, fromPeriod.Id);
+                    "Next period {NextPeriodId} not found for period {PeriodId} (tenant {TenantId}); skipping promotion",
+                    toPeriodId, fromPeriod.Id, tenantId);
                 continue;
             }
 
             if (toPeriod.Status != PeriodStatus.Active)
             {
                 logger.LogWarning(
-                    "Next period {NextPeriodId} is not active (status={Status}); skipping promotion",
-                    toPeriodId, toPeriod.Status);
+                    "Next period {NextPeriodId} is not active (status={Status}, tenant {TenantId}); skipping promotion",
+                    toPeriodId, toPeriod.Status, tenantId);
                 continue;
             }
 
-            var promoted = await PromoteStudentsAsync(
-                dbContext, eventPublisher, fromPeriod.Id, toPeriodId, ct);
-
-            if (promoted > 0)
-            {
-                totalPromoted += promoted;
-                logger.LogInformation(
-                    "Promoted {Count} students from period {FromId} to {ToId}",
-                    promoted, fromPeriod.Id, toPeriodId);
-            }
+            promoted += await PromoteStudentsAsync(
+                dbContext, eventPublisher, fromPeriod.Id, toPeriodId, tenantId, ct);
         }
 
-        if (totalPromoted > 0)
+        if (promoted > 0)
         {
-            logger.LogInformation("Promotion cycle complete; {Total} students promoted total", totalPromoted);
+            logger.LogInformation(
+                "Promoted {Count} students for tenant {TenantId}", promoted, tenantId);
         }
-        else
-        {
-            logger.LogDebug("No students promoted this cycle");
-        }
+
+        return (expiredPeriods.Count, promoted);
     }
 
     private async Task<int> PromoteStudentsAsync(
@@ -132,16 +199,17 @@ public sealed class PromotionService(
         IIntegrationEventPublisher eventPublisher,
         Guid fromPeriodId,
         Guid toPeriodId,
+        Guid tenantId,
         CancellationToken ct)
     {
-        // Get active enrollments in the completed period
+        // All queries below are tenant-filtered by the current (per-tenant) context.
         var activeEnrollments = await dbContext.StudentEnrollments
             .Where(e => e.PeriodId == fromPeriodId && e.Status == EnrollmentStatus.Active)
             .ToListAsync(ct);
 
         if (activeEnrollments.Count == 0) return 0;
 
-        // Check which students already have an enrollment in the target period
+        // Check which students already have an enrollment in the target period.
         var existingStudentIds = await dbContext.StudentEnrollments
             .Where(e => e.PeriodId == toPeriodId)
             .Select(e => e.StudentId)
@@ -227,7 +295,8 @@ public sealed class PromotionService(
 
         await dbContext.SaveChangesAsync(ct);
 
-        // Enqueue integration events (will be dispatched by OutboxDispatcher)
+        // Enqueue integration events (will be dispatched by OutboxDispatcher under
+        // this tenant's context — the publisher stamps OutboxMessage.TenantId).
         foreach (var domainEvent in domainEvents)
         {
             await eventPublisher.EnqueueAsync(domainEvent, ct);

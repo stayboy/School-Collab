@@ -1,15 +1,21 @@
 using SchoolCollab.Core.Data;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class SubjectLesson : IEntity, IAuditableEntity, IHasRowVersion
+public sealed class SubjectLesson : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
     private SubjectLesson() { }
 
     public Guid Id { get; private set; }
+
+    // Multi-tenancy: inherits the subject's tenant (global-tenant-filter.md §3.2 Strict).
+    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
+    public Guid TenantId { get; private set; }
+
     public Guid SubjectId { get; private set; }
     public Subject Subject { get; private set; } = default!;
     public Guid? StrandId { get; private set; }

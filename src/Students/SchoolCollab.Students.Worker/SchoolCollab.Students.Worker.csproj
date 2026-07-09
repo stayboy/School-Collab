@@ -8,6 +8,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
+    <!-- Settings.Core: ITenantDirectory (FR-16) — the tenant registry lives in the
+         Settings DB; the worker needs read-only tenant enumeration for the
+         per-tenant PromotionService loop. Registered via AddTenantDirectory(). -->
+    <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.RabbitMQ.Client" />

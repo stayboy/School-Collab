@@ -59,4 +59,21 @@ public static class TenantEntityExtensions
         }
         return entity;
     }
+
+    /// <summary>
+    /// FR-4 guard for strict create handlers: returns the current tenant id, throwing
+    /// <see cref="TenantContextRequiredException"/> when the current context is the
+    /// default/dev sentinel (<see cref="Guid.Empty"/>) — no strict entity may be
+    /// created with an empty tenant. Call at the top of a create handler, before any
+    /// write, then stamp the created entity via <see cref="WithTenant{T}(T, ITenantProvider)"/>.
+    /// </summary>
+    public static Guid RequireTenantContext(this ITenantProvider tenantProvider, string caller, Type entityType)
+    {
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        if (tenantId == Guid.Empty)
+        {
+            throw new TenantContextRequiredException(caller, entityType);
+        }
+        return tenantId;
+    }
 }

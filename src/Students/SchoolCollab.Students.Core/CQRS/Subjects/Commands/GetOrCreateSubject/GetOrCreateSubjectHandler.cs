@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
@@ -16,12 +17,16 @@ namespace SchoolCollab.Students.Core.CQRS.Subjects.Commands.GetOrCreateSubject;
 public sealed class GetOrCreateSubjectHandler(
     ISubjectRepository repository,
     HybridCache cache,
+    ITenantProvider tenantProvider,
     ILogger<GetOrCreateSubjectHandler> logger) : ICommandHandler<GetOrCreateSubject, SubjectDto>
 {
     public async Task<SubjectDto> HandleAsync(
         GetOrCreateSubject command,
         CancellationToken cancellationToken = default)
     {
+        // FR-4: no strict entity may be created with an empty tenant.
+        tenantProvider.RequireTenantContext(nameof(GetOrCreateSubject), typeof(Subject));
+
         logger.LogDebug("Handling GetOrCreateSubject for CodedValueId {Id}", command.CodedValueId);
 
         var existing = await repository.GetByCodedValueIdAsync(command.CodedValueId, cancellationToken);
@@ -40,7 +45,8 @@ public sealed class GetOrCreateSubjectHandler(
         }
         else
         {
-            subject = Subject.Create(command.CodedValueId, command.Code, command.Name, command.DisplayOrder);
+            subject = Subject.Create(command.CodedValueId, command.Code, command.Name, command.DisplayOrder)
+                .WithTenant(tenantProvider);
             await repository.AddAsync(subject, cancellationToken);
             created = true;
             logger.LogInformation("Subject {Id} created for CodedValueId {CodedValueId}",
