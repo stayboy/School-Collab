@@ -170,6 +170,18 @@ _isRealTenant = (await VisibleTenant.GetScopeAsync(ct)).IsRealTenant;
 
 - Do **not** delete the `AuthenticationStateChanged` handler — the 10 list/form
   pages don't need it, but this page does.
+- The wizard is also the **only** surface whose `OnInitializedAsync` performs
+  tenant-scoped loads (`Api.ListPeriodsAsync` via `DeriveCurrentPeriodAsync`,
+  and `Api.ListStudentsAsync` via `LoadStudentsAsync`). To prevent the
+  `TenantContextRequiredException` for a no-tenant user, skip those loads when
+  `!_isRealTenant` (return early after resolving the tenant).
+- When `!_isRealTenant`, render **only** the `FluentMessageBar` warning (tenant
+  prompt) and do **not** render the `FluentWizard` at all. This fully disables the
+  grade-level create flow for a no-tenant user (consistent with the form pages in
+  §4.3, which render a warning instead of the form). Because the wizard markup is
+  not rendered, the tenant-scoped loads are never reached and no edits/commits
+  can be made. `SaveAsync` also returns early if it is ever reached
+  (defense-in-depth).
 - Existing `@if (IsRealTenant)` override-action render-gating (lines 57, 97, 187)
   stays unchanged.
 - Add a top-level guard: if `!_isRealTenant`, block the wizard's create commit

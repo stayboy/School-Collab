@@ -12,6 +12,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthenticationStateProvider
+@inject VisibleTenantService VisibleTenant
 @inject ILogger<GradeLevelWizard> Logger
 @implements IDisposable
 
@@ -19,6 +20,8 @@
 
 <ErrorBoundary>
     <ChildContent>
+        @if (_isRealTenant)
+        {
         <FluentWizard StepperPosition="StepperPosition.Top"
                       StepSequence="WizardStepSequence.Visited"
                       Width="960px"
@@ -377,6 +380,13 @@
                 </div>
             </ButtonTemplate>
         </FluentWizard>
+        }
+        else
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning">
+                You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
+            </FluentMessageBar>
+        }
     </ChildContent>
     <ErrorContent Context="ex">
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
@@ -452,6 +462,12 @@
         AuthenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
         await RefreshTenantFromAuthStateAsync();
 
+        // No visible tenancy: do not load tenant-scoped data (periods, students)
+        // or render the wizard steps. The markup below shows the tenant prompt
+        // instead, and SaveAsync is also guarded as defense-in-depth.
+        if (!_isRealTenant)
+            return;
+
         // Derive the current period once on load (§6.3) — used by step 2.
         await DeriveCurrentPeriodAsync(ct);
 
@@ -466,9 +482,10 @@
 
         try
         {
-            var authState = await task;
-            var tenantId = authState.User.FindFirst("tenant_id")?.Value;
-            var current = Guid.TryParse(tenantId, out var id) && id != Guid.Empty;
+            // Observe the change (so the awaited task's exception, if any, is
+            // observed) then re-resolve the tenant rule from the shared service.
+            await task;
+            var current = (await VisibleTenant.GetScopeAsync()).IsRealTenant;
             if (current != _isRealTenant)
             {
                 _isRealTenant = current;
@@ -483,12 +500,12 @@
 
     private async Task RefreshTenantFromAuthStateAsync()
     {
-        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
-        var tenantIdClaim = authState.User.FindFirst("tenant_id")?.Value;
-        _isRealTenant = Guid.TryParse(tenantIdClaim, out var tenantId) && tenantId != Guid.Empty;
+        // Delegate the "real tenant" rule to the shared VisibleTenantService
+        // (single source of truth, mirrors GradeLevelWizard's prior claim check).
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
 
-        Logger.LogDebug("GradeLevelWizard.RefreshTenantFromAuthStateAsync: tenant_id={TenantIdClaim}, _isRealTenant={IsRealTenant}",
-            tenantIdClaim ?? "null", _isRealTenant);
+        Logger.LogDebug("GradeLevelWizard.RefreshTenantFromAuthStateAsync: _isRealTenant={IsRealTenant}", _isRealTenant);
     }
 
     private async Task DeriveCurrentPeriodAsync(CancellationToken ct)
@@ -820,6 +837,12 @@
         _error = null;
         _loadCts ??= new CancellationTokenSource();
         var ct = _loadCts.Token;
+
+        if (!_isRealTenant)
+        {
+            _error = "You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.";
+            return;
+        }
 
         try
         {

@@ -1,15 +1,24 @@
 @page "/students/subjects/{Id:guid}/edit"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Edit> Logger
+@inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
 <PageTitle>Edit Subject</PageTitle>
 
 <ErrorBoundary>
     <ChildContent>
-        @if (_loading)
+        @if (!_isRealTenant)
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning">
+                You have no tenant assigned. Subject records are tenant-scoped — pick a tenant to continue.
+            </FluentMessageBar>
+            <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="mt-2">Back to List</FluentButton>
+        }
+        else if (_loading)
         {
             <FluentProgressRing />
         }
@@ -70,11 +79,20 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+    private bool _isRealTenant;
 
     private readonly EditFormModel _model = new();
 
     protected override async Task OnInitializedAsync()
     {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant)
+        {
+            _loading = false;
+            return;
+        }
+
         _loadCts = new CancellationTokenSource();
         var ct = _loadCts.Token;
 
@@ -114,7 +132,7 @@
 
         try
         {
-            if (_item is null) return;
+            if (_item is null || !_isRealTenant) return;
 
             Logger.LogInformation("Updating subject {Id}", Id);
             await Api.UpdateSubjectAsync(Id, new UpdateSubjectRequest(_model.Name!, _model.DisplayOrder), ct);

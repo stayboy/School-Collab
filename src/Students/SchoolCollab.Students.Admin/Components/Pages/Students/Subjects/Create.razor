@@ -2,11 +2,13 @@
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
+@inject VisibleTenantService VisibleTenant
 
 <PageTitle>Create Subject</PageTitle>
 
@@ -15,7 +17,14 @@
         <h1 class="page-title">Create Subject</h1>
     </div>
 
-    @if (_gradeLevelId is null)
+    @if (!_isRealTenant)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">
+            You have no tenant assigned. Subject records are tenant-scoped — pick a tenant to continue.
+        </FluentMessageBar>
+        <FluentButton OnClick="@(() => Nav.NavigateTo("/students/subjects"))">Back to Subjects</FluentButton>
+    }
+    else if (_gradeLevelId is null)
     {
         <FluentMessageBar Intent="MessageIntent.Warning">
             No grade level selected. Please create a subject from the Subjects landing page after selecting a grade level.
@@ -68,6 +77,7 @@
     private Guid? _gradeLevelId;
     private bool _saving;
     private string? _errorMessage;
+    private bool _isRealTenant;
 
     private readonly CreateModel _model = new();
 
@@ -75,6 +85,13 @@
     {
         _gradeLevelId = GradeLevelId;
     }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+    }
+
 
     private async Task OnCodedValueChanged(Guid? id)
     {
@@ -94,7 +111,7 @@
 
     private async Task SaveAsync()
     {
-        if (_gradeLevelId is null) return;
+        if (_gradeLevelId is null || !_isRealTenant) return;
 
         if (string.IsNullOrWhiteSpace(_model.Code) || string.IsNullOrWhiteSpace(_model.Name))
         {

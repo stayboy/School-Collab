@@ -1,18 +1,22 @@
 @page "/students/grade-levels"
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<GradeLevels> Logger
+@inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
 <LandingPage TItem="GradeLevelLandingDto"
              Title="Grade Levels"
              CreateLabel="+ New Grade Level"
              CreateRoute="/students/grade-levels/create"
+             CreateEnabled="@_isRealTenant"
+             SearchEnabled="@_isRealTenant"
              EmptyMessage="@CurrentEmptyMessage"
              Items="@_filteredItems"
              Loading="@(_items is null)"
@@ -81,6 +85,7 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+    private bool _isRealTenant;
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
@@ -96,9 +101,11 @@
             : (_items ?? []).Where(MatchesSearch).ToArray();
 
     private string CurrentEmptyMessage =>
-        !string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
-            ? $"No grade levels match '{_searchText}'."
-            : "No grade levels yet. Create one to get started.";
+        !_isRealTenant
+            ? "Select a tenant to manage grade levels."
+            : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
+                ? $"No grade levels match '{_searchText}'."
+                : "No grade levels yet. Create one to get started.");
 
     private bool MatchesSearch(GradeLevelLandingDto g)
     {
@@ -112,6 +119,14 @@
     {
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant)
+        {
+            _items = [];
+            return;
+        }
 
         Logger.LogInformation("Loading grade levels landing");
         try

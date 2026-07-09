@@ -1,9 +1,11 @@
 @page "/students/periods"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Periods> Logger
 @inject IDialogService DialogService
+@inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
 <PageTitle>Periods</PageTitle>
@@ -15,8 +17,18 @@
                 <h1 class="page-title">Periods</h1>
             </div>
             <div class="action-bar">
-                <FluentButton Appearance="Appearance.Accent" OnClick="@ShowCreatePanel">+ New Period</FluentButton>
+                @if (_isRealTenant)
+                {
+                    <FluentButton Appearance="Appearance.Accent" OnClick="@ShowCreatePanel">+ New Period</FluentButton>
+                }
             </div>
+
+            @if (!_isRealTenant)
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Period records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            }
 
             @if (_showCreate)
             {
@@ -94,6 +106,7 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+    private bool _isRealTenant;
 
     // Create form state
     private bool _showCreate;
@@ -106,6 +119,14 @@
     {
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant)
+        {
+            _items = [];
+            return;
+        }
 
         Logger.LogInformation("Loading periods list");
         try
@@ -130,6 +151,8 @@
 
     private void ShowCreatePanel()
     {
+        if (!_isRealTenant) return;
+
         _showCreate = true;
         _createName = string.Empty;
         _createStartDate = string.Empty;
@@ -144,6 +167,8 @@
 
     private async Task OnCreateAsync()
     {
+        if (!_isRealTenant) return;
+
         if (!DateOnly.TryParse(_createStartDate, out var startDate))
         {
             _error = "Invalid start date format. Use yyyy-MM-dd.";

@@ -1,8 +1,10 @@
 @page "/students/create"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
+@inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
 <PageTitle>New Student</PageTitle>
@@ -14,7 +16,9 @@
                 <h1 class="page-title">New Student</h1>
             </div>
 
-            <EditForm Model="_model" OnValidSubmit="OnSaveAsync" class="form-container">
+            @if (_isRealTenant)
+            {
+                <EditForm Model="_model" OnValidSubmit="OnSaveAsync" class="form-container">
                 <DataAnnotationsValidator />
                 <ValidationSummary />
 
@@ -51,7 +55,14 @@
                     </FluentButton>
                     <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo("/students"))">Cancel</FluentButton>
                 </div>
-            </EditForm>
+                </EditForm>
+            }
+            else
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            }
         </FluentStack>
     </ChildContent>
     <ErrorContent Context="ex">
@@ -67,11 +78,20 @@
     private string? _error;
     private CancellationTokenSource? _saveCts;
     private volatile bool _disposed;
+    private bool _isRealTenant;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+    }
 
     private async Task OnSaveAsync()
     {
         _saving = true;
         _error = null;
+
+        if (!_isRealTenant) return;
 
         DateOnly? dateOfBirth = null;
         if (!string.IsNullOrWhiteSpace(_dobString))

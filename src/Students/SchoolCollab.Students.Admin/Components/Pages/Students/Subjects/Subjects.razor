@@ -1,19 +1,22 @@
 @page "/students/subjects"
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Subjects> Logger
+@inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
 <LandingPage TItem="SubjectDto"
              Title="Subjects"
              CreateLabel="+ New Subject"
              CreateRoute="@(_selectedGradeLevel is null ? "#" : $"/students/subjects/create?gradeLevelId={_selectedGradeLevel.Value}")"
-             CreateEnabled="@(_selectedGradeLevel is not null)"
+             CreateEnabled="@(_isRealTenant && _selectedGradeLevel is not null)"
+             SearchEnabled="@_isRealTenant"
              EmptyMessage="@CurrentEmptyMessage"
              Items="@_filteredItems"
              Loading="@(_items is null || _gradeLevels is null)"
@@ -66,6 +69,7 @@
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+    private bool _isRealTenant;
 
     private GradeLevelOption? _selectedGradeLevel;
     private GradeLevelOption[] _gradeLevelOptions = [];
@@ -89,6 +93,9 @@
     {
         get
         {
+            if (!_isRealTenant)
+                return "Select a tenant to manage subjects.";
+
             if (_gradeLevels is null || _gradeLevels.Length == 0)
                 return "No grade levels exist. Create a grade level first.";
 
@@ -115,6 +122,15 @@
     {
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant)
+        {
+            _gradeLevels = [];
+            _items = [];
+            return;
+        }
 
         Logger.LogInformation("Loading subjects page");
 
@@ -161,6 +177,8 @@
 
     protected override async Task OnParametersSetAsync()
     {
+        if (!_isRealTenant) return;
+
         // If query param changes, update selection
         if (GradeLevelId.HasValue && _gradeLevelOptions.Length > 0)
         {
