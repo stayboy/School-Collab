@@ -28,6 +28,10 @@ public static class AuthTenancyExtensions
         // Register via the shared tenancy helper so core modules can also resolve
         // ITenantProvider when authentication is not configured (e.g. workers/tests).
         services.AddTenancy();
+        // Required so TenantProvider can fall back to the authenticated principal's
+        // tenant_id claim (HttpContext.User) when the AsyncLocal seeded by
+        // IClaimsTransformation is not present in the current async scope.
+        services.AddHttpContextAccessor();
 
         // Bridge from ClaimsPrincipal -> TenantContext
         services.AddScoped<IClaimsTransformation, TenantClaimsTransformation>();

@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Assignments.Admin.Services;
+using SchoolCollab.Core.Auth;
 
 namespace SchoolCollab.Assignments.Admin;
 
@@ -23,10 +24,14 @@ public static class ModuleServices
     /// </summary>
     public static IServiceCollection AddAssignmentsModule(this IServiceCollection services)
     {
+        // Propagates the dev-selected tenant to the assignments-api via the
+        // x-tenant-id header so strict-entity writes resolve the right tenant.
+        services.AddScoped<TenantPropagationDelegatingHandler>();
         services.AddHttpClient<AssignmentsApiClient>(client =>
         {
             client.BaseAddress = new Uri("https+http://assignments-api");
-        });
+        })
+        .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
 
         return services;
     }
