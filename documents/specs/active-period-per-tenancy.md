@@ -1,7 +1,8 @@
 # Spec: Active Period per Tenancy (draft)
 
-> Status: **Draft / Idea** — design proposal; FR-A1–A6 implemented, deviations synced in §10.
-> Open questions in §8.
+> Status: **Implemented** — FR-A1–A6 shipped in PR #71; deviations synced in §10.
+> Open design questions (Q1–Q4, Q5) were resolved as assumed in the draft and are noted in §8.
+> Remaining follow-ups tracked at the end of §10 (not in PR #71).
 > Owner: Students + Core + Assignments contexts
 > Depends on: `global-tenant-filter.md` (§5.6 Period invariant, FR-4/FR-5/FR-6/FR-16/FR-18/FR-19),
 > `grade-level-setup.md` (§0.3 current period derived, §0.4 at-most-one-active invariant),
@@ -295,19 +296,16 @@ the per-tenant scope).
 - This mirrors FR-19: strict-entity actions are gated by context (here: an open period rather than a
   real tenant).
 
-## 8. Open questions
+## 8. Open questions (resolved as assumed in the draft; shipped in PR #71)
 
-- **Q1.** Should "close old active" map to `Complete()` (reuses promotion) or to a new softer
-  `Closed` status? Draft assumes `Complete()`.
-- **Q2.** Promotion rule source of truth: explicit per-student decision (teacher sets
-  promoted/repeated before closure) vs. automatic `Level + 1` rule vs. both (automatic default,
-  manual override)? Draft assumes automatic default + optional override.
-- **Q3.** Should repetition be modeled as "new enrollment in next period at same grade" (carry-
-  forward, current behavior) or as a status on the *existing* enrollment? Draft assumes new
-  next-period enrollment (consistent with promotion).
-- **Q4.** Where should `IActivePeriodProvider` live physically — `SchoolCollab.Core.Tenancy` or a
-  new `SchoolCollab.Core.Periods` namespace? Draft assumes `Tenancy` for parity with
-  `ITenantProvider`.
+- **Q1. RESOLVED → `Complete()`.** "Close old active" maps to `priorPeriod.Complete()`, reusing
+the existing promotion flow (FR-A4). A softer `Closed` status was deferred.
+- **Q2. RESOLVED → automatic default.** `DefaultPromotionRule` applies the automatic `Level + 1`
+rule (else repeat). Per-student manual override is a follow-up (see §10).
+- **Q3. RESOLVED → new next-period enrollment.** Repetition is modeled as a new enrollment in the
+next period at the same grade level (consistent with promotion).
+- **Q4. RESOLVED → `SchoolCollab.Core.Tenancy`.** `IActivePeriodProvider` lives in
+`SchoolCollab.Core/Tenancy` for parity with `ITenantProvider`.
 
 **Decided: wizard integration = Idea C (prerequisite entry gate before steps render).** Chosen over
 an inline Step-2 affordance (Idea A) and a dedicated Term wizard step (Idea B) because period opening
@@ -337,6 +335,8 @@ the existing 2-step wizard content intact. See §4.7 / FR-A6.
    and wizard entry-gate shows panel when no active period / renders steps once one exists.
 
 ## 10. Implementation status (synced with code)
+
+**Shipped in PR #71** (`feature/active-period-per-tenancy` → `main`). Builds green; Students unit (40) and Admin unit (58) suites pass.
 
 Implemented in this pass (builds green; Students period + promotion + strict-tenancy unit tests pass):
 
