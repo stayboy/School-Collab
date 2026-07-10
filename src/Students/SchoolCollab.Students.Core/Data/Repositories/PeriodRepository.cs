@@ -27,7 +27,7 @@ internal sealed class PeriodRepository(StudentsDbContext db)
             .OrderByDescending(x => x.StartDate)
             .Select(x => new PeriodDto(
                 x.Id, x.Name, x.StartDate, x.EndDate,
-                x.Status.ToString(), x.AllowSubjectOverrides, x.NextPeriodId,
+                x.Status.ToString(), x.NextPeriodId,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 

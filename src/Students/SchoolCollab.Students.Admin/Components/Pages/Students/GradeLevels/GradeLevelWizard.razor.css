@@ -312,3 +312,13 @@
 .grade-confirm-reset {
     font-size: 0.85rem;
 }
+
+/* The "Open a term" date pickers render their popup as a child of the FluentCard,
+   which clips to its rounded corners (overflow:hidden) and cut the calendar off.
+   The FluentDialogProvider lives at the layout root (outside .page-scroll), so the
+   popup already escapes the scroll region; making the card/panel visible here stops
+   the card from clipping it. */
+.open-term-panel,
+.open-term-panel .fluent-card {
+    overflow: visible;
+}

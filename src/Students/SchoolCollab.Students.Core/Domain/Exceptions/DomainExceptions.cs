@@ -72,3 +72,13 @@ public sealed class NoCurrentPeriodException : Exception
 {
     public NoCurrentPeriodException(string message) : base(message) { }
 }
+
+/// <summary>
+/// Thrown when an operation requires an Active (open) period but none exists
+/// for the current tenant, or when an enrollment targets a non-active period.
+/// See spec active-period-per-tenancy.md (FR-A3).
+/// </summary>
+public sealed class PeriodNotOpenException : Exception
+{
+    public PeriodNotOpenException(string message) : base(message) { }
+}

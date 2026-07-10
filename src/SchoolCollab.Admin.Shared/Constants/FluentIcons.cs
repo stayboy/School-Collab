@@ -9,6 +9,7 @@ public static class FluentIcons
     public static readonly Icon ClipboardCheckmark = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ClipboardCheckmark();
     public static readonly Icon People = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.People();
     public static readonly Icon ArrowExportUp = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowExportUp();
+    public static readonly Icon ArrowClockwise = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowClockwise();
     public static readonly Icon TextBulletList = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.TextBulletList();
     public static readonly Icon Bot = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Bot();
     public static readonly Icon Add = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Add();
@@ -22,4 +23,5 @@ public static class FluentIcons
     public static readonly Icon Save = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Save();
     public static readonly Icon Settings = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Settings();
     public static readonly Icon Open = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Open();
+    public static readonly Icon Dismiss = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Dismiss();
 }

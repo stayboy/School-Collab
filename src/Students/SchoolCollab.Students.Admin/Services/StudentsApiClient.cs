@@ -59,7 +59,6 @@ public sealed record PeriodDto(
     DateOnly StartDate,
     DateOnly EndDate,
     string Status,
-    bool AllowSubjectOverrides,
     Guid? NextPeriodId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -149,14 +148,12 @@ public record UpdateSubjectRequest(
 public record CreatePeriodRequest(
     string Name,
     DateOnly StartDate,
-    DateOnly EndDate,
-    bool AllowSubjectOverrides);
+    DateOnly EndDate);
 
 public record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
-    DateOnly EndDate,
-    bool AllowSubjectOverrides);
+    DateOnly EndDate);
 
 public record EnrollStudentRequest(
     Guid StudentId,

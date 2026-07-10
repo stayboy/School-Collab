@@ -75,7 +75,7 @@ public class PeriodOverlapInvariantTests
 
         var uh = NewUpdate(s);
         var act = async () => await uh.HandleAsync(
-            new UpdatePeriod(idB, "B2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31), false));
+            new UpdatePeriod(idB, "B2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31)));
 
         await act.Should().ThrowAsync<PeriodOverlapException>();
     }
@@ -89,14 +89,14 @@ public class PeriodOverlapInvariantTests
         var idA = await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
 
         var uh = NewUpdate(s);
-        await uh.HandleAsync(new UpdatePeriod(idA, "A2", new DateOnly(2026, 2, 1), new DateOnly(2026, 5, 15), false));
+        await uh.HandleAsync(new UpdatePeriod(idA, "A2", new DateOnly(2026, 2, 1), new DateOnly(2026, 5, 15)));
 
         var updated = await s.Db.Periods.SingleAsync();
         updated.Name.Should().Be("A2");
     }
 
     [TestMethod]
-    public async Task Activate_WhenAnotherIsActive_Throws()
+    public async Task Activate_WhenAnotherIsActive_ClosesPriorAndActivatesNew()
     {
         using var s = new StudentsTestScope("period-activate-overlap");
         var ch = NewCreate(s);
@@ -105,13 +105,13 @@ public class PeriodOverlapInvariantTests
 
         await NewActivate(s).HandleAsync(new ActivatePeriod(idA)); // A → Active
 
-        var act = async () => await NewActivate(s).HandleAsync(new ActivatePeriod(idB));
-        await act.Should().ThrowAsync<PeriodOverlapException>();
+        // Opening B must auto-close A (FR-A1) rather than reject.
+        await NewActivate(s).HandleAsync(new ActivatePeriod(idB));
 
-        // A stays Active; B stays Draft.
+        // A is closed (Completed); B is now the single Active period.
         var a = await s.Db.Periods.SingleAsync(p => p.Id == idA);
         var b = await s.Db.Periods.SingleAsync(p => p.Id == idB);
-        a.Status.Should().Be(PeriodStatus.Active);
-        b.Status.Should().Be(PeriodStatus.Draft);
+        a.Status.Should().Be(PeriodStatus.Completed);
+        b.Status.Should().Be(PeriodStatus.Active);
     }
 }

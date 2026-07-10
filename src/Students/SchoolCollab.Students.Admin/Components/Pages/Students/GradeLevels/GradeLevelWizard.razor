@@ -22,6 +22,61 @@
     <ChildContent>
         <TenantGate>
             <ChildContent>
+        @if (_activePeriod is null)
+        {
+            <section class="open-term-panel">
+                <FluentCard>
+                    <div class="wizard-section-header">
+                        <div>
+                            <h3>Open a term</h3>
+                            <p class="wizard-hint">Before you can add students to a grade, open an academic period for this tenant.</p>
+                        </div>
+                    </div>
+
+                    @if (_draftPeriods.Count > 0)
+                    {
+                        <div class="assigned-list">
+                            <h4>Existing draft periods</h4>
+                            <ul>
+                                @foreach (var d in _draftPeriods)
+                                {
+                                    <li>
+                                        <span>@d.Name (@d.StartDate – @d.EndDate)</span>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => OpenDraftAsync(d.Id))">Open</FluentButton>
+                                    </li>
+                                }
+                            </ul>
+                        </div>
+                    }
+
+                    <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.End">
+                        <FluentTextField @bind-Value="_newPeriodName" Label="Period name" Placeholder="e.g. 2025–2026 Academic Year" Style="flex:1" />
+                        <FluentButton IconStart="@FluentIcons.Calendar"
+                                      Title="Fill the form with the current academic year (editable template)"
+                                      OnClick="SuggestAcademicYearAsync" />
+                        <FluentButton IconStart="@FluentIcons.ArrowClockwise"
+                                      Title="Fill the form with the next academic year after the latest period"
+                                      OnClick="BackfillAsync" />
+                    </FluentStack>
+                    <FluentDatePicker @bind-Value="_newPeriodStart" Label="Start date" />
+                    <FluentDatePicker @bind-Value="_newPeriodEnd" Label="End date" />
+
+                    <div class="wizard-actions">
+                        <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
+                        <FluentButton Appearance="Appearance.Accent" OnClick="OpenTermAsync" Disabled="@(_openingTerm)">
+                            @(_openingTerm ? "Opening…" : "Create & Open")
+                        </FluentButton>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_termError))
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_termError</FluentMessageBar>
+                    }
+                </FluentCard>
+            </section>
+        }
+        else
+        {
         <FluentWizard StepperPosition="StepperPosition.Top"
                       StepSequence="WizardStepSequence.Visited"
                       Width="960px"
@@ -212,10 +267,10 @@
                                   Summary="Enrol students in this grade"
                                   IconPrevious="@FluentIcons.CheckmarkCircleFilled"
                                   OnChange="OnStep2ChangingAsync">
-                    @if (_currentPeriod is null)
+                    @if (_activePeriod is null)
                     {
                         <FluentMessageBar Intent="MessageIntent.Warning">
-                            No period covers today. Create a period whose date range includes today before enrolling students.
+                            No active period. Open a period before enrolling students.
                         </FluentMessageBar>
                     }
                     else
@@ -225,7 +280,7 @@
                                 <FluentIcon Icon="@(Icons.Regular.Size24.People)" Color="@Color.Accent" />
                                 <div>
                                     <h3>Enrol Students</h3>
-                                    <p class="wizard-hint">Enrol students into this grade level for the current period (@_currentPeriod.Name).</p>
+                                    <p class="wizard-hint">Enrol students into this grade level for the active period (@_activePeriod.Name).</p>
                                 </div>
                             </div>
 
@@ -308,7 +363,7 @@
                                 </div>
                                 <div class="review-row">
                                     <span class="review-label">Current period</span>
-                                    <span class="review-value">@(_currentPeriod?.Name ?? "No current period")</span>
+                                    <span class="review-value">@(_activePeriod?.Name ?? "No active period")</span>
                                 </div>
                                 <div class="review-row">
                                     <span class="review-label">Subjects assigned</span>
@@ -365,6 +420,7 @@
                 </div>
             </ButtonTemplate>
         </FluentWizard>
+        }
         </ChildContent>
         <Fallback>
             <FluentMessageBar Intent="MessageIntent.Warning">
@@ -391,10 +447,24 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
-    // Current period (derived client-side from ListPeriodsAsync — same rule
-    // as the server: StartDate <= today && EndDate >= today). Null = no
-    // current period, which blocks step 2 (§6.3).
+    // Current period (date-derived, display only) — same rule as the server:
+    // StartDate <= today && EndDate >= today.
     private SchoolCollab.Students.Admin.Services.PeriodDto? _currentPeriod;
+
+    // Active period (status-derived) — gates the wizard. When null, the wizard
+    // shows the "Open a term" entry gate instead of its steps (FR-A6 / Idea C).
+    private SchoolCollab.Students.Admin.Services.PeriodDto? _activePeriod;
+
+    // Entry-gate form state for opening a new term.
+    private string? _newPeriodName;
+    private DateTime? _newPeriodStart;
+    private DateTime? _newPeriodEnd;
+    private bool _openingTerm;
+    private string? _termError;
+    private List<SchoolCollab.Students.Admin.Services.PeriodDto> _draftPeriods = new();
+
+    // Full period list (all statuses) — used by BackfillAsync to advance past the latest period.
+    private SchoolCollab.Students.Admin.Services.PeriodDto[]? _periods;
 
     // The resolved name to write into GradeLevel.Name on save (the mirror
     // field). Sourced from the selected coded value, not user-typed.
@@ -451,8 +521,8 @@
         if (!_isRealTenant)
             return;
 
-        // Derive the current period once on load (§6.3) — used by step 2.
-        await DeriveCurrentPeriodAsync(ct);
+        // Derive the active/current period once on load (§6.3 / FR-A6) — used by step 2.
+        await DerivePeriodsAsync(ct);
 
         // Eagerly load the students list we'll need in step 2 so the user
         // doesn't see an empty grid the first time they navigate there.
@@ -491,19 +561,132 @@
         Logger.LogDebug("GradeLevelWizard.RefreshTenantFromAuthStateAsync: _isRealTenant={IsRealTenant}", _isRealTenant);
     }
 
-    private async Task DeriveCurrentPeriodAsync(CancellationToken ct)
+    private async Task DerivePeriodsAsync(CancellationToken ct)
     {
         try
         {
             var periods = await Api.ListPeriodsAsync(ct) ?? [];
+            _periods = periods;
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            // Date-derived "current" — display only.
             _currentPeriod = periods.FirstOrDefault(p => p.StartDate <= today && p.EndDate >= today);
+            // Status-derived "active" — gates enrollment / the wizard (FR-A3 / FR-A6).
+            _activePeriod = periods.FirstOrDefault(p => p.Status == "Active");
+            _draftPeriods = periods.Where(p => p.Status == "Draft").ToList();
+
+            // Showing the gate (no active period): prefill with the current academic year as an
+            // editable template. Only when the name is still empty, so we don't overwrite a
+            // user's in-progress entry.
+            if (_activePeriod is null && string.IsNullOrEmpty(_newPeriodName))
+            {
+                SuggestAcademicYearAsync();
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to derive current period");
+            Logger.LogError(ex, "Failed to derive periods");
+        }
+    }
+
+    /// <summary>
+    /// Entry-gate action (FR-A6 / Idea C): creates a new Draft period and
+    /// activates it, opening the term for the tenant. Activation auto-closes any
+    /// prior active period (FR-A1). Safe here because the gate only renders when
+    // Fills the "Open a term" form with the current academic year as an editable template.
+    private void SuggestAcademicYearAsync()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        ApplyAcademicYearSuggestion(AcademicYearSuggestion.ForDate(today));
+    }
+
+    // Auto-populates the form with the next academic year after the latest existing period.
+    private void BackfillAsync()
+    {
+        ApplyAcademicYearSuggestion(AcademicYearSuggestion.BackfillFrom(_periods));
+    }
+
+    private void ApplyAcademicYearSuggestion((string Name, DateOnly StartDate, DateOnly EndDate) suggestion)
+    {
+        _newPeriodName = suggestion.Name;
+        _newPeriodStart = suggestion.StartDate.ToDateTime(TimeOnly.MinValue);
+        _newPeriodEnd = suggestion.EndDate.ToDateTime(TimeOnly.MinValue);
+    }
+
+    /// no active period exists, so no rollover confirm is needed.
+    /// </summary>
+    private async Task OpenTermAsync()
+    {
+        _termError = null;
+
+        if (string.IsNullOrWhiteSpace(_newPeriodName))
+        {
+            _termError = "Enter a period name.";
+            return;
+        }
+        if (_newPeriodStart is null || _newPeriodEnd is null)
+        {
+            _termError = "Enter a start and end date.";
+            return;
+        }
+        if (_newPeriodEnd.Value.Date < _newPeriodStart.Value.Date)
+        {
+            _termError = "End date must be on or after the start date.";
+            return;
+        }
+
+        _openingTerm = true;
+        try
+        {
+            var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(
+                _newPeriodName.Trim(),
+                DateOnly.FromDateTime(_newPeriodStart.Value.Date),
+                DateOnly.FromDateTime(_newPeriodEnd.Value.Date)));
+
+            await Api.ActivatePeriodAsync(id);
+
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            await DerivePeriodsAsync(ct);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to open term");
+            _termError = ex.Message;
+        }
+        finally
+        {
+            _openingTerm = false;
+        }
+    }
+
+    /// <summary>
+    /// Entry-gate action: activates an existing Draft period, opening it for the
+    /// tenant (FR-A6). See <see cref="OpenTermAsync"/> for the create+activate path.
+    /// </summary>
+    private async Task OpenDraftAsync(Guid id)
+    {
+        _termError = null;
+        _openingTerm = true;
+        try
+        {
+            await Api.ActivatePeriodAsync(id);
+
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            await DerivePeriodsAsync(ct);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to open draft period {Id}", id);
+            _termError = ex.Message;
+        }
+        finally
+        {
+            _openingTerm = false;
         }
     }
 
@@ -523,10 +706,10 @@
 
     private Task OnStep2ChangingAsync(FluentWizardStepChangeEventArgs args)
     {
-        if (_currentPeriod is null)
+        if (_activePeriod is null)
         {
             args.IsCancelled = true;
-            _step2Error = "A current period is required to assign subjects and enrol students.";
+            _step2Error = "An active period is required to assign subjects and enrol students.";
         }
         else
         {
@@ -849,18 +1032,18 @@
                     _selectedCodedValue.DisplayOrder), ct);
             var gradeId = gradeLevel.Id;
 
-            if (_currentPeriod is not null)
+            if (_activePeriod is not null)
             {
                 foreach (var s in _assignedSubjects)
                 {
                     await Api.AssignGradeSubjectAsync(
-                        new AssignGradeSubjectRequest(gradeId, s.Id, _currentPeriod.Id), ct);
+                        new AssignGradeSubjectRequest(gradeId, s.Id, _activePeriod.Id), ct);
                 }
 
                 foreach (var st in _assignedStudents)
                 {
                     await Api.EnrollStudentAsync(
-                        new EnrollStudentRequest(st.Id, _currentPeriod.Id, gradeId, DateOnly.FromDateTime(DateTime.UtcNow)), ct);
+                        new EnrollStudentRequest(st.Id, _activePeriod.Id, gradeId, DateOnly.FromDateTime(DateTime.UtcNow)), ct);
                 }
             }
 

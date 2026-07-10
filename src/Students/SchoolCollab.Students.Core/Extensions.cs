@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
+using SchoolCollab.Students.Core.Tenancy;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Messaging;
 
@@ -31,6 +32,7 @@ public static class Extensions
         services.AddScoped<IGradeLevelRepository, GradeLevelRepository>();
         services.AddScoped<ISubjectRepository, SubjectRepository>();
         services.AddScoped<IPeriodRepository, PeriodRepository>();
+        services.AddScoped<IActivePeriodProvider, ActivePeriodProvider>();
         services.AddScoped<IStudentEnrollmentRepository, StudentEnrollmentRepository>();
         services.AddScoped<IGradeSubjectAssignmentRepository, GradeSubjectAssignmentRepository>();
         services.AddScoped<IStudentSubjectAssignmentRepository, StudentSubjectAssignmentRepository>();

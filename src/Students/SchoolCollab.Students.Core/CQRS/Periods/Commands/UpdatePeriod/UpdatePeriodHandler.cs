@@ -32,7 +32,7 @@ public sealed class UpdatePeriodHandler(
                 $"({overlapping[0].StartDate:O}–{overlapping[0].EndDate:O}).");
         }
 
-        period.Update(command.Name, command.StartDate, command.EndDate, command.AllowSubjectOverrides);
+        period.Update(command.Name, command.StartDate, command.EndDate);
 
         try
         {

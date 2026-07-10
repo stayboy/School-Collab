@@ -6,7 +6,6 @@ public sealed record PeriodDto(
     DateOnly StartDate,
     DateOnly EndDate,
     string Status,
-    bool AllowSubjectOverrides,
     Guid? NextPeriodId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
