@@ -23,17 +23,18 @@ public sealed class ActivatePeriodHandler(
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
 
-        // ── "At most one active period" invariant (§5.6): reject if another
-        //    period is already Active. (The overlap rule already prevents two
-        //    periods containing the same day; this guards the status itself.)
+        // ── "At most one active period" invariant (§5.6 / FR-A1): opening this
+        //    period MUST close any other currently-Active period for the tenant.
+        //    Closing (Complete) is what triggers promotion/repetition — the
+        //    PromotionService polls Completed periods that have a NextPeriodId.
         var activeOther = await repository.GetActivePeriodAsync(
             excludeId: command.Id, cancellationToken);
         if (activeOther is not null)
         {
-            throw new PeriodOverlapException(
-                command.Id,
-                $"Cannot activate period '{period.Name}' because period '{activeOther.Name}' " +
-                $"is already Active.");
+            logger.LogInformation(
+                "Closing prior active period {PriorId} ('{PriorName}') before activating {Id}",
+                activeOther.Id, activeOther.Name, command.Id);
+            activeOther.Complete();
         }
 
         period.Activate();

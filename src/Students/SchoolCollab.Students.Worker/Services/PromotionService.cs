@@ -35,6 +35,10 @@ public sealed class PromotionService(
 {
     private readonly PromotionOptions _options = options.Value;
 
+    // Default promotion rule: advance one grade level if a higher level
+    // exists for the tenant, otherwise repeat at the same grade level (FR-A4).
+    private readonly IPromotionRule _promotionRule = new DefaultPromotionRule();
+
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation(
@@ -218,14 +222,25 @@ public sealed class PromotionService(
         var newEnrollments = new List<StudentEnrollment>();
         var domainEvents = new List<IDomainEvent>();
 
+        // Resolve the tenant's grade levels once so the promotion rule can decide,
+        // per enrollment, whether to advance a grade or repeat (FR-A4).
+        var gradeLevels = await dbContext.GradeLevels.ToListAsync(ct);
+        var gradeLevelById = gradeLevels.ToDictionary(g => g.Id);
+
         foreach (var enrollment in activeEnrollments)
         {
             if (existingStudentIds.Contains(enrollment.StudentId)) continue;
 
+            // Promotion vs. repetition: target the next grade level if one exists
+            // for the tenant, else stay at the same grade level.
+            var targetGradeLevelId = gradeLevelById.TryGetValue(enrollment.GradeLevelId, out var fromGradeLevel)
+                ? _promotionRule.Resolve(fromGradeLevel, gradeLevels)
+                : enrollment.GradeLevelId;
+
             var newEnrollment = StudentEnrollment.Create(
                 enrollment.StudentId,
                 toPeriodId,
-                enrollment.GradeLevelId);
+                targetGradeLevelId);
 
             newEnrollments.Add(newEnrollment);
             domainEvents.AddRange(newEnrollment.DomainEvents);

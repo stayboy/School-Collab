@@ -48,7 +48,7 @@ public static class PeriodRoutes
             try
             {
                 await handler.HandleAsync(new UpdatePeriod(id, req.Name, req.StartDate,
-                    req.EndDate, req.AllowSubjectOverrides), ct);
+                    req.EndDate), ct);
                 return Results.NoContent();
             }
             catch (PeriodNotFoundException)
@@ -105,4 +105,4 @@ public static class PeriodRoutes
     }
 }
 
-internal record UpdatePeriodRequest(string Name, DateOnly StartDate, DateOnly EndDate, bool AllowSubjectOverrides);
+internal record UpdatePeriodRequest(string Name, DateOnly StartDate, DateOnly EndDate);

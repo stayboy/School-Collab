@@ -104,9 +104,26 @@ public class GradeLevelWizardTenancyTests : BunitContext
                 return Json(HttpStatusCode.OK, Array.Empty<CodedValueDto>());
             }
 
-            // GET /students/periods and /students/students — empty arrays
-            if (path.Contains("/students/periods", StringComparison.OrdinalIgnoreCase)
-                || path.Contains("/students/students", StringComparison.OrdinalIgnoreCase)
+            // GET /students/periods — return one Active period so the wizard's
+            // "Open a term" entry gate stays hidden and its steps (override /
+            // new-grade buttons) render. A real tenant must have an open term
+            // before using the wizard (FR-A6).
+            if (path.Contains("/students/periods", StringComparison.OrdinalIgnoreCase))
+            {
+                var activePeriod = new PeriodDto(
+                    Id: Guid.Parse("33333333-3333-3333-3333-333333333333"),
+                    Name: "2025/2026",
+                    StartDate: new DateOnly(2025, 9, 1),
+                    EndDate: new DateOnly(2026, 8, 31),
+                    Status: "Active",
+                    NextPeriodId: null,
+                    CreatedAt: DateTimeOffset.UtcNow,
+                    UpdatedAt: DateTimeOffset.UtcNow);
+                return Json(HttpStatusCode.OK, new[] { activePeriod });
+            }
+
+            // GET /students/students, /subjects, /grade-levels — empty arrays
+            if (path.Contains("/students/students", StringComparison.OrdinalIgnoreCase)
                 || path.Contains("/students/subjects", StringComparison.OrdinalIgnoreCase)
                 || path.Contains("/students/grade-levels", StringComparison.OrdinalIgnoreCase))
             {
@@ -251,29 +268,40 @@ public class GradeLevelWizardTenancyTests : BunitContext
     [TestMethod]
     public void IsRealTenant_True_After_TenantSwitch_Default_To_Real()
     {
-        // Arrange: start with the default tenant
-        var authProvider = RegisterServices(realTenant: false);
+        // Arrange: start with a real tenant so the wizard mounts and loads the
+        // active period at initialization. (Period data is loaded once, on mount;
+        // switching tenants re-evaluates the real-tenant flag but does not reload
+        // periods — so the active period must be present at mount.) This lets us
+        // exercise the default -> real transition below.
+        var authProvider = RegisterServices(realTenant: true);
         var cut = RenderWizard();
-        HasOverrideButton(cut).Should().BeFalse("Override hidden with default tenant");
+        HasOverrideButton(cut).Should().BeTrue("Override visible with real tenant");
 
-        // Act: switch to a real tenant
+        // Switch to the default tenant: override must hide.
+        authProvider.User = CreateUser(Guid.Empty.ToString(), "System", "Organization");
+        cut.Render();
+        HasOverrideButton(cut).Should().BeFalse("Override must be hidden after switching to the default tenant");
+
+        // Act + Assert: the default -> real transition reveals the override again
+        // (the active period loaded at mount stays in scope).
         authProvider.User = CreateUser(Guid.NewGuid().ToString(), "Hydeson", "School");
         cut.Render();
-
-        // Assert: override is now visible
+        cut.WaitForState(() => HasOverrideButton(cut), TimeSpan.FromSeconds(2));
         HasOverrideButton(cut).Should().BeTrue("Override must be visible after switching to a real tenant");
     }
 
     [TestMethod]
     public void TenantId_Debug_TenantSwitch_Values()
     {
-        // Arrange: create tenants with specific GUIDs for debugging
+        // Arrange: create tenants with specific GUIDs for debugging. Start with a
+        // REAL tenant so the wizard mounts and loads the active period at mount
+        // (period data is loaded once, on mount; tenant switches re-evaluate the
+        // real-tenant flag but do not reload periods).
         var realTenantId = Guid.Parse("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE");
         var defaultTenantId = Guid.Empty;
         var authProvider = new MutableAuthenticationStateProvider();
 
-        // Start with default tenant
-        authProvider.User = CreateUser(defaultTenantId.ToString(), "System", "Organization");
+        authProvider.User = CreateUser(realTenantId.ToString(), "Hydeson", "School");
 
         var handler = new WizardHttpHandler();
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
@@ -283,33 +311,35 @@ public class GradeLevelWizardTenancyTests : BunitContext
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance));
         Services.AddSingleton(new VisibleTenantService(authProvider, NullLogger<VisibleTenantService>.Instance));
 
-        // Act: render with default tenant
+        // Act: render with the real tenant
         var cut = RenderWizard();
 
         // Debug: verify tenant context at initial render
         var authState = authProvider.GetAuthenticationStateAsync().Result;
         var tenantIdClaim = authState.User.FindFirst("tenant_id")?.Value;
-        tenantIdClaim.Should().Be(defaultTenantId.ToString(), "Initial tenant should be default (Guid.Empty)");
-        HasOverrideButton(cut).Should().BeFalse("Override hidden when TenantId is Guid.Empty");
+        tenantIdClaim.Should().Be(realTenantId.ToString(), "Initial tenant should be the real tenant GUID");
+        HasOverrideButton(cut).Should().BeTrue("Override visible when TenantId is a real GUID");
 
-        // Act: switch to real tenant
-        authProvider.User = CreateUser(realTenantId.ToString(), "Hydeson", "School");
+        // Act: switch to the default tenant
+        authProvider.User = CreateUser(defaultTenantId.ToString(), "System", "Organization");
         cut.Render();
 
         // Debug: verify tenant context after switch
         authState = authProvider.GetAuthenticationStateAsync().Result;
         tenantIdClaim = authState.User.FindFirst("tenant_id")?.Value;
-        tenantIdClaim.Should().Be(realTenantId.ToString(), "TenantId should now be the real tenant GUID");
-        HasOverrideButton(cut).Should().BeTrue("Override visible when TenantId is a real GUID");
+        tenantIdClaim.Should().Be(defaultTenantId.ToString(), "TenantId should now be Guid.Empty");
+        HasOverrideButton(cut).Should().BeFalse("Override hidden when TenantId is Guid.Empty");
 
-        // Act: switch back to default tenant
-        authProvider.User = CreateUser(defaultTenantId.ToString(), "System", "Organization");
+        // Act: switch back to the real tenant — the override reappears (active
+        // period loaded at mount stays in scope).
+        authProvider.User = CreateUser(realTenantId.ToString(), "Hydeson", "School");
         cut.Render();
 
         // Debug: verify tenant context after switching back
         authState = authProvider.GetAuthenticationStateAsync().Result;
         tenantIdClaim = authState.User.FindFirst("tenant_id")?.Value;
-        tenantIdClaim.Should().Be(defaultTenantId.ToString(), "TenantId should be Guid.Empty again");
-        HasOverrideButton(cut).Should().BeFalse("Override hidden again after switching back to default");
+        tenantIdClaim.Should().Be(realTenantId.ToString(), "TenantId should be the real tenant GUID again");
+        cut.WaitForState(() => HasOverrideButton(cut), TimeSpan.FromSeconds(2));
+        HasOverrideButton(cut).Should().BeTrue("Override visible again after switching back to a real tenant");
     }
 }

@@ -1,6 +1,7 @@
 @page "/students/periods"
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Constants
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Periods> Logger
@@ -25,15 +26,81 @@
                     @if (_showCreate)
             {
                 <div class="create-panel">
-                    <FluentStack Orientation="Orientation.Vertical" Gap="0.75rem">
-                        <FluentTextField @bind-Value="_createName" Label="Name" Required />
-                        <FluentTextField @bind-Value="_createStartDate" Label="Start Date (yyyy-MM-dd)" Required Placeholder="e.g. 2026-01-01" />
-                        <FluentTextField @bind-Value="_createEndDate" Label="End Date (yyyy-MM-dd)" Required Placeholder="e.g. 2026-06-30" />
-                        <FluentCheckbox @bind-Value="_createAllowOverrides" Label="Allow subject overrides" />
-                        <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem">
-                            <FluentButton Appearance="Appearance.Accent" OnClick="@OnCreateAsync">Create</FluentButton>
-                            <FluentButton Appearance="Appearance.Outline" OnClick="@HideCreatePanel">Cancel</FluentButton>
-                        </FluentStack>
+                    <FluentStack Orientation="Orientation.Horizontal"
+                                 HorizontalAlignment="HorizontalAlignment.SpaceBetween"
+                                 VerticalAlignment="VerticalAlignment.Center"
+                                 class="panel-head">
+                        <h2 class="panel-title">New period</h2>
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      IconStart="@FluentIcons.Dismiss"
+                                      Title="Close"
+                                      OnClick="@HideCreatePanel" />
+                    </FluentStack>
+
+                    <FluentStack Orientation="Orientation.Horizontal"
+                                 HorizontalGap="8"
+                                 VerticalAlignment="VerticalAlignment.Top"
+                                 class="panel-tip">
+                        <FluentIcon Icon="@(Icons.Regular.Size20.Calendar)" />
+                        <span>
+                            Pre-filled with the <strong>current academic year</strong> (1 Sep – 31 Aug) as an editable template.
+                            Use the buttons to suggest or backfill, then adjust as needed.
+                        </span>
+                    </FluentStack>
+
+                    <FluentGrid Spacing="3">
+                        <FluentGridItem xs="12" md="4">
+                            <label class="form-label" for="createName">Period name *</label>
+                        </FluentGridItem>
+                        <FluentGridItem xs="12" md="8">
+                            <FluentStack Orientation="Orientation.Horizontal"
+                                         Wrap="true"
+                                         HorizontalGap="8"
+                                         VerticalGap="8"
+                                         VerticalAlignment="VerticalAlignment.Center">
+                                <FluentTextField Id="createName"
+                                                  @bind-Value="_createName"
+                                                  Required
+                                                  Placeholder="e.g. 2026/2027"
+                                                  Style="flex:1; min-width:0" />
+                                <FluentButton IconStart="@FluentIcons.Calendar"
+                                              Title="Fill the period name with the current academic year (editable template)"
+                                              OnClick="@SuggestAcademicYearAsync" />
+                                <FluentButton IconStart="@FluentIcons.ArrowClockwise"
+                                              Title="Fill the form with the next academic year after the latest period"
+                                              OnClick="@BackfillAsync" />
+                            </FluentStack>
+                        </FluentGridItem>
+
+                        <FluentGridItem xs="12" md="4">
+                            <label class="form-label" for="createStart">Start date *</label>
+                        </FluentGridItem>
+                        <FluentGridItem xs="12" md="8">
+                            <FluentTextField Id="createStart"
+                                              @bind-Value="_createStartDate"
+                                              Required
+                                              Placeholder="e.g. 2026-09-01"
+                                              Style="width:12rem" />
+                        </FluentGridItem>
+
+                        <FluentGridItem xs="12" md="4">
+                            <label class="form-label" for="createEnd">End date *</label>
+                        </FluentGridItem>
+                        <FluentGridItem xs="12" md="8">
+                            <FluentTextField Id="createEnd"
+                                              @bind-Value="_createEndDate"
+                                              Required
+                                              Placeholder="e.g. 2027-08-31"
+                                              Style="width:12rem" />
+                        </FluentGridItem>
+                    </FluentGrid>
+
+                    <FluentStack Orientation="Orientation.Horizontal"
+                                 HorizontalGap="8"
+                                 VerticalGap="8"
+                                 class="form-actions">
+                        <FluentButton Appearance="Appearance.Accent" OnClick="@OnCreateAsync">Create period</FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@HideCreatePanel">Cancel</FluentButton>
                     </FluentStack>
                 </div>
             }
@@ -64,9 +131,6 @@
                         </TemplateColumn>
                         <TemplateColumn Title="Status">
                             @GetStatusBadge(context.Status)
-                        </TemplateColumn>
-                        <TemplateColumn Title="Overrides">
-                            @(context.AllowSubjectOverrides ? "Yes" : "No")
                         </TemplateColumn>
                         <TemplateColumn Title="Actions">
                             @if (context.Status == "Draft")
@@ -112,7 +176,6 @@
     private string _createName = string.Empty;
     private string _createStartDate = string.Empty;
     private string _createEndDate = string.Empty;
-    private bool _createAllowOverrides;
 
     protected override async Task OnInitializedAsync()
     {
@@ -148,15 +211,33 @@
         }
     }
 
+
+
     private void ShowCreatePanel()
     {
         if (!_isRealTenant) return;
 
         _showCreate = true;
-        _createName = string.Empty;
-        _createStartDate = string.Empty;
-        _createEndDate = string.Empty;
-        _createAllowOverrides = false;
+        // Prefill with the current academic year as an editable template.
+        ApplySuggestion(AcademicYearSuggestion.ForDate(DateOnly.FromDateTime(DateTime.Today)));
+    }
+
+    private void SuggestAcademicYearAsync()
+    {
+        ApplySuggestion(AcademicYearSuggestion.ForDate(DateOnly.FromDateTime(DateTime.Today)));
+    }
+
+    private void BackfillAsync()
+    {
+        // Auto-populate from the latest existing period (next academic year after it).
+        ApplySuggestion(AcademicYearSuggestion.BackfillFrom(_items));
+    }
+
+    private void ApplySuggestion((string Name, DateOnly StartDate, DateOnly EndDate) suggestion)
+    {
+        _createName = suggestion.Name;
+        _createStartDate = suggestion.StartDate.ToString("yyyy-MM-dd");
+        _createEndDate = suggestion.EndDate.ToString("yyyy-MM-dd");
     }
 
     private void HideCreatePanel()
@@ -181,7 +262,7 @@
             return;
         }
 
-        var request = new CreatePeriodRequest(_createName, startDate, endDate, _createAllowOverrides);
+        var request = new CreatePeriodRequest(_createName, startDate, endDate);
 
         Logger.LogInformation("Creating period {Name}", request.Name);
         try

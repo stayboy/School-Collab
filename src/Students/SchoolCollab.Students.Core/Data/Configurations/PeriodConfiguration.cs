@@ -33,10 +33,6 @@ internal sealed class PeriodConfiguration : TenantEntityTypeConfigurationBase<Pe
             .IsRequired()
             .HasDefaultValue(PeriodStatus.Draft);
 
-        builder.Property(x => x.AllowSubjectOverrides)
-            .IsRequired()
-            .HasDefaultValue(false);
-
         builder.Property(x => x.NextPeriodId);
 
         // NFR-3 hot path: per-tenant current-period lookup and overlap check.

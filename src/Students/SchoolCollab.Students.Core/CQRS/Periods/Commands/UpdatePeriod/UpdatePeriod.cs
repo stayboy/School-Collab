@@ -6,5 +6,4 @@ public sealed record UpdatePeriod(
     Guid Id,
     string Name,
     DateOnly StartDate,
-    DateOnly EndDate,
-    bool AllowSubjectOverrides) : ICommand;
+    DateOnly EndDate) : ICommand;

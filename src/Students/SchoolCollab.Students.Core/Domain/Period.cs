@@ -21,7 +21,6 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
     public DateOnly StartDate { get; private set; }
     public DateOnly EndDate { get; private set; }
     public PeriodStatus Status { get; private set; }
-    public bool AllowSubjectOverrides { get; private set; }
     public Guid? NextPeriodId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -32,8 +31,7 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
     public static Period Create(
         string name,
         DateOnly startDate,
-        DateOnly endDate,
-        bool allowSubjectOverrides = false)
+        DateOnly endDate)
     {
         if (endDate < startDate)
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
@@ -46,7 +44,6 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
             StartDate = startDate,
             EndDate = endDate,
             Status = PeriodStatus.Draft,
-            AllowSubjectOverrides = allowSubjectOverrides,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -55,7 +52,7 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         return period;
     }
 
-    public void Update(string name, DateOnly startDate, DateOnly endDate, bool allowSubjectOverrides)
+    public void Update(string name, DateOnly startDate, DateOnly endDate)
     {
         if (Status != PeriodStatus.Draft)
             throw new InvalidOperationException("Only draft periods can be updated.");
@@ -66,7 +63,6 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         Name = name.Trim();
         StartDate = startDate;
         EndDate = endDate;
-        AllowSubjectOverrides = allowSubjectOverrides;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new PeriodUpdatedEvent(Id, Name));
     }

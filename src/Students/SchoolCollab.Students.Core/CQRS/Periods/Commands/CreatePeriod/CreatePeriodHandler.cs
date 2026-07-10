@@ -37,8 +37,7 @@ public sealed class CreatePeriodHandler(
         var period = Period.Create(
             command.Name,
             command.StartDate,
-            command.EndDate,
-            command.AllowSubjectOverrides)
+            command.EndDate)
             .WithTenant(tenantProvider);
 
         await repository.AddAsync(period, cancellationToken);

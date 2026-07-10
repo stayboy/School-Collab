@@ -39,7 +39,6 @@ public sealed class GetPeriodByIdHandler(
                     period.StartDate,
                     period.EndDate,
                     period.Status.ToString(),
-                    period.AllowSubjectOverrides,
                     period.NextPeriodId,
                     period.CreatedAt,
                     period.UpdatedAt);
