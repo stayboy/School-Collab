@@ -81,15 +81,15 @@ public class FeatureFlagGateTests : BunitContext
     }
 
     [TestMethod]
-    public void FlagOff_NoFallback_ShowsDefaultBanner()
+    public void FlagOff_NoFallback_HidesSilently()
     {
         Register(flagOn: false, out _, out _);
         var cut = Render<FeatureFlagGate>(ps => ps
             .Add(p => p.Key, FlagKey)
             .AddChildContent($"<p>{ChildText}</p>"));
 
-        cut.Markup.Should().Contain("This feature is not enabled for your tenant.");
         cut.Markup.Should().NotContain(ChildText, "ChildContent is hidden when the flag is off");
+        cut.Markup.Should().NotContain("This feature is not enabled", "FeatureFlagGate hides silently by default (no default banner)");
     }
 
     [TestMethod]

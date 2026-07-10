@@ -28,7 +28,6 @@ public class FeatureFlagGate : GateBase
     protected override Task<IReadOnlyList<IGateCondition>> GetConditionsAsync()
         => Task.FromResult<IReadOnlyList<IGateCondition>>(new IGateCondition[] { new FeatureEnabledCondition(Key!, FeatureFlags) });
 
-    protected override string? DefaultFallbackTitle => "Feature disabled";
-
-    protected override string? DefaultFallbackText => "This feature is not enabled for your tenant.";
+    // Feature-flag gates hide silently by default — no "feature disabled" banner.
+    protected override bool ShowDefaultBanner => false;
 }
