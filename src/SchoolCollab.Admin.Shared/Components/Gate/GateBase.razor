@@ -1,0 +1,147 @@
+@namespace SchoolCollab.Admin.Shared.Components.Gate
+@implements IDisposable
+@using System
+@using System.Collections.Generic
+@using System.Linq
+@using System.Threading.Tasks
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.DependencyInjection
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Core.Features
+
+@* Shared gate engine. Owns ALL gating logic: resolve the condition(s), apply the
+  Hide / Disable mode, render Fallback / DisabledContent, react to tenant and
+  feature-flag changes, and dispose its subscriptions. Thin C# subclasses
+  (TenantGate, FeatureFlagGate) only supply their conditions via
+  GetConditionsAsync and must contain no gating logic themselves.
+
+  Because this component owns the render (BuildRenderTree), the subclasses derive
+  from it as plain C# classes and inherit this render — there is no competing
+  .razor that would silently drop it. *@
+
+@if (_passed)
+{
+    @ChildContent
+}
+else if (_mode == GateMode.Disable)
+{
+    <fieldset disabled="disabled" class="tenant-gate-fieldset">
+        @if (DisabledContent is not null)
+        {
+            @DisabledContent
+        }
+        else
+        {
+            @ChildContent
+        }
+    </fieldset>
+}
+else if (Fallback is not null)
+{
+    @Fallback
+}
+else
+{
+    <FluentMessageBar Title="@DefaultFallbackTitle">@DefaultFallbackText</FluentMessageBar>
+}
+
+@code {
+    /// <summary>The gated content. Always rendered in <see cref="GateMode.Disable"/> mode.</summary>
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Optional content shown instead of the default banner when the gate does not pass (Hide mode).</summary>
+    [Parameter] public RenderFragment? Fallback { get; set; }
+
+    /// <summary>Optional content shown (in a disabled container) when the gate does not pass in Disable mode.</summary>
+    [Parameter] public RenderFragment? DisabledContent { get; set; }
+
+    /// <summary>Conditions combined by <see cref="Combination"/> (default AND).</summary>
+    [Parameter] public IReadOnlyList<IGateCondition>? Conditions { get; set; }
+
+    /// <summary>How multiple <see cref="Conditions"/> combine. Default <see cref="GateCombination.All"/> (AND).</summary>
+    [Parameter] public GateCombination Combination { get; set; } = GateCombination.All;
+
+    /// <summary>Hide (default) or disable the gated content when the gate does not pass.</summary>
+    protected GateMode _mode = GateMode.Hide;
+
+    /// <summary>Whether the gate's condition(s) currently pass.</summary>
+    protected bool _passed;
+
+    [Inject] protected AuthenticationStateProvider AuthenticationStateProvider { get; set; } = default!;
+    [Inject] protected IServiceProvider Services { get; set; } = default!;
+
+    /// <summary>Resolved lazily from <see cref="Services"/> so a host/module that never registers
+    /// <see cref="IFeatureFlagChangeNotifier"/> (e.g. one that only uses <c>TenantGate</c>) does not fail.</summary>
+    private IFeatureFlagChangeNotifier? _flagNotifier;
+
+    /// <summary>Supply the conditions this gate evaluates. Subclasses override this; the default uses <see cref="Conditions"/>.</summary>
+    protected virtual Task<IReadOnlyList<IGateCondition>> GetConditionsAsync()
+        => Task.FromResult(Conditions ?? (IReadOnlyList<IGateCondition>)Array.Empty<IGateCondition>());
+
+    /// <summary>Default banner title (Hide mode, no custom Fallback). Subclasses override per concern.</summary>
+    protected virtual string? DefaultFallbackTitle => "No tenant selected";
+
+    /// <summary>Default banner body (Hide mode, no custom Fallback).</summary>
+    protected virtual string? DefaultFallbackText => "Select a tenant using the dev tenant switcher to use this feature.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await EvaluateAsync();
+        AuthenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        _flagNotifier = Services.GetService<IFeatureFlagChangeNotifier>();
+        if (_flagNotifier is not null)
+        {
+            _flagNotifier.FeatureFlagsChanged += OnFeatureFlagsChanged;
+        }
+    }
+
+    private async Task EvaluateAsync()
+    {
+        var conditions = Conditions ?? await GetConditionsAsync();
+        if (conditions is not { Count: > 0 })
+        {
+            // No conditions => nothing to gate on; always pass.
+            _passed = true;
+            return;
+        }
+
+        var results = await Task.WhenAll(conditions.Select(c => c.EvaluateAsync()));
+        _passed = Combination == GateCombination.All
+            ? results.All(r => r)
+            : results.Any(r => r);
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        try
+        {
+            await task;
+            await InvokeAsync(async () =>
+            {
+                await EvaluateAsync();
+                StateHasChanged();
+            });
+        }
+        catch
+        {
+            // Ignore auth-change resolution errors — keep the last known gate state.
+        }
+    }
+
+    private void OnFeatureFlagsChanged()
+        => _ = InvokeAsync(async () =>
+        {
+            await EvaluateAsync();
+            StateHasChanged();
+        });
+
+    public void Dispose()
+    {
+        AuthenticationStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+        if (_flagNotifier is not null)
+        {
+            _flagNotifier.FeatureFlagsChanged -= OnFeatureFlagsChanged;
+        }
+    }
+}
