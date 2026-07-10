@@ -73,6 +73,26 @@ before → after / reason), viewable on each flag's detail page. A
 `FeatureFlagChanged` event is also published on the `config` RabbitMQ exchange
 (via the transactional outbox) for the future push-invalidation subscriber.
 
+### UI Gating in Blazor
+
+For Razor pages, gate UI on a runtime flag with the `<FeatureFlagGate>` component
+(lives in `SchoolCollab.Admin.Shared`, designed in
+[`documents/specs/ui-gate-component.md`](../specs/ui-gate-component.md)):
+
+```razor
+<FeatureFlagGate Key="FEATURE:EnableCodedValuesAiChat">
+    <AiChatPanel />
+</FeatureFlagGate>
+```
+
+`<FeatureFlagGate Key="FEATURE:<Area>">` resolves the same
+`IsEnabledAsync("FEATURE:<Area>")` call described above, but as a declarative,
+**reactive** surface: it re-evaluates (and re-renders) live when the flag is
+toggled in the Config UI, with no page reload. It is tenant-aware automatically
+because the underlying `ConfigFeatureFlagService` resolves per tenant. Use it
+instead of an inline `IsEnabledAsync` + `if` when the gated thing is a block of
+UI. Endpoints and startup switches keep using `IFeatureFlagService` directly.
+
 ## Retiring a flag
 
 Once the gated behaviour is permanent, remove the `IsEnabledAsync` call site

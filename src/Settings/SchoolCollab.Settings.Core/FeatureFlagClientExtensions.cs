@@ -54,6 +54,11 @@ public static class ConfigFeatureFlagClientExtensions
         services.TryAddSingleton<IFeatureFlagResolver, ConfigFeatureFlagService>();
         services.Replace(ServiceDescriptor.Singleton<IFeatureFlagService, ConfigFeatureFlagService>());
 
+        // Process-local signal so Blazor gates (GateBase / FeatureFlagGate) can react
+        // live to flag changes once the Settings client observes a FeatureFlagChanged
+        // event. Registered as a singleton alongside IFeatureFlagService.
+        services.TryAddSingleton<IFeatureFlagChangeNotifier, FeatureFlagChangeNotifier>();
+
         return services;
     }
 }

@@ -171,3 +171,15 @@ The 8 form/wizard pages were migrated by replacing their top-level
 preserving the exact prior warning text (so UX and any page-level assertions are
 unchanged). The page's `_isRealTenant` field and its `OnInitializedAsync` API-gating
 `return` are retained (TG-FR-5).
+
+## 11. Unified gate (`Gate` / `GateBase`)
+
+`TenantGate` is the tenant-visibility specialization of the shared gate engine
+described in [`ui-gate-component.md`](./ui-gate-component.md). The gating logic
+(resolve, `Hide`/`Disable` modes, `Fallback`/`DisabledContent`, reactivity,
+disposal) is being lifted into a common `GateBase`, and `TenantGate` will derive
+from it — supplying a single `TenantSelectedCondition`. **This is a refactor
+only:** the public API (`Mode`, `Fallback`, `ChildContent`) and the behavior
+covered by TG-FR-1..5 are unchanged, so the 8 existing consumers need no edits.
+A new `FeatureFlagGate : GateBase` provides the same first-class, reactive
+surface for runtime feature flags.

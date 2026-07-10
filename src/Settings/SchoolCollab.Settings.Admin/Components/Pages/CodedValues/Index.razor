@@ -7,7 +7,6 @@
 @inject IDialogService DialogService
 @inject AiChatHub ChatHub
 @inject NavigationManager Nav
-@inject IFeatureFlagService FeatureFlags
 @implements IDisposable
 
 <LandingPage TItem="CodedValueDto"
@@ -31,15 +30,14 @@
            can re-read prior responses or follow an ongoing stream. (Sending a
            prompt opens the drawer via OnPromptSubmittedAsync instead.) Gated by
            the runtime, tenant-overridable FEATURE:EnableCodedValuesAiChat flag
-           resolved via the central Config service. *@
-        @if (_aiChatEnabled == true)
-        {
+           via the <FeatureFlagGate> component (reactive to live flag changes). *@
+        <FeatureFlagGate Key="FEATURE:EnableCodedValuesAiChat">
             <FluentButton Appearance="Appearance.Neutral"
                           Title="Open AI assistant"
                           OnClick="OpenChatDrawerAsync">
                 ✨ Chat
             </FluentButton>
-        }
+        </FeatureFlagGate>
     </ToolbarActions>
     <Columns>
         <TemplateColumn TGridItem="CodedValueDto" Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
@@ -103,25 +101,23 @@
            conversation (when the drawer is closed), opens the drawer, and
            feeds the text to the drawer's Full-mode chat via the Prompt
            parameter. The drawer is the single AI-calling surface and owns
-           the conversation history. -- *@
-        @if (_aiChatEnabled == true)
-        {
+           the conversation history. Gated by FEATURE:EnableCodedValuesAiChat. -- *@
+        <FeatureFlagGate Key="FEATURE:EnableCodedValuesAiChat">
             <AiChat Mode="AiChatMode.InputOnly"
                      ShowIntro="true"
                      Placeholder="Ask me to create coded values..."
-                     Enabled="@(_aiChatEnabled == true)"
+                     Enabled="true"
                      OnPromptSubmitted="@OnPromptSubmittedAsync" />
-        }
+        </FeatureFlagGate>
     </Footer>
     <ChildContent>
-        @if (_aiChatEnabled == true)
-        {
+        <FeatureFlagGate Key="FEATURE:EnableCodedValuesAiChat">
             <AiChatPanel Open="_chatDrawerOpen"
                              OpenChanged="@OnDrawerOpenChangedAsync"
                              Prompt="@_pendingPrompt"
-                             Enabled="@(_aiChatEnabled == true)"
+                             Enabled="true"
                              OnToolCallCompleted="@OnToolCallCompletedAsync" />
-        }
+        </FeatureFlagGate>
     </ChildContent>
 </LandingPage>
 
@@ -140,7 +136,7 @@
     // the flag was off. Defaulting to `null` (unresolved) keeps both render
     // branches inactive until the flag is known, so the disabled state never
     // leaks into the first frame.
-    private bool? _aiChatEnabled;
+
 
     // Search state
     private string _searchText = string.Empty;
@@ -184,7 +180,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _aiChatEnabled = await FeatureFlags.IsEnabledAsync("FEATURE:EnableCodedValuesAiChat");
+
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
 
