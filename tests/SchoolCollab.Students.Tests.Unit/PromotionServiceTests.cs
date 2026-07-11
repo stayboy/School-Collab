@@ -112,4 +112,56 @@ public class PromotionServiceTests
         enrollment.Status.Should().Be(EnrollmentStatus.Withdrawn);
         enrollment.ExitDate.Should().NotBeNull();
     }
+
+    [TestMethod]
+    public void StudentEnrollment_Create_WithPromotionOutcome_Promoted_SetsOutcome()
+    {
+        var enrollment = StudentEnrollment.Create(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            promotionOutcome: PromotionOutcome.Promoted);
+
+        enrollment.PromotionOutcome.Should().Be(PromotionOutcome.Promoted);
+    }
+
+    [TestMethod]
+    public void StudentEnrollment_Create_WithPromotionOutcome_Repeated_SetsOutcome()
+    {
+        var enrollment = StudentEnrollment.Create(
+            Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(),
+            promotionOutcome: PromotionOutcome.Repeated);
+
+        enrollment.PromotionOutcome.Should().Be(PromotionOutcome.Repeated);
+    }
+
+    [TestMethod]
+    public void StudentEnrollment_Create_WithoutPromotionOutcome_IsNull()
+    {
+        var enrollment = StudentEnrollment.Create(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid());
+
+        enrollment.PromotionOutcome.Should().BeNull(
+            "direct enrollments are not promotion carry-forwards");
+    }
+
+    [TestMethod]
+    public void DefaultPromotionRule_PromotesToNextLevel_WhenHigherLevelExists()
+    {
+        var gl1 = GradeLevel.Create(Guid.NewGuid(), 1, "Grade 1", 1);
+        var gl2 = GradeLevel.Create(Guid.NewGuid(), 2, "Grade 2", 2);
+        var rule = new DefaultPromotionRule();
+
+        var target = rule.Resolve(gl1, new[] { gl1, gl2 });
+
+        target.Should().Be(gl2.Id, "the student advances one level when a higher grade exists");
+    }
+
+    [TestMethod]
+    public void DefaultPromotionRule_Repeats_WhenNoHigherLevelExists()
+    {
+        var gl1 = GradeLevel.Create(Guid.NewGuid(), 1, "Grade 1", 1);
+        var rule = new DefaultPromotionRule();
+
+        var target = rule.Resolve(gl1, new[] { gl1 });
+
+        target.Should().Be(gl1.Id, "the student repeats at the same level when no higher grade exists");
+    }
 }

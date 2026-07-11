@@ -32,6 +32,10 @@ internal sealed class StudentEnrollmentConfiguration : TenantEntityTypeConfigura
             .IsRequired()
             .HasDefaultValue(EnrollmentStatus.Active);
 
+        builder.Property(x => x.PromotionOutcome)
+            .HasColumnName("promotion_outcome")
+            .IsRequired(false);
+
         builder.HasIndex(x => new { x.TenantId, x.StudentId, x.PeriodId })
             .IsUnique()
             .HasDatabaseName("ix_student_enrollments_tenant_student_period");
