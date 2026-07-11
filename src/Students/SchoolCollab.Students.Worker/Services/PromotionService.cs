@@ -237,10 +237,17 @@ public sealed class PromotionService(
                 ? _promotionRule.Resolve(fromGradeLevel, gradeLevels)
                 : enrollment.GradeLevelId;
 
+            // A target equal to the current grade level means the rule repeated the
+            // student (no higher level exists); otherwise they were promoted.
+            var outcome = targetGradeLevelId == enrollment.GradeLevelId
+                ? PromotionOutcome.Repeated
+                : PromotionOutcome.Promoted;
+
             var newEnrollment = StudentEnrollment.Create(
                 enrollment.StudentId,
                 toPeriodId,
-                targetGradeLevelId);
+                targetGradeLevelId,
+                promotionOutcome: outcome);
 
             newEnrollments.Add(newEnrollment);
             domainEvents.AddRange(newEnrollment.DomainEvents);

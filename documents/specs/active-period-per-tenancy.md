@@ -361,14 +361,19 @@ Implemented in this pass (builds green; Students period + promotion + strict-ten
 
 1. **`IActivePeriodProvider` returns `ActivePeriod` (Core record), not `Period?`.** Required to
    avoid a `SchoolCollab.Core → SchoolCollab.Students.Core` dependency (the layering rule in §0).
-2. **No `HybridCache` in the provider yet.** Direct query is the source of truth; the per-tenant
-   cache (tag `"students"`) is a follow-up — see §4.6.
+2. **`HybridCache` is now wired in the provider.** `ActivePeriodProvider` caches the active and
+   current period per tenant (keys `active-period:{tenantId}` / `current-period:{tenantId}`, tag
+   `"students"`, invalidated by the Activate/Complete handlers) — see §10 follow-ups.
 
-### Follow-ups (not yet done)
+### Follow-ups
 
-- `PromotionOutcome` column / closure record on `StudentEnrollment` for reporting
-  promoted-vs-repeated (§4.5, §5 — optional).
-- Rollover *confirmation* dialog — the entry gate only appears when no active period exists, so
-  opening there cannot close a prior active one; the confirm matters for a future period-management
-  screen (the auto-close handler already enforces it server-side).
-- Per-tenant `HybridCache` wiring in `ActivePeriodProvider` (§4.6).
+- **DONE (PR #72):** Per-tenant `HybridCache` wiring in `ActivePeriodProvider` (§4.6). The provider
+  caches the `ActivePeriod` record (not the `Period` entity) per tenant under the `"students"` tag.
+- **DONE (PR #72):** `PromotionOutcome` column on `StudentEnrollment` (nullable int
+  `promotion_outcome`, migration `AddPromotionOutcome`) + `PromotionOutcome` enum (Promoted/Repeated)
+  set by `PromotionService.PromoteStudentsAsync` so reporting can distinguish promoted vs. repeated
+  (§4.5, §5). The carry-forward now records the outcome; direct (non-promotion) enrollments stay null.
+- **DEFERRED:** Rollover *confirmation* dialog. The wizard entry gate only appears when no active
+  period exists, so opening there cannot close a prior active one; the confirm matters for a future
+  period-management screen (the auto-close handler already enforces closure server-side). Out of
+  scope for now.
