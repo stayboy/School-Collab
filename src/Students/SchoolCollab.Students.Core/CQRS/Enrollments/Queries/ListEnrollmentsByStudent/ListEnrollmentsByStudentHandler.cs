@@ -20,15 +20,20 @@ public sealed class ListEnrollmentsByStudentHandler(
         ListEnrollmentsByStudent query,
         CancellationToken cancellationToken = default)
     {
+        // Capture the tenant in the request scope: db.CurrentTenantId is lost
+        // inside the HybridCache factory, so the global "Tenant" filter would
+        // resolve to Guid.Empty and hide every row. Scope the query explicitly.
+        var tenantId = db.CurrentTenantId;
+
         return await cache.GetOrCreateAsync(
             $"student:{query.StudentId}:enrollments",
-            (db, query.StudentId),
+            (db, query.StudentId, tenantId),
             static async (state, ct) =>
             {
-                var (db, studentId) = state;
+                var (db, studentId, tenantId) = state;
                 var results = await db.StudentEnrollments
-                    .AsNoTracking()
-                    .Where(x => x.StudentId == studentId)
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(x => x.StudentId == studentId && x.TenantId == tenantId)
                     .OrderByDescending(x => x.EnrolledOn)
                     .ToArrayAsync(ct);
 

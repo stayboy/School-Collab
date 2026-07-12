@@ -21,7 +21,7 @@ public sealed class ListRootCodedValuesHandler(
         CancellationToken cancellationToken = default)
     {
         return await cache.GetOrCreateAsync(
-            "coded-values:root",
+            $"tenant:{db.CurrentTenantId}:coded-values:root",
             db,
             static async (db, ct) =>
             {

@@ -27,6 +27,7 @@ public sealed class GetSubjectByIdHandler(
             {
                 var (db, id) = state;
                 var subject = await db.Subjects
+                    .IgnoreQueryFilters(["Tenant"])
                     .AsNoTracking()
                     .SingleOrDefaultAsync(x => x.Id == id, ct);
 

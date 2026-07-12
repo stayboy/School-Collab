@@ -20,15 +20,20 @@ public sealed class ListGradeSubjectAssignmentsByGradeLevelHandler(
         ListGradeSubjectAssignmentsByGradeLevel query,
         CancellationToken cancellationToken = default)
     {
+        // Capture the tenant in the request scope: db.CurrentTenantId is lost
+        // inside the HybridCache factory, so the global "Tenant" filter would
+        // resolve to Guid.Empty and hide every row. Scope the query explicitly.
+        var tenantId = db.CurrentTenantId;
+
         return await cache.GetOrCreateAsync(
             $"grade-level:{query.GradeLevelId}:period:{query.PeriodId}:grade-subject-assignments",
-            (db, query.GradeLevelId, query.PeriodId),
+            (db, query.GradeLevelId, query.PeriodId, tenantId),
             static async (state, ct) =>
             {
-                var (db, gradeLevelId, periodId) = state;
+                var (db, gradeLevelId, periodId, tenantId) = state;
                 var results = await db.GradeSubjectAssignments
-                    .AsNoTracking()
-                    .Where(x => x.GradeLevelId == gradeLevelId && x.PeriodId == periodId)
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(x => x.GradeLevelId == gradeLevelId && x.PeriodId == periodId && x.TenantId == tenantId)
                     .OrderBy(x => x.SubjectId)
                     .ToArrayAsync(ct);
 

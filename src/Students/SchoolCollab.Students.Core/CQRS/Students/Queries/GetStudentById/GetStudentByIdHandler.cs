@@ -29,6 +29,7 @@ public sealed class GetStudentByIdHandler(
             {
                 var (db, id) = state;
                 var student = await db.Students
+                    .IgnoreQueryFilters(["Tenant"])
                     .AsNoTracking()
                     .SingleOrDefaultAsync(x => x.Id == id, ct);
 

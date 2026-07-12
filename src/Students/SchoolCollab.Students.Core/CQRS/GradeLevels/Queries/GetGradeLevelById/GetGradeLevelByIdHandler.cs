@@ -27,6 +27,7 @@ public sealed class GetGradeLevelByIdHandler(
             {
                 var (db, id) = state;
                 var gradeLevel = await db.GradeLevels
+                    .IgnoreQueryFilters(["Tenant"])
                     .AsNoTracking()
                     .SingleOrDefaultAsync(x => x.Id == id, ct);
 

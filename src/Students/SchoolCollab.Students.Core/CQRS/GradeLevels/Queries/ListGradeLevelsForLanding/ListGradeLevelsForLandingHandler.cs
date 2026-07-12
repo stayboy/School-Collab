@@ -11,10 +11,10 @@ namespace SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevelsFor
 /// <summary>
 /// Landing-page query: every grade level with per-<b>current-period</b> counts.
 /// The current period is derived server-side (<c>StartDate &lt;= today &amp;&amp;
-/// EndDate &gt;= today</c>) — there is no period parameter, so the UI can't get out
+/// EndDate &gt;= today</c>) - there is no period parameter, so the UI can't get out
 /// of sync. <see cref="GradeLevelLandingDto.StudentCount"/> is tenant-scoped via
 /// the <c>Student</c> global query filter (which uses <see cref="ITenantProvider"/>);
-/// <see cref="GradeLevelLandingDto.SubjectCount"/> is global. See spec §5.3.
+/// <see cref="GradeLevelLandingDto.SubjectCount"/> is global. See spec 5.3.
 /// </summary>
 public sealed class ListGradeLevelsForLandingHandler(
     StudentsDbContext db,
@@ -48,13 +48,15 @@ public sealed class ListGradeLevelsForLandingHandler(
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, currentPeriodId, currentPeriod?.Name),
+            (db, currentPeriodId, currentPeriod?.Name, tenantId),
             static async (state, ct) =>
             {
-                var (db, currentPeriodId, currentPeriodName) = state;
+                var (db, currentPeriodId, currentPeriodName, tenantId) = state;
                 var hasPeriod = currentPeriodId is not null;
 
                 var rows = await db.GradeLevels
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(gl => gl.TenantId == tenantId)
                     .AsNoTracking()
                     .OrderBy(x => x.Level)
                     .Select(gl => new
@@ -66,21 +68,24 @@ public sealed class ListGradeLevelsForLandingHandler(
                         gl.DisplayOrder,
                         gl.CreatedAt,
                         gl.UpdatedAt,
-                        // SubjectCount is GLOBAL (subjects are the shared curriculum
-                        // blueprint): GradeSubjectAssignments for (grade, current period).
                         SubjectCount = hasPeriod
-                            ? db.GradeSubjectAssignments.Count(ga =>
-                                ga.GradeLevelId == gl.Id && ga.PeriodId == currentPeriodId!.Value)
+                            ? db.GradeSubjectAssignments
+                                .IgnoreQueryFilters(new[] { "Tenant" })
+                                .Count(ga =>
+                                    ga.GradeLevelId == gl.Id
+                                    && ga.PeriodId == currentPeriodId!.Value
+                                    && ga.TenantId == tenantId)
                             : 0,
-                        // StudentCount is TENANT-SCOPED via the Student global query
-                        // filter (tenant + soft-delete), joined through enrollments
-                        // for (grade, current period, Active status).
                         StudentCount = hasPeriod
-                            ? db.StudentEnrollments.Count(se =>
-                                se.GradeLevelId == gl.Id
-                                && se.PeriodId == currentPeriodId!.Value
-                                && se.Status == EnrollmentStatus.Active
-                                && db.Students.Any(s => s.Id == se.StudentId))
+                            ? db.StudentEnrollments
+                                .IgnoreQueryFilters(new[] { "Tenant" })
+                                .Count(se =>
+                                    se.GradeLevelId == gl.Id
+                                    && se.PeriodId == currentPeriodId!.Value
+                                    && se.Status == EnrollmentStatus.Active
+                                    && db.Students
+                                        .IgnoreQueryFilters(new[] { "Tenant" })
+                                        .Any(s => s.Id == se.StudentId && s.TenantId == tenantId))
                             : 0
                     })
                     .ToArrayAsync(ct);

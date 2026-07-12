@@ -20,12 +20,21 @@ public sealed class ListGradeLevelsHandler(
         ListGradeLevels query,
         CancellationToken cancellationToken = default)
     {
+        // Capture the tenant in the request scope: db.CurrentTenantId is lost
+        // inside the HybridCache factory, so the global "Tenant" filter would
+        // hide every row (and zero the correlated counts). Scope the query
+        // explicitly instead.
+        var tenantId = db.CurrentTenantId;
+
         return await cache.GetOrCreateAsync(
-            "grade-levels:list",
-            db,
-            static async (db, ct) =>
+            $"grade-levels:list:{tenantId}",
+            (db, tenantId),
+            static async (state, ct) =>
             {
+                var (db, tenantId) = state;
                 var results = await db.GradeLevels
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(gl => gl.TenantId == tenantId)
                     .AsNoTracking()
                     .OrderBy(x => x.Level)
                     .Select(gl => new
@@ -37,8 +46,12 @@ public sealed class ListGradeLevelsHandler(
                         gl.DisplayOrder,
                         gl.CreatedAt,
                         gl.UpdatedAt,
-                        SubjectCount = db.GradeSubjectAssignments.Count(ga => ga.GradeLevelId == gl.Id),
-                        StudentCount = db.StudentEnrollments.Count(se => se.GradeLevelId == gl.Id)
+                        SubjectCount = db.GradeSubjectAssignments
+                            .IgnoreQueryFilters(new[] { "Tenant" })
+                            .Count(ga => ga.GradeLevelId == gl.Id && ga.TenantId == tenantId),
+                        StudentCount = db.StudentEnrollments
+                            .IgnoreQueryFilters(new[] { "Tenant" })
+                            .Count(se => se.GradeLevelId == gl.Id && se.TenantId == tenantId)
                     })
                     .ToArrayAsync(ct);
 

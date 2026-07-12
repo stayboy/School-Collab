@@ -20,15 +20,20 @@ public sealed class ListStudentSubjectAssignmentsByPeriodHandler(
         ListStudentSubjectAssignmentsByPeriod query,
         CancellationToken cancellationToken = default)
     {
+        // Capture the tenant in the request scope: db.CurrentTenantId is lost
+        // inside the HybridCache factory, so the global "Tenant" filter would
+        // resolve to Guid.Empty and hide every row. Scope the query explicitly.
+        var tenantId = db.CurrentTenantId;
+
         return await cache.GetOrCreateAsync(
             $"period:{query.PeriodId}:student-subject-assignments",
-            (db, query.PeriodId),
+            (db, query.PeriodId, tenantId),
             static async (state, ct) =>
             {
-                var (db, periodId) = state;
+                var (db, periodId, tenantId) = state;
                 var results = await db.StudentSubjectAssignments
-                    .AsNoTracking()
-                    .Where(x => x.PeriodId == periodId)
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(x => x.PeriodId == periodId && x.TenantId == tenantId)
                     .OrderBy(x => x.StudentId)
                     .ThenBy(x => x.SubjectId)
                     .ToArrayAsync(ct);

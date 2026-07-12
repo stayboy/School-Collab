@@ -20,17 +20,21 @@ public sealed class ListDeletedStudentsHandler(
         ListDeletedStudents query,
         CancellationToken cancellationToken = default)
     {
-        var cacheKey = $"students:deleted:{db.CurrentTenantId}";
+        // Capture the tenant in the request scope: db.CurrentTenantId is lost
+        // inside the HybridCache factory, so the global "Tenant" filter would
+        // resolve to Guid.Empty and hide every row. Scope the query explicitly.
+        var tenantId = db.CurrentTenantId;
 
         return await cache.GetOrCreateAsync(
-            cacheKey,
-            db,
+            $"students:deleted:{tenantId}",
+            (db, tenantId),
             static async (state, ct) =>
             {
-                var results = await state.Students
-                    .IgnoreQueryFilters(["SoftDelete"])
+                var (db, tenantId) = state;
+                var results = await db.Students
+                    .IgnoreQueryFilters(["SoftDelete", "Tenant"])
+                    .Where(x => x.IsDeleted && x.TenantId == tenantId)
                     .AsNoTracking()
-                    .Where(x => x.IsDeleted)
                     .OrderBy(x => x.LastName)
                     .ThenBy(x => x.FirstName)
                     .ToArrayAsync(ct);
