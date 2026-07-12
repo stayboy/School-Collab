@@ -313,12 +313,67 @@
     font-size: 0.85rem;
 }
 
-/* The "Open a term" date pickers render their popup as a child of the FluentCard,
-   which clips to its rounded corners (overflow:hidden) and cut the calendar off.
-   The FluentDialogProvider lives at the layout root (outside .page-scroll), so the
-   popup already escapes the scroll region; making the card/panel visible here stops
-   the card from clipping it. */
-.open-term-panel,
-.open-term-panel .fluent-card {
+.current-term-card {
+    padding: 18px 22px;
+    margin-bottom: 1.1rem;
+    background: #f6fbf6;
+    border: 1px solid #cfe8cf;
+    overflow: visible;
+}
+
+.current-term-name {
+    font-size: 1.25rem;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.current-term-dates {
+    margin-top: 4px;
+    color: var(--neutral-foreground-hint);
+    font-size: 0.9rem;
+}
+
+/* Confirmation gate card: a plain styled div (NOT FluentCard). FluentCard
+   defaults to height:100% and clips to its corners, which hid/stretched the
+   confirm button. A plain div + explicit flex .form-actions keeps the button
+   auto-width and in normal flow, matching PeriodForm's working submit row. */
+.term-gate-card {
+    background: var(--neutral-fill-rest);
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 12px;
+    padding: 1.5rem;
+    overflow: visible;
+}
+
+.current-term-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+/* The gate's action row (scoped to this component; PeriodForm has its own). */
+.form-actions {
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--neutral-stroke-rest, #eee);
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 0.75rem;
+}
+
+/* The "Open a term" date pickers (and the confirm button) render inside a
+   FluentCard, which clips to its rounded corners (overflow:hidden) and hides the
+   date-picker popup / can clip the bottom action button. Blazor scoped CSS does
+   not cross the FluentCard component boundary, so the selector must use ::deep to
+   reach the fluent-card element it renders. The inline overflow:visible on the
+   FluentCard elements (in the .razor) is the primary fix; this rule is
+   defense-in-depth. */
+.open-term-panel {
+    overflow: visible;
+}
+
+::deep .open-term-panel .fluent-card {
     overflow: visible;
 }

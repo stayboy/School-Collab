@@ -21,7 +21,7 @@ public sealed class GetSubjectByCodeHandler(
         CancellationToken cancellationToken = default)
     {
         var normalisedCode = query.Code.Trim().ToUpperInvariant();
-        var cacheKey = $"subject:code:{normalisedCode}";
+        var cacheKey = $"subject:code:{db.CurrentTenantId}:{normalisedCode}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
@@ -30,6 +30,7 @@ public sealed class GetSubjectByCodeHandler(
             {
                 var (db, code) = state;
                 var subject = await db.Subjects
+                    .IgnoreQueryFilters(["Tenant"])
                     .AsNoTracking()
                     .SingleOrDefaultAsync(x => x.Code == code, ct);
 

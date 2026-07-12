@@ -1,0 +1,98 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Microsoft.Extensions.Logging
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject VisibleTenantService VisibleTenant
+@inject ILogger<ActiveTermToolbar> Logger
+@implements IDisposable
+
+@if (_isRealTenant)
+{
+    <FluentAnchor Href="/students/periods"
+                  class="active-term-link"
+                  Appearance="Appearance.Hypertext"
+                  IconStart="@(new Icons.Regular.Size20.Calendar())"
+                  Title="@_title">
+        @if (_loading)
+        {
+            <span class="active-term-muted">Loading term…</span>
+        }
+        else if (_activePeriod is not null)
+        {
+            <span class="active-term-name">@_activePeriod.Name</span>
+        }
+        else
+        {
+            <span class="active-term-muted">No active period</span>
+        }
+    </FluentAnchor>
+}
+
+@code {
+    private PeriodDto? _activePeriod;
+    private bool _loading = true;
+    private bool _isRealTenant;
+    private CancellationTokenSource? _cts;
+    private volatile bool _disposed;
+    private string _title = "View academic periods";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _cts = new CancellationTokenSource();
+        Nav.LocationChanged += OnLocationChanged;
+        await LoadAsync(_cts.Token);
+    }
+
+    private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
+        => _ = LoadAsync(_cts?.Token ?? CancellationToken.None);
+
+    private async Task LoadAsync(CancellationToken ct)
+    {
+        try
+        {
+            // Only surface the active term when a real (non-default) tenant
+            // is in scope; with no tenancy there is nothing tenant-scoped to show.
+            var scope = await VisibleTenant.GetScopeAsync();
+            if (_disposed) return;
+            _isRealTenant = scope.IsRealTenant;
+            if (!_isRealTenant)
+            {
+                _activePeriod = null;
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+
+            var periods = await Api.ListPeriodsAsync(ct) ?? [];
+            if (_disposed) return;
+            _activePeriod = periods.FirstOrDefault(p => p.Status == "Active");
+            _title = _activePeriod is not null
+                ? $"Active term: {_activePeriod.Name} ({_activePeriod.StartDate:d} – {_activePeriod.EndDate:d}). View, open or close periods."
+                : "No active academic period. View or open a period.";
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load active period for toolbar");
+            _activePeriod = null;
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        Nav.LocationChanged -= OnLocationChanged;
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
+}

@@ -27,6 +27,7 @@ public sealed class GetPeriodByIdHandler(
             {
                 var (db, id) = state;
                 var period = await db.Periods
+                    .IgnoreQueryFilters(["Tenant"])
                     .AsNoTracking()
                     .SingleOrDefaultAsync(x => x.Id == id, ct);
 

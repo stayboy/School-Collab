@@ -20,12 +20,20 @@ public sealed class ListSubjectsHandler(
         ListSubjects query,
         CancellationToken cancellationToken = default)
     {
+        // Capture the tenant in the request scope: db.CurrentTenantId is lost
+        // inside the HybridCache factory, so the global "Tenant" filter would
+        // hide every row. Scope the query explicitly instead.
+        var tenantId = db.CurrentTenantId;
+
         return await cache.GetOrCreateAsync(
-            "subjects:list",
-            db,
-            static async (db, ct) =>
+            $"subjects:list:{tenantId}",
+            (db, tenantId),
+            static async (state, ct) =>
             {
+                var (db, tenantId) = state;
                 var results = await db.Subjects
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(s => s.TenantId == tenantId)
                     .AsNoTracking()
                     .OrderBy(x => x.DisplayOrder)
                     .ThenBy(x => x.Name)

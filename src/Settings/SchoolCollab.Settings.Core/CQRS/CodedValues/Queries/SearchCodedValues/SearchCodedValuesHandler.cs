@@ -30,7 +30,7 @@ public sealed class SearchCodedValuesHandler(
         var parentIdStr = query.ParentId?.ToString() ?? "root";
         var includeDisabledStr = query.IncludeDisabled ? "1" : "0";
         var rawKey = $"search:{searchText}:{parentIdStr}:{includeDisabledStr}";
-        var cacheKey = $"coded-values:search:{CacheKeyHelper.Hash(rawKey)}";
+        var cacheKey = $"coded-values:search:{db.CurrentTenantId}:{CacheKeyHelper.Hash(rawKey)}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
