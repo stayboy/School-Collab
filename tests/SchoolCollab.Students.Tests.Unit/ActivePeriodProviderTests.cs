@@ -30,7 +30,7 @@ public class ActivePeriodProviderTests
         s.Db.Periods.Add(period);
         await s.Db.SaveChangesAsync();
 
-        var provider = new ActivePeriodProvider(s.Periods, s.Tenants, s.Cache);
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
 
         var active = await provider.GetActivePeriodAsync();
 
@@ -45,7 +45,7 @@ public class ActivePeriodProviderTests
     {
         using var s = new StudentsTestScope("active-period-provider-none");
 
-        var provider = new ActivePeriodProvider(s.Periods, s.Tenants, s.Cache);
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
 
         (await provider.GetActivePeriodAsync()).Should().BeNull();
     }
@@ -62,7 +62,7 @@ public class ActivePeriodProviderTests
         s.Db.Periods.Add(period);
         await s.Db.SaveChangesAsync();
 
-        var provider = new ActivePeriodProvider(s.Periods, s.Tenants, s.Cache);
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
 
         // Tenant A sees its active period.
         (await provider.GetActivePeriodAsync()).Should().NotBeNull();
