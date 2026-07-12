@@ -25,7 +25,7 @@
         @if (_activePeriod is null)
         {
             <section class="open-term-panel">
-                <FluentCard>
+                <FluentCard Style="overflow: visible; height: auto;">
                     <div class="wizard-section-header">
                         <div>
                             <h3>Open a term</h3>
@@ -49,30 +49,39 @@
                         </div>
                     }
 
-                    <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem" AlignItems="AlignItems.End">
-                        <FluentTextField @bind-Value="_newPeriodName" Label="Period name" Placeholder="e.g. 2025–2026 Academic Year" Style="flex:1" />
-                        <FluentButton IconStart="@FluentIcons.Calendar"
-                                      Title="Fill the form with the current academic year (editable template)"
-                                      OnClick="SuggestAcademicYearAsync" />
-                        <FluentButton IconStart="@FluentIcons.ArrowClockwise"
-                                      Title="Fill the form with the next academic year after the latest period"
-                                      OnClick="BackfillAsync" />
-                    </FluentStack>
-                    <FluentDatePicker @bind-Value="_newPeriodStart" Label="Start date" />
-                    <FluentDatePicker @bind-Value="_newPeriodEnd" Label="End date" />
-
-                    <div class="wizard-actions">
-                        <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" OnClick="OpenTermAsync" Disabled="@(_openingTerm)">
-                            @(_openingTerm ? "Opening…" : "Create & Open")
-                        </FluentButton>
+                    <PeriodForm AutoActivateOnCreate="true"
+                                SubmitLabel="Create & Open"
+                                CancelRoute="/students/grade-levels"
+                                ShowHeader="false"
+                                ShowTip="false"
+                                ExistingPeriods="_periods"
+                                OnSaved="OnPeriodFormSaved" />
+                </FluentCard>
+            </section>
+        }
+        else if (!_termConfirmed)
+        {
+            <section class="open-term-panel">
+                <div class="term-gate-card">
+                    <div class="wizard-section-header">
+                        <div>
+                            <h3>Term already open</h3>
+                            <p class="wizard-hint">A term is currently open for this tenant. Confirm you want to use it to set up the grade level.</p>
+                        </div>
                     </div>
 
-                    @if (!string.IsNullOrEmpty(_termError))
-                    {
-                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_termError</FluentMessageBar>
-                    }
-                </FluentCard>
+                    <div class="current-term-card">
+                        <div class="current-term-row">
+                            <FluentLabel class="current-term-name">@_activePeriod!.Name</FluentLabel>
+                            <FluentBadge Appearance="@GetStatusAppearance(_activePeriod!.Status)">@_activePeriod!.Status</FluentBadge>
+                        </div>
+                        <div class="current-term-dates">@_activePeriod!.StartDate – @_activePeriod!.EndDate</div>
+                    </div>
+
+                    <div class="form-actions">
+                        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmCurrentTermAsync">Continue with this term</FluentButton>
+                    </div>
+                </div>
             </section>
         }
         else
@@ -455,15 +464,17 @@
     // shows the "Open a term" entry gate instead of its steps (FR-A6 / Idea C).
     private SchoolCollab.Students.Admin.Services.PeriodDto? _activePeriod;
 
-    // Entry-gate form state for opening a new term.
-    private string? _newPeriodName;
-    private DateTime? _newPeriodStart;
-    private DateTime? _newPeriodEnd;
-    private bool _openingTerm;
-    private string? _termError;
+    // When an active period already exists on load, the wizard shows a
+    // confirmation gate (so the user reuses the open term instead of creating an
+    // overlapping one). Once confirmed (or after creating/opening a term here),
+    // the wizard steps render.
+    private bool _termConfirmed;
+
+    // Draft periods available to "Open" from the entry gate (FR-A6).
     private List<SchoolCollab.Students.Admin.Services.PeriodDto> _draftPeriods = new();
 
-    // Full period list (all statuses) — used by BackfillAsync to advance past the latest period.
+    // Full period list (all statuses) — surfaced to the shared PeriodForm (via
+    // ExistingPeriods) so its Backfill action can advance past the latest period.
     private SchoolCollab.Students.Admin.Services.PeriodDto[]? _periods;
 
     // The resolved name to write into GradeLevel.Name on save (the mirror
@@ -573,14 +584,6 @@
             // Status-derived "active" — gates enrollment / the wizard (FR-A3 / FR-A6).
             _activePeriod = periods.FirstOrDefault(p => p.Status == "Active");
             _draftPeriods = periods.Where(p => p.Status == "Draft").ToList();
-
-            // Showing the gate (no active period): prefill with the current academic year as an
-            // editable template. Only when the name is still empty, so we don't overwrite a
-            // user's in-progress entry.
-            if (_activePeriod is null && string.IsNullOrEmpty(_newPeriodName))
-            {
-                SuggestAcademicYearAsync();
-            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -591,88 +594,52 @@
     }
 
     /// <summary>
-    /// Entry-gate action (FR-A6 / Idea C): creates a new Draft period and
-    /// activates it, opening the term for the tenant. Activation auto-closes any
-    /// prior active period (FR-A1). Safe here because the gate only renders when
-    // Fills the "Open a term" form with the current academic year as an editable template.
-    private void SuggestAcademicYearAsync()
-    {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        ApplyAcademicYearSuggestion(AcademicYearSuggestion.ForDate(today));
-    }
-
-    // Auto-populates the form with the next academic year after the latest existing period.
-    private void BackfillAsync()
-    {
-        ApplyAcademicYearSuggestion(AcademicYearSuggestion.BackfillFrom(_periods));
-    }
-
-    private void ApplyAcademicYearSuggestion((string Name, DateOnly StartDate, DateOnly EndDate) suggestion)
-    {
-        _newPeriodName = suggestion.Name;
-        _newPeriodStart = suggestion.StartDate.ToDateTime(TimeOnly.MinValue);
-        _newPeriodEnd = suggestion.EndDate.ToDateTime(TimeOnly.MinValue);
-    }
-
-    /// no active period exists, so no rollover confirm is needed.
+    /// Callback fired by the shared <c>PeriodForm</c> after it creates (and, in
+    /// the wizard, activates) a period via the "Open a term" gate. Re-derives
+    /// the active/current period so the entry gate closes and the wizard steps
+    /// render.
     /// </summary>
-    private async Task OpenTermAsync()
+    private async Task OnPeriodFormSaved(SchoolCollab.Students.Admin.Services.PeriodDto saved)
     {
-        _termError = null;
-
-        if (string.IsNullOrWhiteSpace(_newPeriodName))
-        {
-            _termError = "Enter a period name.";
-            return;
-        }
-        if (_newPeriodStart is null || _newPeriodEnd is null)
-        {
-            _termError = "Enter a start and end date.";
-            return;
-        }
-        if (_newPeriodEnd.Value.Date < _newPeriodStart.Value.Date)
-        {
-            _termError = "End date must be on or after the start date.";
-            return;
-        }
-
-        _openingTerm = true;
-        try
-        {
-            var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(
-                _newPeriodName.Trim(),
-                DateOnly.FromDateTime(_newPeriodStart.Value.Date),
-                DateOnly.FromDateTime(_newPeriodEnd.Value.Date)));
-
-            await Api.ActivatePeriodAsync(id);
-
-            var ct = _loadCts?.Token ?? CancellationToken.None;
-            await DerivePeriodsAsync(ct);
-            await InvokeAsync(StateHasChanged);
-        }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to open term");
-            _termError = ex.Message;
-        }
-        finally
-        {
-            _openingTerm = false;
-        }
+        _termConfirmed = true;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        await DerivePeriodsAsync(ct);
+        await InvokeAsync(StateHasChanged);
     }
 
     /// <summary>
+    /// Confirmation-gate action: the tenant already has an open (active) term, so
+    /// reuse it for this grade-level setup instead of creating an overlapping one.
+    /// Flips the gate so the wizard steps render.
+    /// </summary>
+    private Task ConfirmCurrentTermAsync()
+    {
+        _termConfirmed = true;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Maps a period status to a Fluent badge appearance (mirrors the
+    /// Periods landing page).</summary>
+    private static Appearance GetStatusAppearance(string status) => status switch
+    {
+        "Draft" => Appearance.Neutral,
+        "Active" => Appearance.Accent,
+        "Completed" => Appearance.Outline,
+        "Archived" => Appearance.Neutral,
+        _ => Appearance.Neutral
+    };
+
+    /// <summary>
     /// Entry-gate action: activates an existing Draft period, opening it for the
-    /// tenant (FR-A6). See <see cref="OpenTermAsync"/> for the create+activate path.
+    /// tenant (FR-A6). The create+activate path now lives in the shared
+    /// <c>PeriodForm</c> (see <see cref="OnPeriodFormSaved"/>).
     /// </summary>
     private async Task OpenDraftAsync(Guid id)
     {
-        _termError = null;
-        _openingTerm = true;
         try
         {
             await Api.ActivatePeriodAsync(id);
+            _termConfirmed = true;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;
             await DerivePeriodsAsync(ct);
@@ -682,11 +649,6 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to open draft period {Id}", id);
-            _termError = ex.Message;
-        }
-        finally
-        {
-            _openingTerm = false;
         }
     }
 

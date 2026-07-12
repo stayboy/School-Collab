@@ -1,17 +1,85 @@
 @inherits LayoutComponentBase
-@using SchoolCollab.Admin.Shared.Components.Layout
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Microsoft.AspNetCore.Components.Sections
+@using SchoolCollab.Admin.Shared.Components.Theme
 @using SchoolCollab.Admin.Components.Layout
+@using SchoolCollab.Students.Admin.Components.Toolbar
 @implements IDisposable
 @inject NavigationManager Nav
+@inject ILogger<MainLayout> Logger
 
-<SchoolCollabLayout Body="@Body"
-                    DefaultTitle="School Collab"
-                    SidebarContent="@SidebarContent"
-                    HeaderActions="@HeaderActions"
-                    TitleResolver="@ResolveTitle" />
+<FluentDesignTheme @bind-Mode="@_mode"
+                   @bind-OfficeColor="@_officeColor"
+                   StorageName="theme"
+                   OnLuminanceChanged="OnLuminanceChanged" />
+
+<FluentToastProvider />
+<FluentDialogProvider />
+<FluentMessageBarProvider />
+<FluentTooltipProvider />
+<FluentKeyCodeProvider />
+
+<FluentLayout>
+    <FluentHeader Height="50">
+        <FluentStack Orientation="Orientation.Horizontal"
+                     VerticalAlignment="VerticalAlignment.Center"
+                     HorizontalGap="12"
+                     class="layout-header-stack">
+
+            <span class="brand">School Collab</span>
+            <span class="brand-sep" aria-hidden="true">&#183;</span>
+            <span class="brand-page">@(_pageTitle ?? DefaultTitle)</span>
+
+            <FluentSpacer />
+
+            <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
+
+            <FluentStack Orientation="Orientation.Horizontal"
+                          VerticalAlignment="VerticalAlignment.Center"
+                          HorizontalGap="16">
+                @HeaderActionsLeading
+
+                <FluentButton Appearance="Appearance.Stealth"
+                              OnClick="@(() => Nav.NavigateTo("/settings"))"
+                              Title="Settings"
+                              aria-label="Settings"
+                              class="toolbar-icon-button">
+                    <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
+                </FluentButton>
+            </FluentStack>
+        </FluentStack>
+    </FluentHeader>
+    <div class="layout-body">
+        @SidebarContent
+
+        <div class="layout-content">
+            <article class="content">
+                <div class="page-toolbar-slot">
+                    <SectionOutlet SectionName="page-toolbar" />
+                </div>
+                <div class="page-scroll">
+                    @Body
+                </div>
+                <div class="page-footer-slot">
+                    <SectionOutlet SectionName="page-footer" />
+                </div>
+            </article>
+        </div>
+    </div>
+</FluentLayout>
+
+<div id="blazor-error-ui" data-nosnippet>
+    An unhandled error has occurred.
+    <a href="." class="reload">Reload</a>
+    <span class="dismiss">&#10060;</span>
+</div>
 
 @code {
-    private RenderFragment? HeaderActions => __builder => {
+    [Parameter] public string DefaultTitle { get; set; } = "School Collab";
+
+    private RenderFragment? HeaderActionsLeading => __builder => {
+        <ActiveTermToolbar />
         <DevTenantSwitcher />
     };
     private RenderFragment? SidebarContent => _showSidebar ? __builder => {
@@ -39,14 +107,23 @@
         _                                                                                   => null
     };
 
+    private DesignThemeModes _mode = DesignThemeModes.System;
+    private OfficeColor? _officeColor = OfficeColor.Teams;
+    private string? _pageTitle;
+    private string? _lastPath;
+
     protected override void OnInitialized()
     {
         Nav.LocationChanged += OnLocationChanged;
         UpdateSidebarVisibility(new Uri(Nav.Uri).AbsolutePath);
+        UpdatePageTitle(new Uri(Nav.Uri).AbsolutePath);
     }
 
     private void OnLocationChanged(object? sender, Microsoft.AspNetCore.Components.Routing.LocationChangedEventArgs e)
-        => UpdateSidebarVisibility(new Uri(e.Location).AbsolutePath);
+    {
+        UpdateSidebarVisibility(new Uri(e.Location).AbsolutePath);
+        UpdatePageTitle(new Uri(e.Location).AbsolutePath);
+    }
 
     private void UpdateSidebarVisibility(string path)
     {
@@ -56,6 +133,19 @@
             _showSidebar = showSidebar;
             StateHasChanged();
         }
+    }
+
+    private void UpdatePageTitle(string path)
+    {
+        if (string.Equals(path, _lastPath, StringComparison.OrdinalIgnoreCase)) return;
+        _lastPath = path;
+        _pageTitle = ResolveTitle(path);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnLuminanceChanged(LuminanceChangedEventArgs args)
+    {
+        Logger.LogInformation("Theme luminance changed to {Mode}", args.Mode);
     }
 
     public void Dispose()

@@ -1,0 +1,35 @@
+/* Active academic term shown in the app header (next to Settings). It is a
+   real anchor to /students/periods, where the user can view/edit, activate
+   (open) a draft, complete (close) an active period, or create a new one. */
+.active-term-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    color: var(--neutral-foreground-1);
+    /* Redefine the Fluent tokens the Hypertext anchor reads inside its
+       shadow DOM so the text uses the app's real foreground color. */
+    --neutral-foreground-rest: var(--neutral-foreground-1);
+    --accent-foreground-rest: var(--neutral-foreground-1);
+    font-size: 0.85rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+.active-term-link:hover {
+    color: var(--neutral-foreground-1);
+    text-decoration: underline;
+}
+
+.active-term-name {
+    font-weight: 600;
+    color: var(--neutral-foreground-1);
+}
+
+.active-term-muted {
+    color: var(--neutral-foreground-1);
+    font-style: italic;
+}

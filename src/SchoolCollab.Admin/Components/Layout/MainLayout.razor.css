@@ -21,10 +21,16 @@
    Pages publish a pinned toolbar with <SectionContent SectionName="page-toolbar"> and
    a pinned footer (e.g. an inline chat launcher) with <SectionContent
    SectionName="page-footer">. Everything else a page renders flows into @Body, which
-   lives in .page-scroll — the only region that scrolls. So grid/list overgrowth
+   lives in .page-scroll -- the only region that scrolls. So grid/list overgrowth
    can never push the toolbar out of view or scroll the footer off the page. */
 
 .layout-header-stack {
+    /* Force full width so the FluentSpacer can push the right cluster
+       (active term, tenant switcher, settings) to the far edge. FluentStack
+       renders inline-flex (content-sized) which leaves the spacer no room. */
+    display: flex !important;
+    flex: 1 1 auto !important;
+    width: 100% !important;
     height: 100%;
     padding-left: 1rem;
     padding-right: 1rem;
