@@ -553,11 +553,11 @@ public sealed class StudentsApiClient
         (await _http.PostAsync($"/students/contacts/{id}/set-primary", null, ct)).EnsureSuccessStatusCode();
 
     public async Task<SubscribedContactDto[]?> ListSubscribedContactsAsync(
-        ContactOwnerType ownerType, Guid ownerId, SubscriptionScope? scope = null, CancellationToken ct = default)
+        ContactOwnerType ownerType, Guid? ownerId = null, SubscriptionScope? scope = null, CancellationToken ct = default)
     {
         var url = scope.HasValue
-            ? $"/students/contacts/subscribed?ownerType={ownerType}&ownerId={ownerId}&scope={scope}"
-            : $"/students/contacts/subscribed?ownerType={ownerType}&ownerId={ownerId}";
+            ? $"/students/contacts/subscribed?ownerType={ownerType}&scope={scope}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}"
+            : $"/students/contacts/subscribed?ownerType={ownerType}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}";
         return await _http.GetFromJsonAsync<SubscribedContactDto[]>(url, ct);
     }
 

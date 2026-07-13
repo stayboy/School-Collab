@@ -67,6 +67,15 @@ public sealed class GuardianSubmissionGate : ITenantEntity, IEntity, IAuditableE
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>Teacher/admin enables the student to self-submit directly, bypassing
+    /// the guardian review (spec §9 <c>enable-submission</c>; the gate is optional
+    /// when <c>Assignment.MandatoryReview == false</c>).</summary>
+    public void EnableForStudent()
+    {
+        SubmissionEnabledForStudent = true;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     /// <summary>Reset the gate to its initial state on unpublish (spec §4).
     /// Submissions + versions are retained; the gate returns to "awaiting review".</summary>
     public void Reset()

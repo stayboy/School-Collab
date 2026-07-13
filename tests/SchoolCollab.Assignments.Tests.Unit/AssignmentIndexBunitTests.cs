@@ -94,7 +94,7 @@ public class AssignmentIndexBunitTests : BunitContext
             Guid.NewGuid(), "Test", null, AssignmentTypeDto.SemiManual,
             GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
             Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Published,
-            null, null, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+            null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
         var json = JsonSerializer.Serialize(dto, _apiJsonOptions);
 

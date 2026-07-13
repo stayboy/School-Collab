@@ -23,14 +23,14 @@ public sealed class ListSubscribedContactsHandler(
         var scopeKey = query.Scope.HasValue ? ((int)query.Scope.Value).ToString() : "all";
 
         return await cache.GetOrCreateAsync(
-            $"contacts:subscribed:{tenantId}:{(int)query.OwnerType}:{query.OwnerId}:{scopeKey}",
+            $"contacts:subscribed:{tenantId}:{(int)query.OwnerType}:{query.OwnerId?.ToString() ?? "all"}:{scopeKey}",
             (db, tenantId, query.OwnerType, query.OwnerId, query.Scope),
             static async (state, ct) =>
             {
                 var (db, tenantId, ownerType, ownerId, scope) = state;
                 var contacts = await db.Contacts
                     .IgnoreQueryFilters(["Tenant"])
-                    .Where(c => c.TenantId == tenantId && c.OwnerType == ownerType && c.OwnerId == ownerId)
+                    .Where(c => c.TenantId == tenantId && c.OwnerType == ownerType && (ownerId == null || c.OwnerId == ownerId))
                     .Join(db.ContactSubscriptions.IgnoreQueryFilters(["Tenant"]),
                         c => c.Id, s => s.ContactId,
                         (c, s) => new { c, s })

@@ -15,6 +15,9 @@ using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentRecipients;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListSubmissionsByAssignment;
 
 namespace SchoolCollab.Assignments.Tests.Unit;
 
@@ -409,6 +412,71 @@ public class SubmissionEngineTests
         submissionRepo.UpdatedGates.Should().ContainSingle(g => !g.SubmissionEnabledForStudent);
     }
 
+    [TestMethod]
+    public async Task ListAssignmentRecipients_ReturnsRecipients()
+    {
+        var submissionRepo = new FakeSubmissionRepository
+        {
+            RecipientsForAssignment = new[]
+            {
+                new AssignmentRecipientDto(Guid.NewGuid(), AssignmentId, ContactOwnerTypeDto.Guardian, GuardianId, StudentId, ContactGuardian, ContactChannelDto.Email, GuardianRoleDto.Primary, true, true),
+                new AssignmentRecipientDto(Guid.NewGuid(), AssignmentId, ContactOwnerTypeDto.Student, StudentId, null, ContactStudent, ContactChannelDto.SMS, null, true, true),
+            }
+        };
+        var handler = new ListAssignmentRecipientsHandler(submissionRepo, NullLogger<ListAssignmentRecipientsHandler>.Instance);
+
+        var result = await handler.HandleAsync(new ListAssignmentRecipients(AssignmentId));
+
+        result.Should().HaveCount(2);
+        result.Should().Contain(r => r.OwnerType == ContactOwnerTypeDto.Guardian && r.Role == GuardianRoleDto.Primary);
+        result.Should().Contain(r => r.OwnerType == ContactOwnerTypeDto.Student && r.Channel == ContactChannelDto.SMS);
+    }
+
+    [TestMethod]
+    public async Task GetSubmission_ReturnsDetailWithVersionsAndReview()
+    {
+        var submissionId = Guid.NewGuid();
+        var submissionRepo = new FakeSubmissionRepository
+        {
+            SubmissionDetailToReturn = new SubmissionDetailDto(
+                submissionId, AssignmentId, StudentId, 2, ReviewStateDto.Reviewed, DateTimeOffset.UtcNow,
+                new[]
+                {
+                    new SubmissionVersionDto(Guid.NewGuid(), 1, SubmissionSourceDto.Student, "v1", null, DateTimeOffset.UtcNow),
+                    new SubmissionVersionDto(Guid.NewGuid(), 2, SubmissionSourceDto.GuardianOnBehalf, "v2", GuardianId, DateTimeOffset.UtcNow),
+                },
+                new SubmissionReviewDto(Guid.NewGuid(), submissionId, Guid.Empty, 9.5m, "A", "good", DateTimeOffset.UtcNow))
+        };
+        var handler = new GetSubmissionHandler(submissionRepo, NullLogger<GetSubmissionHandler>.Instance);
+
+        var result = await handler.HandleAsync(new GetSubmission(AssignmentId, StudentId));
+
+        result.Should().NotBeNull();
+        result!.Versions.Should().HaveCount(2);
+        result.CurrentVersionNumber.Should().Be(2);
+        result.Review.Should().NotBeNull();
+        result.Review!.Score.Should().Be(9.5m);
+    }
+
+    [TestMethod]
+    public async Task ListSubmissionsByAssignment_ReturnsSubmissions()
+    {
+        var submissionRepo = new FakeSubmissionRepository
+        {
+            SubmissionsForAssignment = new[]
+            {
+                new SubmissionForReviewDto(Guid.NewGuid(), AssignmentId, "Math", StudentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow),
+                new SubmissionForReviewDto(Guid.NewGuid(), AssignmentId, "Math", Guid.NewGuid(), 2, ReviewStateDto.Reviewed, DateTimeOffset.UtcNow),
+            }
+        };
+        var handler = new ListSubmissionsByAssignmentHandler(submissionRepo, NullLogger<ListSubmissionsByAssignmentHandler>.Instance);
+
+        var result = await handler.HandleAsync(new ListSubmissionsByAssignment(AssignmentId));
+
+        result.Should().HaveCount(2);
+        result.Should().OnlyContain(s => s.AssignmentId == AssignmentId);
+    }
+
     // ── Fakes ────────────────────────────────────────────────────────────
 
     private sealed class FakeTenantProvider : ITenantProvider
@@ -488,6 +556,17 @@ public class SubmissionEngineTests
         public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
         public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid t, CancellationToken ct = default)
             => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
+        public Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid a, CancellationToken ct = default)
+            => Task.FromResult(SubmissionsForAssignment);
+        public Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid a, CancellationToken ct = default)
+            => Task.FromResult(RecipientsForAssignment);
+        public Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid a, Guid s, CancellationToken ct = default)
+            => Task.FromResult(SubmissionDetailToReturn);
+
+        public SubmissionForReviewDto[] SubmissionsForAssignment { get; set; } = Array.Empty<SubmissionForReviewDto>();
+        public AssignmentRecipientDto[] RecipientsForAssignment { get; set; } = Array.Empty<AssignmentRecipientDto>();
+        public SubmissionDetailDto? SubmissionDetailToReturn;
+
         public Task<GuardianGateDto?> GetGuardianGateAsync(Guid a, Guid s, CancellationToken ct = default)
             => Task.FromResult((GuardianGateDto?)null);
     }

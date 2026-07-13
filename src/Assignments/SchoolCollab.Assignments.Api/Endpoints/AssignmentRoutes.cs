@@ -15,8 +15,13 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssignmen
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetGuardianGate;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmissionsForReview;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuery;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentRecipients;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListSubmissionsByAssignment;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.EnableStudentSubmission;
+using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 
@@ -71,7 +76,7 @@ public static class AssignmentRoutes
                     id, req.Title, req.Description, (AssignmentType)req.AssignmentType,
                     (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
                     req.SubjectId, req.GradeLevelId,
-                    req.DueDate, req.MaxScore);
+                    req.DueDate, req.MaxScore, req.MandatoryReview);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }
@@ -180,18 +185,69 @@ public static class AssignmentRoutes
             }
         });
 
-        // ── Phase 6: publish & review-gate engine ──────────────────────────────
+        // ── Phase 7: recipients + review-gate + submission (spec §8/§9) ────────
 
-        group.MapPost("/{id:guid}/gates/{gateId:guid}/review", async (
+        // Publish recipients (spec §12).
+        group.MapGet("/{id:guid}/recipients", async (
             Guid id,
-            Guid gateId,
+            [FromServices] IQueryHandler<ListAssignmentRecipients, AssignmentRecipientDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListAssignmentRecipients(id), ct)));
+
+        // Submissions for an assignment (teacher review/grade queue, spec §12).
+        group.MapGet("/{id:guid}/submissions", async (
+            Guid id,
+            [FromServices] IQueryHandler<ListSubmissionsByAssignment, SubmissionForReviewDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListSubmissionsByAssignment(id), ct)));
+
+        // Submission with version history + review (spec §9 GET .../submission).
+        group.MapGet("/{id:guid}/students/{studentId:guid}/submission", async (
+            Guid id,
+            Guid studentId,
+            [FromServices] IQueryHandler<GetSubmission, SubmissionDetailDto?> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(new GetSubmission(id, studentId), ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        // Guardian review (Primary). spec §9: .../students/{studentId}/guardian-review.
+        group.MapPost("/{id:guid}/students/{studentId:guid}/guardian-review", async (
+            Guid id,
+            Guid studentId,
             [FromBody] ReviewSubmissionGateRequest req,
+            [FromServices] ISubmissionRepository submissionRepo,
             [FromServices] ICommandHandler<ReviewSubmissionGateCommand> handler,
             CancellationToken ct) =>
         {
+            var gate = await submissionRepo.GetGateByAssignmentStudentAsync(id, studentId, ct);
+            if (gate is null) return Results.NotFound();
             try
             {
-                await handler.HandleAsync(new ReviewSubmissionGateCommand(gateId, req.ReviewerGuardianId, req.Approve, req.Comment), ct);
+                await handler.HandleAsync(new ReviewSubmissionGateCommand(gate.Id, req.ReviewerGuardianId, req.Approve, req.Comment), ct);
+                return Results.NoContent();
+            }
+            catch (GuardianSubmissionGateNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        // Teacher/admin enables student self-submit directly (spec §9: .../enable-submission).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/enable-submission", async (
+            Guid id,
+            Guid studentId,
+            [FromBody] EnableStudentSubmissionRequest req,
+            [FromServices] ISubmissionRepository submissionRepo,
+            [FromServices] ICommandHandler<EnableStudentSubmissionCommand> handler,
+            CancellationToken ct) =>
+        {
+            var gate = await submissionRepo.GetGateByAssignmentStudentAsync(id, studentId, ct);
+            if (gate is null) return Results.NotFound();
+            try
+            {
+                await handler.HandleAsync(new EnableStudentSubmissionCommand(gate.Id, req.ReviewerGuardianId), ct);
                 return Results.NoContent();
             }
             catch (GuardianSubmissionGateNotFoundException)
@@ -246,16 +302,20 @@ public static class AssignmentRoutes
             }
         });
 
-        group.MapPost("/{id:guid}/submissions/{submissionId:guid}/review", async (
+        // Teacher grades a submission (spec §9: .../students/{studentId}/submission/review).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/submission/review", async (
             Guid id,
-            Guid submissionId,
+            Guid studentId,
             [FromBody] ReviewSubmissionRequest req,
+            [FromServices] ISubmissionRepository submissionRepo,
             [FromServices] ICommandHandler<ReviewSubmissionCommand> handler,
             CancellationToken ct) =>
         {
+            var submission = await submissionRepo.GetSubmissionByAssignmentStudentAsync(id, studentId, ct);
+            if (submission is null) return Results.NotFound();
             try
             {
-                await handler.HandleAsync(new ReviewSubmissionCommand(submissionId, req.TeacherId, req.Score, req.Grade, req.Comments), ct);
+                await handler.HandleAsync(new ReviewSubmissionCommand(submission.Id, req.TeacherId, req.Score, req.Grade, req.Comments), ct);
                 return Results.NoContent();
             }
             catch (SubmissionNotFoundException)

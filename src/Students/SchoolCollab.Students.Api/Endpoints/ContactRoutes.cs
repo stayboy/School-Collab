@@ -119,7 +119,7 @@ public static class ContactRoutes
         // Cross-BC resolver contract (spec §9 G5).
         group.MapGet("/subscribed", async (
             ContactOwnerType ownerType,
-            Guid ownerId,
+            Guid? ownerId,
             SubscriptionScope? scope,
             [FromServices] IQueryHandler<ListSubscribedContacts, SubscribedContactDto[]> handler,
             CancellationToken ct) =>

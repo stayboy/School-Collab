@@ -14,4 +14,5 @@ public sealed record UpdateAssignmentCommand(
     Guid SubjectId,
     Guid? GradeLevelId,
     DateTimeOffset? DueDate,
-    decimal? MaxScore) : ICommand;
+    decimal? MaxScore,
+    bool MandatoryReview) : ICommand;

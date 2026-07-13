@@ -11,5 +11,5 @@ namespace SchoolCollab.Students.Core.CQRS.Contacts.Queries.ListSubscribedContact
 /// </summary>
 public sealed record ListSubscribedContacts(
     ContactOwnerType OwnerType,
-    Guid OwnerId,
-    SubscriptionScope? Scope) : IQuery<SubscribedContactDto[]>;
+    Guid? OwnerId = null,
+    SubscriptionScope? Scope = null) : IQuery<SubscribedContactDto[]>;

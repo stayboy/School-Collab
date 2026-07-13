@@ -53,6 +53,7 @@ public sealed class GetAssignmentByIdQueryHandler(
                     (AssignmentStatusDto)assignment.Status,
                     assignment.DueDate,
                     assignment.MaxScore,
+                    assignment.MandatoryReview,
                     assignment.CreatedByTeacherId,
                     assignment.CreatedAt,
                     assignment.UpdatedAt);

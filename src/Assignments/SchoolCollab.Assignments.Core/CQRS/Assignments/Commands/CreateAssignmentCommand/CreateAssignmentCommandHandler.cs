@@ -32,7 +32,8 @@ public sealed class CreateAssignmentCommandHandler(
             command.GradeLevelId,
             command.DueDate,
             command.MaxScore,
-            createdByTeacherId: Guid.Empty) // TODO: wire up authenticated teacher ID
+            createdByTeacherId: Guid.Empty, // TODO: wire up authenticated teacher ID
+            mandatoryReview: command.MandatoryReview)
             .WithTenant(tenantProvider);
 
         await repository.AddAsync(assignment, cancellationToken);

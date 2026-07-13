@@ -53,6 +53,7 @@ public record AssignmentSummaryDto(
     AssignmentStatusDto Status,
     DateTimeOffset? DueDate,
     decimal? MaxScore,
+    bool MandatoryReview,
     Guid CreatedByTeacherId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -66,7 +67,8 @@ public record CreateAssignmentRequest(
     Guid SubjectId = default,
     Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
-    decimal? MaxScore = null);
+    decimal? MaxScore = null,
+    bool MandatoryReview = true);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -77,7 +79,8 @@ public record UpdateAssignmentRequest(
     Guid SubjectId = default,
     Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
-    decimal? MaxScore = null);
+    decimal? MaxScore = null,
+    bool MandatoryReview = true);
 
 /// <summary>Publish an assignment (spec §8). Optional contact selection:
 /// when <see cref="ContactIds"/> is non-empty, only those subscribed contacts
@@ -135,3 +138,79 @@ public record ReviewSubmissionRequest(
 
 /// <summary>Student self-submit (spec §4.11).</summary>
 public record CreateStudentSubmissionRequest(string? Content);
+
+// ── Phase 7: publish recipients + submission detail (spec §8/§12) ────────────
+
+/// <summary>Who owns a publish contact (mirrors Students.Core ContactOwnerType).</summary>
+public enum ContactOwnerTypeDto
+{
+    [Description("Student")] Student = 0,
+    [Description("Guardian")] Guardian = 1
+}
+
+/// <summary>Contact channel (mirrors Students.Core ContactChannel).</summary>
+public enum ContactChannelDto
+{
+    [Description("Email")] Email = 0,
+    [Description("SMS")] SMS = 1,
+    [Description("WhatsApp")] WhatsApp = 2
+}
+
+/// <summary>Guardian role relative to a student (mirrors Students.Core GuardianRole).</summary>
+public enum GuardianRoleDto
+{
+    [Description("Primary")] Primary = 0,
+    [Description("CC")] CC = 1
+}
+
+/// <summary>Submission source (mirrors Assignments.Core SubmissionSource).</summary>
+public enum SubmissionSourceDto
+{
+    [Description("Student")] Student = 0,
+    [Description("Guardian")] GuardianOnBehalf = 1
+}
+
+/// <summary>Per-(assignment, contact) publish recipient (spec §4.6).</summary>
+public record AssignmentRecipientDto(
+    Guid Id,
+    Guid AssignmentId,
+    ContactOwnerTypeDto OwnerType,
+    Guid OwnerId,
+    Guid? WardStudentId,
+    Guid ContactId,
+    ContactChannelDto Channel,
+    GuardianRoleDto? Role,
+    bool NotifyOnBroadcast,
+    bool SubscriptionActive);
+
+/// <summary>A single submission version (spec §4.11).</summary>
+public record SubmissionVersionDto(
+    Guid Id,
+    int VersionNumber,
+    SubmissionSourceDto Source,
+    string? Content,
+    Guid? SubmittedByGuardianId,
+    DateTimeOffset SubmittedAt);
+
+/// <summary>Teacher review/grade attached to a submission (spec §4.13).</summary>
+public record SubmissionReviewDto(
+    Guid Id,
+    Guid SubmissionId,
+    Guid TeacherId,
+    decimal? Score,
+    string? Grade,
+    string? Comments,
+    DateTimeOffset CreatedAt);
+
+/// <summary>A submission with its version history + review (spec §4.11/§4.13).</summary>
+public record SubmissionDetailDto(
+    Guid SubmissionId,
+    Guid AssignmentId,
+    Guid StudentId,
+    int CurrentVersionNumber,
+    ReviewStateDto ReviewState,
+    DateTimeOffset LastSubmittedAt,
+    SubmissionVersionDto[] Versions,
+    SubmissionReviewDto? Review);
+
+public record EnableStudentSubmissionRequest(Guid? ReviewerGuardianId);

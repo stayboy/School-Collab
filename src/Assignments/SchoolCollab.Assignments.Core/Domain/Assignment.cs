@@ -60,7 +60,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         Guid? gradeLevelId,
         DateTimeOffset? dueDate,
         decimal? maxScore,
-        Guid createdByTeacherId)
+        Guid createdByTeacherId = default,
+        bool mandatoryReview = true)
     {
         if (subjectId == Guid.Empty)
             throw new ArgumentException("Subject is required.", nameof(subjectId));
@@ -80,8 +81,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             MaxScore = maxScore,
             Status = AssignmentStatus.Draft,
             CreatedByTeacherId = createdByTeacherId,
-            // Mandatory review is the default (spec §4.7).
-            MandatoryReview = true,
+            // Mandatory review is the default (spec §4.7); callers may opt out.
+            MandatoryReview = mandatoryReview,
             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             CreatedAt = now,
             UpdatedAt = now
@@ -93,7 +94,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
 
     public void Update(string title, string? description, AssignmentType assignmentType,
         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
-        Guid subjectId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore)
+        Guid subjectId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
+        bool mandatoryReview)
     {
         if (Status != AssignmentStatus.Draft)
             throw new InvalidOperationException("Only draft assignments can be updated.");
@@ -109,6 +111,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         GradeLevelId = gradeLevelId;
         DueDate = dueDate;
         MaxScore = maxScore;
+        MandatoryReview = mandatoryReview;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentUpdatedEvent(Id, Title));
     }

@@ -24,7 +24,12 @@ public sealed class AssignmentsApiClient
                 new JsonStringEnumConverter<AssignmentTypeDto>(),
                 new JsonStringEnumConverter<AssignmentStatusDto>(),
                 new JsonStringEnumConverter<GradingFormatDto>(),
-                new JsonStringEnumConverter<TargetAudienceTypeDto>()
+                new JsonStringEnumConverter<TargetAudienceTypeDto>(),
+                new JsonStringEnumConverter<ReviewStateDto>(),
+                new JsonStringEnumConverter<ContactOwnerTypeDto>(),
+                new JsonStringEnumConverter<ContactChannelDto>(),
+                new JsonStringEnumConverter<GuardianRoleDto>(),
+                new JsonStringEnumConverter<SubmissionSourceDto>()
             }
         };
     }
@@ -74,7 +79,13 @@ public sealed class AssignmentsApiClient
     public async Task PublishAsync(Guid id, CancellationToken ct = default)
     {
         _logger.LogInformation("Publishing assignment {AssignmentId}", id);
-        (await _http.PostAsync($"/assignments/{id}/publish", null, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/assignments/{id}/publish", (PublishAssignmentRequest?)null, _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    public async Task PublishAsync(Guid id, IReadOnlyList<Guid>? contactIds, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Publishing assignment {AssignmentId} to {Count} selected contacts", id, contactIds?.Count ?? 0);
+        (await _http.PostAsJsonAsync($"/assignments/{id}/publish", new PublishAssignmentRequest(contactIds), _jsonOptions, ct)).EnsureSuccessStatusCode();
     }
 
     public async Task UnpublishAsync(Guid id, CancellationToken ct = default)
@@ -99,5 +110,53 @@ public sealed class AssignmentsApiClient
     {
         _logger.LogInformation("Deleting assignment {AssignmentId}", id);
         (await _http.DeleteAsync($"/assignments/{id}", ct)).EnsureSuccessStatusCode();
+    }
+
+    // ── Phase 7: recipients + submissions + review/gate (spec §8/§9/§12) ─────
+
+    public async Task<AssignmentRecipientDto[]?> GetRecipientsAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting recipients for assignment {AssignmentId}", id);
+        var response = await _http.GetAsync($"/assignments/{id}/recipients", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<AssignmentRecipientDto[]>(_jsonOptions, ct);
+    }
+
+    public async Task<SubmissionForReviewDto[]?> ListSubmissionsAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Listing submissions for assignment {AssignmentId}", assignmentId);
+        var result = await _http.GetFromJsonAsync<SubmissionForReviewDto[]>($"/assignments/{assignmentId}/submissions", _jsonOptions, ct);
+        _logger.LogInformation("Listed {Count} submissions", result?.Length ?? 0);
+        return result;
+    }
+
+    public async Task<SubmissionDetailDto?> GetSubmissionAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting submission for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
+        var response = await _http.GetAsync($"/assignments/{assignmentId}/students/{studentId}/submission", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SubmissionDetailDto>(_jsonOptions, ct);
+    }
+
+    public async Task ReviewSubmissionAsync(Guid assignmentId, Guid studentId, ReviewSubmissionRequest req, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Reviewing submission for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
+        (await _http.PostAsJsonAsync($"/assignments/{assignmentId}/students/{studentId}/submission/review", req, _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    public async Task ReviewGateAsync(Guid assignmentId, Guid studentId, ReviewSubmissionGateRequest req, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Reviewing gate for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
+        (await _http.PostAsJsonAsync($"/assignments/{assignmentId}/students/{studentId}/guardian-review", req, _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    public async Task EnableSubmissionAsync(Guid assignmentId, Guid studentId, EnableStudentSubmissionRequest req, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Enabling submission for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
+        (await _http.PostAsJsonAsync($"/assignments/{assignmentId}/students/{studentId}/enable-submission", req, _jsonOptions, ct)).EnsureSuccessStatusCode();
     }
 }

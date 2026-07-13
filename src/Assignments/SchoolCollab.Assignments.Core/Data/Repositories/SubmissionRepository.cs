@@ -59,6 +59,85 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
         return await query.ToArrayAsync(ct);
     }
 
+    public async Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        var query = from s in db.AssignmentSubmissions
+                    join a in db.Assignments on s.AssignmentId equals a.Id
+                    where s.AssignmentId == assignmentId
+                    orderby s.LastSubmittedAt descending
+                    select new SubmissionForReviewDto(
+                        s.Id,
+                        a.Id,
+                        a.Title,
+                        s.StudentId,
+                        s.CurrentVersionNumber,
+                        (ReviewStateDto)(int)s.ReviewState,
+                        s.LastSubmittedAt);
+
+        return await query.ToArrayAsync(ct);
+    }
+
+    public async Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        var query = from r in db.AssignmentRecipients
+                    where r.AssignmentId == assignmentId
+                    orderby r.OwnerType, r.OwnerId
+                    select new AssignmentRecipientDto(
+                        r.Id,
+                        r.AssignmentId,
+                        (ContactOwnerTypeDto)(int)r.OwnerType,
+                        r.OwnerId,
+                        r.WardStudentId,
+                        r.ContactId,
+                        (ContactChannelDto)(int)r.Channel,
+                        r.Role == null ? (GuardianRoleDto?)null : (GuardianRoleDto)(int)r.Role,
+                        r.NotifyOnBroadcast,
+                        r.SubscriptionActive);
+
+        return await query.ToArrayAsync(ct);
+    }
+
+    public async Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
+    {
+        var submission = await db.AssignmentSubmissions
+            .FirstOrDefaultAsync(s => s.AssignmentId == assignmentId && s.StudentId == studentId, ct);
+        if (submission is null)
+            return null;
+
+        var versions = await (from v in db.AssignmentSubmissionVersions
+                               where v.SubmissionId == submission.Id
+                               orderby v.VersionNumber
+                               select new SubmissionVersionDto(
+                                   v.Id,
+                                   v.VersionNumber,
+                                   (SubmissionSourceDto)(int)v.Source,
+                                   v.Content,
+                                   v.SubmittedByGuardianId,
+                                   v.SubmittedAt)).ToArrayAsync(ct);
+
+        var review = await (from r in db.SubmissionReviews
+                            where r.SubmissionId == submission.Id
+                            orderby r.CreatedAt descending
+                            select new SubmissionReviewDto(
+                                r.Id,
+                                r.SubmissionId,
+                                r.TeacherId,
+                                r.Score,
+                                r.Grade,
+                                r.Comments,
+                                r.CreatedAt)).FirstOrDefaultAsync(ct);
+
+        return new SubmissionDetailDto(
+            submission.Id,
+            submission.AssignmentId,
+            submission.StudentId,
+            submission.CurrentVersionNumber,
+            (ReviewStateDto)(int)submission.ReviewState,
+            submission.LastSubmittedAt,
+            versions,
+            review);
+    }
+
     public async Task<GuardianGateDto?> GetGuardianGateAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
     {
         var gate = await db.GuardianSubmissionGates
