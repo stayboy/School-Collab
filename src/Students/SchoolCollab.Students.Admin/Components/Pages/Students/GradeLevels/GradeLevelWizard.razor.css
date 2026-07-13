@@ -313,63 +313,82 @@
     font-size: 0.85rem;
 }
 
-.current-term-card {
-    padding: 18px 22px;
-    margin-bottom: 1.1rem;
-    background: #f6fbf6;
-    border: 1px solid #cfe8cf;
-    overflow: visible;
+/* ── Inline "new student" form (step 2) ──────────────────────
+   The form fields and validation come from the shared
+   <StudentFormFields> component (Components/Students/), so this
+   stylesheet only carries the wizard's wrapper-card rules: padding
+   on the FluentCard, the section header typography that lives
+   above the form, and the red asterisk shown in the hint text
+   (the asterisk used to come from a .required-marker rule that
+   lived here too; now it's a rule on the shared component, scoped
+   to .student-form-fields, so the hint text's literal asterisk
+   needs its own copy of the colour). */
+.new-student-card {
+    margin-top: 12px;
+    padding: 16px 20px;
 }
 
-.current-term-name {
-    font-size: 1.25rem;
-    font-weight: 700;
-    line-height: 1.2;
+.new-student-card .required-marker {
+    color: #c50f1f;
+    font-weight: 600;
+    margin-left: 2px;
 }
 
-.current-term-dates {
-    margin-top: 4px;
+/* Section header inside the form card. Mirrors the typography used by
+   the wizard's "Open a term" PeriodForm so the form fits the same
+   visual rhythm as the rest of step 1. */
+.new-student-card .form-section-header {
+    margin-bottom: 0.5rem;
+}
+
+.new-student-card .form-section-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 600;
+}
+
+.new-student-card .form-hint {
     color: var(--neutral-foreground-hint);
+    font-size: 0.85rem;
+    margin: 0.25rem 0 1rem;
+    line-height: 1.4;
+}
+
+/* ── Review step lists ──────────────────────────────────────
+   Step 3 shows the actual students and subjects to be wired up
+   (not just counts). Use the same assigned-list styling the rest
+   of the wizard uses so the visual language stays consistent. */
+.review-list {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.review-list li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    background: var(--neutral-fill-rest);
+    border-radius: 4px;
     font-size: 0.9rem;
 }
 
-/* Confirmation gate card: a plain styled div (NOT FluentCard). FluentCard
-   defaults to height:100% and clips to its corners, which hid/stretched the
-   confirm button. A plain div + explicit flex .form-actions keeps the button
-   auto-width and in normal flow, matching PeriodForm's working submit row. */
-.term-gate-card {
-    background: var(--neutral-fill-rest);
-    border: 1px solid var(--neutral-stroke);
-    border-radius: 12px;
-    padding: 1.5rem;
-    overflow: visible;
+/* Muted secondary text (e.g. "Available" / "Already enrolled" in the
+   students grid, phase detail text in the save status list). */
+.muted {
+    color: var(--neutral-foreground-hint);
+    font-size: 0.85rem;
 }
 
-.current-term-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-}
-
-/* The gate's action row (scoped to this component; PeriodForm has its own). */
-.form-actions {
-    margin-top: 1.1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--neutral-stroke-rest, #eee);
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    gap: 0.75rem;
-}
-
-/* The "Open a term" date pickers (and the confirm button) render inside a
-   FluentCard, which clips to its rounded corners (overflow:hidden) and hides the
-   date-picker popup / can clip the bottom action button. Blazor scoped CSS does
-   not cross the FluentCard component boundary, so the selector must use ::deep to
-   reach the fluent-card element it renders. The inline overflow:visible on the
-   FluentCard elements (in the .razor) is the primary fix; this rule is
-   defense-in-depth. */
+/* The "Open a term" date pickers render inside a FluentCard, which clips to
+   its rounded corners (overflow:hidden) and hides the date-picker popup. The
+   FluentCard elements in the .razor have inline overflow:visible as the
+   primary fix; this scoped rule is defense-in-depth for any descendant
+   .fluent-card the Blazor rendering produces. */
 .open-term-panel {
     overflow: visible;
 }

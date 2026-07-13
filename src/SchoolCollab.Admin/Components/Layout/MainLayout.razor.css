@@ -27,7 +27,14 @@
 .layout-header-stack {
     /* Force full width so the FluentSpacer can push the right cluster
        (active term, tenant switcher, settings) to the far edge. FluentStack
-       renders inline-flex (content-sized) which leaves the spacer no room. */
+       renders inline-flex (content-sized) which leaves the spacer no room.
+
+       Lives on a plain <div> wrapper, NOT on the FluentStack root, because
+       Blazor CSS-isolation scopes a child component's root element with the
+       CHILD's scope attribute, not the parent's. The FluentStack root would
+       receive FluentStack's scope (e.g. b-xxxx) and the layout-scoped rule
+       below would silently fail to match. The plain wrapper receives this
+       component's scope, so the rule applies. */
     display: flex !important;
     flex: 1 1 auto !important;
     width: 100% !important;
@@ -36,6 +43,28 @@
     padding-right: 1rem;
     min-width: 0;
     overflow: visible;
+    align-items: center;
+    box-sizing: border-box;
+}
+
+.header-actions-trailing {
+    display: inline-flex;
+    align-items: center;
+    gap: 16px;
+    flex: 0 0 auto;
+    /* Override FluentStack's inline width:100% if one is ever nested here
+       again in the future -- the right cluster must size to its content
+       and let the FluentSpacer push it to the far right. */
+    width: auto;
+}
+
+/* FluentStack renders an inline width:100% on its root div. The ThemeSwitcher
+   is a FluentStack child of the header row -- without this override its root
+   claims 100% of the row width and leaves no free space for the FluentSpacer
+   to absorb (which is what pushes the trailing actions to the far edge). */
+.layout-header-stack ::deep > .theme-switcher-stack {
+    flex: 0 0 auto;
+    width: auto;
 }
 
 .brand-page {

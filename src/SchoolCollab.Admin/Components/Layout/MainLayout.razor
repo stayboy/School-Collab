@@ -22,33 +22,32 @@
 
 <FluentLayout>
     <FluentHeader Height="50">
-        <FluentStack Orientation="Orientation.Horizontal"
-                     VerticalAlignment="VerticalAlignment.Center"
-                     HorizontalGap="12"
-                     class="layout-header-stack">
-
-            <span class="brand">School Collab</span>
-            <span class="brand-sep" aria-hidden="true">&#183;</span>
-            <span class="brand-page">@(_pageTitle ?? DefaultTitle)</span>
-
-            <FluentSpacer />
-
-            <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
-
+        <div class="layout-header-stack">
             <FluentStack Orientation="Orientation.Horizontal"
-                          VerticalAlignment="VerticalAlignment.Center"
-                          HorizontalGap="16">
-                @HeaderActionsLeading
+                         VerticalAlignment="VerticalAlignment.Center"
+                         HorizontalGap="12">
 
-                <FluentButton Appearance="Appearance.Stealth"
-                              OnClick="@(() => Nav.NavigateTo("/settings"))"
-                              Title="Settings"
-                              aria-label="Settings"
-                              class="toolbar-icon-button">
-                    <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
-                </FluentButton>
+                <span class="brand">School Collab</span>
+                <span class="brand-sep" aria-hidden="true">&#183;</span>
+                <span class="brand-page">@(_pageTitle ?? DefaultTitle)</span>
+
+                <ThemeSwitcher @bind-Mode="_mode" @bind-Accent="_officeColor" />
+
+                <FluentSpacer />
+
+                <div class="header-actions-trailing">
+                    @HeaderActionsLeading
+
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  OnClick="@(() => Nav.NavigateTo("/settings"))"
+                                  Title="Settings"
+                                  aria-label="Settings"
+                                  class="toolbar-icon-button">
+                        <FluentIcon Value="@(new Icons.Regular.Size20.Settings())" />
+                    </FluentButton>
+                </div>
             </FluentStack>
-        </FluentStack>
+        </div>
     </FluentHeader>
     <div class="layout-body">
         @SidebarContent

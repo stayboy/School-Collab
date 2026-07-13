@@ -11,24 +11,39 @@
 
 @if (_isRealTenant)
 {
-    <FluentAnchor Href="/students/periods"
-                  class="active-term-link"
-                  Appearance="Appearance.Hypertext"
-                  IconStart="@(new Icons.Regular.Size20.Calendar())"
-                  Title="@_title">
-        @if (_loading)
-        {
-            <span class="active-term-muted">Loading term…</span>
-        }
-        else if (_activePeriod is not null)
-        {
-            <span class="active-term-name">@_activePeriod.Name</span>
-        }
-        else
-        {
-            <span class="active-term-muted">No active period</span>
-        }
-    </FluentAnchor>
+    <span class="active-term-link">
+        <FluentAnchor Href="/students/periods"
+                      Appearance="Appearance.Hypertext"
+                      IconStart="@(new Icons.Regular.Size20.Calendar())"
+                      Title="@_title">
+            @if (_loading)
+            {
+                <span class="active-term-muted">Loading term…</span>
+            }
+            else if (_activePeriod is not null)
+            {
+                <span class="active-term-name">@_activePeriod.Name</span>
+            }
+            else
+            {
+                <span class="active-term-muted">No active period</span>
+            }
+        </FluentAnchor>
+    </span>
+}
+else
+{
+    @* No real (non-default) tenant is in scope. The per-tenant UI is hidden
+       by design (TestAuthHandler defaults to Guid.Empty until a tenant is
+       picked) so we surface a compact, non-clickable hint in the toolbar slot
+       instead of leaving the area blank — the user can then see the dev
+       tenant switcher next to it and select a tenant to unlock the
+       active-term view. *@
+    <span class="active-term-link active-term-link--muted"
+          title="Select a tenant (dev switcher on the right) to view the active academic period.">
+        <FluentIcon Value="@(new Icons.Regular.Size20.Calendar())" />
+        <span class="active-term-muted">No tenant</span>
+    </span>
 }
 
 @code {

@@ -32,29 +32,30 @@
     }
 
     <FluentStack Orientation="Orientation.Vertical" Spacing="4">
-        <FluentStack Orientation="Orientation.Horizontal" Spacing="2" AlignItems="AlignItems.Start">
-            <div class="field-label"><label for="periodName">Period name *</label></div>
-            <FluentStack Orientation="Orientation.Horizontal" Spacing="2" AlignItems="AlignItems.End" Style="flex:1; min-width:0">
-                <FluentTextField Id="periodName" @bind-Value="_name"
-                                 Label=""
-                                 Placeholder="e.g. 2025–2026 Academic Year"
-                                 Style="flex:1; min-width:0" />
-                <FluentButton IconStart="@FluentIcons.Calendar"
-                              Title="Fill the form with the current academic year (editable template)"
-                              OnClick="SuggestAcademicYearAsync" />
-                <FluentButton IconStart="@FluentIcons.ArrowClockwise"
-                              Title="Fill the form with the next academic year after the latest period"
-                              OnClick="BackfillAsync" />
-            </FluentStack>
-        </FluentStack>
+        @* Period name + the Suggest/Backfill buttons. The row contains
+           three controls (text field + two icon buttons) so the label
+           is top-aligned (AlignTop) to sit naturally against the taller
+           cell — matches the pre-FormRow visual. *@
+        <FormRow Label="Period name *" AlignTop For="periodName">
+            <FluentTextField Id="periodName" @bind-Value="_name"
+                             Label=""
+                             Placeholder="e.g. 2025–2026 Academic Year"
+                             Style="flex:1; min-width:0" />
+            <FluentButton IconStart="@FluentIcons.Calendar"
+                          Title="Fill the form with the current academic year (editable template)"
+                          OnClick="SuggestAcademicYearAsync" />
+            <FluentButton IconStart="@FluentIcons.ArrowClockwise"
+                          Title="Fill the form with the next academic year after the latest period"
+                          OnClick="BackfillAsync" />
+        </FormRow>
 
-        <FluentStack Orientation="Orientation.Horizontal" Spacing="2" AlignItems="AlignItems.Start">
-            <div class="field-label"><label>Dates *</label></div>
-            <FluentStack Orientation="Orientation.Horizontal" Spacing="2" AlignItems="AlignItems.End" Style="flex:1; min-width:0">
-                <FluentDatePicker @bind-Value="_start" Label="" Style="flex:1; min-width:0" />
-                <FluentDatePicker @bind-Value="_end" Label="" Style="flex:1; min-width:0" />
-            </FluentStack>
-        </FluentStack>
+        @* Two date pickers side-by-side. AlignTop so the "Dates *" label
+           sits at the top of the row (top-align reads better against a
+           two-input cell than centering). *@
+        <FormRow Label="Dates *" AlignTop>
+            <FluentDatePicker @bind-Value="_start" Label="" Style="flex:1; min-width:0" />
+            <FluentDatePicker @bind-Value="_end"   Label="" Style="flex:1; min-width:0" />
+        </FormRow>
     </FluentStack>
 
     <div class="form-actions">

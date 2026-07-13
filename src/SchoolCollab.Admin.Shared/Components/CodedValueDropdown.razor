@@ -5,6 +5,53 @@
 @inject ILogger<CodedValueDropdown> Logger
 @implements IDisposable
 
+@*
+    Usage
+    ─────
+    Simple two-way binding (just store the picked id in a model field):
+        <CodedValueDropdown Parent="CodedValueParent.Genders"
+                            @bind-SelectedId="Model.GenderCodedValueId" />
+
+    Two-way binding with a side-effect (e.g. fetch the full CodedValueDto
+    and seed dependent state). Uses Blazor's pseudo binder `@bind-Foo:after`
+    so the binder still updates the bound field AND the handler runs — no
+    need for a custom "On*" parameter.
+
+    Recommended C# form: declare the `:after` handler as a parameterless
+    `void` method that fire-and-forgets an `async Task` helper. The method
+    group then converts directly to the `Action` that `@bind-Foo:after`
+    expects, so the call site is just the bare method name — no lambda
+    wrapper. The handler reads the post-bind bound field directly (the
+    binder has already updated it). The async helper owns the real work
+    and its own try/catch, so any failure surfaces via the logger instead
+    of becoming an unobserved-Task exception from the discarded Task:
+
+        <CodedValueDropdown Parent="CodedValueParent.Grades"
+                            @bind-SelectedId="_codedValueIdNullable"
+                            @bind-SelectedId:after="OnCodedValueChanged" />
+
+        @code {
+            // Parameterless void handler — :after target. Reads the
+            // post-bind field, fire-and-forgets the async seed.
+            private void OnCodedValueChanged()
+                => _ = SeedFromCodedValueAsync();
+
+            // Async helper — real work, properly awaited inside, with
+            // its own try/catch for clean error handling.
+            private async Task SeedFromCodedValueAsync() { ... }
+        }
+
+    If the side-effect handler must genuinely take a parameter (e.g. it
+    is shared with other call sites and the value isn't always bound),
+    wrap it in a lambda: `@bind-SelectedId:after="() => OnHandler(id)"`.
+    The lambda is `Action` and the `async Task` method's returned Task is
+    discarded — equivalent fire-and-forget semantics.
+
+    Do NOT pass `SelectedIdChanged=` at the call site — that overrides the
+    binder and the bound field stops updating. Use `@bind-SelectedId:after`
+    for the side-effect; the binder owns `SelectedIdChanged`.
+*@
+
 @if (_error is not null)
 {
     <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
@@ -163,6 +210,13 @@
     private async Task OnSelectedOptionChanged(CodedValueDto? value)
     {
         _selectedOption = value;
+        // Notifies the binder (drives the @bind-SelectedId target). When the
+        // consumer also supplies a @bind-SelectedId:after handler, Blazor's
+        // binder wires that handler into its internal callback chain and
+        // invokes it after the bound field is updated. Consumers should NOT
+        // pass SelectedIdChanged= directly — that overrides the binder and
+        // the bound field stops updating. Use @bind-SelectedId:after for
+        // side-effects; the binder owns SelectedIdChanged.
         await SelectedIdChanged.InvokeAsync(value?.Id);
     }
 

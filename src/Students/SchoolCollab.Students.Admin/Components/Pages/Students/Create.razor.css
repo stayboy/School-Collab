@@ -1,34 +1,6 @@
-/* Page layout */
-.page-container {
-    height: 100%;
-    gap: 0;
-}
-
-.title-row {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding-top: 0.25rem;
-}
-
-.page-title {
-    margin: 0;
-}
-
-/* Form layout */
-.form-container {
-    max-width: 600px;
-}
-
-::deep .full-width {
-    width: 100%;
-}
-
-.action-bar {
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding-top: 0.75rem;
-}
+/* Page layout. The form fields come from the shared <StudentFormFields>
+   component (Components/Students/), so this stylesheet only carries the
+   page chrome rules. */
+.page-container { height: 100%; gap: 0; }
+.title-row { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-top: 0.25rem; }
+.page-title { margin: 0; }

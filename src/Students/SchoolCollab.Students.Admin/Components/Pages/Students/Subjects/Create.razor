@@ -35,8 +35,8 @@
                 <div>
                     <CodedValueDropdown Parent="CodedValueParent.Subjects"
                                         Label="Pick existing subject coded value (optional)"
-                                        SelectedId="_model.CodedValueId"
-                                        SelectedIdChanged="OnCodedValueChanged" />
+                                        @bind-SelectedId="_model.CodedValueId"
+                                        @bind-SelectedId:after="OnCodedValueChanged" />
                     <p class="hint">Leave empty to create a new subject from scratch.</p>
                 </div>
 
@@ -96,19 +96,35 @@
     }
 
 
-    private async Task OnCodedValueChanged(Guid? id)
+    private void OnCodedValueChanged()
     {
-        _model.CodedValueId = id;
-        if (id.HasValue)
+        // The @bind-SelectedId binder has already written the picked id to
+        // _model.CodedValueId by the time this :after handler runs, so we
+        // read it directly from the model — no parameter needed. Declared
+        // `void` (not `async Task`) so it converts directly to the `Action`
+        // that @bind-SelectedId:after expects — call site is a bare method
+        // group, no lambda wrapper. Fire-and-forget the async seed; the
+        // helper's try/catch keeps any failure out of the unobserved-Task
+        // path and surfaces it via the logger instead.
+        _ = SeedFromCodedValueAsync();
+    }
+
+    private async Task SeedFromCodedValueAsync()
+    {
+        if (!_model.CodedValueId.HasValue) return;
+
+        try
         {
-            // Seed code/name from the selected coded value.
-            var cv = await CodedValuesApi.GetByIdAsync(id.Value);
-            if (cv is not null)
-            {
-                _model.Code = cv.Code;
-                _model.Name = cv.Name;
-                _model.DisplayOrder = cv.DisplayOrder;
-            }
+            var cv = await CodedValuesApi.GetByIdAsync(_model.CodedValueId.Value);
+            if (cv is null) return;
+
+            _model.Code = cv.Code;
+            _model.Name = cv.Name;
+            _model.DisplayOrder = cv.DisplayOrder;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to seed subject fields from coded value {CodedValueId}", _model.CodedValueId);
         }
     }
 

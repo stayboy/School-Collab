@@ -11,7 +11,6 @@ using SchoolCollab.Students.Admin.Services;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Claims;
-using System.Text.Json;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -204,22 +203,6 @@ public class GradeLevelWizardTenancyTests : BunitContext
     private static bool HasNewGradeButton(IRenderedComponent<GradeLevelWizard> cut)
         => cut.Markup.Contains(NewGradeButtonText, StringComparison.Ordinal);
 
-    /// <summary>
-    /// Dismisses the wizard's "Term already open" confirmation gate (rendered
-    /// when an active period already exists) so the wizard steps appear. The
-    /// gate is exactly what the user asked for ("if a current/active period
-    /// exists it is shown for confirmation"), so real-tenant flows must click
-    /// through it. No-op when the gate is absent (e.g. default tenant, where
-    /// the whole wizard is hidden by the parent <see cref="TenantGate"/>).
-    /// </summary>
-    private static void ConfirmActiveTerm(IRenderedComponent<GradeLevelWizard> cut)
-    {
-        var button = cut.FindAll("fluent-button")
-            .FirstOrDefault(b => (b.TextContent ?? string.Empty).Contains("Continue with this term", StringComparison.Ordinal));
-        if (button is not null)
-            button.Click();
-    }
-
     [TestMethod]
     public void OverrideNameButton_Visible_When_RealTenant()
     {
@@ -228,7 +211,6 @@ public class GradeLevelWizardTenancyTests : BunitContext
 
         // Act: render the wizard
         var cut = RenderWizard();
-        ConfirmActiveTerm(cut);
 
         // The Override name button sits in the grade section's coded-value-actions
         // div, alongside the New grade button. It should render unconditionally
@@ -255,7 +237,6 @@ public class GradeLevelWizardTenancyTests : BunitContext
 
         // Act: render the wizard
         var cut = RenderWizard();
-        ConfirmActiveTerm(cut);
 
         // Assert: for a default tenant the wizard (and its New grade / Override
         // name buttons) is hidden and the tenant prompt is shown instead of
@@ -271,7 +252,6 @@ public class GradeLevelWizardTenancyTests : BunitContext
         // Arrange: start with a real tenant, render, verify override visible
         var authProvider = RegisterServices(realTenant: true);
         var cut = RenderWizard();
-        ConfirmActiveTerm(cut);
         HasOverrideButton(cut).Should().BeTrue("Override visible with real tenant");
 
         // Act: switch to the default tenant (simulates the dev tenant switcher
@@ -294,7 +274,6 @@ public class GradeLevelWizardTenancyTests : BunitContext
         // exercise the default -> real transition below.
         var authProvider = RegisterServices(realTenant: true);
         var cut = RenderWizard();
-        ConfirmActiveTerm(cut);
         HasOverrideButton(cut).Should().BeTrue("Override visible with real tenant");
 
         // Switch to the default tenant: override must hide.
@@ -333,7 +312,6 @@ public class GradeLevelWizardTenancyTests : BunitContext
 
         // Act: render with the real tenant
         var cut = RenderWizard();
-        ConfirmActiveTerm(cut);
 
         // Debug: verify tenant context at initial render
         var authState = authProvider.GetAuthenticationStateAsync().Result;

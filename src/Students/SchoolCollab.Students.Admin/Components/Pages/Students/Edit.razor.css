@@ -1,7 +1,7 @@
+/* Page layout. The form fields come from the shared <StudentFormFields>
+   component (Components/Students/), so this stylesheet only carries the
+   page chrome rules. */
 .page-container { height: 100%; gap: 0; }
 .title-row { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-top: 0.25rem; }
 .page-title { margin: 0; }
-.action-bar { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-bottom: 0.75rem; }
 .spinner-container { flex: 1; display: flex; align-items: center; justify-content: center; }
-.form-container { max-width: 600px; }
-.form-field { margin-bottom: 1rem; }

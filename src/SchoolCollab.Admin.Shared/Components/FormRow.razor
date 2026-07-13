@@ -1,0 +1,88 @@
+@*
+    Shared form-row primitive — the canonical, repo-wide building block for
+    any form (create / edit / wizard step / dialog) that needs a horizontal
+    label + input row.
+
+    THE PATTERN (School-Collab form layout convention, v4.14.2):
+
+      ┌─ .form-row (display: flex, align-items: center, gap: 12px) ─────┐
+      │ ┌─ .form-row-label (width: 180px, flex-shrink: 0) ──┐ ┌─ input ┐ │
+      │ │ "Contact email *" (left, equal-width every row)    │ │  cell  │ │
+      │ └────────────────────────────────────────────────────┘ └────────┘ │
+      └──────────────────────────────────────────────────────────────────┘
+        all labels: 180px      all input cells start at the SAME x
+                               (label width + gap is a constant)
+
+    Why this shape:
+      - The LABEL column is the CONSTANT (fixed 180px on every row), so
+        every label in a form has identical width and reads as a single
+        uniform block down the form.
+      - The INPUT column is the VARIABLE (flex:1; min-width:0), so every
+        input cell takes the remaining width and every input's left edge
+        lands on the same vertical axis — inputs align down the form even
+        when their individual intrinsic widths differ.
+      - align-items: center keeps the label text on the same line as the
+        input control; a wrapping label still centers its first line.
+      - Plain <div> wrappers (not FluentStack) are intentional: they are
+        the lightest layout primitive, keep CSS-isolation scope clean
+        (the wrapper divs are authored here, so they receive THIS
+        component's scope attribute and the rules below actually match).
+
+    Usage (in a form component):
+        <EditForm ...>
+            <FormRow Label="Student number" Required For="studentFormNumber">
+                <FluentTextField Id="studentFormNumber" @bind-Value="..." />
+            </FormRow>
+            <FormRow Label="Dates" AlignTop For="periodStart">
+                <FluentDatePicker Id="periodStart" @bind-Value="..." />
+                <FluentDatePicker Id="periodEnd"   @bind-Value="..." />
+            </FormRow>
+        </EditForm>
+
+    Parameters:
+      - Label       (required) the visible label text.
+      - Required    optional, renders a red asterisk after the label.
+      - For         optional, the DOM id of the input the <label> points to.
+                    When null the <label> has no `for` attribute (still
+                    rendered, just not clickable-to-focus).
+      - LabelTip    optional, surfaces as a native title= tooltip on the label.
+      - AlignTop    optional, top-aligns the row instead of centering. Use
+                    for multi-input rows (e.g. two date pickers stacked in
+                    the input cell) where centering the label against a
+                    tall cell looks off. Default false (center, the modern
+                    default for single-input rows).
+      - ChildContent (required) the input(s) for the row.
+*@
+
+<div class="form-row @(AlignTop ? "form-row--align-top" : null)">
+    <div class="form-row-label">
+        <label for="@For" title="@LabelTip">@Label @if (Required) { <span class="form-row-required" aria-hidden="true">*</span> }</label>
+    </div>
+    <div class="form-row-input">
+        @ChildContent
+    </div>
+</div>
+
+@code {
+    /// <summary>Visible label text. Required.</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = default!;
+
+    /// <summary>When true, renders a red asterisk after the label.</summary>
+    [Parameter] public bool Required { get; set; }
+
+    /// <summary>Optional DOM id of the input the <c>&lt;label&gt;</c> targets.</summary>
+    [Parameter] public string? For { get; set; }
+
+    /// <summary>Optional native tooltip on the label.</summary>
+    [Parameter] public string? LabelTip { get; set; }
+
+    /// <summary>
+    /// Top-align the row instead of centering. Use for multi-input rows
+    /// (e.g. two date pickers side-by-side) where centering the label
+    /// against a tall input cell looks off. Default false.
+    /// </summary>
+    [Parameter] public bool AlignTop { get; set; }
+
+    /// <summary>The input(s) for the row. Required.</summary>
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+}

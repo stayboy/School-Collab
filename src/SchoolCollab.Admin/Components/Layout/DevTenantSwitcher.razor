@@ -1,4 +1,6 @@
 @using Microsoft.Extensions.Configuration
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Auth
 @inject TenantsApiClient TenantsApi
@@ -19,9 +21,21 @@
     }
     else if (_tenants.Length == 0)
     {
-        <span class="dev-tenant-empty"
-              title="No tenants seeded yet. Run the migration service to seed 'Hydeson School' and 'Little Legends'.">
-            No tenants
+        @* Empty state: either no tenants are seeded, or the Settings API
+           was unreachable. Show a diagnostic so the user can tell the
+           two apart and act (run migrations / start the AppHost). *@
+        var message = _error ?? "No tenants seeded yet. Run the migration service to seed 'Hydeson School' and 'Little Legends'.";
+        <span class="dev-tenant-empty @(string.IsNullOrEmpty(_error) ? string.Empty : "dev-tenant-error")"
+              title="@message">
+            @if (string.IsNullOrEmpty(_error))
+            {
+                <text>No tenants</text>
+            }
+            else
+            {
+                <FluentIcon Value="@(new Icons.Regular.Size16.Warning())" />
+                <text> Tenants API</text>
+            }
         </span>
     }
     else
@@ -47,6 +61,14 @@
     private TenantDto[]? _tenants;
     private TenantOption[] _options = [];
     private TenantOption? _selectedOption;
+    private string? _error;
+
+    // Bound on the Settings API round-trip. Without this, a missing or
+    // unreachable Settings API (e.g. the AppHost's infrastructure failed to
+    // start, or the Admin is running standalone without the backend) leaves
+    // the switcher stuck on "Loading tenants…" indefinitely and the user
+    // can't tell whether the seed is missing or the backend is down.
+    private static readonly TimeSpan TenantsLoadTimeout = TimeSpan.FromSeconds(8);
 
     protected override async Task OnInitializedAsync()
     {
@@ -59,12 +81,18 @@
 
         try
         {
-            _tenants = await TenantsApi.ListTenantsAsync();
+            using var cts = new CancellationTokenSource(TenantsLoadTimeout);
+            _tenants = await TenantsApi.ListTenantsAsync(cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            _tenants = [];
+            _error = "Settings API did not respond in time. Start the AppHost (it brings up the Settings API and the migration service).";
         }
         catch (Exception ex)
         {
-            Logger.LogWarning(ex, "Failed to load tenants for dev switcher");
             _tenants = [];
+            _error = $"Settings API unreachable: {ex.Message}. Start the AppHost or the Settings API directly.";
         }
 
         // The "(default tenant)" option (empty value) clears the selection so the

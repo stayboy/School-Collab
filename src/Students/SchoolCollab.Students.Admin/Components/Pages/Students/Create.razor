@@ -18,44 +18,21 @@
 
             <TenantGate>
                 <ChildContent>
-                <EditForm Model="_model" OnValidSubmit="OnSaveAsync" class="form-container">
-                <DataAnnotationsValidator />
-                <ValidationSummary />
-
-                <FluentTextField Label="Student Number"
-                                 @bind-Value="_model.StudentNumber"
-                                 Required class="full-width" />
-                <FluentTextField Label="First Name"
-                                 @bind-Value="_model.FirstName"
-                                 Required class="full-width" />
-                <FluentTextField Label="Last Name"
-                                 @bind-Value="_model.LastName"
-                                 Required class="full-width" />
-                <FluentTextField Label="Date of Birth (YYYY-MM-DD)"
-                                 @bind-Value="_dobString"
-                                 class="full-width" />
-                <FluentTextField Label="Contact Email"
-                                 @bind-Value="_model.ContactEmail"
-                                 Required class="full-width" />
-                <FluentTextField Label="Contact Phone"
-                                 @bind-Value="_model.ContactPhone"
-                                 class="full-width" />
-                <FluentTextField Label="Gender Coded Value ID (optional)"
-                                 @bind-Value="_genderIdString"
-                                 class="full-width" />
-
-                @if (!string.IsNullOrEmpty(_error))
-                {
-                    <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
-                }
-
-                <div class="action-bar">
-                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
-                        @(_saving ? "Saving…" : "Create Student")
-                    </FluentButton>
-                    <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo("/students"))">Cancel</FluentButton>
-                </div>
-                </EditForm>
+                @* Field values live on _model directly now — the shared
+                   <StudentFormFields> binds to Model.StudentNumber / FirstName
+                   / LastName / DateOfBirth (DateOnly?) / GenderCodedValueId
+                   (Guid?) / ContactEmail / ContactPhone, and DataAnnotations
+                   validation runs on the model via <DataAnnotationsValidator />. *@
+                <StudentFormFields Model="_model"
+                                   ErrorMessage="@_error"
+                                   OnValidSubmit="OnSaveAsync">
+                    <Actions>
+                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                            @(_saving ? "Saving…" : "Create Student")
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo("/students"))">Cancel</FluentButton>
+                    </Actions>
+                </StudentFormFields>
             </ChildContent>
             <Fallback>
                 <FluentMessageBar Intent="MessageIntent.Warning">
@@ -71,9 +48,7 @@
 </ErrorBoundary>
 
 @code {
-    private readonly FormModel _model = new();
-    private string? _dobString;
-    private string? _genderIdString;
+    private readonly StudentFormModel _model = new();
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _saveCts;
@@ -93,30 +68,6 @@
 
         if (!_isRealTenant) return;
 
-        DateOnly? dateOfBirth = null;
-        if (!string.IsNullOrWhiteSpace(_dobString))
-        {
-            if (!DateOnly.TryParse(_dobString, out var dob))
-            {
-                _error = "Invalid date format for Date of Birth. Use YYYY-MM-DD.";
-                _saving = false;
-                return;
-            }
-            dateOfBirth = dob;
-        }
-
-        Guid? genderCodedValueId = null;
-        if (!string.IsNullOrWhiteSpace(_genderIdString))
-        {
-            if (!Guid.TryParse(_genderIdString, out var genderId))
-            {
-                _error = "Invalid GUID format for Gender Coded Value ID.";
-                _saving = false;
-                return;
-            }
-            genderCodedValueId = genderId;
-        }
-
         _saveCts?.Cancel();
         _saveCts?.Dispose();
         _saveCts = new CancellationTokenSource();
@@ -129,8 +80,8 @@
                 _model.StudentNumber!,
                 _model.FirstName!,
                 _model.LastName!,
-                dateOfBirth,
-                genderCodedValueId,
+                _model.DateOfBirth,
+                _model.GenderCodedValueId,
                 _model.ContactEmail!,
                 _model.ContactPhone);
 
@@ -156,22 +107,5 @@
         _saveCts?.Cancel();
         _saveCts?.Dispose();
         _saveCts = null;
-    }
-
-    private sealed class FormModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? StudentNumber { get; set; }
-
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? FirstName { get; set; }
-
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? LastName { get; set; }
-
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? ContactEmail { get; set; }
-
-        public string? ContactPhone { get; set; }
     }
 }

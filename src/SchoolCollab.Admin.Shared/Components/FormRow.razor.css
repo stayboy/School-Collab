@@ -1,0 +1,82 @@
+/* ── FormRow (shared form-row primitive) ──
+   School-Collab form layout convention (FluentUI Blazor v4.14.2).
+   See FormRow.razor for the full pattern description.
+
+   The .form-row wrapper is a plain <div> with display:flex, gap:12px,
+   and align-items:center. The label cell (.form-row-label) is a FIXED
+   180px column with flex-shrink:0 so every label in every row has the
+   same width; the input cell (.form-row-input) takes the remaining
+   width (flex:1; min-width:0) so every input cell starts at the same
+   x — all input left edges land on the same vertical axis.
+
+   Vertical alignment is centered by default; .form-row--align-top
+   top-aligns for multi-input rows where centering looks off. */
+
+/* ── Row wrapper ── */
+.form-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    /* No min-height here — the input cell's tallest child defines the
+       row height, and the label cell stretches to match (align-items
+       center positions the label text within that height). */
+}
+
+.form-row--align-top {
+    align-items: start;
+}
+
+/* ── Label cell (LEFT column — the CONSTANT) ──
+   width: 180px is the canonical repo-wide label width. It fits the
+   longest label in the admin forms ("Contact email", "Date of birth",
+   "Student number") without wrapping. flex-shrink:0 keeps the column
+   at exactly 180px regardless of label text length, so the label
+   column reads as a single uniform block down the form. */
+.form-row-label {
+    width: 180px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    min-height: 32px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    line-height: 1.3;
+    color: var(--neutral-foreground-hint);
+    text-transform: capitalize;
+    letter-spacing: 0.04em;
+    word-break: break-word;
+    hyphens: auto;
+}
+
+.form-row--align-top .form-row-label {
+    /* Top-align the label text against multi-input cells so the label's
+       first line sits at the top of the row rather than floating in
+       the vertical middle. */
+    padding-top: 0.4rem;
+    align-items: start;
+}
+
+/* Red asterisk that follows the field name on required rows. Matches
+   FluentUI's own required-marker color so the red is consistent with
+   any <FluentTextField Required> the user might see elsewhere. */
+.form-row-required {
+    color: #c50f1f;
+    font-weight: 600;
+    margin-left: 2px;
+}
+
+/* ── Input cell (RIGHT column — the VARIABLE) ──
+   flex:1 takes ALL remaining width after the 180px label; min-width:0
+   is the standard flex/grid gotcha fix that lets children shrink below
+   their intrinsic content width (so a long email value can scroll
+   instead of pushing the column wider). */
+.form-row-input {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Allow the input cell to wrap to a new line on very narrow
+       viewports (e.g. <480px) instead of clipping. */
+    flex-wrap: wrap;
+}
