@@ -14,6 +14,7 @@ public static class FluentIcons
     public static readonly Icon Bot = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Bot();
     public static readonly Icon Add = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Add();
     public static readonly Icon PersonAdd = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.PersonAdd();
+    public static readonly Icon Person = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Person();
     public static readonly Icon SlideText = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.SlideText();
     public static readonly Icon Book = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Book();
     public static readonly Icon Calendar = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Calendar();
@@ -24,4 +25,5 @@ public static class FluentIcons
     public static readonly Icon Settings = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Settings();
     public static readonly Icon Open = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Open();
     public static readonly Icon Dismiss = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Dismiss();
+    public static readonly Icon Edit = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Edit();
 }

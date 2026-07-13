@@ -124,3 +124,11 @@ public sealed class ContactNotFoundException : Exception
     public ContactNotFoundException(Guid id) : base($"Contact with ID '{id}' was not found.")
         => ContactId = id;
 }
+
+public sealed class TeacherNotFoundException : Exception
+{
+    public Guid TeacherId { get; }
+
+    public TeacherNotFoundException(Guid id) : base($"Teacher with ID '{id}' was not found.")
+        => TeacherId = id;
+}

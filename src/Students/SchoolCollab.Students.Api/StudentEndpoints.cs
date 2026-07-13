@@ -44,6 +44,15 @@ public static class StudentEndpoints
         contactsGroup.MapContactRoutes();
         contactsGroup.MapSubscriptionRoutes();
 
+        // Phase 8 (spec §4.12): teacher onboarding + subject/grade links.
+        // G2: admin/teacher-only (RequireAuthorization inherited from the group).
+        var teachersGroup = app.MapGroup("/teachers");
+        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        {
+            teachersGroup.RequireAuthorization();
+        }
+        teachersGroup.MapTeacherRoutes();
+
         return app;
     }
 }
