@@ -1,5 +1,6 @@
 @page "/students/{id:guid}"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
@@ -30,70 +31,76 @@
             }
             else
             {
-                <div class="form-container">
-                    <div class="form-field">
-                        <FluentTextField Value="@_student.StudentNumber" ReadOnly Label="Student Number" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField Value="@_student.FirstName" ReadOnly Label="First Name" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField Value="@_student.LastName" ReadOnly Label="Last Name" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField Value="@(_student.DateOfBirth?.ToString() ?? "—")" ReadOnly Label="Date of Birth" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField Value="@_student.ContactEmail" ReadOnly Label="Contact Email" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField Value="@(_student.ContactPhone ?? "—")" ReadOnly Label="Contact Phone" />
-                    </div>
-                    <div class="form-field">
-                        @if (_student.IsDeleted)
+                <FluentTabs>
+                    <FluentTab Label="Overview">
+                        <div class="form-container">
+                            <div class="form-field">
+                                <FluentTextField Value="@_student.StudentNumber" ReadOnly Label="Student Number" />
+                            </div>
+                            <div class="form-field">
+                                <FluentTextField Value="@_student.FirstName" ReadOnly Label="First Name" />
+                            </div>
+                            <div class="form-field">
+                                <FluentTextField Value="@_student.LastName" ReadOnly Label="Last Name" />
+                            </div>
+                            <div class="form-field">
+                                <FluentTextField Value="@(_student.DateOfBirth?.ToString() ?? "—")" ReadOnly Label="Date of Birth" />
+                            </div>
+                            <div class="form-field">
+                                @if (_student.IsDeleted)
+                                {
+                                    <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+                                }
+                                else
+                                {
+                                    <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                                }
+                            </div>
+                            <div class="form-field">
+                                <FluentTextField Value="@_student.CreatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Created At" />
+                            </div>
+                            <div class="form-field">
+                                <FluentTextField Value="@_student.UpdatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Updated At" />
+                            </div>
+                        </div>
+
+                        <h3>Enrollments</h3>
+                        @if (_enrollments is null)
                         {
-                            <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+                            <div class="spinner-container">
+                                <FluentProgressRing />
+                            </div>
+                        }
+                        else if (_enrollments.Length == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info">No enrollments yet.</FluentMessageBar>
                         }
                         else
                         {
-                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                            <FluentDataGrid Items="@_enrollments.AsQueryable()"
+                                            TGridItem="StudentEnrollmentDto"
+                                            MultiLine="true">
+                                <PropertyColumn Property="@(e => e.PeriodId)" Title="Period ID" />
+                                <PropertyColumn Property="@(e => e.GradeLevelId)" Title="Grade Level ID" />
+                                <TemplateColumn Title="Enrolled On">
+                                    @context.EnrolledOn.ToString("d")
+                                </TemplateColumn>
+                                <TemplateColumn Title="Exit Date">
+                                    @(context.ExitDate?.ToString("d") ?? "—")
+                                </TemplateColumn>
+                                <PropertyColumn Property="@(e => e.Status)" />
+                            </FluentDataGrid>
                         }
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField Value="@_student.CreatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Created At" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField Value="@_student.UpdatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Updated At" />
-                    </div>
-                </div>
+                    </FluentTab>
 
-                <h3>Enrollments</h3>
-                @if (_enrollments is null)
-                {
-                    <div class="spinner-container">
-                        <FluentProgressRing />
-                    </div>
-                }
-                else if (_enrollments.Length == 0)
-                {
-                    <FluentMessageBar Intent="MessageIntent.Info">No enrollments yet.</FluentMessageBar>
-                }
-                else
-                {
-                    <FluentDataGrid Items="@_enrollments.AsQueryable()"
-                                    TGridItem="StudentEnrollmentDto"
-                                    MultiLine="true">
-                        <PropertyColumn Property="@(e => e.PeriodId)" Title="Period ID" />
-                        <PropertyColumn Property="@(e => e.GradeLevelId)" Title="Grade Level ID" />
-                        <TemplateColumn Title="Enrolled On">
-                            @context.EnrolledOn.ToString("d")
-                        </TemplateColumn>
-                        <TemplateColumn Title="Exit Date">
-                            @(context.ExitDate?.ToString("d") ?? "—")
-                        </TemplateColumn>
-                        <PropertyColumn Property="@(e => e.Status)" />
-                    </FluentDataGrid>
-                }
+                    <FluentTab Label="Guardians">
+                        <GuardiansTab StudentId="Id" />
+                    </FluentTab>
+
+                    <FluentTab Label="Contacts">
+                        <ContactsEditor OwnerType="ContactOwnerType.Student" OwnerId="@Id" />
+                    </FluentTab>
+                </FluentTabs>
             }
                 </ChildContent>
                 <Fallback>

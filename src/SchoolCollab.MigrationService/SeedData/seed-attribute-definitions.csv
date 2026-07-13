@@ -2,3 +2,5 @@ ParentCode,Key,DisplayName,DataType,SourceCode,IsRequired,AllowMultiple,MinLengt
 AI-MODELS,weight,Weight,2,,False,False,,,
 AI-MODELS,ollamaModelName,Ollama Model Name,0,,False,False,,,
 AI-MODELS,openrouterModelName,OpenRouter Model Name,0,,False,False,,,
+COMMUNITYS,City,City,7,CITIES,False,False,,,
+CITIES,Country,Country,7,COUNTRYS,False,False,,,

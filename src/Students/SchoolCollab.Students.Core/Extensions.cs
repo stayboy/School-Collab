@@ -36,6 +36,8 @@ public static class Extensions
         services.AddScoped<IStudentEnrollmentRepository, StudentEnrollmentRepository>();
         services.AddScoped<IGradeSubjectAssignmentRepository, GradeSubjectAssignmentRepository>();
         services.AddScoped<IStudentSubjectAssignmentRepository, StudentSubjectAssignmentRepository>();
+        services.AddScoped<IGuardianRepository, GuardianRepository>();
+        services.AddScoped<IContactRepository, ContactRepository>();
 
         services.AddHybridCache(options =>
         {

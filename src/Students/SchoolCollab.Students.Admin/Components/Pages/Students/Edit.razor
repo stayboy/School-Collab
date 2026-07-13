@@ -98,8 +98,6 @@
                 _model.FirstName = _student.FirstName;
                 _model.LastName = _student.LastName;
                 _model.DateOfBirth = _student.DateOfBirth;
-                _model.ContactEmail = _student.ContactEmail;
-                _model.ContactPhone = _student.ContactPhone;
                 _model.GenderCodedValueId = _student.GenderCodedValueId;
                 Logger.LogInformation("Loaded student {StudentNumber} for edit", _student.StudentNumber);
             }
@@ -124,9 +122,7 @@
 
         var req = new UpdateStudentRequest(
             _model.FirstName!, _model.LastName!,
-            _model.DateOfBirth, _model.GenderCodedValueId,
-            _model.ContactEmail!,
-            string.IsNullOrWhiteSpace(_model.ContactPhone) ? null : _model.ContactPhone);
+            _model.DateOfBirth, _model.GenderCodedValueId);
 
         _saving = true;
         try

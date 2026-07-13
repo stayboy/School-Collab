@@ -1,0 +1,305 @@
+@* Shared multi-channel contacts editor (spec §11). Owns add / remove /
+   verify / set-primary / subscribe for a single contact owner (a Student or a
+   Guardian). Reused by the student ContactsTab, the GuardianSetupWizard, and
+   the GradeLevelWizard guardian step — the same way <StudentFormFields>
+   centralises the student field set.
+
+   Usage:
+     <ContactsEditor OwnerType="ContactOwnerType.Student" OwnerId="@studentId" />
+     <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@guardianId" />
+
+   The component loads the owner's contacts on mount (and whenever OwnerId
+   changes) and owns all mutations against StudentsApiClient, so parents only
+   supply the owner identity. *@
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject ILogger<ContactsEditor> Logger
+
+<div class="contacts-editor">
+    @if (_loading)
+    {
+        <div class="contacts-editor-loading">
+            <FluentProgressRing />
+        </div>
+    }
+    else
+    {
+        <div class="contacts-editor-add">
+            <FluentSelect TOption="ContactChannel"
+                          Items="_channels"
+                          @bind-SelectedOption="_newChannel"
+                          OptionText="@(c => c.ToString())"
+                          OptionValue="@(c => c.ToString())"
+                          Placeholder="Channel"
+                          class="contacts-channel" />
+            <FluentTextField @bind-Value="_newValue"
+                              Placeholder="Email / phone / WhatsApp…"
+                              class="contacts-value" />
+            <FluentTextField @bind-Value="_newLabel"
+                              Placeholder="Label (optional)"
+                              class="contacts-label" />
+            <FluentCheckbox @bind-Value="_newIsPrimary" class="contacts-primary">
+                Primary
+            </FluentCheckbox>
+            <FluentButton Appearance="Appearance.Accent"
+                          IconStart="@(new Icons.Regular.Size20.Add())"
+                          OnClick="AddAsync"
+                          Disabled="@(_adding || string.IsNullOrWhiteSpace(_newValue))">
+                @(_adding ? "Adding…" : "Add")
+            </FluentButton>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" class="contacts-error">@_error</FluentMessageBar>
+        }
+
+        @if (_contacts.Count == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info" class="contacts-empty">No contacts yet.</FluentMessageBar>
+        }
+        else
+        {
+            <ul class="contacts-list">
+                @foreach (var c in _contacts)
+                {
+                    <li class="contact-item">
+                        <span class="contact-channel" title="@c.Channel">@ChannelGlyph(c.Channel) @c.Channel</span>
+                        <span class="contact-value">@c.Value</span>
+                        @if (!string.IsNullOrWhiteSpace(c.Label))
+                        {
+                            <span class="contact-label">@c.Label</span>
+                        }
+                        @if (c.IsPrimary)
+                        {
+                            <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Primary</FluentBadge>
+                        }
+                        @if (c.IsVerified)
+                        {
+                            <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Verified</FluentBadge>
+                        }
+                        else
+                        {
+                            <FluentBadge Appearance="Appearance.Neutral" class="contact-badge">Unverified</FluentBadge>
+                        }
+
+                        @if (ShowSubscription)
+                        {
+                            <FluentCheckbox Value="@_subscribed.Contains(c.Id)"
+                                            ValueChanged="@(v => ToggleSubscribeAsync(c.Id, v))"
+                                            class="contact-subscribe">
+                                Subscribed
+                            </FluentCheckbox>
+                        }
+
+                        <span class="contact-actions">
+                            @if (!c.IsVerified)
+                            {
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              Title="Mark verified"
+                                              OnClick="@(() => VerifyAsync(c.Id))">
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.Checkmark)" />
+                                </FluentButton>
+                            }
+                            @if (!c.IsPrimary)
+                            {
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              Title="Set as primary"
+                                              OnClick="@(() => SetPrimaryAsync(c.Id))">
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.Star)" />
+                                </FluentButton>
+                            }
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          Title="Remove contact"
+                                          OnClick="@(() => RemoveAsync(c.Id))">
+                                <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
+                            </FluentButton>
+                        </span>
+                    </li>
+                }
+            </ul>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The contact owner type (Student or Guardian).</summary>
+    [Parameter, EditorRequired] public ContactOwnerType OwnerType { get; set; }
+
+    /// <summary>The owner's id.</summary>
+    [Parameter, EditorRequired] public Guid OwnerId { get; set; }
+
+    /// <summary>When true (default), shows the subscribe/unsubscribe toggle.</summary>
+    [Parameter] public bool ShowSubscription { get; set; } = true;
+
+    private static readonly ContactChannel[] _channels = (ContactChannel[])Enum.GetValues(typeof(ContactChannel));
+
+    private List<ContactDto> _contacts = new();
+    private HashSet<Guid> _subscribed = new();
+    private bool _loading;
+    private bool _adding;
+    private string? _error;
+    private Guid? _loadedOwnerId;
+
+    // New-contact form state.
+    private ContactChannel _newChannel = ContactChannel.Email;
+    private string _newValue = string.Empty;
+    private string _newLabel = string.Empty;
+    private bool _newIsPrimary;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Reload whenever the owner changes (e.g. navigating between students
+        // that reuse the same component instance).
+        if (_loadedOwnerId != OwnerId)
+        {
+            _loadedOwnerId = OwnerId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null;
+        try
+        {
+            var contacts = await Api.ListContactsAsync(OwnerType, OwnerId);
+            _contacts = contacts?.ToList() ?? new List<ContactDto>();
+
+            if (ShowSubscription)
+            {
+                var subscribed = await Api.ListSubscribedContactsAsync(OwnerType, OwnerId);
+                _subscribed = new HashSet<Guid>(subscribed?.Select(s => s.Id) ?? []);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load contacts for {OwnerType} {OwnerId}", OwnerType, OwnerId);
+            _error = ex.Message;
+            _contacts = new List<ContactDto>();
+        }
+        finally
+        {
+            _loading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newValue)) return;
+
+        _adding = true;
+        _error = null;
+        try
+        {
+            await Api.AddContactAsync(new AddContactRequest(
+                OwnerType, OwnerId, _newChannel, _newValue.Trim(),
+                string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
+                _newIsPrimary));
+
+            _newValue = string.Empty;
+            _newLabel = string.Empty;
+            _newIsPrimary = false;
+            _newChannel = ContactChannel.Email;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to add contact for {OwnerType} {OwnerId}", OwnerType, OwnerId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _adding = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RemoveAsync(Guid id)
+    {
+        _error = null;
+        try
+        {
+            await Api.DeleteContactAsync(id);
+            _subscribed.Remove(id);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to remove contact {ContactId}", id);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task VerifyAsync(Guid id)
+    {
+        _error = null;
+        try
+        {
+            await Api.VerifyContactAsync(id);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to verify contact {ContactId}", id);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SetPrimaryAsync(Guid id)
+    {
+        _error = null;
+        try
+        {
+            await Api.SetPrimaryContactAsync(id);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to set primary contact {ContactId}", id);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ToggleSubscribeAsync(Guid id, bool subscribe)
+    {
+        _error = null;
+        try
+        {
+            if (subscribe)
+                await Api.SubscribeAsync(id);
+            else
+                await Api.UnsubscribeAsync(id);
+
+            if (subscribe)
+                _subscribed.Add(id);
+            else
+                _subscribed.Remove(id);
+
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to toggle subscription for contact {ContactId}", id);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string ChannelGlyph(ContactChannel channel) => channel switch
+    {
+        ContactChannel.Email => "✉",
+        ContactChannel.SMS => "📱",
+        ContactChannel.WhatsApp => "💬",
+        _ => "•"
+    };
+}

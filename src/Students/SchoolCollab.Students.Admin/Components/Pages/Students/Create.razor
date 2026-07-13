@@ -21,7 +21,7 @@
                 @* Field values live on _model directly now — the shared
                    <StudentFormFields> binds to Model.StudentNumber / FirstName
                    / LastName / DateOfBirth (DateOnly?) / GenderCodedValueId
-                   (Guid?) / ContactEmail / ContactPhone, and DataAnnotations
+                   (Guid?), and DataAnnotations
                    validation runs on the model via <DataAnnotationsValidator />. *@
                 <StudentFormFields Model="_model"
                                    ErrorMessage="@_error"
@@ -81,9 +81,7 @@
                 _model.FirstName!,
                 _model.LastName!,
                 _model.DateOfBirth,
-                _model.GenderCodedValueId,
-                _model.ContactEmail!,
-                _model.ContactPhone);
+                _model.GenderCodedValueId);
 
             await Api.CreateStudentAsync(request, ct);
             Nav.NavigateTo("/students");

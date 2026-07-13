@@ -16,8 +16,6 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public string LastName { get; private set; } = default!;
     public DateOnly? DateOfBirth { get; private set; }
     public Guid? GenderCodedValueId { get; private set; }
-    public string ContactEmail { get; private set; } = default!;
-    public string? ContactPhone { get; private set; }
 
     // Multi-tenancy: each student belongs to a tenant (e.g., school)
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
@@ -35,9 +33,7 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         string firstName,
         string lastName,
         DateOnly? dateOfBirth,
-        Guid? genderCodedValueId,
-        string contactEmail,
-        string? contactPhone)
+        Guid? genderCodedValueId)
     {
         var now = DateTimeOffset.UtcNow;
         var student = new Student
@@ -48,8 +44,6 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
             LastName = lastName.Trim(),
             DateOfBirth = dateOfBirth,
             GenderCodedValueId = genderCodedValueId,
-            ContactEmail = contactEmail.Trim(),
-            ContactPhone = contactPhone?.Trim(),
             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             IsDeleted = false,
             CreatedAt = now,
@@ -64,16 +58,12 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         string firstName,
         string lastName,
         DateOnly? dateOfBirth,
-        Guid? genderCodedValueId,
-        string contactEmail,
-        string? contactPhone)
+        Guid? genderCodedValueId)
     {
         FirstName = firstName.Trim();
         LastName = lastName.Trim();
         DateOfBirth = dateOfBirth;
         GenderCodedValueId = genderCodedValueId;
-        ContactEmail = contactEmail.Trim();
-        ContactPhone = contactPhone?.Trim();
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new StudentUpdatedEvent(Id, StudentNumber));
     }

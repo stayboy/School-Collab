@@ -51,6 +51,12 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Property(x => x.CreatedByTeacherId)
             .IsRequired();
 
+        builder.Property(x => x.MandatoryReview)
+            .IsRequired()
+            .HasDefaultValue(true);
+
+        builder.Property(x => x.PublishedAt);
+
 
         builder.HasIndex(x => x.SubjectId)
             .HasDatabaseName("ix_assignments_subject_id");

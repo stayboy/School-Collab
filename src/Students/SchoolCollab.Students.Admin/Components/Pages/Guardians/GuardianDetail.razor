@@ -1,0 +1,370 @@
+@page "/students/guardians/{Id:guid}"
+@page "/students/guardians/{Id:guid}/edit"
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject NavigationManager Nav
+@inject ILogger<GuardianDetail> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<PageTitle>Guardian — @(_guardian is null ? "Loading…" : $"{_guardian.FirstName} {_guardian.LastName}")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+                @if (_guardian is null)
+                {
+                    <div class="spinner-container"><FluentProgressRing /></div>
+                }
+                else
+                {
+                    <FluentStack Orientation="Orientation.Vertical" class="page-container">
+                        <div class="title-row">
+                            <h1 class="page-title">@_guardian.FirstName @_guardian.LastName</h1>
+                            @if (!_editing)
+                            {
+                                <FluentButton Appearance="Appearance.Outline" OnClick="StartEdit">Edit</FluentButton>
+                            }
+                        </div>
+
+                        @* ── Profile (view / edit) ── *@
+                        @if (_editing)
+                        {
+                            <FluentCard class="detail-card">
+                                <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                                    <FormRow Label="Title">
+                                        <CodedValueDropdown Parent="CodedValueParent.Salutations" @bind-SelectedId="_editTitleId" />
+                                    </FormRow>
+                                    <FormRow Label="First name" Required>
+                                        <FluentTextField @bind-Value="_editFirstName" Required />
+                                    </FormRow>
+                                    <FormRow Label="Last name" Required>
+                                        <FluentTextField @bind-Value="_editLastName" Required />
+                                    </FormRow>
+                                    <FormRow Label="Display name">
+                                        <FluentTextField @bind-Value="_editDisplayName" />
+                                    </FormRow>
+                                    <FormRow Label="Address">
+                                        <FluentTextField @bind-Value="_editAddress" />
+                                    </FormRow>
+                                    <FormRow Label="Community">
+                                        <CodedValueDropdown Parent="CodedValueParent.Communities" @bind-SelectedId="_editCommunityId" />
+                                    </FormRow>
+                                </FluentStack>
+                                <div class="form-actions">
+                                    <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
+                                        <FluentButton Appearance="Appearance.Accent" OnClick="SaveEdit" Disabled="@_saving">@(_saving ? "Saving…" : "Save")</FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline" OnClick="CancelEdit">Cancel</FluentButton>
+                                    </FluentStack>
+                                </div>
+                                @if (!string.IsNullOrEmpty(_error))
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                                }
+                            </FluentCard>
+                        }
+                        else
+                        {
+                            <FluentCard class="detail-card">
+                                <div class="profile-grid">
+                                    @if (!string.IsNullOrWhiteSpace(_titleName)) { <div class="profile-row"><span class="profile-label">Title</span><span class="profile-value">@_titleName</span></div> }
+                                    <div class="profile-row"><span class="profile-label">Name</span><span class="profile-value">@_guardian.FirstName @_guardian.LastName</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(_guardian.DisplayName)) { <div class="profile-row"><span class="profile-label">Display name</span><span class="profile-value">@_guardian.DisplayName</span></div> }
+                                    @if (!string.IsNullOrWhiteSpace(_guardian.Address)) { <div class="profile-row"><span class="profile-label">Address</span><span class="profile-value">@_guardian.Address</span></div> }
+                                    @if (!string.IsNullOrWhiteSpace(_communityName)) { <div class="profile-row"><span class="profile-label">Community</span><span class="profile-value">@_communityName</span></div> }
+                                </div>
+                            </FluentCard>
+                        }
+
+                        @* ── Contacts ── *@
+                        <h3>Contacts</h3>
+                        <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@_guardian.Id" />
+
+                        @* ── Linked students ── *@
+                        <h3>Wards</h3>
+                        @if (_wards is null)
+                        {
+                            <div class="spinner-container"><FluentProgressRing /></div>
+                        }
+                        else if (_wards.Length == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info">No wards linked yet.</FluentMessageBar>
+                        }
+                        else
+                        {
+                            <ul class="assigned-list">
+                                @foreach (var w in _wards)
+                                {
+                                    <li>
+                                        <span><strong>@w.StudentNumber</strong> — @w.FirstName @w.LastName</span>
+                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => UnlinkAsync(w.Id))">Unlink</FluentButton>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
+                        <FluentCard class="detail-card">
+                            <div class="wizard-section-header">
+                                <div>
+                                    <h4>Link a ward</h4>
+                                    <p class="wizard-hint">Pick a student, set the role and relationship.</p>
+                                </div>
+                            </div>
+                            <div class="link-ward-row">
+                                <FluentSelect TOption="SchoolCollab.Students.Admin.Services.StudentDto" Items="_availableStudents" @bind-SelectedOption="_newWard" OptionText="@(s => $"{s.StudentNumber} — {s.FirstName} {s.LastName}")" OptionValue="@(s => s.Id.ToString())" Placeholder="Student" class="link-ward-student" />
+                                <FluentSelect TOption="GuardianRole" Items="_roles" @bind-SelectedOption="_newWardRole" OptionText="@(r => r.ToString())" OptionValue="@(r => r.ToString())" Placeholder="Role" class="link-ward-role" />
+                                <CodedValueDropdown Parent="CodedValueParent.Relationships" @bind-SelectedId="_newWardRelationship" Placeholder="Relationship" class="link-ward-rel" />
+                                <FluentButton Appearance="Appearance.Accent" OnClick="AddLinkAsync" Disabled="@(_newWard is null || _saving)">Link</FluentButton>
+                            </div>
+                        </FluentCard>
+
+                        @* ── Name history ── *@
+                        <h3>Name history</h3>
+                        @if (_history is null)
+                        {
+                            <div class="spinner-container"><FluentProgressRing /></div>
+                        }
+                        else if (_history.Length == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info">No name changes recorded.</FluentMessageBar>
+                        }
+                        else
+                        {
+                            <ul class="timeline">
+                                @foreach (var h in _history)
+                                {
+                                    <li class="timeline-item">
+                                        <span class="timeline-name">@h.FirstName @h.LastName</span>
+                                        @if (!string.IsNullOrWhiteSpace(h.DisplayName)) { <span class="muted"> — @h.DisplayName</span> }
+                                        <span class="timeline-date">@h.CreatedAt.ToLocalTime().ToString("g")</span>
+                                    </li>
+                                }
+                            </ul>
+                        }
+
+                        <div class="action-bar">
+                            <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo("/students/guardians")'>Back to Guardians</FluentButton>
+                        </div>
+                    </FluentStack>
+                }
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Guardian records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+<style>
+    .muted { color: var(--neutral-foreground-hint); }
+    .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+    .profile-row { display: flex; gap: 8px; }
+    .profile-label { font-weight: 600; min-width: 90px; }
+    .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+    .timeline-item { display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; border-left: 3px solid var(--accent-fill-rest, #0f6cbd); background: var(--neutral-layer-1, #fafafa); }
+    .timeline-date { margin-left: auto; color: var(--neutral-foreground-hint); font-size: 0.85em; }
+    .link-ward-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .link-ward-student { flex: 1 1 240px; min-width: 200px; }
+    .link-ward-role { width: 130px; }
+    .link-ward-rel { width: 180px; }
+</style>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private GuardianDto? _guardian;
+    private GuardianNameHistoryDto[]? _history;
+    private SchoolCollab.Students.Admin.Services.StudentDto[]? _wards;
+    private SchoolCollab.Students.Admin.Services.StudentDto[] _availableStudents = [];
+    private bool _editing;
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private bool _isRealTenant;
+
+    private string? _titleName;
+    private string? _communityName;
+
+    // Edit form state.
+    private Guid? _editTitleId;
+    private string _editFirstName = string.Empty;
+    private string _editLastName = string.Empty;
+    private string _editDisplayName = string.Empty;
+    private string _editAddress = string.Empty;
+    private Guid? _editCommunityId;
+
+    // Link form state.
+    private SchoolCollab.Students.Admin.Services.StudentDto? _newWard;
+    private GuardianRole _newWardRole = GuardianRole.Primary;
+    private Guid? _newWardRelationship;
+    private static readonly GuardianRole[] _roles = (GuardianRole[])Enum.GetValues(typeof(GuardianRole));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant) return;
+
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        _editing = Nav.Uri.EndsWith("/edit", StringComparison.OrdinalIgnoreCase);
+
+        try
+        {
+            var tasks = new List<Task>();
+            _guardian = await Api.GetGuardianByIdAsync(Id, ct);
+            if (_guardian is null)
+            {
+                _error = $"Guardian {Id} not found.";
+                return;
+            }
+
+            _history = await Api.GetGuardianNameHistoryAsync(Id, ct);
+            _wards = await Api.ListStudentsForGuardianAsync(Id, ct) ?? [];
+            var all = await Api.ListStudentsAsync(ct) ?? [];
+            var linkedIds = new HashSet<Guid>(_wards.Select(w => w.Id));
+            _availableStudents = all.Where(s => !linkedIds.Contains(s.Id)).ToArray();
+
+            if (_guardian.TitleCodedValueId.HasValue)
+                _titleName = (await CodedValuesApi.GetByIdAsync(_guardian.TitleCodedValueId.Value, ct))?.Name;
+            if (_guardian.CommunityId.HasValue)
+                _communityName = (await CodedValuesApi.GetByIdAsync(_guardian.CommunityId.Value, ct))?.Name;
+
+            SeedEditForm();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load guardian {Id}", Id);
+            _error = ex.Message;
+        }
+    }
+
+    private void SeedEditForm()
+    {
+        if (_guardian is null) return;
+        _editTitleId = _guardian.TitleCodedValueId;
+        _editFirstName = _guardian.FirstName;
+        _editLastName = _guardian.LastName;
+        _editDisplayName = _guardian.DisplayName ?? string.Empty;
+        _editAddress = _guardian.Address ?? string.Empty;
+        _editCommunityId = _guardian.CommunityId;
+    }
+
+    private void StartEdit() => _editing = true;
+    private void CancelEdit() { SeedEditForm(); _editing = false; _error = null; }
+
+    private async Task SaveEdit()
+    {
+        if (_guardian is null) return;
+        if (string.IsNullOrWhiteSpace(_editFirstName) || string.IsNullOrWhiteSpace(_editLastName))
+        {
+            _error = "First name and last name are required.";
+            return;
+        }
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Api.UpdateGuardianAsync(_guardian.Id, new UpdateGuardianRequest(
+                _editTitleId,
+                _editFirstName.Trim(), _editLastName.Trim(),
+                string.IsNullOrWhiteSpace(_editDisplayName) ? null : _editDisplayName.Trim(),
+                string.IsNullOrWhiteSpace(_editAddress) ? null : _editAddress.Trim(),
+                _editCommunityId));
+
+            _guardian = await Api.GetGuardianByIdAsync(_guardian.Id, default);
+            if (_guardian?.TitleCodedValueId.HasValue == true)
+                _titleName = (await CodedValuesApi.GetByIdAsync(_guardian.TitleCodedValueId.Value))?.Name;
+            if (_guardian?.CommunityId.HasValue == true)
+                _communityName = (await CodedValuesApi.GetByIdAsync(_guardian.CommunityId.Value))?.Name;
+            _editing = false;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update guardian {Id}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task AddLinkAsync()
+    {
+        if (_guardian is null || _newWard is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                _newWard.Id, _guardian.Id, _newWardRelationship, _newWardRole, false, null));
+            _wards = await Api.ListStudentsForGuardianAsync(_guardian.Id, default) ?? [];
+            var linkedIds = new HashSet<Guid>(_wards.Select(w => w.Id));
+            _availableStudents = _availableStudents.Where(s => !linkedIds.Contains(s.Id)).ToArray();
+            _newWard = null;
+            _newWardRelationship = null;
+            _newWardRole = GuardianRole.Primary;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to link ward {StudentId} to guardian {GuardianId}", _newWard?.Id, _guardian.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task UnlinkAsync(Guid studentId)
+    {
+        if (_guardian is null) return;
+        _error = null;
+        try
+        {
+            await Api.UnlinkGuardianAsync(studentId, _guardian.Id);
+            _wards = await Api.ListStudentsForGuardianAsync(_guardian.Id, default) ?? [];
+            var linkedIds = new HashSet<Guid>(_wards.Select(w => w.Id));
+            var all = await Api.ListStudentsAsync(default) ?? [];
+            _availableStudents = all.Where(s => !linkedIds.Contains(s.Id)).ToArray();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to unlink ward {StudentId} from guardian {GuardianId}", studentId, _guardian.Id);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

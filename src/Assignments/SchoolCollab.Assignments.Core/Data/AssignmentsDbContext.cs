@@ -12,6 +12,11 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     : ModuleDbContext(options, tenantProvider)
 {
     public DbSet<Assignment> Assignments => Set<Assignment>();
+    public DbSet<AssignmentRecipient> AssignmentRecipients => Set<AssignmentRecipient>();
+    public DbSet<GuardianSubmissionGate> GuardianSubmissionGates => Set<GuardianSubmissionGate>();
+    public DbSet<AssignmentSubmission> AssignmentSubmissions => Set<AssignmentSubmission>();
+    public DbSet<AssignmentSubmissionVersion> AssignmentSubmissionVersions => Set<AssignmentSubmissionVersion>();
+    public DbSet<SubmissionReview> SubmissionReviews => Set<SubmissionReview>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -29,6 +34,11 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         // available to tenant-aware configuration base classes. Do not use
         // ApplyConfigurationsFromAssembly here because it cannot inject arguments.
         modelBuilder.ApplyConfiguration(new AssignmentConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new AssignmentRecipientConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new GuardianSubmissionGateConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new AssignmentSubmissionConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new AssignmentSubmissionVersionConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new SubmissionReviewConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
 
         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed

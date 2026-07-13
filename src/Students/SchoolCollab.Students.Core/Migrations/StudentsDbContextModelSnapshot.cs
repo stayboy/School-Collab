@@ -74,6 +74,138 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("outbox_messages", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Contact", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<int>("Channel")
+                        .HasColumnType("integer")
+                        .HasColumnName("channel");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<bool>("IsPrimary")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_primary");
+
+                    b.Property<bool>("IsVerified")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_verified");
+
+                    b.Property<string>("Label")
+                        .HasColumnType("text")
+                        .HasColumnName("label");
+
+                    b.Property<Guid>("OwnerId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("owner_id");
+
+                    b.Property<int>("OwnerType")
+                        .HasColumnType("integer")
+                        .HasColumnName("owner_type");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("value");
+
+                    b.HasKey("Id")
+                        .HasName("pk_contacts");
+
+                    b.HasIndex("TenantId", "OwnerType", "OwnerId")
+                        .HasDatabaseName("ix_contacts_tenant_owner");
+
+                    b.HasIndex("TenantId", "OwnerType", "OwnerId", "Channel", "Value")
+                        .IsUnique()
+                        .HasDatabaseName("ix_contacts_tenant_owner_channel_value");
+
+                    b.ToTable("contacts", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ContactSubscription", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ContactId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("contact_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<int>("Scope")
+                        .HasColumnType("integer")
+                        .HasColumnName("scope");
+
+                    b.Property<Guid?>("ScopeRefId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("scope_ref_id");
+
+                    b.Property<int>("Status")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("status");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_contact_subscriptions");
+
+                    b.HasIndex("TenantId", "ContactId", "Scope", "ScopeRefId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_contact_subscriptions_tenant_contact_scope");
+
+                    b.ToTable("contact_subscriptions", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeLevel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -192,6 +324,120 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("grade_subject_assignments", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Guardian", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Address")
+                        .HasColumnType("text")
+                        .HasColumnName("address");
+
+                    b.Property<Guid?>("CommunityId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("community_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("first_name");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("last_name");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TitleCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("title_coded_value_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_guardians");
+
+                    b.HasIndex("TenantId", "LastName")
+                        .HasDatabaseName("ix_guardians_tenant_last_name");
+
+                    b.ToTable("guardians", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GuardianNameHistory", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("first_name");
+
+                    b.Property<Guid>("GuardianId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("guardian_id");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("last_name");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_guardian_name_history");
+
+                    b.HasIndex("TenantId", "GuardianId")
+                        .HasDatabaseName("ix_guardian_name_history_tenant_guardian");
+
+                    b.ToTable("guardian_name_history", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Period", b =>
                 {
                     b.Property<Guid>("Id")
@@ -257,17 +503,6 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
                         .HasColumnName("id");
-
-                    b.Property<string>("ContactEmail")
-                        .IsRequired()
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)")
-                        .HasColumnName("contact_email");
-
-                    b.Property<string>("ContactPhone")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("contact_phone");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -413,6 +648,69 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDatabaseName("ix_student_enrollments_tenant_student_period");
 
                     b.ToTable("student_enrollments", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.StudentGuardian", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid?>("CreatedByGuardianId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("created_by_guardian_id");
+
+                    b.Property<Guid>("GuardianId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("guardian_id");
+
+                    b.Property<bool>("IsEmergencyContact")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_emergency_contact");
+
+                    b.Property<Guid?>("RelationshipCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("relationship_coded_value_id");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("integer")
+                        .HasColumnName("role");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_student_guardians");
+
+                    b.HasIndex("TenantId", "GuardianId")
+                        .HasDatabaseName("ix_student_guardians_tenant_guardian");
+
+                    b.HasIndex("TenantId", "StudentId", "GuardianId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_student_guardians_tenant_student_guardian");
+
+                    b.ToTable("student_guardians", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.StudentSubjectAssignment", b =>
@@ -657,6 +955,164 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDatabaseName("ix_subject_strands_tenant_subject");
 
                     b.ToTable("subject_strands", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Teacher", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("ContactPhone")
+                        .HasColumnType("text")
+                        .HasColumnName("contact_phone");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("DisplayName")
+                        .HasColumnType("text")
+                        .HasColumnName("display_name");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("email");
+
+                    b.Property<string>("FirstName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("first_name");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("LastName")
+                        .IsRequired()
+                        .HasColumnType("text")
+                        .HasColumnName("last_name");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid?>("StaffUserId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("staff_user_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TitleCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("title_coded_value_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_teachers");
+
+                    b.HasIndex("TenantId", "LastName")
+                        .HasDatabaseName("ix_teachers_tenant_last_name");
+
+                    b.ToTable("teachers", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherGradeLevel", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("GradeLevelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("grade_level_id");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TeacherId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("teacher_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_teacher_grade_levels");
+
+                    b.HasIndex("TenantId", "TeacherId", "GradeLevelId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_teacher_grade_levels_tenant_teacher_grade_level");
+
+                    b.ToTable("teacher_grade_levels", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherSubject", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("SubjectId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("subject_id");
+
+                    b.Property<Guid>("TeacherId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("teacher_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_teacher_subjects");
+
+                    b.HasIndex("TenantId", "TeacherId", "SubjectId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_teacher_subjects_tenant_teacher_subject");
+
+                    b.ToTable("teacher_subjects", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeSubjectAssignment", b =>

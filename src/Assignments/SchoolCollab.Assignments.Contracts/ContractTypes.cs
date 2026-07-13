@@ -83,3 +83,51 @@ public record ReviewAssignmentRequest(
     Guid TeacherId,
     decimal? Score,
     string? Comments);
+
+public enum ReviewStateDto
+{
+    Pending = 0,
+    Reviewed = 1,
+    Graded = 2
+}
+
+/// <summary>Teacher review queue item (spec §4.13).</summary>
+public record SubmissionForReviewDto(
+    Guid SubmissionId,
+    Guid AssignmentId,
+    string AssignmentTitle,
+    Guid StudentId,
+    int CurrentVersionNumber,
+    ReviewStateDto ReviewState,
+    DateTimeOffset LastSubmittedAt);
+
+/// <summary>Guardian portal view of a submission gate (spec §4.10).</summary>
+public record GuardianGateDto(
+    Guid GateId,
+    Guid AssignmentId,
+    Guid StudentId,
+    bool SubmissionEnabledForStudent,
+    DateTimeOffset? ReviewedAt,
+    Guid? ReviewedByGuardianId,
+    string? ReviewComment,
+    Guid? SubmittedByGuardianId,
+    DateTimeOffset? SubmittedByGuardianAt);
+
+public record ReviewSubmissionGateRequest(
+    Guid ReviewerGuardianId,
+    bool Approve,
+    string? Comment);
+
+public record SubmitAssignmentOnBehalfRequest(
+    Guid StudentId,
+    Guid GuardianId,
+    string? Content);
+
+public record ReviewSubmissionRequest(
+    Guid TeacherId,
+    decimal? Score,
+    string? Grade,
+    string? Comments);
+
+/// <summary>Student self-submit (spec §4.11).</summary>
+public record CreateStudentSubmissionRequest(string? Content);

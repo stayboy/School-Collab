@@ -115,20 +115,21 @@ var settingsAi = builder.AddProject<Projects.SchoolCollab_AI_Server>("settings-a
     .WithEnvironment("OpenRouter__ApiKey", openRouterApiKey)
     .WaitFor(settingsApi);
 
-var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
-    .WithReference(assignmentsDb)
-    .WithReference(rabbit)
-    .WithReference(redis)
-    .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
-    .WaitFor(rabbit)
-    .WaitFor(redis)
-    .WaitForCompletion(migrator);
-
 var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("students-api")
     .WithReference(studentsDb)
     .WithReference(rabbit)
     .WithReference(redis)
     .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
+    .WaitFor(rabbit)
+    .WaitFor(redis)
+    .WaitForCompletion(migrator);
+
+var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
+    .WithReference(assignmentsDb)
+    .WithReference(rabbit)
+    .WithReference(redis)
+    .WithReference(studentsApi)
+    .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);

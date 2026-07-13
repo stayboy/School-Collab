@@ -33,6 +33,14 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public decimal? MaxScore { get; private set; }
     public AssignmentStatus Status { get; private set; }
     public Guid CreatedByTeacherId { get; private set; }
+    /// <summary>
+    /// When true (default), student self-submit is blocked until a Primary
+    /// guardian reviews + enables (or submits on behalf). When false, the
+    /// gate is optional (spec §4.7).
+    /// </summary>
+    public bool MandatoryReview { get; private set; }
+    /// <summary>Set when the assignment is published (spec §4.8). Null while Draft.</summary>
+    public DateTimeOffset? PublishedAt { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -72,6 +80,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             MaxScore = maxScore,
             Status = AssignmentStatus.Draft,
             CreatedByTeacherId = createdByTeacherId,
+            // Mandatory review is the default (spec §4.7).
+            MandatoryReview = true,
             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             CreatedAt = now,
             UpdatedAt = now
@@ -109,6 +119,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             return;
 
         Status = AssignmentStatus.Published;
+        PublishedAt = DateTimeOffset.UtcNow;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentPublishedEvent(Id, Title));
     }

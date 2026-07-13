@@ -23,18 +23,6 @@ public sealed class StudentFormModel
     [Required]
     public string? LastName { get; set; }
 
-    [Required]
-    [EmailAddress]
-    public string? ContactEmail { get; set; }
-
-    /// <summary>
-    /// Optional. Validated with <see cref="PhoneAttribute"/> when provided so
-    /// obviously malformed values (e.g. "abc") are caught client-side before
-    /// the round-trip to the server.
-    /// </summary>
-    [Phone]
-    public string? ContactPhone { get; set; }
-
     /// <summary>Optional. Bound to a FluentDatePicker in the shared form.</summary>
     public DateOnly? DateOfBirth { get; set; }
 

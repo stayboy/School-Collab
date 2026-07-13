@@ -46,7 +46,6 @@
         </TemplateColumn>
         <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.FirstName)" Sortable="true" />
         <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.LastName)" Sortable="true" />
-        <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.ContactEmail)" />
         <TemplateColumn TGridItem="StudentDto" Title="Date of Birth">
             @(context.DateOfBirth?.ToShortDateString() ?? "—")
         </TemplateColumn>
@@ -136,8 +135,7 @@
         var search = _searchText.Trim();
         return s.StudentNumber.Contains(search, StringComparison.OrdinalIgnoreCase)
             || s.FirstName.Contains(search, StringComparison.OrdinalIgnoreCase)
-            || s.LastName.Contains(search, StringComparison.OrdinalIgnoreCase)
-            || s.ContactEmail.Contains(search, StringComparison.OrdinalIgnoreCase);
+            || s.LastName.Contains(search, StringComparison.OrdinalIgnoreCase);
     }
 
     protected override async Task OnInitializedAsync()

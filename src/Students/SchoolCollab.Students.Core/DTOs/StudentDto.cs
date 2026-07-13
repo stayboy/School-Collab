@@ -7,8 +7,6 @@ public sealed record StudentDto(
     string LastName,
     DateOnly? DateOfBirth,
     Guid? GenderCodedValueId,
-    string ContactEmail,
-    string? ContactPhone,
     bool IsDeleted,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
