@@ -197,6 +197,8 @@
                         </ul>
                     </section>
 
+                    <FluentCheckbox @bind-Value="_mandatoryReview" Label="Require guardian review before student submits" class="mt-3" />
+
                     @if (!string.IsNullOrEmpty(_step1Error))
                     {
                         <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_step1Error</FluentMessageBar>
@@ -378,6 +380,7 @@
     private AssignmentTypeDto? _selectedType = AssignmentTypeDto.Manual;
     private GradingFormatDto _selectedGradingFormat = GradingFormatDto.TeacherGraded;
     private TargetAudienceTypeDto _selectedTargetAudience = TargetAudienceTypeDto.AllStudents;
+    private bool _mandatoryReview = true;
 
     // Grade Level dropdown state
     private GradeLevelDto[]? _gradeLevels;
@@ -512,7 +515,8 @@
                 Guid.Parse(_selectedSubject.Value),
                 _selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value),
                 _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
-                _model.MaxScore);
+                _model.MaxScore,
+                _mandatoryReview);
 
             var assignmentId = await Api.CreateAsync(req, ct);
 

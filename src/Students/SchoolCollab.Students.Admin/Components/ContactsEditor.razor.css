@@ -1,0 +1,89 @@
+.contacts-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.contacts-editor-loading {
+    display: flex;
+    justify-content: center;
+    padding: 16px;
+}
+
+.contacts-editor-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.contacts-channel {
+    width: 140px;
+}
+
+.contacts-value {
+    flex: 1 1 220px;
+    min-width: 200px;
+}
+
+.contacts-label {
+    width: 160px;
+}
+
+.contacts-primary {
+    white-space: nowrap;
+}
+
+.contacts-error {
+    margin: 0;
+}
+
+.contacts-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.contact-item {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    border-radius: 6px;
+    background: var(--neutral-layer-1, #fafafa);
+}
+
+.contact-channel {
+    font-weight: 600;
+    min-width: 110px;
+}
+
+.contact-value {
+    flex: 1 1 auto;
+    word-break: break-all;
+}
+
+.contact-label {
+    color: var(--neutral-foreground-hint, #666);
+    font-style: italic;
+}
+
+.contact-badge {
+    white-space: nowrap;
+}
+
+.contact-subscribe {
+    white-space: nowrap;
+}
+
+.contact-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}

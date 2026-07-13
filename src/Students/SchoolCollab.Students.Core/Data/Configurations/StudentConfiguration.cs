@@ -36,13 +36,6 @@ internal sealed class StudentConfiguration : TenantEntityTypeConfigurationBase<S
 
         builder.Property(x => x.GenderCodedValueId);
 
-        builder.Property(x => x.ContactEmail)
-            .IsRequired()
-            .HasMaxLength(500);
-
-        builder.Property(x => x.ContactPhone)
-            .HasMaxLength(50);
-
         // FR-7: unique per (tenant, student_number) — was globally unique on StudentNumber.
         builder.HasIndex(x => new { x.TenantId, x.StudentNumber })
             .IsUnique()

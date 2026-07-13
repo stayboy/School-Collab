@@ -1147,7 +1147,7 @@
             var hidden = _alreadyEnrolledStudentIds;
             _availableStudents = students
                 .Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
-                    s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt))
+                    s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt))
                 .Where(s => !_assignedStudents.Contains(s) && !hidden.Contains(s.Id))
                 .ToArray();
         }
@@ -1190,8 +1190,6 @@
             _newStudentModel.StudentNumber = null;
             _newStudentModel.FirstName = null;
             _newStudentModel.LastName = null;
-            _newStudentModel.ContactEmail = null;
-            _newStudentModel.ContactPhone = null;
             _newStudentModel.DateOfBirth = null;
             _newStudentModel.GenderCodedValueId = null;
         }
@@ -1215,9 +1213,7 @@
                 _newStudentModel.FirstName!,
                 _newStudentModel.LastName!,
                 _newStudentModel.DateOfBirth,
-                _newStudentModel.GenderCodedValueId,
-                _newStudentModel.ContactEmail!,
-                string.IsNullOrWhiteSpace(_newStudentModel.ContactPhone) ? null : _newStudentModel.ContactPhone);
+                _newStudentModel.GenderCodedValueId);
 
             await Api.CreateStudentAsync(request, ct);
 
@@ -1237,8 +1233,6 @@
             _newStudentModel.StudentNumber = null;
             _newStudentModel.FirstName = null;
             _newStudentModel.LastName = null;
-            _newStudentModel.ContactEmail = null;
-            _newStudentModel.ContactPhone = null;
             _newStudentModel.DateOfBirth = null;
             _newStudentModel.GenderCodedValueId = null;
         }

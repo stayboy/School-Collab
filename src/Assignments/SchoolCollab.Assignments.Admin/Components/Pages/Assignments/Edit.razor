@@ -59,6 +59,7 @@
 
                 <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" class="full-width mb-3" />
                 <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" class="narrow-field mb-3" />
+                <FluentCheckbox @bind-Value="_mandatoryReview" Label="Require guardian review before student submits" class="mb-3" />
 
                 @if (!string.IsNullOrEmpty(_error))
                 {
@@ -86,6 +87,7 @@
     private bool _loading = true;
     private bool _saving;
     private string? _error;
+    private bool _mandatoryReview = true;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -135,6 +137,7 @@
                 _model.Description = _item.Description;
                 _model.DueDate = _item.DueDate?.DateTime;
                 _model.MaxScore = _item.MaxScore;
+                _mandatoryReview = _item.MandatoryReview;
                 _selectedType = _typeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
                 _selectedGradingFormat = _gradingFormatOptions.FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
                 _selectedTargetAudience = _targetAudienceOptions.FirstOrDefault(o => o.Value == ((int)_item.TargetAudienceType).ToString());
@@ -190,7 +193,8 @@
                 _item!.SubjectId,
                 _item.GradeLevelId,
                 _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
-                _model.MaxScore);
+                _model.MaxScore,
+                _mandatoryReview);
 
             await Api.UpdateAsync(Id, req, ct);
             Nav.NavigateTo("/assignments");

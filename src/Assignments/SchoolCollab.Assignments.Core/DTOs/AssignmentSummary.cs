@@ -14,6 +14,7 @@ public record AssignmentSummary(
     AssignmentStatus Status,
     DateTimeOffset? DueDate,
     decimal? MaxScore,
+    bool MandatoryReview,
     Guid CreatedByTeacherId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

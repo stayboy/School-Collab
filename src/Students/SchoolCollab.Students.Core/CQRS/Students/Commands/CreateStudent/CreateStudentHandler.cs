@@ -35,9 +35,7 @@ public sealed class CreateStudentHandler(
             command.FirstName,
             command.LastName,
             command.DateOfBirth,
-            command.GenderCodedValueId,
-            command.ContactEmail,
-            command.ContactPhone)
+            command.GenderCodedValueId)
             .WithTenant(tenantProvider);
 
         await repository.AddAsync(student, cancellationToken);

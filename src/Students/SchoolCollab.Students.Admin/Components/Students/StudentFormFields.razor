@@ -75,26 +75,6 @@
                               class="student-form-input--dob" />
         </FormRow>
 
-        @* Contact email. Wide input (fills the input cell) because
-           emails vary in length and a narrow cell forces awkward
-           wrapping or scrolling. The [EmailAddress] data annotation on
-           the model is enforced by <DataAnnotationsValidator />. *@
-        <FormRow Label="Contact email" Required For="studentFormEmail">
-            <FluentTextField Id="studentFormEmail"
-                             @bind-Value="Model.ContactEmail"
-                             Required
-                             Placeholder="name@example.com"
-                             class="student-form-input--email" />
-        </FormRow>
-
-        @* Contact phone. Optional, validated by [Phone] when provided. *@
-        <FormRow Label="Contact phone" For="studentFormPhone">
-            <FluentTextField Id="studentFormPhone"
-                             @bind-Value="Model.ContactPhone"
-                             Placeholder="+1 555 123 4567"
-                             class="student-form-input--phone" />
-        </FormRow>
-
         @* Gender. Optional coded-value dropdown for the GENDER parent.
            Simple two-way binding — the binder updates
            Model.GenderCodedValueId directly; no callback boilerplate

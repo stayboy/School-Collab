@@ -7,6 +7,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" />
+    <ProjectReference Include="..\..\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
   </ItemGroup>
   <ItemGroup>

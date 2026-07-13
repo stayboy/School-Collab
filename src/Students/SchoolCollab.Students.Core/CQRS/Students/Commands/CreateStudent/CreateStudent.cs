@@ -7,6 +7,4 @@ public sealed record CreateStudent(
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,
-    Guid? GenderCodedValueId,
-    string ContactEmail,
-    string? ContactPhone) : ICommand;
+    Guid? GenderCodedValueId) : ICommand;

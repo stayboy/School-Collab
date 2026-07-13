@@ -48,7 +48,7 @@ public class AssignmentTests
             GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents,
             Guid.Empty, // empty subject
-            null, null, null);
+            null, null, null, true);
 
         act.Should().Throw<ArgumentException>()
             .WithParameterName("subjectId")
@@ -140,7 +140,7 @@ public class AssignmentTests
 
         assignment.Update("New Title", "New Desc", AssignmentType.SemiManual,
             GradingFormat.InstantGraded, TargetAudienceType.SelectedGrades,
-            newSubjectId, Guid.NewGuid(), null, 50m);
+            newSubjectId, Guid.NewGuid(), null, 50m, true);
 
         Assert.AreEqual("New Title", assignment.Title);
         Assert.AreEqual("New Desc", assignment.Description);
@@ -158,7 +158,7 @@ public class AssignmentTests
         assignment.Publish();
         var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            SubjectId, null, null, null);
+            SubjectId, null, null, null, true);
         act.Should().Throw<InvalidOperationException>();
     }
 
@@ -170,7 +170,7 @@ public class AssignmentTests
         assignment.Close();
         var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            SubjectId, null, null, null);
+            SubjectId, null, null, null, true);
         act.Should().Throw<InvalidOperationException>();
     }
 

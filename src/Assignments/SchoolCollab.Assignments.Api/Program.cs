@@ -32,6 +32,13 @@ else
 }
 
 builder.Services.AddAssignmentsCore(builder.Configuration);
+
+// Cross-bounded-context contact resolver (spec §9 G5): resolves subscribed
+// contacts from the Students API. The named client is resolved via Aspire
+// service discovery once the AppHost references students-api.
+builder.Services.AddHttpClient("students-api");
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolver, SchoolCollab.Assignments.Api.Services.StudentsContactResolver>();
+
 builder.Services.AddOpenApi();
 
 // Auth + tenancy (OIDC via Keycloak)

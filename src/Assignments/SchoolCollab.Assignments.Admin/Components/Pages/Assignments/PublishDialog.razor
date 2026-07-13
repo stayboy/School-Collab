@@ -1,0 +1,78 @@
+@* Assignment publish dialog (spec §12). *@
+@inherits DialogShellBase<PublishFormModel, PublishResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Students.Core.DTOs
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <p class="dialog-hint">@Model.AudienceSummary</p>
+
+        @if (Model.MandatoryReview)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
+                Guardian review is required before students can submit.
+            </FluentMessageBar>
+        }
+
+        <FluentCheckbox @bind-Value="Model.LimitSelection" Label="Limit to specific contacts" class="mb-3" />
+
+        @if (Model.LimitSelection)
+        {
+            @if (Model.Contacts.Count == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning">No subscribed contacts available to select.</FluentMessageBar>
+            }
+            else
+            {
+                <div class="contact-select-list">
+                    @foreach (var sel in Model.Selections)
+                    {
+                        <FluentCheckbox @bind-Value="sel.IsSelected"
+                                        Label="@($"{sel.Contact.Value} · {sel.Contact.Channel}{(sel.Contact.Role is not null ? " · " + sel.Contact.Role : "")}")"
+                                        class="mb-1" />
+                    }
+                </div>
+            }
+        }
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Publish" OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    protected override string SubmitText => "Publish";
+    protected override string SavingText => "Publishing...";
+
+    protected override void OnModelInitialized(PublishFormModel model)
+    {
+        model.Selections = model.Contacts
+            .Select(c => new ContactSelection(c))
+            .ToList();
+    }
+
+    protected override Task<PublishResult?> SubmitAsync(PublishFormModel model)
+    {
+        IReadOnlyList<Guid>? contactIds = null;
+
+        if (model.LimitSelection)
+        {
+            var selected = model.Selections
+                .Where(s => s.IsSelected)
+                .Select(s => s.Contact.Id)
+                .ToList();
+
+            if (selected.Count == 0)
+            {
+                Error = "Select at least one contact, or uncheck 'Limit to specific contacts'.";
+                return Task.FromResult<PublishResult?>(null);
+            }
+
+            contactIds = selected;
+        }
+
+        return Task.FromResult<PublishResult?>(new PublishResult(contactIds));
+    }
+}

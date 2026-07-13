@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Students.Core.Domain;
+using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Admin.Services;
 
@@ -13,8 +15,6 @@ public sealed record StudentDto(
     string LastName,
     DateOnly? DateOfBirth,
     Guid? GenderCodedValueId,
-    string ContactEmail,
-    string? ContactPhone,
     bool IsDeleted,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -99,17 +99,13 @@ public record CreateStudentRequest(
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,
-    Guid? GenderCodedValueId,
-    string ContactEmail,
-    string? ContactPhone);
+    Guid? GenderCodedValueId);
 
 public record UpdateStudentRequest(
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,
-    Guid? GenderCodedValueId,
-    string ContactEmail,
-    string? ContactPhone);
+    Guid? GenderCodedValueId);
 
 public record CreateGradeLevelRequest(
     Guid CodedValueId,
@@ -179,6 +175,84 @@ public record AssignStudentSubjectRequest(
     Guid PeriodId,
     bool IsOverride,
     string SourceType);
+
+// ── Guardian requests ────────────────────────────────────────────────────────
+
+public record CreateGuardianRequest(
+    Guid? TitleCodedValueId,
+    string FirstName,
+    string LastName,
+    string? DisplayName,
+    string? Address,
+    Guid? CommunityId);
+
+public record UpdateGuardianRequest(
+    Guid? TitleCodedValueId,
+    string FirstName,
+    string LastName,
+    string? DisplayName,
+    string? Address,
+    Guid? CommunityId);
+
+public record LinkGuardianRequest(
+    Guid StudentId,
+    Guid GuardianId,
+    Guid? RelationshipCodedValueId,
+    GuardianRole Role,
+    bool IsEmergencyContact,
+    Guid? ActingGuardianId);
+
+public record UpdateGuardianLinkRequest(
+    GuardianRole Role,
+    Guid? RelationshipCodedValueId,
+    bool IsEmergencyContact);
+
+// ── Teacher requests (Phase 8 / spec §4.12) ────────────────────────────────
+
+public sealed record TeacherDto(
+    Guid Id,
+    Guid? TitleCodedValueId,
+    string FirstName,
+    string LastName,
+    string? DisplayName,
+    string Email,
+    string? ContactPhone,
+    bool IsDeleted,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public record CreateTeacherRequest(
+    Guid? TitleCodedValueId,
+    string FirstName,
+    string LastName,
+    string? DisplayName,
+    string Email,
+    string? ContactPhone);
+
+public record UpdateTeacherRequest(
+    string FirstName,
+    string LastName,
+    string? DisplayName,
+    string Email,
+    string? ContactPhone);
+
+public record LinkTeacherSubjectRequest(Guid SubjectId);
+
+public record LinkTeacherGradeLevelRequest(Guid GradeLevelId);
+
+// ── Contact / subscription requests ──────────────────────────────────────────
+
+public record AddContactRequest(
+    ContactOwnerType OwnerType,
+    Guid OwnerId,
+    ContactChannel Channel,
+    string Value,
+    string? Label,
+    bool IsPrimary);
+
+public record UpdateContactRequest(string Value, string? Label);
+
+public record SubscriptionRequest(SubscriptionScope Scope, Guid? ScopeRefId);
 
 // ── Client ──────────────────────────────────────────────────────────────────
 
@@ -433,6 +507,147 @@ public sealed class StudentsApiClient
 
     public async Task RemoveStudentSubjectAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/student-subjects/{id}", ct)).EnsureSuccessStatusCode();
+
+    // ── Guardians ───────────────────────────────────────────────────────────
+
+    public async Task<GuardianDto[]?> ListGuardiansAsync(CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<GuardianDto[]>("/students/guardians", ct);
+
+    public async Task<GuardianDto?> GetGuardianByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/students/guardians/{id}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GuardianDto>(ct);
+    }
+
+    public async Task<Guid> CreateGuardianAsync(CreateGuardianRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/guardians", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    public async Task UpdateGuardianAsync(Guid id, UpdateGuardianRequest req, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/students/guardians/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteGuardianAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/guardians/{id}", ct)).EnsureSuccessStatusCode();
+
+    public async Task<GuardianNameHistoryDto[]?> GetGuardianNameHistoryAsync(Guid id, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<GuardianNameHistoryDto[]>($"/students/guardians/{id}/name-history", ct);
+
+    public async Task<StudentDto[]?> ListStudentsForGuardianAsync(Guid guardianId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<StudentDto[]>($"/students/guardians/{guardianId}/students", ct);
+
+    // ── Student ↔ Guardian links ─────────────────────────────────────────────
+
+    public async Task<StudentGuardianViewDto[]?> ListGuardiansByStudentAsync(Guid studentId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<StudentGuardianViewDto[]>($"/students/{studentId}/guardians", ct);
+
+    public async Task<Guid> LinkGuardianAsync(LinkGuardianRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync($"/students/{req.StudentId}/guardians", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    public async Task UpdateGuardianLinkAsync(Guid studentId, Guid guardianId, UpdateGuardianLinkRequest req, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/students/{studentId}/guardians/{guardianId}", req, ct)).EnsureSuccessStatusCode();
+
+    public async Task UnlinkGuardianAsync(Guid studentId, Guid guardianId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/{studentId}/guardians/{guardianId}", ct)).EnsureSuccessStatusCode();
+
+    // ── Teachers (Phase 8 / spec §4.12) ───────────────────────────────────
+
+    public async Task<TeacherDto[]?> ListTeachersAsync(CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TeacherDto[]>("/teachers", ct);
+
+    public async Task<TeacherDto?> GetTeacherByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/teachers/{id}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<TeacherDto>(ct);
+    }
+
+    public async Task<Guid> CreateTeacherAsync(CreateTeacherRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/teachers", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    public async Task UpdateTeacherAsync(Guid id, UpdateTeacherRequest req, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/teachers/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteTeacherAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/teachers/{id}", ct)).EnsureSuccessStatusCode();
+
+    public async Task LinkTeacherSubjectAsync(Guid teacherId, Guid subjectId, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/subjects", new LinkTeacherSubjectRequest(subjectId), ct)).EnsureSuccessStatusCode();
+
+    public async Task UnlinkTeacherSubjectAsync(Guid teacherId, Guid subjectId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/teachers/{teacherId}/subjects/{subjectId}", ct)).EnsureSuccessStatusCode();
+
+    public async Task LinkTeacherGradeLevelAsync(Guid teacherId, Guid gradeLevelId, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/grade-levels", new LinkTeacherGradeLevelRequest(gradeLevelId), ct)).EnsureSuccessStatusCode();
+
+    public async Task UnlinkTeacherGradeLevelAsync(Guid teacherId, Guid gradeLevelId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/teachers/{teacherId}/grade-levels/{gradeLevelId}", ct)).EnsureSuccessStatusCode();
+
+    public async Task<SubjectDto[]?> ListSubjectsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<SubjectDto[]>($"/teachers/{teacherId}/subjects", ct);
+
+    public async Task<GradeLevelDto[]?> ListGradeLevelsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<GradeLevelDto[]>($"/teachers/{teacherId}/grade-levels", ct);
+
+    // ── Contacts ─────────────────────────────────────────────────────────────
+
+    public async Task<ContactDto[]?> ListContactsAsync(ContactOwnerType ownerType, Guid ownerId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<ContactDto[]>($"/students/contacts?ownerType={ownerType}&ownerId={ownerId}", ct);
+
+    public async Task<Guid> AddContactAsync(AddContactRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/contacts", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    public async Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/students/contacts/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteContactAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/contacts/{id}", ct)).EnsureSuccessStatusCode();
+
+    public async Task VerifyContactAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/students/contacts/{id}/verify", null, ct)).EnsureSuccessStatusCode();
+
+    public async Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/students/contacts/{id}/set-primary", null, ct)).EnsureSuccessStatusCode();
+
+    public async Task<SubscribedContactDto[]?> ListSubscribedContactsAsync(
+        ContactOwnerType ownerType, Guid? ownerId = null, SubscriptionScope? scope = null, CancellationToken ct = default)
+    {
+        var url = scope.HasValue
+            ? $"/students/contacts/subscribed?ownerType={ownerType}&scope={scope}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}"
+            : $"/students/contacts/subscribed?ownerType={ownerType}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}";
+        return await _http.GetFromJsonAsync<SubscribedContactDto[]>(url, ct);
+    }
+
+    // ── Subscriptions ────────────────────────────────────────────────────────
+
+    public async Task SubscribeAsync(
+        Guid contactId, SubscriptionScope scope = SubscriptionScope.AllAssignments, Guid? scopeRefId = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/students/contacts/{contactId}/subscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
+
+    public async Task UnsubscribeAsync(
+        Guid contactId, SubscriptionScope scope = SubscriptionScope.AllAssignments, Guid? scopeRefId = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/students/contacts/{contactId}/unsubscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
 
     // ── Helper ───────────────────────────────────────────────────────────────
 

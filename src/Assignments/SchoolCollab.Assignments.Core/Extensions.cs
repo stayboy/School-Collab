@@ -31,6 +31,8 @@ public static class Extensions
                 .UseSnakeCaseNamingConvention());
 
         services.AddScoped<IAssignmentRepository, AssignmentRepository>();
+        services.AddScoped<ISubmissionRepository, SubmissionRepository>();
+        services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
 
         services.AddHybridCache(options =>
         {

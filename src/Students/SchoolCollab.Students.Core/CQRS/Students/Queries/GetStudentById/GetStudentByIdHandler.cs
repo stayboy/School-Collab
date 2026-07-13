@@ -43,8 +43,6 @@ public sealed class GetStudentByIdHandler(
                     student.LastName,
                     student.DateOfBirth,
                     student.GenderCodedValueId,
-                    student.ContactEmail,
-                    student.ContactPhone,
                     student.IsDeleted,
                     student.CreatedAt,
                     student.UpdatedAt);

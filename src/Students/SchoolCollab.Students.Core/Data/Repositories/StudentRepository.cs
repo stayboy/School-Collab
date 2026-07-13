@@ -42,7 +42,7 @@ internal sealed class StudentRepository(StudentsDbContext db)
             .OrderBy(x => x.LastName).ThenBy(x => x.FirstName)
             .Select(x => new StudentDto(
                 x.Id, x.StudentNumber, x.FirstName, x.LastName,
-                x.DateOfBirth, x.GenderCodedValueId, x.ContactEmail, x.ContactPhone,
+                x.DateOfBirth, x.GenderCodedValueId,
                 x.IsDeleted, x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
     }
@@ -54,7 +54,7 @@ internal sealed class StudentRepository(StudentsDbContext db)
             .OrderBy(x => x.LastName).ThenBy(x => x.FirstName)
             .Select(x => new StudentDto(
                 x.Id, x.StudentNumber, x.FirstName, x.LastName,
-                x.DateOfBirth, x.GenderCodedValueId, x.ContactEmail, x.ContactPhone,
+                x.DateOfBirth, x.GenderCodedValueId,
                 x.IsDeleted, x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
     }

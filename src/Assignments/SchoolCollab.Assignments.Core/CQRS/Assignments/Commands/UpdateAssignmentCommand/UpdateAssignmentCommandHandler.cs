@@ -30,7 +30,8 @@ public sealed class UpdateAssignmentCommandHandler(
             command.SubjectId,
             command.GradeLevelId,
             command.DueDate,
-            command.MaxScore);
+            command.MaxScore,
+            command.MandatoryReview);
 
         await repository.UpdateAsync(assignment, cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);

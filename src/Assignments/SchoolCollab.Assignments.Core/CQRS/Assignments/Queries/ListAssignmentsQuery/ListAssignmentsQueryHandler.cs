@@ -50,6 +50,7 @@ public sealed class ListAssignmentsQueryHandler(
                     (AssignmentStatusDto)s.Status,
                     s.DueDate,
                     s.MaxScore,
+                    s.MandatoryReview,
                     s.CreatedByTeacherId,
                     s.CreatedAt,
                     s.UpdatedAt)).ToArray();

@@ -53,8 +53,6 @@ public sealed class ListStudentsByGradeHandler(
                     s.LastName,
                     s.DateOfBirth,
                     s.GenderCodedValueId,
-                    s.ContactEmail,
-                    s.ContactPhone,
                     s.IsDeleted,
                     s.CreatedAt,
                     s.UpdatedAt))

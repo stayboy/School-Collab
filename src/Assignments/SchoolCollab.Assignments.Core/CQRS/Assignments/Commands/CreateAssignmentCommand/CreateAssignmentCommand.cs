@@ -13,4 +13,5 @@ public sealed record CreateAssignmentCommand(
     Guid SubjectId,
     Guid? GradeLevelId,
     DateTimeOffset? DueDate,
-    decimal? MaxScore) : ICommand;
+    decimal? MaxScore,
+    bool MandatoryReview = true) : ICommand;

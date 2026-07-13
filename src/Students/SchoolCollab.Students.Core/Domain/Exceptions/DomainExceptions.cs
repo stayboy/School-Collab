@@ -82,3 +82,70 @@ public sealed class PeriodNotOpenException : Exception
 {
     public PeriodNotOpenException(string message) : base(message) { }
 }
+
+public sealed class GuardianNotFoundException : Exception
+{
+    public Guid GuardianId { get; }
+
+    public GuardianNotFoundException(Guid id) : base($"Guardian with ID '{id}' was not found.")
+        => GuardianId = id;
+}
+
+public sealed class GuardianLinkNotFoundException : Exception
+{
+    public Guid StudentId { get; }
+    public Guid GuardianId { get; }
+
+    public GuardianLinkNotFoundException(Guid studentId, Guid guardianId)
+        : base($"No link exists between student '{studentId}' and guardian '{guardianId}'.")
+    {
+        StudentId = studentId;
+        GuardianId = guardianId;
+    }
+}
+
+public sealed class GuardianLinkAlreadyExistsException : Exception
+{
+    public Guid StudentId { get; }
+    public Guid GuardianId { get; }
+
+    public GuardianLinkAlreadyExistsException(Guid studentId, Guid guardianId)
+        : base($"A link already exists between student '{studentId}' and guardian '{guardianId}'.")
+    {
+        StudentId = studentId;
+        GuardianId = guardianId;
+    }
+}
+
+public sealed class ContactNotFoundException : Exception
+{
+    public Guid ContactId { get; }
+
+    public ContactNotFoundException(Guid id) : base($"Contact with ID '{id}' was not found.")
+        => ContactId = id;
+}
+
+public sealed class TeacherNotFoundException : Exception
+{
+    public Guid TeacherId { get; }
+
+    public TeacherNotFoundException(Guid id) : base($"Teacher with ID '{id}' was not found.")
+        => TeacherId = id;
+}
+
+/// <summary>
+/// Thrown when a subject or grade-level link already exists for a teacher
+/// (spec §4.12). Mirrors <see cref="GuardianLinkAlreadyExistsException"/>.
+/// </summary>
+public sealed class TeacherLinkAlreadyExistsException : Exception
+{
+    public Guid TeacherId { get; }
+    public Guid RefId { get; }
+
+    public TeacherLinkAlreadyExistsException(Guid teacherId, Guid refId)
+        : base($"A link already exists between teacher '{teacherId}' and '{refId}'.")
+    {
+        TeacherId = teacherId;
+        RefId = refId;
+    }
+}

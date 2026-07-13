@@ -1,0 +1,490 @@
+@page "/students/teachers/create"
+@page "/students/teachers/{Id:guid}/edit"
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject VisibleTenantService VisibleTenant
+@inject ILogger<TeacherSetupWizard> Logger
+@implements IDisposable
+
+<PageTitle>@(_isEdit ? "Edit Teacher" : "New Teacher")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+                <FluentWizard StepperPosition="StepperPosition.Top"
+                              StepSequence="WizardStepSequence.Visited"
+                              Width="960px"
+                              Height="auto"
+                              @ref="_wizard"
+                              @bind-Value="_stepIndex">
+                    @* ── Step 1: profile ── *@
+                    <FluentWizardStep Label="Profile"
+                                      Summary="Teacher name &amp; contact"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                      OnChange="OnProfileChangingAsync">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Person)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Teacher profile</h3>
+                                    <p class="wizard-hint">Title, name and the single staff email / phone used to identify the teacher.</p>
+                                </div>
+                            </div>
+
+                            <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                                <FormRow Label="Title">
+                                    <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                                        @bind-SelectedId="_titleCodedValueId" />
+                                </FormRow>
+                                <FormRow Label="First name" Required>
+                                    <FluentTextField @bind-Value="_firstName" Required Placeholder="First name" />
+                                </FormRow>
+                                <FormRow Label="Last name" Required>
+                                    <FluentTextField @bind-Value="_lastName" Required Placeholder="Last name" />
+                                </FormRow>
+                                <FormRow Label="Display name">
+                                    <FluentTextField @bind-Value="_displayName" Placeholder="e.g. Mr. Smith (optional)" />
+                                </FormRow>
+                                <FormRow Label="Email" Required>
+                                    <FluentTextField @bind-Value="_email" Required Type="InputType.Email" Placeholder="staff@example.com" />
+                                </FormRow>
+                                <FormRow Label="Contact phone">
+                                    <FluentTextField @bind-Value="_contactPhone" Placeholder="Phone (optional)" />
+                                </FormRow>
+                            </FluentStack>
+
+                            @if (!string.IsNullOrEmpty(_profileError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_profileError</FluentMessageBar>
+                            }
+                        </section>
+                    </FluentWizardStep>
+
+                    @* ── Step 2: subjects ── *@
+                    <FluentWizardStep Label="Subjects"
+                                      Summary="Subjects taught"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                      OnChange="OnSubjectsChangingAsync">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Book)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Subjects</h3>
+                                    <p class="wizard-hint">Pick the subjects this teacher teaches.</p>
+                                </div>
+                            </div>
+
+                            @if (_allSubjects is null)
+                            {
+                                <div class="spinner-container"><FluentProgressRing /></div>
+                            }
+                            else if (_allSubjects.Length == 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">No subjects in this tenant yet.</FluentMessageBar>
+                            }
+                            else
+                            {
+                                <div class="check-list">
+                                    @foreach (var s in _allSubjects)
+                                    {
+                                        <div class="check-row">
+                                            <FluentCheckbox Value="@_selectedSubjectIds.Contains(s.Id)"
+                                                            ValueChanged="@(v => OnSubjectToggled(s.Id, v))" />
+                                            <span class="check-name">@s.Name <span class="muted">@s.Code</span></span>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </section>
+                    </FluentWizardStep>
+
+                    @* ── Step 3: grade levels ── *@
+                    <FluentWizardStep Label="Grade Levels"
+                                      Summary="Grade levels taught"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                      OnChange="OnGradeLevelsChangingAsync">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.SlideText)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Grade levels</h3>
+                                    <p class="wizard-hint">Pick the grade levels this teacher teaches.</p>
+                                </div>
+                            </div>
+
+                            @if (_allGradeLevels is null)
+                            {
+                                <div class="spinner-container"><FluentProgressRing /></div>
+                            }
+                            else if (_allGradeLevels.Length == 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">No grade levels in this tenant yet.</FluentMessageBar>
+                            }
+                            else
+                            {
+                                <div class="check-list">
+                                    @foreach (var gl in _allGradeLevels)
+                                    {
+                                        <div class="check-row">
+                                            <FluentCheckbox Value="@_selectedGradeLevelIds.Contains(gl.Id)"
+                                                            ValueChanged="@(v => OnGradeLevelToggled(gl.Id, v))" />
+                                            <span class="check-name">@gl.Name <span class="muted">Level @gl.Level</span></span>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        </section>
+                    </FluentWizardStep>
+
+                    @* ── Step 4: review ── *@
+                    <FluentWizardStep Label="Review"
+                                      Summary="Verify and save"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                      DeferredLoading="true">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Eye)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Review &amp; Save</h3>
+                                    <p class="wizard-hint">Verify the details before finishing.</p>
+                                </div>
+                            </div>
+
+                            <div class="review-card">
+                                <div class="review-grid">
+                                    <div class="review-row"><span class="review-label">Name</span><span class="review-value">@_firstName @_lastName</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(_displayName))
+                                    {
+                                        <div class="review-row"><span class="review-label">Display name</span><span class="review-value">@_displayName</span></div>
+                                    }
+                                    <div class="review-row"><span class="review-label">Email</span><span class="review-value">@_email</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(_contactPhone))
+                                    {
+                                        <div class="review-row"><span class="review-label">Phone</span><span class="review-value">@_contactPhone</span></div>
+                                    }
+                                </div>
+                            </div>
+
+                            <div class="review-card">
+                                <h4>Subjects (@_selectedSubjectIds.Count)</h4>
+                                @if (_selectedSubjectIds.Count == 0)
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Info">No subjects selected.</FluentMessageBar>
+                                }
+                                else
+                                {
+                                    <ul class="review-list">
+                                        @foreach (var s in _allSubjects?.Where(s => _selectedSubjectIds.Contains(s.Id)) ?? [])
+                                        {
+                                            <li>@s.Name <span class="muted">@s.Code</span></li>
+                                        }
+                                    </ul>
+                                }
+                            </div>
+
+                            <div class="review-card">
+                                <h4>Grade levels (@_selectedGradeLevelIds.Count)</h4>
+                                @if (_selectedGradeLevelIds.Count == 0)
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Info">No grade levels selected.</FluentMessageBar>
+                                }
+                                else
+                                {
+                                    <ul class="review-list">
+                                        @foreach (var gl in _allGradeLevels?.Where(gl => _selectedGradeLevelIds.Contains(gl.Id)) ?? [])
+                                        {
+                                            <li>@gl.Name <span class="muted">Level @gl.Level</span></li>
+                                        }
+                                    </ul>
+                                }
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(_error))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3 mb-3">@_error</FluentMessageBar>
+                            }
+                        </section>
+                    </FluentWizardStep>
+                </FluentWizard>
+
+                <div class="wizard-actions">
+                    @if (_stepIndex > 0)
+                    {
+                        <FluentButton Appearance="Appearance.Neutral"
+                                      IconStart="@FluentIcons.ArrowLeft"
+                                      OnClick="@(() => GoToStepAsync(_stepIndex - 1))">
+                            Back
+                        </FluentButton>
+                    }
+                    <span class="wizard-actions-spacer" aria-hidden="true"></span>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
+                    @if (_stepIndex < 3)
+                    {
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@FluentIcons.ArrowRight"
+                                      OnClick="@(() => GoToStepAsync(_stepIndex + 1))"
+                                      class="ms-2">
+                            Continue
+                        </FluentButton>
+                    }
+                    else
+                    {
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@FluentIcons.Save"
+                                      Disabled="@_saving" OnClick="SaveAsync"
+                                      class="ms-2">
+                            @(_saving ? "Saving…" : "Save and Finish")
+                        </FluentButton>
+                    }
+                </div>
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Teacher records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid? Id { get; set; }
+
+    private FluentWizard? _wizard;
+    private int _stepIndex;
+    private bool _isEdit => Id.HasValue;
+    private string? _profileError;
+    private string? _error;
+    private bool _saving;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private bool _isRealTenant;
+
+    // Profile fields.
+    private Guid? _titleCodedValueId;
+    private string _firstName = string.Empty;
+    private string _lastName = string.Empty;
+    private string _displayName = string.Empty;
+    private string _email = string.Empty;
+    private string _contactPhone = string.Empty;
+
+    // Subjects / grade levels.
+    private SubjectDto[]? _allSubjects;
+    private GradeLevelDto[]? _allGradeLevels;
+    private HashSet<Guid> _selectedSubjectIds = new();
+    private HashSet<Guid> _originalSubjectIds = new();
+    private HashSet<Guid> _selectedGradeLevelIds = new();
+    private HashSet<Guid> _originalGradeLevelIds = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        AuthenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        await RefreshTenantFromAuthStateAsync();
+
+        if (!_isRealTenant)
+            return;
+
+        try
+        {
+            _allSubjects = await Api.ListSubjectsAsync(ct) ?? [];
+            _allGradeLevels = await Api.ListGradeLevelsAsync(ct) ?? [];
+
+            if (_isEdit && Id is not null)
+            {
+                var t = await Api.GetTeacherByIdAsync(Id.Value, ct);
+                if (t is not null)
+                {
+                    _titleCodedValueId = t.TitleCodedValueId;
+                    _firstName = t.FirstName;
+                    _lastName = t.LastName;
+                    _displayName = t.DisplayName ?? string.Empty;
+                    _email = t.Email;
+                    _contactPhone = t.ContactPhone ?? string.Empty;
+                }
+
+                var existingSubjects = await Api.ListSubjectsForTeacherAsync(Id.Value, ct) ?? [];
+                var existingGradeLevels = await Api.ListGradeLevelsForTeacherAsync(Id.Value, ct) ?? [];
+                _originalSubjectIds = existingSubjects.Select(s => s.Id).ToHashSet();
+                _originalGradeLevelIds = existingGradeLevels.Select(g => g.Id).ToHashSet();
+                _selectedSubjectIds = new HashSet<Guid>(_originalSubjectIds);
+                _selectedGradeLevelIds = new HashSet<Guid>(_originalGradeLevelIds);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load data for teacher wizard");
+            _error = ex.Message;
+        }
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        if (_disposed) return;
+        try
+        {
+            await task;
+            var current = (await VisibleTenant.GetScopeAsync()).IsRealTenant;
+            if (current != _isRealTenant)
+            {
+                _isRealTenant = current;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to handle authentication state change in TeacherSetupWizard");
+        }
+    }
+
+    private async Task RefreshTenantFromAuthStateAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+    }
+
+    private Task OnProfileChangingAsync(FluentWizardStepChangeEventArgs args)
+    {
+        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName) || string.IsNullOrWhiteSpace(_email))
+        {
+            args.IsCancelled = true;
+            _profileError = "First name, last name and email are required.";
+            return Task.CompletedTask;
+        }
+        _profileError = null;
+        return Task.CompletedTask;
+    }
+
+    private Task OnSubjectsChangingAsync(FluentWizardStepChangeEventArgs args)
+    {
+        // No blocking validation — a teacher may teach zero subjects.
+        return Task.CompletedTask;
+    }
+
+    private Task OnGradeLevelsChangingAsync(FluentWizardStepChangeEventArgs args)
+    {
+        // No blocking validation — a teacher may teach zero grade levels.
+        return Task.CompletedTask;
+    }
+
+    private void OnSubjectToggled(Guid subjectId, bool selected)
+    {
+        if (selected)
+            _selectedSubjectIds.Add(subjectId);
+        else
+            _selectedSubjectIds.Remove(subjectId);
+        StateHasChanged();
+    }
+
+    private void OnGradeLevelToggled(Guid gradeLevelId, bool selected)
+    {
+        if (selected)
+            _selectedGradeLevelIds.Add(gradeLevelId);
+        else
+            _selectedGradeLevelIds.Remove(gradeLevelId);
+        StateHasChanged();
+    }
+
+    private async Task GoToStepAsync(int step)
+    {
+        if (_wizard is not null)
+            await _wizard.GoToStepAsync(step);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving) return;
+        _saving = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            Guid teacherId;
+            if (_isEdit && Id is not null)
+            {
+                teacherId = Id.Value;
+                await Api.UpdateTeacherAsync(teacherId, new UpdateTeacherRequest(
+                    _firstName.Trim(), _lastName.Trim(),
+                    string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
+                    _email.Trim(),
+                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
+                await SyncLinksAsync(teacherId, _originalSubjectIds, _selectedSubjectIds,
+                    id => Api.LinkTeacherSubjectAsync(teacherId, id, ct),
+                    id => Api.UnlinkTeacherSubjectAsync(teacherId, id, ct));
+                await SyncLinksAsync(teacherId, _originalGradeLevelIds, _selectedGradeLevelIds,
+                    id => Api.LinkTeacherGradeLevelAsync(teacherId, id, ct),
+                    id => Api.UnlinkTeacherGradeLevelAsync(teacherId, id, ct));
+            }
+            else
+            {
+                teacherId = await Api.CreateTeacherAsync(new CreateTeacherRequest(
+                    _titleCodedValueId,
+                    _firstName.Trim(), _lastName.Trim(),
+                    string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
+                    _email.Trim(),
+                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
+                foreach (var subjectId in _selectedSubjectIds)
+                    await Api.LinkTeacherSubjectAsync(teacherId, subjectId, ct);
+                foreach (var gradeLevelId in _selectedGradeLevelIds)
+                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, ct);
+            }
+
+            Nav.NavigateTo($"/students/teachers/{teacherId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save teacher");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SyncLinksAsync(
+        Guid teacherId,
+        HashSet<Guid> original,
+        HashSet<Guid> selected,
+        Func<Guid, Task> link,
+        Func<Guid, Task> unlink)
+    {
+        foreach (var id in selected.Except(original))
+            await link(id);
+        foreach (var id in original.Except(selected))
+            await unlink(id);
+    }
+
+    private void Cancel() => Nav.NavigateTo("/students/teachers");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        AuthenticationStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+}

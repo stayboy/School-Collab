@@ -44,8 +44,6 @@ public sealed class GetStudentByStudentNumberHandler(
                     student.LastName,
                     student.DateOfBirth,
                     student.GenderCodedValueId,
-                    student.ContactEmail,
-                    student.ContactPhone,
                     student.IsDeleted,
                     student.CreatedAt,
                     student.UpdatedAt);

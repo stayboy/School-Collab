@@ -1,8 +1,13 @@
 @page "/assignments/{Id:guid}"
 @using SchoolCollab.Assignments.Contracts
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Admin.Helpers
 @inject AssignmentsApiClient Api
+@inject StudentsApiClient StudentsApi
+@inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
 @implements IDisposable
@@ -30,75 +35,206 @@
                         : Appearance.Lightweight)">
                         @_item.Status
                     </FluentBadge>
-                </div>
-
-                <div class="detail-grid">
-                    <div class="detail-label">Type</div>
-                    <div class="detail-value">@EnumHelper.GetDescription(_item.AssignmentType)</div>
-
-                    <div class="detail-label">Grading</div>
-                    <div class="detail-value">@EnumHelper.GetDescription(_item.GradingFormat)</div>
-
-                    <div class="detail-label">Audience</div>
-                    <div class="detail-value">@EnumHelper.GetDescription(_item.TargetAudienceType)</div>
-
-                    <div class="detail-label">Subject</div>
-                    <div class="detail-value">@( _item.SubjectName ?? "—")</div>
-
-                    <div class="detail-label">Grade</div>
-                    <div class="detail-value">@( _item.GradeName ?? "—")</div>
-
-                    <div class="detail-label">Due Date</div>
-                    <div class="detail-value">@( _item.DueDate?.ToLocalTime().ToString("g") ?? "—")</div>
-
-                    <div class="detail-label">Max Score</div>
-                    <div class="detail-value">@( _item.MaxScore?.ToString("0.##") ?? "—")</div>
-
-                    <div class="detail-label">Created</div>
-                    <div class="detail-value">@_item.CreatedAt.ToLocalTime().ToString("g")</div>
-
-                    <div class="detail-label">Updated</div>
-                    <div class="detail-value">@_item.UpdatedAt.ToLocalTime().ToString("g")</div>
-                </div>
-
-                @if (!string.IsNullOrWhiteSpace(_item.Description))
-                {
-                    <div class="mt-3">
-                        <div class="detail-label">Description</div>
-                        <div class="detail-value description">@_item.Description</div>
-                    </div>
-                }
-
-                <div class="mt-3">
-                    <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Back to List</FluentButton>
-                    @if (_item.Status == AssignmentStatusDto.Draft)
+                    @if (_item.MandatoryReview)
                     {
-                        <FluentAnchor Href="@($"/assignments/{_item.Id}/edit")" Appearance="Appearance.Accent" class="ms-2">Edit</FluentAnchor>
+                        <FluentBadge Appearance="Appearance.Lightweight" Title="Guardian review required before students submit">Review required</FluentBadge>
                     }
                 </div>
 
-                @if (_item.Status == AssignmentStatusDto.Closed)
-                {
-                    <hr class="my-4" />
-                    <h4>Submit Review</h4>
-                    <EditForm Model="_reviewModel" OnValidSubmit="SubmitReviewAsync" class="form-container">
-                        <DataAnnotationsValidator />
+                <FluentTabs>
+                    <FluentTab Label="Overview">
+                        <div class="detail-grid">
+                            <div class="detail-label">Type</div>
+                            <div class="detail-value">@EnumHelper.GetDescription(_item.AssignmentType)</div>
 
-                        <FluentNumberField @bind-Value="_reviewModel.Score" Label="Score" class="narrow-field mb-3" />
-                        <FluentTextArea @bind-Value="_reviewModel.Comments" Label="Comments" Rows="3" class="full-width mb-3" />
+                            <div class="detail-label">Grading</div>
+                            <div class="detail-value">@EnumHelper.GetDescription(_item.GradingFormat)</div>
 
-                        @if (!string.IsNullOrEmpty(_reviewError))
+                            <div class="detail-label">Audience</div>
+                            <div class="detail-value">@EnumHelper.GetDescription(_item.TargetAudienceType)</div>
+
+                            <div class="detail-label">Subject</div>
+                            <div class="detail-value">@( _item.SubjectName ?? "—")</div>
+
+                            <div class="detail-label">Grade</div>
+                            <div class="detail-value">@( _item.GradeName ?? "—")</div>
+
+                            <div class="detail-label">Due Date</div>
+                            <div class="detail-value">@( _item.DueDate?.ToLocalTime().ToString("g") ?? "—")</div>
+
+                            <div class="detail-label">Max Score</div>
+                            <div class="detail-value">@( _item.MaxScore?.ToString("0.##") ?? "—")</div>
+
+                            <div class="detail-label">Created</div>
+                            <div class="detail-value">@_item.CreatedAt.ToLocalTime().ToString("g")</div>
+
+                            <div class="detail-label">Updated</div>
+                            <div class="detail-value">@_item.UpdatedAt.ToLocalTime().ToString("g")</div>
+                        </div>
+
+                        @if (!string.IsNullOrWhiteSpace(_item.Description))
                         {
-                            <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_reviewError</FluentMessageBar>
+                            <div class="mt-3">
+                                <div class="detail-label">Description</div>
+                                <div class="detail-value description">@_item.Description</div>
+                            </div>
                         }
 
-                        <div>
-                            <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_submittingReview">
-                                @(_submittingReview ? "Submitting…" : "Submit Review")
-                            </FluentButton>
+                        <div class="mt-3">
+                            <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Back to List</FluentButton>
+                            @if (_item.Status == AssignmentStatusDto.Draft)
+                            {
+                                <FluentAnchor Href="@($"/assignments/{_item.Id}/edit")" Appearance="Appearance.Accent" class="ms-2">Edit</FluentAnchor>
+                                <FluentButton Appearance="Appearance.Accent" OnClick="OpenPublishDialogAsync" Disabled="@_publishing" class="ms-2">
+                                    @(_publishing ? "Publishing…" : "Publish")
+                                </FluentButton>
+                            }
                         </div>
-                    </EditForm>
-                }
+
+                        @if (_item.Status == AssignmentStatusDto.Closed)
+                        {
+                            <hr class="my-4" />
+                            <h4>Submit Review</h4>
+                            <EditForm Model="_reviewModel" OnValidSubmit="SubmitReviewAsync" class="form-container">
+                                <DataAnnotationsValidator />
+                                <FluentNumberField @bind-Value="_reviewModel.Score" Label="Score" class="narrow-field mb-3" />
+                                <FluentTextArea @bind-Value="_reviewModel.Comments" Label="Comments" Rows="3" class="full-width mb-3" />
+                                @if (!string.IsNullOrEmpty(_reviewError))
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_reviewError</FluentMessageBar>
+                                }
+                                <div>
+                                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_submittingReview">@(_submittingReview ? "Submitting…" : "Submit Review")</FluentButton>
+                                </div>
+                            </EditForm>
+                        }
+                    </FluentTab>
+
+                    <FluentTab Label="Recipients">
+                        @if (_loadingRecipients)
+                        {
+                            <FluentProgressRing />
+                        }
+                        else if (_recipients is null || _recipients.Length == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                                No recipients yet. Publish the assignment to notify subscribed student/guardian contacts.
+                            </FluentMessageBar>
+                        }
+                        else
+                        {
+                            <table class="recipients-table mt-3">
+                                <thead>
+                                    <tr>
+                                        <th>Recipient</th>
+                                        <th>Channel</th>
+                                        <th>Role</th>
+                                        <th>Subscription</th>
+                                        <th>Broadcast</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var r in _recipients)
+                                    {
+                                        <tr>
+                                            <td>@EnumHelper.GetDescription(r.OwnerType)</td>
+                                            <td>@EnumHelper.GetDescription(r.Channel)</td>
+                                            <td>@(r.Role is not null ? EnumHelper.GetDescription(r.Role) : "—")</td>
+                                            <td>
+                                                <FluentBadge Appearance="@(r.SubscriptionActive ? Appearance.Accent : Appearance.Neutral)">
+                                                    @(r.SubscriptionActive ? "Active" : "Inactive")
+                                                </FluentBadge>
+                                            </td>
+                                            <td>@(r.NotifyOnBroadcast ? "Yes" : "No")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </FluentTab>
+
+                    <FluentTab Label="Submissions">
+                        @if (_loadingSubmissions)
+                        {
+                            <FluentProgressRing />
+                        }
+                        else if (_selectedSubmission is not null)
+                        {
+                            <div class="mt-3">
+                                <FluentButton Appearance="Appearance.Outline" OnClick="BackToSubmissionsAsync">← All submissions</FluentButton>
+                                <h4 class="mt-2">Student @_selectedSubmission.StudentId</h4>
+                                <p class="dialog-hint">Current version @_selectedSubmission.CurrentVersionNumber · Review: @EnumHelper.GetDescription(_selectedSubmission.ReviewState)</p>
+
+                                <h5>Version history</h5>
+                                <table class="recipients-table">
+                                    <thead>
+                                        <tr><th>Ver</th><th>Source</th><th>Submitted</th><th>Content</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var v in _selectedSubmission.Versions)
+                                        {
+                                            <tr>
+                                                <td>@v.VersionNumber</td>
+                                                <td>@EnumHelper.GetDescription(v.Source)</td>
+                                                <td>@v.SubmittedAt.ToLocalTime().ToString("g")</td>
+                                                <td class="submission-content">@(v.Content ?? "—")</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+
+                                @if (_selectedSubmission.Review is not null)
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-3">
+                                        Reviewed: @(_selectedSubmission.Review!.Score?.ToString("0.##") ?? "—") @(_selectedSubmission.Review.Grade ?? "") — @(_selectedSubmission.Review.Comments ?? "")
+                                    </FluentMessageBar>
+                                }
+
+                                <hr class="my-4" />
+                                <h5>Teacher review / grade</h5>
+                                <EditForm Model="_submissionReviewModel" OnValidSubmit="SubmitSubmissionReviewAsync" class="form-container">
+                                    <DataAnnotationsValidator />
+                                    <FluentNumberField @bind-Value="_submissionReviewModel.Score" Label="Score" class="narrow-field mb-3" />
+                                    <FluentTextField @bind-Value="_submissionReviewModel.Grade" Label="Grade" class="full-width mb-3" />
+                                    <FluentTextArea @bind-Value="_submissionReviewModel.Comments" Label="Comments" Rows="3" class="full-width mb-3" />
+                                    @if (!string.IsNullOrEmpty(_submissionReviewError))
+                                    {
+                                        <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_submissionReviewError</FluentMessageBar>
+                                    }
+                                    <div>
+                                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_submittingSubmissionReview">
+                                            @(_submittingSubmissionReview ? "Submitting…" : "Submit Review")
+                                        </FluentButton>
+                                    </div>
+                                </EditForm>
+                            </div>
+                        }
+                        else if (_submissions is null || _submissions.Length == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">No submissions yet.</FluentMessageBar>
+                        }
+                        else
+                        {
+                            <table class="recipients-table mt-3">
+                                <thead>
+                                    <tr><th>Student</th><th>Version</th><th>Review</th><th>Last submitted</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var s in _submissions)
+                                    {
+                                        <tr>
+                                            <td>@s.StudentId</td>
+                                            <td>@s.CurrentVersionNumber</td>
+                                            <td>@EnumHelper.GetDescription(s.ReviewState)</td>
+                                            <td>@s.LastSubmittedAt.ToLocalTime().ToString("g")</td>
+                                            <td><FluentButton Appearance="Appearance.Outline" OnClick="@(() => SelectSubmissionAsync(s.StudentId))">View</FluentButton></td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </FluentTab>
+                </FluentTabs>
             </div>
         }
     </ChildContent>
@@ -116,9 +252,29 @@
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
+    // Recipients (spec §12)
+    private AssignmentRecipientDto[]? _recipients;
+    private bool _loadingRecipients;
+
+    // Submissions + review (spec §12)
+    private SubmissionForReviewDto[]? _submissions;
+    private bool _loadingSubmissions;
+    private SubmissionDetailDto? _selectedSubmission;
+    private bool _loadingSubmission;
+
+    // Publish dialog (spec §12)
+    private bool _publishing;
+    private string? _publishError;
+
+    // Closed-assignment review (existing AssignmentReview)
     private bool _submittingReview;
     private string? _reviewError;
     private readonly ReviewFormModel _reviewModel = new();
+
+    // Submission teacher review/grade
+    private bool _submittingSubmissionReview;
+    private string? _submissionReviewError;
+    private readonly SubmissionReviewFormModel _submissionReviewModel = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -130,6 +286,32 @@
             Logger.LogInformation("Loading assignment {AssignmentId}", Id);
             _item = await Api.GetByIdAsync(Id, ct);
             if (_disposed) return;
+
+            if (_item is not null)
+            {
+                _loadingRecipients = true;
+                _loadingSubmissions = true;
+                try
+                {
+                    _recipients = await Api.GetRecipientsAsync(Id, ct);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to load recipients for {AssignmentId}", Id);
+                }
+                finally { _loadingRecipients = false; }
+
+                try
+                {
+                    _submissions = await Api.ListSubmissionsAsync(Id, ct);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Failed to load submissions for {AssignmentId}", Id);
+                }
+                finally { _loadingSubmissions = false; }
+            }
+
             Logger.LogInformation("Loaded assignment {AssignmentId}", Id);
         }
         catch (OperationCanceledException) { }
@@ -142,6 +324,106 @@
         finally
         {
             if (!_disposed) _loading = false;
+        }
+    }
+
+    private string AudienceSummary()
+    {
+        var audience = _item is not null ? EnumHelper.GetDescription(_item.TargetAudienceType) : "All students";
+        var grade = _item?.GradeName;
+        return grade is not null ? $"Audience: {audience} · Grade {grade}" : $"Audience: {audience}";
+    }
+
+    private async Task OpenPublishDialogAsync()
+    {
+        if (_item is null) return;
+        _publishing = true;
+        _publishError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            var contacts = await StudentsApi.ListSubscribedContactsAsync(
+                ContactOwnerType.Guardian, null, SubscriptionScope.AllAssignments, ct) ?? [];
+            var model = new PublishFormModel(contacts.ToList(), AudienceSummary(), _item.MandatoryReview);
+
+            var result = await DialogService.ShowShellDialogAsync<PublishDialog, PublishFormModel, PublishResult>(
+                model, title: "Publish assignment", size: DialogSize.Medium);
+
+            if (result is null)
+                return; // cancelled
+
+            await Api.PublishAsync(Id, result.ContactIds, ct);
+            _item = await Api.GetByIdAsync(Id, ct);
+            _recipients = await Api.GetRecipientsAsync(Id, ct);
+            Nav.NavigateTo($"/assignments/{Id}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to publish assignment {AssignmentId}", Id);
+            _publishError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _publishing = false;
+        }
+    }
+
+    private async Task SelectSubmissionAsync(Guid studentId)
+    {
+        _loadingSubmission = true;
+        _submissionReviewError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _selectedSubmission = await Api.GetSubmissionAsync(Id, studentId, ct);
+            _submissionReviewModel.Score = _selectedSubmission?.Review?.Score;
+            _submissionReviewModel.Grade = _selectedSubmission?.Review?.Grade;
+            _submissionReviewModel.Comments = _selectedSubmission?.Review?.Comments;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load submission for {AssignmentId}/{StudentId}", Id, studentId);
+            _submissionReviewError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loadingSubmission = false;
+        }
+    }
+
+    private void BackToSubmissionsAsync() => _selectedSubmission = null;
+
+    private async Task SubmitSubmissionReviewAsync()
+    {
+        if (_selectedSubmission is null) return;
+        _submittingSubmissionReview = true;
+        _submissionReviewError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            Logger.LogInformation("Submitting review for submission {SubmissionId}", _selectedSubmission.SubmissionId);
+            await Api.ReviewSubmissionAsync(Id, _selectedSubmission.StudentId, new ReviewSubmissionRequest(
+                Guid.Empty, // TeacherId — placeholder, wired to auth in a later phase
+                _submissionReviewModel.Score,
+                _submissionReviewModel.Grade,
+                _submissionReviewModel.Comments));
+            _selectedSubmission = await Api.GetSubmissionAsync(Id, _selectedSubmission.StudentId, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to submit review for {AssignmentId}/{StudentId}", Id, _selectedSubmission.StudentId);
+            _submissionReviewError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _submittingSubmissionReview = false;
         }
     }
 
@@ -187,6 +469,13 @@
     private sealed class ReviewFormModel
     {
         public decimal? Score { get; set; }
+        public string? Comments { get; set; }
+    }
+
+    private sealed class SubmissionReviewFormModel
+    {
+        public decimal? Score { get; set; }
+        public string? Grade { get; set; }
         public string? Comments { get; set; }
     }
 }
