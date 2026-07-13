@@ -946,6 +946,7 @@ read-model)._
 | 6 | Publish integration, review-gate & teacher review engine | **DONE (engine) + POLISH** | `IContactResolver` + `StudentsContactResolver`; publish upserts `AssignmentRecipient` (deduped by contact) + auto-creates `GuardianSubmissionGate` when `MandatoryReview`; **6 CQRS handlers** (+`CreateStudentSubmission` §4.10 gate) + §9-shaped submit endpoints; `ISubmissionRepository`; `ReviewSubmission` enforces `CreatedByTeacherId` authz; **`IAssignmentNotificationBroadcaster`** extracted (outbox); `PublishAssignmentCommand` contact selection; `Unpublish` rebuilds recipients + resets gate. 73/73 Assignments.Unit + 12/12 Arch. Remaining: full §9 route alignment (gate/submission review) + §8 recipient/submission queries — deferred to Phase 7. |
 | 7 | Assignments API + admin UI (Assignments.Admin) | **DONE** | §9-shaped endpoints (`/recipients`, `/submissions`, `/students/{studentId}/submission`, `/students/{studentId}/guardian-review`, `/students/{studentId}/enable-submission`, `/students/{studentId}/submit-on-behalf`, `/students/{studentId}/submission/review`, `/submissions/review-queue`, `/gates/student/{studentId}`); legacy id-based gate/submission review routes removed. New CQRS: `ListAssignmentRecipients`, `GetSubmission`, `ListSubmissionsByAssignment`, `EnableStudentSubmission` (→ `GuardianSubmissionGate.EnableForStudent()`). `Detail.razor` FluentTabs (Overview/Recipients/Submissions) + publish dialog (reuses `DialogShellBase<TModel,TResult>` shared shell; optional contact-subset selection via `StudentsApiClient.ListSubscribedContactsAsync`) + teacher review/grade form (`ReviewSubmissionAsync` + `GetSubmissionAsync`). `Create`/`Edit` `MandatoryReview` toggle. `AssignmentSummaryDto`/`CreateAssignmentRequest`/`UpdateAssignmentRequest` carry `MandatoryReview`; `Assignment.Create`/`Update` + `Create/UpdateAssignmentCommand` wired. 76/76 Assignments.Unit + 12/12 Arch. |
 | 8 | Teacher CQRS + API + SetupWizard UI (Students.Admin) | **DONE** | `TeacherDto`; `ITeacherRepository` + `TeacherRepository` (Add/Get/GetIncludingDeleted/Update/SoftDelete + subject/grade-level link add/remove) registered in `Extensions.cs`; `StudentsDbContext` `Teachers`/`TeacherSubjects`/`TeacherGradeLevels` DbSets (no new migration — tables already in `AddGuardiansContactsTeachers`). CQRS: `CreateTeacher`(+`Guid`), `UpdateTeacher`, `DeleteTeacher` (soft-delete), `Link/UnlinkTeacherSubject`, `Link/UnlinkTeacherGradeLevel`, `GetTeacherById`, `ListTeachers`, `ListSubjectsForTeacher`, `ListGradeLevelsForTeacher` (all tenant + HybridCache "teachers" tag; `TeacherNotFoundException` added). Students.Api `/teachers` routes (G2: `RequireAuthorization` unless `FEATURE:DisableOIDCAuth`) mounted in `StudentEndpoints`. Students.Admin `StudentsApiClient` teacher DTO/requests/methods (`/teachers` prefix). UI: `Teachers.razor` list (LandingPage), `TeacherSetupWizard.razor` (FluentWizard Profile→Subjects→GradeLevels→Review, edit diff-sync), `TeacherDetail.razor`; NavMenu Teachers link. `SchoolCollab.Admin.Shared.Constants.FluentIcons` gained `Edit`+`Person`. 8/8 `TeacherCqrsTests`; Students.Unit 77/77, Assignments.Unit 76/76, Arch 12/12. `ListAssignmentsForTeacher` deferred to teacher portal (§18). |
+| 9 | MigrationService wiring + seed run + full cross-module build/test | **DONE** | `SchoolCollab.MigrationService` (`migrator` in AppHost) applies EF migrations for all three contexts — Settings (`SettingsDbContext`), Assignments (`AssignmentsDbContext`), Students (`StudentsDbContext`, incl. `teachers`/`teacher_subjects`/`teacher_grade_levels` from `AddGuardiansContactsTeachers`) — then seeds CodedValues (incl. `SALUTS` Mr/Mrs/Ms/Dr/Prof/Mx for the Teacher title dropdown), the real Tenant registry, and `FEATURE:EnableCodedValuesAiChat`, and backfills assignment `SubjectId`/`GradeLevelId`. `MigrationGuardTests` (Students/Assignments/Settings) confirm zero pending model changes (`HasPendingModelChanges() == false`), so `MigrateAsync` is drift-free. `SchoolCollab.sln` builds 0 errors; **all 9 unit-test projects pass (638 tests)**: Students.Unit 77, Assignments.Unit 76, ArchitectureTests 12, Core.Tests.Unit 64, Admin.Tests.Unit 58, Settings.Tests.Unit 348, Students.Api.Tests.Unit 1, Assignments.Api.Tests.Unit 1, Settings.Api.Tests.Unit 1. Integration/Playwright suites (Testcontainers + browser) remain environment-blocked (no Docker). |
 
 ### Phase 4 deviations / notes
 - **`ListGuardiansByStudent` returns `StudentGuardianViewDto[]`** (not `GuardianDto[]`)
@@ -1067,12 +1068,16 @@ selection (#6), Unpublish rebuild recipients + reset gate (#7), student-on-behal
 
 ## Consolidated gaps & recommendations (next steps)
 
-_Review dated 2026-07-14 (Phase 8 applied). Test state: Students.Unit 77/77,
-ArchitectureTests 12/12, Assignments.Unit 76/76; `SchoolCollab.sln` builds 0
-errors. Phases 1–7 fully meet the plan; Phase 4 UI complete + Playwright
-smoke tests authored; Phase 6 engine complete + plan-fidelity polish applied;
-Phase 7 (Assignments API + admin UI) complete; Phase 8 (Teacher CQRS + API +
-SetupWizard UI) complete. Remaining work: Phase 9 + deferred Tier 3 items._
+_Review dated 2026-07-14 (Phase 9 applied). Test state: all 9 unit-test
+projects pass — Students.Unit 77/77, Assignments.Unit 76/76, ArchitectureTests
+12/12, Core.Tests.Unit 64/64, Admin.Tests.Unit 58/58, Settings.Tests.Unit 348/348,
+Students.Api.Tests.Unit 1/1, Assignments.Api.Tests.Unit 1/1, Settings.Api.Tests.Unit
+1/1 (638 total); `SchoolCollab.sln` builds 0 errors. Phases 1–8 fully meet the
+plan; Phase 4 UI complete + Playwright smoke tests authored; Phase 6 engine
+complete + plan-fidelity polish applied; Phase 7 (Assignments API + admin UI)
+complete; Phase 8 (Teacher CQRS + API + SetupWizard UI) complete; Phase 9
+(MigrationService wiring + seed run + full cross-module build/test) complete.
+Remaining work: deferred Tier 3 items + teacher portal (§18)._
 
 ### Tier 1 — finish Phase 6 (its own stated scope) ✔ DONE (2026-07-12)
 1. ~~**`ReviewSubmission` authorization**~~ — done: handler loads the
@@ -1122,6 +1127,10 @@ SetupWizard UI) complete. Remaining work: Phase 9 + deferred Tier 3 items._
     list, teacher review/grade screen + endpoints; student-scoped §9 routes finalized.
 12. ~~**Phase 8**~~ — done (see status table): Teacher CQRS + API (`/teachers`, G2 authz) +
     SetupWizard UI (`Teachers.razor`, `TeacherSetupWizard`, `TeacherDetail`); 8/8 `TeacherCqrsTests`.
-13. **Phase 9** — MigrationService wiring + seed run + full cross-module build/test.
+13. ~~**Phase 9**~~ — done (see status table): `SchoolCollab.MigrationService`
+    applies migrations for Settings/Assignments/Students (incl. Teacher tables) +
+    seeds CodedValues (incl. `SALUTS`)/Tenant/`FEATURE:EnableCodedValuesAiChat` +
+    assignment backfill; `MigrationGuardTests` confirm zero pending model changes;
+    `SchoolCollab.sln` builds 0 errors; all 9 unit-test projects pass (638 tests).
 14. **Integration tests (Testcontainers)** — currently blocked environmentally
     (no Docker); revisit when available.
