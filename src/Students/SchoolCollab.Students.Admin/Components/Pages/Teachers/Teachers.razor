@@ -22,7 +22,8 @@
              GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
-             SearchPlaceholder="Search teachers…">
+             SearchPlaceholder="Search teachers…"
+             Error="@_error">
     <Columns>
         <TemplateColumn TGridItem="TeacherDto" Title="Name" Sortable="true" SortBy="@_sortByName">
             <strong>@context.FirstName @context.LastName</strong>
@@ -108,12 +109,14 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load teachers");
             _error = ex.Message;
+            _items = [];
         }
     }
 
     private async Task OnDeleteAsync(Guid id, string name)
     {
         if (_disposed) return;
+        _error = null;
 
         var dialog = await DialogService.ShowConfirmationAsync(
             $"Are you sure you want to delete teacher '{name}'? This blocks the record but keeps its subject and grade-level links.",

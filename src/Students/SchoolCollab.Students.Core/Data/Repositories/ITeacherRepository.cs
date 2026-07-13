@@ -12,7 +12,9 @@ public interface ITeacherRepository
     Task SoftDeleteAsync(Teacher teacher, CancellationToken cancellationToken = default);
 
     Task AddSubjectAsync(TeacherSubject link, CancellationToken cancellationToken = default);
+    Task<TeacherSubject?> GetSubjectLinkAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default);
     Task RemoveSubjectAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default);
     Task AddGradeLevelAsync(TeacherGradeLevel link, CancellationToken cancellationToken = default);
+    Task<TeacherGradeLevel?> GetGradeLevelLinkAsync(Guid teacherId, Guid gradeLevelId, CancellationToken cancellationToken = default);
     Task RemoveGradeLevelAsync(Guid teacherId, Guid gradeLevelId, CancellationToken cancellationToken = default);
 }

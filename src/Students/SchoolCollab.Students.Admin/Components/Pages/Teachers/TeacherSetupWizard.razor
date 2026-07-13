@@ -415,6 +415,7 @@
         if (_saving) return;
         _saving = true;
         _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
         try
         {
             Guid teacherId;
@@ -425,13 +426,13 @@
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
                     _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()));
+                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
                 await SyncLinksAsync(teacherId, _originalSubjectIds, _selectedSubjectIds,
-                    id => Api.LinkTeacherSubjectAsync(teacherId, id),
-                    id => Api.UnlinkTeacherSubjectAsync(teacherId, id));
+                    id => Api.LinkTeacherSubjectAsync(teacherId, id, ct),
+                    id => Api.UnlinkTeacherSubjectAsync(teacherId, id, ct));
                 await SyncLinksAsync(teacherId, _originalGradeLevelIds, _selectedGradeLevelIds,
-                    id => Api.LinkTeacherGradeLevelAsync(teacherId, id),
-                    id => Api.UnlinkTeacherGradeLevelAsync(teacherId, id));
+                    id => Api.LinkTeacherGradeLevelAsync(teacherId, id, ct),
+                    id => Api.UnlinkTeacherGradeLevelAsync(teacherId, id, ct));
             }
             else
             {
@@ -440,15 +441,16 @@
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
                     _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()));
+                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
                 foreach (var subjectId in _selectedSubjectIds)
-                    await Api.LinkTeacherSubjectAsync(teacherId, subjectId);
+                    await Api.LinkTeacherSubjectAsync(teacherId, subjectId, ct);
                 foreach (var gradeLevelId in _selectedGradeLevelIds)
-                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId);
+                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, ct);
             }
 
             Nav.NavigateTo($"/students/teachers/{teacherId}");
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;

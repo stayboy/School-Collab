@@ -59,7 +59,8 @@ public static class AssignmentRoutes
                 req.Title, req.Description, (AssignmentType)req.AssignmentType,
                 (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
                 req.SubjectId, req.GradeLevelId,
-                req.DueDate, req.MaxScore);
+                req.DueDate, req.MaxScore,
+                req.MandatoryReview);
             var id = await handler.HandleAsync(cmd, ct);
             return Results.Created($"/assignments/{id}", new { id });
         });

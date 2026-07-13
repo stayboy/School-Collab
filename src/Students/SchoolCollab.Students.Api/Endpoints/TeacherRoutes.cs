@@ -91,8 +91,14 @@ public static class TeacherRoutes
             [FromServices] ICommandHandler<LinkTeacherSubject> handler,
             CancellationToken ct) =>
         {
-            await handler.HandleAsync(new LinkTeacherSubject(id, req.SubjectId), ct);
-            return Results.NoContent();
+            try
+            {
+                await handler.HandleAsync(new LinkTeacherSubject(id, req.SubjectId), ct);
+                return Results.NoContent();
+            }
+            catch (TeacherNotFoundException) { return Results.NotFound(); }
+            catch (SubjectNotFoundException) { return Results.NotFound(); }
+            catch (TeacherLinkAlreadyExistsException ex) { return Results.Conflict(new { ex.Message }); }
         });
 
         group.MapDelete("/{id:guid}/subjects/{subjectId:guid}", async (
@@ -118,8 +124,14 @@ public static class TeacherRoutes
             [FromServices] ICommandHandler<LinkTeacherGradeLevel> handler,
             CancellationToken ct) =>
         {
-            await handler.HandleAsync(new LinkTeacherGradeLevel(id, req.GradeLevelId), ct);
-            return Results.NoContent();
+            try
+            {
+                await handler.HandleAsync(new LinkTeacherGradeLevel(id, req.GradeLevelId), ct);
+                return Results.NoContent();
+            }
+            catch (TeacherNotFoundException) { return Results.NotFound(); }
+            catch (GradeLevelNotFoundException) { return Results.NotFound(); }
+            catch (TeacherLinkAlreadyExistsException ex) { return Results.Conflict(new { ex.Message }); }
         });
 
         group.MapDelete("/{id:guid}/grade-levels/{gradeLevelId:guid}", async (

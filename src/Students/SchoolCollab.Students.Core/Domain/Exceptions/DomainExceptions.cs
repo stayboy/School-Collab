@@ -132,3 +132,20 @@ public sealed class TeacherNotFoundException : Exception
     public TeacherNotFoundException(Guid id) : base($"Teacher with ID '{id}' was not found.")
         => TeacherId = id;
 }
+
+/// <summary>
+/// Thrown when a subject or grade-level link already exists for a teacher
+/// (spec §4.12). Mirrors <see cref="GuardianLinkAlreadyExistsException"/>.
+/// </summary>
+public sealed class TeacherLinkAlreadyExistsException : Exception
+{
+    public Guid TeacherId { get; }
+    public Guid RefId { get; }
+
+    public TeacherLinkAlreadyExistsException(Guid teacherId, Guid refId)
+        : base($"A link already exists between teacher '{teacherId}' and '{refId}'.")
+    {
+        TeacherId = teacherId;
+        RefId = refId;
+    }
+}

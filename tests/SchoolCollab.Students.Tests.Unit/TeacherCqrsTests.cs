@@ -32,11 +32,11 @@ public class TeacherCqrsTests
     private static DeleteTeacherHandler NewDelete(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<DeleteTeacherHandler>.Instance);
     private static LinkTeacherSubjectHandler NewLinkSubject(StudentsTestScope s) =>
-        new(TeacherRepo(s), s.Tenants, s.Cache, NullLogger<LinkTeacherSubjectHandler>.Instance);
+        new(TeacherRepo(s), s.Subjects, s.Cache, s.Tenants, NullLogger<LinkTeacherSubjectHandler>.Instance);
     private static UnlinkTeacherSubjectHandler NewUnlinkSubject(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<UnlinkTeacherSubjectHandler>.Instance);
     private static LinkTeacherGradeLevelHandler NewLinkGrade(StudentsTestScope s) =>
-        new(TeacherRepo(s), s.Tenants, s.Cache, NullLogger<LinkTeacherGradeLevelHandler>.Instance);
+        new(TeacherRepo(s), s.GradeLevels, s.Cache, s.Tenants, NullLogger<LinkTeacherGradeLevelHandler>.Instance);
     private static UnlinkTeacherGradeLevelHandler NewUnlinkGrade(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<UnlinkTeacherGradeLevelHandler>.Instance);
     private static GetTeacherByIdHandler NewGetById(StudentsTestScope s) =>
@@ -177,5 +177,49 @@ public class TeacherCqrsTests
         var listed = await NewList(s).HandleAsync(new ListTeachers());
         listed.Should().HaveCount(2);
         listed.Select(t => t.LastName).Should().Contain(new[] { "Doe", "Roe" });
+    }
+
+    [TestMethod]
+    public async Task LinkSubject_MissingTeacher_Throws()
+    {
+        using var s = new StudentsTestScope("teacher-link-missing-teacher");
+        var subjectId = await SeedSubjectAsync(s, "MATH", "Mathematics");
+
+        var act = async () => await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(Guid.NewGuid(), subjectId));
+        await act.Should().ThrowAsync<TeacherNotFoundException>();
+    }
+
+    [TestMethod]
+    public async Task LinkSubject_MissingSubject_Throws()
+    {
+        using var s = new StudentsTestScope("teacher-link-missing-subject");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+
+        var act = async () => await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(id, Guid.NewGuid()));
+        await act.Should().ThrowAsync<SubjectNotFoundException>();
+    }
+
+    [TestMethod]
+    public async Task LinkSubject_DuplicateLink_Throws()
+    {
+        using var s = new StudentsTestScope("teacher-link-duplicate");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var subjectId = await SeedSubjectAsync(s, "MATH", "Mathematics");
+
+        await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
+        var act = async () => await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
+        await act.Should().ThrowAsync<TeacherLinkAlreadyExistsException>();
+    }
+
+    [TestMethod]
+    public async Task LinkGradeLevel_DuplicateLink_Throws()
+    {
+        using var s = new StudentsTestScope("teacher-grade-duplicate");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var gradeId = await SeedGradeLevelAsync(s, 5, "Grade 5");
+
+        await NewLinkGrade(s).HandleAsync(new LinkTeacherGradeLevel(id, gradeId));
+        var act = async () => await NewLinkGrade(s).HandleAsync(new LinkTeacherGradeLevel(id, gradeId));
+        await act.Should().ThrowAsync<TeacherLinkAlreadyExistsException>();
     }
 }

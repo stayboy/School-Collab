@@ -1079,6 +1079,32 @@ complete; Phase 8 (Teacher CQRS + API + SetupWizard UI) complete; Phase 9
 (MigrationService wiring + seed run + full cross-module build/test) complete.
 Remaining work: deferred Tier 3 items + teacher portal (§18)._
 
+### Post-review fixes (2026-07-14)
+- **Phase 7 — `MandatoryReview` on Create (HIGH):** `POST /assignments` route now
+  passes `req.MandatoryReview` to `CreateAssignmentCommand` (previously dropped →
+  create always defaulted to `true`, making the Create wizard's guardian-review
+  checkbox non-functional). Update path was already correct.
+- **Phase 8 — Teacher link existence + duplicate handling (MEDIUM):** `LinkTeacherSubject`
+  / `LinkTeacherGradeLevel` now validate the teacher AND the subject/grade exist
+  (tenant-scoped; soft-deleted teachers excluded) and throw `TeacherNotFoundException`
+  / `SubjectNotFoundException` / `GradeLevelNotFoundException`; a duplicate link throws
+  the new `TeacherLinkAlreadyExistsException`. Routes map these to 404 / 409
+  (previously a nonexistent teacher silently created a dangling row → 204, and a
+  duplicate threw a raw 500). Mirrors the `LinkGuardianToStudent` convention. Added
+  `ITeacherRepository.GetSubjectLinkAsync` / `GetGradeLevelLinkAsync`. 4 new
+  `TeacherCqrsTests` cover missing-teacher / missing-subject / duplicate subject /
+  duplicate grade-level.
+- **Phase 8 — `Teachers.razor` error surfacing (LOW):** the dead `_error` field is
+  now wired to `LandingPage.Error`; a failed load sets `_items = []` (stops the
+  spinner) and delete clears stale errors.
+- **Phase 8 — `TeacherSetupWizard.SaveAsync` cancellation (LOW):** all API calls now
+  pass the component `CancellationToken`; `OperationCanceledException` is swallowed
+  so navigating away mid-save no longer surfaces a spurious error.
+- Test state after fixes: Students.Unit 81/81 (+4), full suite 642/642, build 0 errors.
+  Deferred: `Guid.Empty` teacher/auth-id placeholders (auth-wiring work item),
+  non-transactional link syncing, `EnableStudentSubmissionCommand.ReviewerGuardianId`
+  dead input, FK constraints on link tables (would need a migration).
+
 ### Tier 1 — finish Phase 6 (its own stated scope) ✔ DONE (2026-07-12)
 1. ~~**`ReviewSubmission` authorization**~~ — done: handler loads the
    `Assignment` and rejects non-creator teachers; review endpoint returns 403.

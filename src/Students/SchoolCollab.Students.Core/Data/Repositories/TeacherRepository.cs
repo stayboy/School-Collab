@@ -13,6 +13,9 @@ internal sealed class TeacherRepository(StudentsDbContext db)
         return Db.SaveChangesAsync(cancellationToken);
     }
 
+    public Task<TeacherSubject?> GetSubjectLinkAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
+        => Db.TeacherSubjects.FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.SubjectId == subjectId, cancellationToken);
+
     public async Task RemoveSubjectAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
     {
         var link = await Db.TeacherSubjects
@@ -29,6 +32,9 @@ internal sealed class TeacherRepository(StudentsDbContext db)
         Db.TeacherGradeLevels.Add(link);
         return Db.SaveChangesAsync(cancellationToken);
     }
+
+    public Task<TeacherGradeLevel?> GetGradeLevelLinkAsync(Guid teacherId, Guid gradeLevelId, CancellationToken cancellationToken = default)
+        => Db.TeacherGradeLevels.FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.GradeLevelId == gradeLevelId, cancellationToken);
 
     public async Task RemoveGradeLevelAsync(Guid teacherId, Guid gradeLevelId, CancellationToken cancellationToken = default)
     {
