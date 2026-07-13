@@ -42,16 +42,10 @@
     color: #0a5cb8;
 }
 
-.field-label {
-    width: 160px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    min-height: 34px;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: #333;
-}
+/* The label cell, input cell, and required-marker now live in the
+   shared FormRow primitive (src/SchoolCollab.Admin.Shared/Components/
+   FormRow.razor.css) — the canonical repo-wide 180px label column.
+   This stylesheet only carries the PERIOD-FORM-SPECIFIC bits below. */
 
 .form-actions {
     margin-top: 1.1rem;

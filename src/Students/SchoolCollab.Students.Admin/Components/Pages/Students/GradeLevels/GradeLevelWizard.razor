@@ -59,31 +59,6 @@
                 </FluentCard>
             </section>
         }
-        else if (!_termConfirmed)
-        {
-            <section class="open-term-panel">
-                <div class="term-gate-card">
-                    <div class="wizard-section-header">
-                        <div>
-                            <h3>Term already open</h3>
-                            <p class="wizard-hint">A term is currently open for this tenant. Confirm you want to use it to set up the grade level.</p>
-                        </div>
-                    </div>
-
-                    <div class="current-term-card">
-                        <div class="current-term-row">
-                            <FluentLabel class="current-term-name">@_activePeriod!.Name</FluentLabel>
-                            <FluentBadge Appearance="@GetStatusAppearance(_activePeriod!.Status)">@_activePeriod!.Status</FluentBadge>
-                        </div>
-                        <div class="current-term-dates">@_activePeriod!.StartDate – @_activePeriod!.EndDate</div>
-                    </div>
-
-                    <div class="form-actions">
-                        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmCurrentTermAsync">Continue with this term</FluentButton>
-                    </div>
-                </div>
-            </section>
-        }
         else
         {
         <FluentWizard StepperPosition="StepperPosition.Top"
@@ -117,8 +92,8 @@
                                     <div class="coded-value-picker">
                                         <CodedValueDropdown @ref="_codedValueDropdown"
                                                             Parent="CodedValueParent.Grades"
-                                                            SelectedId="_codedValueIdNullable"
-                                                            SelectedIdChanged="OnCodedValueChanged" />
+                                                            @bind-SelectedId="_codedValueIdNullable"
+                                                            @bind-SelectedId:after="OnCodedValueChanged" />
                                     </div>
                                     <div class="coded-value-actions">
 
@@ -191,8 +166,8 @@
                                     <div class="coded-value-picker">
                                         <CodedValueDropdown @ref="_subjectCodedValueDropdown"
                                                             Parent="CodedValueParent.Subjects"
-                                                            SelectedId="_selectedSubjectCodedValueId"
-                                                            SelectedIdChanged="OnSubjectCodedValueChanged" />
+                                                            @bind-SelectedId="_selectedSubjectCodedValueId"
+                                                            @bind-SelectedId:after="OnSubjectCodedValueChanged" />
                                     </div>
 
                                     @* Last-added subject chip — confirms the most
@@ -293,40 +268,112 @@
                                 </div>
                             </div>
 
-                            @if (_availableStudents.Length == 0 && _assignedStudents.Count == 0)
+                            @* Inline "new student" form. Collapsed by default so it
+                               doesn't crowd the grid; expands when the user clicks
+                               "+ New student". This avoids the round-trip out of the
+                               wizard to /students/create and back, which was the
+                               only way to seed students for a fresh tenant. The
+                               toggle button is hidden while the form is open — the
+                               form has its own Cancel button (at the bottom of the
+                               card) that closes the form, so showing two stacked
+                               Cancellable controls would be confusing. The form
+                               itself is the shared <StudentFormFields> component
+                               used by /students/create and /students/{id}/edit, so
+                               the field set and validation stay in lockstep across
+                               the three entry points. *@
+                            @if (!_showNewStudentForm)
                             {
-                                <FluentMessageBar Intent="MessageIntent.Info">No students available to enrol.</FluentMessageBar>
+                                <div class="coded-value-actions">
+                                    <FluentButton Appearance="Appearance.Neutral"
+                                                  IconStart="@FluentIcons.PersonAdd"
+                                                  OnClick="ToggleNewStudentForm">
+                                        New student
+                                    </FluentButton>
+                                </div>
                             }
-                            else
+
+                            @if (_showNewStudentForm)
+                            {
+                                <FluentCard class="new-student-card">
+                                    <div class="form-section-header">
+                                        <div>
+                                            <h3>New student</h3>
+                                            <p class="form-hint">Required fields are marked with <span class="required-marker">*</span>. The student will be enrolled in this grade as soon as you submit.</p>
+                                        </div>
+                                    </div>
+                                    @* The form uses the shared <StudentFormFields>
+                                       component — it owns the date picker, the
+                                       CodedValueDropdown for gender, the
+                                       equal-width label column, and the action
+                                       row. The wizard only contributes the
+                                       wrapper card and the hint text. *@
+                                    <StudentFormFields Model="_newStudentModel"
+                                                       ErrorMessage="@_newStudentError"
+                                                       OnValidSubmit="OnCreateStudentAsync">
+                                        <Actions>
+                                            <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_creatingStudent">
+                                                @(_creatingStudent ? "Creating…" : "Create & enrol")
+                                            </FluentButton>
+                                            <FluentButton Appearance="Appearance.Outline" OnClick="ToggleNewStudentForm">Cancel</FluentButton>
+                                        </Actions>
+                                    </StudentFormFields>
+                                </FluentCard>
+                            }
+
+                            @* Available students grid. The "Enrol" button is
+                               disabled for students already enrolled in another
+                               grade for this active period (pre-loaded into
+                               _alreadyEnrolledStudentIds in OnStep2ChangingAsync).
+                               This prevents the user from clicking through to
+                               review and only learning on save that the
+                               backend rejected the second enrollment. *@
+                            @if (_availableStudents.Length == 0 && _assignedStudents.Count == 0 && !_showNewStudentForm)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                                    No students in this tenant yet. Click <strong>New student</strong> to add the first one.
+                                </FluentMessageBar>
+                            }
+                            else if (_availableStudents.Length > 0)
                             {
                                 <div class="grid-container">
                                     <FluentDataGrid Items="@_availableStudents.AsQueryable()" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto">
                                         <PropertyColumn Property="@(x => x.StudentNumber)" Title="Number" />
                                         <PropertyColumn Property="@(x => x.FirstName)" Title="First Name" />
                                         <PropertyColumn Property="@(x => x.LastName)" Title="Last Name" />
+                                        <TemplateColumn Title="Status">
+                                            @if (_alreadyEnrolledStudentIds.Contains(context.Id))
+                                            {
+                                                <span class="muted" title="Already enrolled in another grade for this period.">Already enrolled</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="muted">Available</span>
+                                            }
+                                        </TemplateColumn>
                                         <TemplateColumn Title="Action">
                                             <FluentButton Appearance="Appearance.Lightweight"
+                                                          Disabled="@_alreadyEnrolledStudentIds.Contains(context.Id)"
                                                           OnClick="@(() => AddStudent(context))">Enrol</FluentButton>
                                         </TemplateColumn>
                                     </FluentDataGrid>
                                 </div>
+                            }
 
-                                @if (_assignedStudents.Count > 0)
-                                {
-                                    <div class="assigned-list">
-                                        <h4>Enrolled in this grade</h4>
-                                        <ul>
-                                            @foreach (var s in _assignedStudents)
-                                            {
-                                                <li>
-                                                    <span>@s.FirstName @s.LastName</span>
-                                                    <FluentButton Appearance="Appearance.Lightweight"
-                                                                  OnClick="@(() => RemoveStudent(s))">Remove</FluentButton>
-                                                </li>
-                                            }
-                                        </ul>
-                                    </div>
-                                }
+                            @if (_assignedStudents.Count > 0)
+                            {
+                                <div class="assigned-list">
+                                    <h4>Enrolled in this grade (@_assignedStudents.Count)</h4>
+                                    <ul>
+                                        @foreach (var s in _assignedStudents)
+                                        {
+                                            <li>
+                                                <span><strong>@s.StudentNumber</strong> — @s.FirstName @s.LastName</span>
+                                                <FluentButton Appearance="Appearance.Lightweight"
+                                                              OnClick="@(() => RemoveStudent(s))">Remove</FluentButton>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
                             }
                         </section>
                     }
@@ -357,6 +404,13 @@
                                     <span class="review-label">Name</span>
                                     <span class="review-value">@(string.IsNullOrWhiteSpace(ResolvedName) ? "—" : ResolvedName)</span>
                                 </div>
+                                @if (_selectedCodedValue is not null && !string.IsNullOrWhiteSpace(_selectedCodedValue.Code))
+                                {
+                                    <div class="review-row">
+                                        <span class="review-label">Coded value code</span>
+                                        <span class="review-value"><code>@_selectedCodedValue.Code</code></span>
+                                    </div>
+                                }
                                 <div class="review-row">
                                     <span class="review-label">Tenant override</span>
                                     <span class="review-value">
@@ -374,16 +428,89 @@
                                     <span class="review-label">Current period</span>
                                     <span class="review-value">@(_activePeriod?.Name ?? "No active period")</span>
                                 </div>
-                                <div class="review-row">
-                                    <span class="review-label">Subjects assigned</span>
-                                    <span class="review-value">@_assignedSubjects.Count</span>
-                                </div>
-                                <div class="review-row">
-                                    <span class="review-label">Students enrolled</span>
-                                    <span class="review-value">@_assignedStudents.Count</span>
-                                </div>
                             </div>
                         </div>
+
+                        @* Surface what will be wired up at save time, not just
+                           the counts — the user must see the actual students and
+                           subjects so they can sanity-check before clicking Save. *@
+                        <div class="review-card">
+                            <h4>Subjects to assign (@_assignedSubjects.Count)</h4>
+                            @if (_assignedSubjects.Count == 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">No subjects will be assigned to this grade.</FluentMessageBar>
+                            }
+                            else
+                            {
+                                <ul class="review-list">
+                                    @foreach (var s in _assignedSubjects)
+                                    {
+                                        <li>
+                                            <span><strong>@s.Code</strong> — @s.Name</span>
+                                            @if (s.IsOverridden)
+                                            {
+                                                <FluentBadge Appearance="Appearance.Accent" class="grade-confirm-badge">Overridden</FluentBadge>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                        </div>
+
+                        <div class="review-card">
+                            <h4>Students to enrol (@_assignedStudents.Count)</h4>
+                            @if (_activePeriod is null && _assignedStudents.Count > 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+                                    No active period — these students will be <strong>added to the list but NOT enrolled</strong> on save. Open an active period first, then re-save.
+                                </FluentMessageBar>
+                            }
+                            @if (_assignedStudents.Count == 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">No students will be enrolled in this grade.</FluentMessageBar>
+                            }
+                            else
+                            {
+                                <ul class="review-list">
+                                    @foreach (var st in _assignedStudents)
+                                    {
+                                        <li>
+                                            <span><strong>@st.StudentNumber</strong> — @st.FirstName @st.LastName</span>
+                                        </li>
+                                    }
+                                </ul>
+                            }
+                            @if (_enrollSkippedCount > 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                                    @_enrollSkippedCount student(s) were skipped during a previous save attempt (already enrolled in another grade for this period).
+                                </FluentMessageBar>
+                            }
+                        </div>
+
+                        @* Per-phase save status (populated by SaveAsync as it
+                           runs). Shows what succeeded, what was skipped, and
+                           what failed — much clearer than a single boolean
+                           "did the save work". *@
+                        @if (_savePhases.Count > 0)
+                        {
+                            <div class="review-card">
+                                <h4>Save status</h4>
+                                <ul class="review-list">
+                                    @foreach (var phase in _savePhases)
+                                    {
+                                        <li>
+                                            <span><strong>@phase.Name</strong></span>
+                                            <FluentBadge Appearance="@PhaseAppearance(phase.Outcome)">@PhaseLabel(phase)</FluentBadge>
+                                            @if (!string.IsNullOrEmpty(phase.Detail))
+                                            {
+                                                <span class="muted"> — @phase.Detail</span>
+                                            }
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
 
                         @if (!string.IsNullOrEmpty(_error))
                         {
@@ -406,7 +533,17 @@
 
                     <span class="wizard-actions-spacer" aria-hidden="true"></span>
 
-                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
+                    @* The wizard footer's own Cancel button is hidden while the
+                       inline "new student" form is open — the form has its own
+                       Cancel button (toggles the form closed) and showing two
+                       Cancellable controls stacked vertically is confusing. The
+                       other footer buttons (Back / Continue) stay available so
+                       the user can still navigate around the wizard without
+                       first having to dismiss the form. *@
+                    @if (!_showNewStudentForm)
+                    {
+                        <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
+                    }
 
                     @if (stepIndex < 2)
                     {
@@ -460,15 +597,14 @@
     // StartDate <= today && EndDate >= today.
     private SchoolCollab.Students.Admin.Services.PeriodDto? _currentPeriod;
 
-    // Active period (status-derived) — gates the wizard. When null, the wizard
-    // shows the "Open a term" entry gate instead of its steps (FR-A6 / Idea C).
+    // Active period (status-derived) — gates the wizard's step rendering. When
+    // null the wizard shows the "Open a term" entry gate instead of its steps
+    // (FR-A6 / Idea C), because Step 2 (enrolment) and Step 3 (review) both
+    // require a tenant-scoped period. When a period already exists the user
+    // is not asked to confirm it here — the global ActiveTermToolbar in the
+    // app header is the single source of truth for "which term is in scope",
+    // so the wizard proceeds straight to its steps.
     private SchoolCollab.Students.Admin.Services.PeriodDto? _activePeriod;
-
-    // When an active period already exists on load, the wizard shows a
-    // confirmation gate (so the user reuses the open term instead of creating an
-    // overlapping one). Once confirmed (or after creating/opening a term here),
-    // the wizard steps render.
-    private bool _termConfirmed;
 
     // Draft periods available to "Open" from the entry gate (FR-A6).
     private List<SchoolCollab.Students.Admin.Services.PeriodDto> _draftPeriods = new();
@@ -513,6 +649,31 @@
     private List<SchoolCollab.Students.Admin.Services.SubjectDto> _assignedSubjects = new();
     private SchoolCollab.Students.Core.DTOs.StudentDto[] _availableStudents = [];
     private List<SchoolCollab.Students.Core.DTOs.StudentDto> _assignedStudents = new();
+
+    // Students already enrolled in ANOTHER grade for the current active period
+    // (populated when entering step 2 via ListEnrollmentsByPeriod). Used to
+    // disable the "Enrol" button on the available grid and to skip them in
+    // SaveAsync, so the user never reaches a save that the backend will reject
+    // with a duplicate-enrollment conflict.
+    private HashSet<Guid> _alreadyEnrolledStudentIds = new();
+
+    // Inline "new student" form (step 2). Collapsed by default — clicking
+    // "New student" expands the shared <StudentFormFields> EditForm bound to
+    // _newStudentModel. On submit we call CreateStudentAsync, refresh
+    // _availableStudents, and auto-enrol the new student. The model is the
+    // shared <StudentFormModel> used by /students/create and
+    // /students/{id}/edit so the three entry points stay in lockstep.
+    private bool _showNewStudentForm;
+    private bool _creatingStudent;
+    private string? _newStudentError;
+    private readonly StudentFormModel _newStudentModel = new();
+
+    // Per-phase save status (step 3). Populated by SaveAsync as the save
+    // progresses. Cleared on each new save attempt. Shown as a list of badges
+    // in the review step so the user can see exactly which phase succeeded,
+    // was skipped, or failed.
+    private readonly List<SavePhaseStatus> _savePhases = new();
+    private int _enrollSkippedCount;
 
     protected override async Task OnInitializedAsync()
     {
@@ -601,21 +762,9 @@
     /// </summary>
     private async Task OnPeriodFormSaved(SchoolCollab.Students.Admin.Services.PeriodDto saved)
     {
-        _termConfirmed = true;
         var ct = _loadCts?.Token ?? CancellationToken.None;
         await DerivePeriodsAsync(ct);
         await InvokeAsync(StateHasChanged);
-    }
-
-    /// <summary>
-    /// Confirmation-gate action: the tenant already has an open (active) term, so
-    /// reuse it for this grade-level setup instead of creating an overlapping one.
-    /// Flips the gate so the wizard steps render.
-    /// </summary>
-    private Task ConfirmCurrentTermAsync()
-    {
-        _termConfirmed = true;
-        return Task.CompletedTask;
     }
 
     /// <summary>Maps a period status to a Fluent badge appearance (mirrors the
@@ -639,7 +788,6 @@
         try
         {
             await Api.ActivatePeriodAsync(id);
-            _termConfirmed = true;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;
             await DerivePeriodsAsync(ct);
@@ -666,44 +814,86 @@
         return Task.CompletedTask;
     }
 
-    private Task OnStep2ChangingAsync(FluentWizardStepChangeEventArgs args)
+    private async Task OnStep2ChangingAsync(FluentWizardStepChangeEventArgs args)
     {
         if (_activePeriod is null)
         {
             args.IsCancelled = true;
             _step2Error = "An active period is required to assign subjects and enrol students.";
+            return;
         }
-        else
+
+        _step2Error = null;
+
+        // Eagerly load the set of students already enrolled in another grade
+        // for the current active period, so step 2 can show "Already enrolled"
+        // on the available grid and SaveAsync can skip them. Done here (not on
+        // mount) because periods are loaded on mount but the per-period
+        // enrollment list is the only thing the step 2 grid cares about.
+        try
         {
-            _step2Error = null;
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            var existing = await Api.ListEnrollmentsByPeriodAsync(_activePeriod.Id, ct) ?? [];
+            // Only count enrollments that are still active (no exit date) for a
+            // *different* grade than the one we're about to create. Since the
+            // grade doesn't exist yet, anything in this list is "another grade".
+            _alreadyEnrolledStudentIds = existing
+                .Where(e => e.ExitDate is null)
+                .Select(e => e.StudentId)
+                .ToHashSet();
         }
-        return Task.CompletedTask;
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load already-enrolled students for the active period");
+            // Non-fatal — fall through; the worst case is a save that the
+            // backend rejects, and the per-phase status will surface it.
+        }
     }
 
-    private async Task OnCodedValueChanged(Guid? id)
+    private void OnCodedValueChanged()
     {
-        _codedValueIdNullable = id;
+        // The bound field (_codedValueIdNullable) is already updated by
+        // the @bind-SelectedId binder before :after runs, so we read it
+        // directly from the field — no parameter needed. Declared `void`
+        // (not `async Task`) so it converts directly to the `Action` that
+        // @bind-SelectedId:after expects — call site is a bare method
+        // group, no lambda wrapper. The synchronous error-clear runs here
+        // so the UI is responsive immediately; the async fetch (or the
+        // sync clear-selection null-out) is fire-and-forget.
         _error = null;
         _step1Error = null;
 
-        if (id.HasValue)
+        if (_codedValueIdNullable.HasValue)
         {
-            try
-            {
-                var ct = _loadCts?.Token ?? CancellationToken.None;
-                _selectedCodedValue = await CodedValuesApi.GetByIdAsync(id.Value, ct);
-            }
-            catch (OperationCanceledException) { }
-            catch (Exception ex)
-            {
-                if (_disposed) return;
-                Logger.LogError(ex, "Failed to load coded value {CodedValueId}", id);
-                _error = ex.Message;
-            }
+            _ = FetchCodedValueAsync();
         }
         else
         {
             _selectedCodedValue = null;
+        }
+    }
+
+    private async Task FetchCodedValueAsync()
+    {
+        // Async helper that owns the real work (fetch the CodedValueDto so
+        // the review card can show the resolved name + override badge).
+        // Fire-and-forget from the :after handler; the try/catch keeps any
+        // failure (including the benign navigation/disposal cancellation)
+        // out of the unobserved-Task path and surfaces real errors via the
+        // logger + the wizard's error banner.
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            _selectedCodedValue = await CodedValuesApi.GetByIdAsync(_codedValueIdNullable!.Value, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load coded value {CodedValueId}", _codedValueIdNullable);
+            _error = ex.Message;
         }
     }
 
@@ -846,19 +1036,41 @@
     /// pick another subject immediately. Duplicate picks for the same coded
     /// value are no-ops.
     /// </summary>
-    private async Task OnSubjectCodedValueChanged(Guid? id)
+    private void OnSubjectCodedValueChanged()
     {
-        if (!id.HasValue) return;
-        if (_assignedSubjects.Any(s => s.CodedValueId == id)) return;
+        // The bound field (_selectedSubjectCodedValueId) is already updated
+        // by the @bind-SelectedId binder before :after runs, so we read it
+        // directly from the field — no parameter needed. Declared `void`
+        // (not `async Task`) so it converts directly to the `Action` that
+        // @bind-SelectedId:after expects — call site is a bare method
+        // group, no lambda wrapper. The synchronous guards + error-clear
+        // run here so the UI is responsive immediately; the async
+        // find-or-create + add is fire-and-forget.
+        if (!_selectedSubjectCodedValueId.HasValue) return;
+        if (_assignedSubjects.Any(s => s.CodedValueId == _selectedSubjectCodedValueId)) return;
 
         _step1Error = null;
+        _ = AddSubjectFromCodedValueAsync();
+    }
 
+    private async Task AddSubjectFromCodedValueAsync()
+    {
+        // Async helper that owns the real work (fetch the CodedValueDto,
+        // find-or-create the Subject, add it to the grade's assignment
+        // list). Fire-and-forget from the :after handler; the try/catch
+        // keeps any failure (including the benign navigation/disposal
+        // cancellation) out of the unobserved-Task path and surfaces
+        // real errors via the logger + the wizard's step 1 error banner.
+        // The finally resets the picker so the next pick is a fresh
+        // selection — without it the dropdown would stay on the same
+        // value and the user couldn't re-pick the same subject to add
+        // it again (the duplicate guard above would also kick in).
         try
         {
             var ct = _loadCts?.Token ?? CancellationToken.None;
             // Fetch the coded value so we have the code/name/displayOrder for
             // the Subject entity and for the confirmation chip.
-            var cv = await CodedValuesApi.GetByIdAsync(id.Value, ct);
+            var cv = await CodedValuesApi.GetByIdAsync(_selectedSubjectCodedValueId!.Value, ct);
             if (cv is null) return;
 
             // Find-or-create the Subject by CodedValueId so we can add it to
@@ -875,7 +1087,7 @@
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to assign subject {CodedValueId}", id);
+            Logger.LogError(ex, "Failed to assign subject {CodedValueId}", _selectedSubjectCodedValueId);
             _step1Error = ex.Message;
         }
         finally
@@ -926,9 +1138,18 @@
         try
         {
             var students = await Api.ListStudentsAsync(ct) ?? [];
-            _availableStudents = students.Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
-                s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt
-            )).Where(s => !_assignedStudents.Contains(s)).ToArray();
+            // Project to the Core DTO type the wizard state uses (the Api
+            // client returns its own StudentDto, but AddStudent and the grid
+            // bind against the Core DTO). Hide students already enrolled in
+            // another grade for the active period from the available grid —
+            // re-enrolling them would fail on the server. They're still in
+            // the tenant, just not eligible for THIS grade in THIS period.
+            var hidden = _alreadyEnrolledStudentIds;
+            _availableStudents = students
+                .Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
+                    s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.ContactEmail, s.ContactPhone, s.IsDeleted, s.CreatedAt, s.UpdatedAt))
+                .Where(s => !_assignedStudents.Contains(s) && !hidden.Contains(s.Id))
+                .ToArray();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -941,6 +1162,7 @@
     private void AddStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
     {
         if (_assignedStudents.Any(s => s.Id == student.Id)) return;
+        if (_alreadyEnrolledStudentIds.Contains(student.Id)) return; // belt-and-braces — grid also disables this row
         _assignedStudents.Add(student);
         _availableStudents = _availableStudents.Where(s => s.Id != student.Id).ToArray();
     }
@@ -948,8 +1170,88 @@
     private async Task RemoveStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
     {
         _assignedStudents.Remove(student);
+        // Re-derive the available grid in case the removed student wasn't there
+        // (defensive — AddStudent moves them out, but a prior save failure or
+        // a hot-reload could leave the lists out of sync).
         var ct = _loadCts?.Token ?? CancellationToken.None;
         await LoadStudentsAsync(ct);
+    }
+
+    // ── Inline "new student" form (step 2) ──────────────────────────────────
+
+    private void ToggleNewStudentForm()
+    {
+        _showNewStudentForm = !_showNewStudentForm;
+        _newStudentError = null;
+        if (!_showNewStudentForm)
+        {
+            // Reset the form when the user cancels, so a half-filled form
+            // doesn't leak into the next open.
+            _newStudentModel.StudentNumber = null;
+            _newStudentModel.FirstName = null;
+            _newStudentModel.LastName = null;
+            _newStudentModel.ContactEmail = null;
+            _newStudentModel.ContactPhone = null;
+            _newStudentModel.DateOfBirth = null;
+            _newStudentModel.GenderCodedValueId = null;
+        }
+    }
+
+    private async Task OnCreateStudentAsync()
+    {
+        // The shared form component does all the parsing + validation
+        // (date picker, gender dropdown, DataAnnotations). By the time
+        // we get here every field on _newStudentModel is already in its
+        // final type — DateOnly? for the date, Guid? for the gender —
+        // so the request goes out without any string round-tripping.
+        _newStudentError = null;
+
+        _creatingStudent = true;
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            var request = new CreateStudentRequest(
+                _newStudentModel.StudentNumber!,
+                _newStudentModel.FirstName!,
+                _newStudentModel.LastName!,
+                _newStudentModel.DateOfBirth,
+                _newStudentModel.GenderCodedValueId,
+                _newStudentModel.ContactEmail!,
+                string.IsNullOrWhiteSpace(_newStudentModel.ContactPhone) ? null : _newStudentModel.ContactPhone);
+
+            await Api.CreateStudentAsync(request, ct);
+
+            // Refresh the available grid so the just-created student is in it,
+            // then auto-enrol them in this grade. The create+enrol pattern
+            // matches the "Pick and add" affordance the subjects section uses
+            // — minimise the number of clicks to go from "no students" to
+            // "students enrolled".
+            await LoadStudentsAsync(ct);
+            var created = _availableStudents.FirstOrDefault(s => s.StudentNumber == _newStudentModel.StudentNumber);
+            if (created is not null)
+            {
+                AddStudent(created);
+            }
+
+            _showNewStudentForm = false;
+            _newStudentModel.StudentNumber = null;
+            _newStudentModel.FirstName = null;
+            _newStudentModel.LastName = null;
+            _newStudentModel.ContactEmail = null;
+            _newStudentModel.ContactPhone = null;
+            _newStudentModel.DateOfBirth = null;
+            _newStudentModel.GenderCodedValueId = null;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create student in wizard");
+            _newStudentError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _creatingStudent = false;
+        }
     }
 
     // ── Navigation & save ───────────────────────────────────────────────────
@@ -963,6 +1265,8 @@
     {
         _saving = true;
         _error = null;
+        _savePhases.Clear();
+        _enrollSkippedCount = 0;
         _loadCts ??= new CancellationTokenSource();
         var ct = _loadCts.Token;
 
@@ -972,60 +1276,202 @@
             return;
         }
 
-        try
+        if (_codedValueIdNullable is null || _selectedCodedValue is null)
         {
-            if (_codedValueIdNullable is null || _selectedCodedValue is null)
-            {
-                _error = "Please select a grade coded value.";
-                return;
-            }
+            _error = "Please select a grade coded value.";
+            return;
+        }
 
-            Logger.LogInformation("User initiated create for grade {CodedValueId}", _codedValueIdNullable);
+        Logger.LogInformation("User initiated create for grade {CodedValueId}", _codedValueIdNullable);
 
-            // Find-or-create the GradeLevel by CodedValueId (§6.3). The
-            // resolved name (with tenant override applied) is mirrored into
-            // GradeLevel.Name. Level/DisplayOrder come from the coded value
-            // itself (the user never edits them in the wizard).
+        // Phase 1: grade level. If this fails we don't touch subjects or
+        // students — the user can correct and retry without partial state.
+        Guid? gradeId = null;
+        var gradeError = await RunPhaseAsync("Grade level", async () =>
+        {
             var gradeLevel = await Api.GetOrCreateGradeLevelAsync(
                 new GetOrCreateGradeLevelRequest(
-                    _codedValueIdNullable.Value,
-                    _selectedCodedValue.DisplayOrder,
+                    _codedValueIdNullable!.Value,
+                    _selectedCodedValue!.DisplayOrder,
                     ResolvedName,
                     _selectedCodedValue.DisplayOrder), ct);
-            var gradeId = gradeLevel.Id;
+            gradeId = gradeLevel.Id;
+            return $"{(gradeLevel.Id == Guid.Empty ? "new" : "existing")} grade level";
+        });
+        if (gradeError is not null || gradeId is null)
+        {
+            // Don't proceed — no point wiring subjects/students to a grade
+            // that didn't get created.
+            return;
+        }
 
-            if (_activePeriod is not null)
+        // Phase 2: subjects. We persist these even if there's no active
+        // period (subjects are grade-level, not period-scoped), so the user
+        // can see the wiring once they open a period. The backend's
+        // AssignGradeSubjectAsync requires a period though — guard it.
+        if (_activePeriod is not null)
+        {
+            var subjectFailures = 0;
+            foreach (var s in _assignedSubjects)
             {
-                foreach (var s in _assignedSubjects)
+                try
                 {
                     await Api.AssignGradeSubjectAsync(
-                        new AssignGradeSubjectRequest(gradeId, s.Id, _activePeriod.Id), ct);
+                        new AssignGradeSubjectRequest(gradeId.Value, s.Id, _activePeriod.Id), ct);
                 }
-
-                foreach (var st in _assignedStudents)
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
                 {
-                    await Api.EnrollStudentAsync(
-                        new EnrollStudentRequest(st.Id, _activePeriod.Id, gradeId, DateOnly.FromDateTime(DateTime.UtcNow)), ct);
+                    if (_disposed) return;
+                    subjectFailures++;
+                    Logger.LogError(ex, "Failed to assign subject {SubjectId} to grade {GradeId}", s.Id, gradeId);
                 }
             }
+            var subjectOutcome = subjectFailures == 0
+                ? SavePhaseOutcome.Success
+                : (subjectFailures == _assignedSubjects.Count ? SavePhaseOutcome.Failed : SavePhaseOutcome.Partial);
+            _savePhases.Add(new SavePhaseStatus(
+                "Subjects",
+                subjectOutcome,
+                subjectFailures == 0
+                    ? $"{_assignedSubjects.Count} subject(s) assigned for period {_activePeriod.Name}"
+                    : $"{_assignedSubjects.Count - subjectFailures}/{_assignedSubjects.Count} assigned; {subjectFailures} failed"));
+        }
+        else if (_assignedSubjects.Count > 0)
+        {
+            _savePhases.Add(new SavePhaseStatus(
+                "Subjects",
+                SavePhaseOutcome.Skipped,
+                "No active period — subjects NOT assigned. Open a period then re-save."));
+        }
 
-            Logger.LogInformation("Grade {GradeId} created with {SubjectCount} subjects and {StudentCount} students",
-                gradeId, _assignedSubjects.Count, _assignedStudents.Count);
+        // Phase 3: students. Pre-skip any student already enrolled in another
+        // grade for this period (populated in OnStep2ChangingAsync) — trying
+        // to re-enrol them would just blow up with a conflict and confuse the
+        // user. The grid disables those rows already; this is defence in depth.
+        var studentsToEnrol = _assignedStudents
+            .Where(st => !_alreadyEnrolledStudentIds.Contains(st.Id))
+            .ToList();
+        var skipped = _assignedStudents.Count - studentsToEnrol.Count;
+        _enrollSkippedCount = skipped;
 
+        if (_activePeriod is not null && studentsToEnrol.Count > 0)
+        {
+            var enrolledCount = 0;
+            var enrollFailures = 0;
+            foreach (var st in studentsToEnrol)
+            {
+                try
+                {
+                    await Api.EnrollStudentAsync(
+                        new EnrollStudentRequest(st.Id, _activePeriod.Id, gradeId.Value, DateOnly.FromDateTime(DateTime.UtcNow)), ct);
+                    enrolledCount++;
+                }
+                catch (OperationCanceledException) { throw; }
+                catch (Exception ex)
+                {
+                    if (_disposed) return;
+                    enrollFailures++;
+                    Logger.LogError(ex, "Failed to enrol student {StudentId} in grade {GradeId}", st.Id, gradeId);
+                }
+            }
+            var enrollOutcome = enrollFailures == 0
+                ? SavePhaseOutcome.Success
+                : (enrollFailures == studentsToEnrol.Count ? SavePhaseOutcome.Failed : SavePhaseOutcome.Partial);
+            _savePhases.Add(new SavePhaseStatus(
+                "Students",
+                enrollOutcome,
+                BuildEnrolDetail(studentsToEnrol.Count, enrolledCount, enrollFailures, skipped, _activePeriod.Name)));
+        }
+        else if (_activePeriod is null && _assignedStudents.Count > 0)
+        {
+            _savePhases.Add(new SavePhaseStatus(
+                "Students",
+                SavePhaseOutcome.Skipped,
+                $"No active period — {_assignedStudents.Count} student(s) NOT enrolled. Open a period then re-save."));
+        }
+        else if (skipped > 0)
+        {
+            _savePhases.Add(new SavePhaseStatus(
+                "Students",
+                SavePhaseOutcome.Partial,
+                BuildEnrolDetail(0, 0, 0, skipped, _activePeriod?.Name ?? "—")));
+        }
+
+        Logger.LogInformation("Grade {GradeId} save attempt: subjects={SubjectCount} students={StudentCount}",
+            gradeId, _assignedSubjects.Count, _assignedStudents.Count);
+
+        // Don't auto-navigate away on partial failure — the user needs to see
+        // the per-phase status in the review step. On full success, navigate.
+        var anyFailure = _savePhases.Any(p => p.Outcome is SavePhaseOutcome.Failed or SavePhaseOutcome.Partial);
+        if (!anyFailure)
+        {
             Nav.NavigateTo("/students/grade-levels");
         }
-        catch (OperationCanceledException) { }
+
+        // Always reset the save flag at the end so the user can click Save
+        // again from the review step (e.g. after fixing a partial failure).
+        if (!_disposed) _saving = false;
+    }
+
+    /// <summary>
+    /// Runs a save phase and wraps the result in a <see cref="SavePhaseStatus"/>.
+    /// Returns the phase's error message (if any) so the caller can decide
+    /// whether to short-circuit the rest of the save. The phase is added to
+    /// <see cref="_savePhases"/> either way so the user always sees what
+    /// happened.
+    /// </summary>
+    private async Task<string?> RunPhaseAsync(string name, Func<Task<string>> action)
+    {
+        try
+        {
+            var detail = await action();
+            _savePhases.Add(new SavePhaseStatus(name, SavePhaseOutcome.Success, detail));
+            return null;
+        }
+        catch (OperationCanceledException)
+        {
+            _savePhases.Add(new SavePhaseStatus(name, SavePhaseOutcome.Failed, "Cancelled"));
+            return "Cancelled";
+        }
         catch (Exception ex)
         {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to create grade level");
+            if (_disposed) return ex.Message;
+            Logger.LogError(ex, "Save phase {Phase} failed", name);
             _error = ex.Message;
-        }
-        finally
-        {
-            if (!_disposed) _saving = false;
+            _savePhases.Add(new SavePhaseStatus(name, SavePhaseOutcome.Failed, ex.Message));
+            return ex.Message;
         }
     }
+
+    private static string BuildEnrolDetail(int requested, int enrolled, int failed, int skipped, string periodName)
+    {
+        var parts = new List<string>();
+        if (enrolled > 0) parts.Add($"{enrolled} enrolled");
+        if (failed > 0) parts.Add($"{failed} failed");
+        if (skipped > 0) parts.Add($"{skipped} skipped (already in another grade)");
+        if (parts.Count == 0) parts.Add("0 of " + requested);
+        parts.Add($"for period {periodName}");
+        return string.Join("; ", parts);
+    }
+
+    private static Appearance PhaseAppearance(SavePhaseOutcome outcome) => outcome switch
+    {
+        SavePhaseOutcome.Success => Appearance.Accent,
+        SavePhaseOutcome.Partial => Appearance.Neutral,
+        SavePhaseOutcome.Skipped => Appearance.Lightweight,
+        SavePhaseOutcome.Failed => Appearance.Outline,
+        _ => Appearance.Lightweight
+    };
+
+    private static string PhaseLabel(SavePhaseStatus phase) => phase.Outcome switch
+    {
+        SavePhaseOutcome.Success => "Done",
+        SavePhaseOutcome.Partial => "Partial",
+        SavePhaseOutcome.Skipped => "Skipped",
+        SavePhaseOutcome.Failed => "Failed",
+        _ => phase.Outcome.ToString()
+    };
 
     public void Dispose()
     {
@@ -1034,5 +1480,22 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+    }
+
+    // ── Nested types ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Result of one phase of the save (grade level / subjects / students).
+    /// Surfaced in the review step so the user can see exactly which phase
+    /// succeeded, was skipped (e.g. no active period), or partially failed.
+    /// </summary>
+    private sealed record SavePhaseStatus(string Name, SavePhaseOutcome Outcome, string Detail);
+
+    private enum SavePhaseOutcome
+    {
+        Success,   // every item in the phase was persisted
+        Partial,   // some items succeeded, others failed or were skipped
+        Skipped,   // the phase was bypassed (e.g. no items, or no active period)
+        Failed     // every item failed
     }
 }

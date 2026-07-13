@@ -1,0 +1,155 @@
+@*
+    Shared student form fields. Renders the standard "create / edit student"
+    field set used by:
+      - /students/create  (Create.razor)
+      - /students/{id}/edit (Edit.razor)
+      - the inline "new student" form inside the GradeLevelWizard step 2
+
+    The component owns the <EditForm>, the <DataAnnotationsValidator />, the
+    field rows, and the action-row container. Parents supply:
+      - the model (bound to <EditForm Model>)
+      - the OnValidSubmit handler
+      - the action buttons (Submit / Cancel) via the Actions RenderFragment
+      - any visible error message via ErrorMessage
+
+    Each field row uses the canonical <FormRow> primitive from
+    SchoolCollab.Admin.Shared — the repo-wide fixed-width (180px) label
+    cell + flexible input cell pattern that guarantees all labels are
+    equal-width and every input's left edge lands on the same vertical
+    axis. See FormRow.razor for the full pattern.
+
+    A CSS border-top on .form-actions draws the horizontal line that
+    separates the field block from the action buttons below (matches
+    the established PeriodForm pattern).
+
+    Field types match the server contract directly:
+      - DateOfBirth: DateOnly?  (bound to a FluentDatePicker via a
+        DateTime? bridge — the picker API only takes DateTime?)
+      - GenderCodedValueId: Guid?  (bound to a CodedValueDropdown for
+        the GENDER parent)
+*@
+@using SchoolCollab.Admin.Shared.Constants
+
+<EditForm Model="@Model" OnValidSubmit="@OnValidSubmit" class="student-form-fields">
+    <DataAnnotationsValidator />
+
+    @* The parent vertical stack controls the row rhythm. Spacing="3" gives
+       a comfortable 12px gap between rows — modern forms have generous
+       breathing room rather than tight packing. *@
+    <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+        @* Student number. ReadOnly when editing an existing student (the
+           student number is the stable identifier the rest of the app
+           keys off; it can't be changed after creation). *@
+        <FormRow Label="Student number"
+                 Required="@(!ReadOnlyStudentNumber)"
+                 For="studentFormNumber">
+            <FluentTextField Id="studentFormNumber"
+                             @bind-Value="Model.StudentNumber"
+                             ReadOnly="@ReadOnlyStudentNumber"
+                             Required="@(!ReadOnlyStudentNumber)"
+                             Placeholder="e.g. S-2026-001"
+                             class="student-form-input--student-number" />
+        </FormRow>
+
+        @* Name. First + last sit side-by-side inside the input cell. *@
+        <FormRow Label="Name" Required For="studentFormFirstName">
+            <FluentTextField Id="studentFormFirstName"
+                             @bind-Value="Model.FirstName"
+                             Required
+                             Placeholder="First name"
+                             class="student-form-input--name" />
+            <FluentTextField @bind-Value="Model.LastName"
+                             Required
+                             Placeholder="Last name"
+                             class="student-form-input--name" />
+        </FormRow>
+
+        @* Date of birth. FluentDatePicker binds to DateTime?, so we
+           convert from the model's DateOnly? on the way in and back on
+           the way out. Narrow input (160px) — a date picker doesn't
+           need more room than that. *@
+        <FormRow Label="Date of birth" For="studentFormDob">
+            <FluentDatePicker Id="studentFormDob"
+                              Value="@DateOfBirthAsDateTime"
+                              ValueChanged="@OnDateOfBirthChanged"
+                              class="student-form-input--dob" />
+        </FormRow>
+
+        @* Contact email. Wide input (fills the input cell) because
+           emails vary in length and a narrow cell forces awkward
+           wrapping or scrolling. The [EmailAddress] data annotation on
+           the model is enforced by <DataAnnotationsValidator />. *@
+        <FormRow Label="Contact email" Required For="studentFormEmail">
+            <FluentTextField Id="studentFormEmail"
+                             @bind-Value="Model.ContactEmail"
+                             Required
+                             Placeholder="name@example.com"
+                             class="student-form-input--email" />
+        </FormRow>
+
+        @* Contact phone. Optional, validated by [Phone] when provided. *@
+        <FormRow Label="Contact phone" For="studentFormPhone">
+            <FluentTextField Id="studentFormPhone"
+                             @bind-Value="Model.ContactPhone"
+                             Placeholder="+1 555 123 4567"
+                             class="student-form-input--phone" />
+        </FormRow>
+
+        @* Gender. Optional coded-value dropdown for the GENDER parent.
+           Simple two-way binding — the binder updates
+           Model.GenderCodedValueId directly; no callback boilerplate
+           needed (the previous OnGenderChanged did nothing but mirror
+           the new value into the model). *@
+        <FormRow Label="Gender">
+            <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                @bind-SelectedId="Model.GenderCodedValueId"
+                                Placeholder="Select gender (optional)"
+                                class="student-form-input--gender" />
+        </FormRow>
+    </FluentStack>
+
+    @if (!string.IsNullOrEmpty(ErrorMessage))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error" class="student-form-error">@ErrorMessage</FluentMessageBar>
+    }
+
+    @* Action row. The .form-actions CSS class draws the horizontal line
+       (border-top) that separates the field block above from the action
+       buttons below, and adds comfortable margin/padding so the line
+       breathes. The parent supplies the actual buttons via the Actions
+       RenderFragment. *@
+    <div class="form-actions">
+        <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
+            @Actions
+        </FluentStack>
+    </div>
+</EditForm>
+
+@code {
+    /// <summary>The form model. Required — the EditForm binds to it.</summary>
+    [Parameter, EditorRequired] public StudentFormModel Model { get; set; } = default!;
+
+    /// <summary>Submit handler. Fires only when DataAnnotations validation passes.</summary>
+    [Parameter, EditorRequired] public EventCallback OnValidSubmit { get; set; }
+
+    /// <summary>Action buttons (Submit, Cancel) rendered in the bottom row. Required.</summary>
+    [Parameter, EditorRequired] public RenderFragment Actions { get; set; } = default!;
+
+    /// <summary>When true, the student number field is read-only (used by Edit.razor).</summary>
+    [Parameter] public bool ReadOnlyStudentNumber { get; set; }
+
+    /// <summary>Error message to surface above the action row. Optional.</summary>
+    [Parameter] public string? ErrorMessage { get; set; }
+
+    // ── DOB bridge: Model.DateOfBirth is DateOnly? but
+    //    FluentDatePicker.Value is DateTime?. Convert on the way in
+    //    and out so the model keeps the server's contract type. *@
+
+    private DateTime? DateOfBirthAsDateTime => Model.DateOfBirth?.ToDateTime(TimeOnly.MinValue);
+
+    private async Task OnDateOfBirthChanged(DateTime? value)
+    {
+        Model.DateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
+        await Task.CompletedTask;
+    }
+}

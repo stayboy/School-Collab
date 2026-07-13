@@ -26,41 +26,21 @@
             }
             else
             {
-                <div class="form-container">
-                    <div class="form-field">
-                        <FluentTextField Value="@_student.StudentNumber" ReadOnly Label="Student Number" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField @bind-Value="_firstName" Label="First Name *" Required />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField @bind-Value="_lastName" Label="Last Name *" Required />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField @bind-Value="_dateOfBirthText" Label="Date of Birth" Placeholder="yyyy-MM-dd" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField @bind-Value="_contactEmail" Label="Contact Email *" Required />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField @bind-Value="_contactPhone" Label="Contact Phone" />
-                    </div>
-                    <div class="form-field">
-                        <FluentTextField @bind-Value="_genderCodedValueIdText" Label="Gender Coded Value ID" Placeholder="Optional GUID" />
-                    </div>
-
-                    @if (!string.IsNullOrEmpty(_error))
-                    {
-                        <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
-                    }
-                </div>
-
-                <div class="action-bar">
-                    <FluentButton Appearance="Appearance.Accent" OnClick="OnSaveAsync" Disabled="@_saving">
-                        @(_saving ? "Saving…" : "Save")
-                    </FluentButton>
-                    <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}")'>Cancel</FluentButton>
-                </div>
+                @* The shared <StudentFormFields> binds to the StudentFormModel
+                   directly. On load we project the loaded DTO into the model;
+                   on save the model's typed values go straight into
+                   UpdateStudentRequest. *@
+                <StudentFormFields Model="_model"
+                                   ReadOnlyStudentNumber="true"
+                                   ErrorMessage="@_error"
+                                   OnValidSubmit="OnSaveAsync">
+                    <Actions>
+                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                            @(_saving ? "Saving…" : "Save")
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}")'>Cancel</FluentButton>
+                    </Actions>
+                </StudentFormFields>
             }
                 </ChildContent>
                 <Fallback>
@@ -80,12 +60,7 @@
     [Parameter] public Guid Id { get; set; }
 
     private StudentDto? _student;
-    private string _firstName = string.Empty;
-    private string _lastName = string.Empty;
-    private string _dateOfBirthText = string.Empty;
-    private string _contactEmail = string.Empty;
-    private string _contactPhone = string.Empty;
-    private string _genderCodedValueIdText = string.Empty;
+    private readonly StudentFormModel _model = new();
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _loadCts;
@@ -114,12 +89,18 @@
             }
             else
             {
-                _firstName = _student.FirstName;
-                _lastName = _student.LastName;
-                _dateOfBirthText = _student.DateOfBirth?.ToString() ?? string.Empty;
-                _contactEmail = _student.ContactEmail;
-                _contactPhone = _student.ContactPhone ?? string.Empty;
-                _genderCodedValueIdText = _student.GenderCodedValueId?.ToString() ?? string.Empty;
+                // Project the DTO into the shared form model. Types match
+                // (string / string / string / DateOnly? / Guid? / string / string?)
+                // so the assignment is a straight copy — no string parsing
+                // needed now that the form uses FluentDatePicker and
+                // CodedValueDropdown for the typed fields.
+                _model.StudentNumber = _student.StudentNumber;
+                _model.FirstName = _student.FirstName;
+                _model.LastName = _student.LastName;
+                _model.DateOfBirth = _student.DateOfBirth;
+                _model.ContactEmail = _student.ContactEmail;
+                _model.ContactPhone = _student.ContactPhone;
+                _model.GenderCodedValueId = _student.GenderCodedValueId;
                 Logger.LogInformation("Loaded student {StudentNumber} for edit", _student.StudentNumber);
             }
         }
@@ -141,27 +122,11 @@
 
         _error = null;
 
-        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName) || string.IsNullOrWhiteSpace(_contactEmail))
-        {
-            _error = "First Name, Last Name, and Contact Email are required.";
-            return;
-        }
-
-        DateOnly? dateOfBirth = null;
-        if (!string.IsNullOrWhiteSpace(_dateOfBirthText) && DateOnly.TryParse(_dateOfBirthText, out var dob))
-        {
-            dateOfBirth = dob;
-        }
-
-        Guid? genderCodedValueId = null;
-        if (!string.IsNullOrWhiteSpace(_genderCodedValueIdText) && Guid.TryParse(_genderCodedValueIdText, out var gid))
-        {
-            genderCodedValueId = gid;
-        }
-
         var req = new UpdateStudentRequest(
-            _firstName, _lastName, dateOfBirth, genderCodedValueId,
-            _contactEmail, string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone);
+            _model.FirstName!, _model.LastName!,
+            _model.DateOfBirth, _model.GenderCodedValueId,
+            _model.ContactEmail!,
+            string.IsNullOrWhiteSpace(_model.ContactPhone) ? null : _model.ContactPhone);
 
         _saving = true;
         try
