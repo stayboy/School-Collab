@@ -12,6 +12,9 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
     public void Add(AssignmentRecipient recipient) => db.AssignmentRecipients.Add(recipient);
     public void Update(AssignmentRecipient recipient) => db.AssignmentRecipients.Update(recipient);
 
+    public Task<int> DeleteRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) =>
+        db.AssignmentRecipients.Where(r => r.AssignmentId == assignmentId).ExecuteDeleteAsync(ct);
+
     public Task<GuardianSubmissionGate?> GetGateAsync(Guid gateId, CancellationToken ct = default) =>
         db.GuardianSubmissionGates.FirstOrDefaultAsync(g => g.Id == gateId, ct);
 
@@ -20,6 +23,9 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
 
     public void Add(GuardianSubmissionGate gate) => db.GuardianSubmissionGates.Add(gate);
     public void Update(GuardianSubmissionGate gate) => db.GuardianSubmissionGates.Update(gate);
+
+    public Task<List<GuardianSubmissionGate>> ListGatesForAssignmentAsync(Guid assignmentId, CancellationToken ct = default) =>
+        db.GuardianSubmissionGates.Where(g => g.AssignmentId == assignmentId).ToListAsync(ct);
 
     public Task<AssignmentSubmission?> GetSubmissionAsync(Guid submissionId, CancellationToken ct = default) =>
         db.AssignmentSubmissions.FirstOrDefaultAsync(s => s.Id == submissionId, ct);

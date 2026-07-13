@@ -10,6 +10,7 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssig
 
 public sealed class UnpublishAssignmentCommandHandler(
     IAssignmentRepository repository,
+    ISubmissionRepository submissionRepository,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
     ILogger<UnpublishAssignmentCommandHandler> logger) : ICommandHandler<UnpublishAssignmentCommand>
@@ -22,7 +23,17 @@ public sealed class UnpublishAssignmentCommandHandler(
             ?? throw new AssignmentNotFoundException(command.Id);
 
         assignment.Unpublish();
+
+        // §4: rebuild recipients + reset the gate on unpublish (submissions/versions retained).
+        await submissionRepository.DeleteRecipientsForAssignmentAsync(command.Id, cancellationToken);
+        foreach (var gate in await submissionRepository.ListGatesForAssignmentAsync(command.Id, cancellationToken))
+        {
+            gate.Reset();
+            submissionRepository.Update(gate);
+        }
+
         await repository.UpdateAsync(assignment, cancellationToken);
+        await submissionRepository.SaveChangesAsync(cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);
 
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentUnpublishedEvent>())
@@ -37,6 +48,6 @@ public sealed class UnpublishAssignmentCommandHandler(
 
         assignment.ClearDomainEvents();
 
-        logger.LogInformation("Assignment {Id} unpublished", assignment.Id);
+        logger.LogInformation("Assignment {Id} unpublished (recipients rebuilt, gate reset)", assignment.Id);
     }
 }

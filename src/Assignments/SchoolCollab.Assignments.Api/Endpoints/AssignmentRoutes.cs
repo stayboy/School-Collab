@@ -111,12 +111,13 @@ public static class AssignmentRoutes
 
         group.MapPost("/{id:guid}/publish", async (
             Guid id,
+            [FromBody] PublishAssignmentRequest? req,
             [FromServices] ICommandHandler<PublishAssignmentCommand> handler,
             CancellationToken ct) =>
         {
             try
             {
-                await handler.HandleAsync(new PublishAssignmentCommand(id), ct);
+                await handler.HandleAsync(new PublishAssignmentCommand(id, req?.ContactIds), ct);
                 return Results.NoContent();
             }
             catch (AssignmentNotFoundException)
@@ -199,15 +200,17 @@ public static class AssignmentRoutes
             }
         });
 
-        group.MapPost("/{id:guid}/submit-on-behalf", async (
+        // Guardian submits on behalf (spec §9: POST /assignments/{id}/students/{studentId}/submit-on-behalf).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/submit-on-behalf", async (
             Guid id,
+            Guid studentId,
             [FromBody] SubmitAssignmentOnBehalfRequest req,
             [FromServices] ICommandHandler<SubmitAssignmentOnBehalfCommand> handler,
             CancellationToken ct) =>
         {
             try
             {
-                await handler.HandleAsync(new SubmitAssignmentOnBehalfCommand(id, req.StudentId, req.GuardianId, req.Content), ct);
+                await handler.HandleAsync(new SubmitAssignmentOnBehalfCommand(id, studentId, req.GuardianId, req.Content), ct);
                 return Results.NoContent();
             }
             catch (GuardianSubmissionGateNotFoundException)

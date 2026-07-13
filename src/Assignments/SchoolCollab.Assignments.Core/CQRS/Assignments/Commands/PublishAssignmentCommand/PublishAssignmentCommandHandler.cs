@@ -1,12 +1,10 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
-using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
-using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain;
 
@@ -17,7 +15,7 @@ public sealed class PublishAssignmentCommandHandler(
     ISubmissionRepository submissionRepository,
     IContactResolver contactResolver,
     ITenantProvider tenantProvider,
-    IIntegrationEventPublisher publisher,
+    IAssignmentNotificationBroadcaster broadcaster,
     HybridCache cache,
     ILogger<PublishAssignmentCommandHandler> logger) : ICommandHandler<PublishAssignmentCommand>
 {
@@ -31,21 +29,15 @@ public sealed class PublishAssignmentCommandHandler(
         assignment.Publish();
 
         var tenantId = tenantProvider.GetTenantContext().TenantId;
-        await ResolveRecipientsAndGatesAsync(assignment, tenantId, cancellationToken);
+        var recipients = await ResolveRecipientsAndGatesAsync(assignment, tenantId, command.ContactIds, cancellationToken);
 
         await repository.UpdateAsync(assignment, cancellationToken);
         await submissionRepository.SaveChangesAsync(cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);
 
-        foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentPublishedEvent>())
-        {
-            await publisher.EnqueueAsync(
-                new AssignmentPublishedIntegrationEvent(
-                    assignment.Id,
-                    assignment.Title,
-                    assignment.UpdatedAt),
-                cancellationToken);
-        }
+        await broadcaster.BroadcastPublishedAsync(
+            new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, recipients),
+            cancellationToken);
 
         assignment.ClearDomainEvents();
 
@@ -55,18 +47,25 @@ public sealed class PublishAssignmentCommandHandler(
 
     /// <summary>
     /// Resolve subscribed contacts for the publish scope and persist one
-    /// <see cref="AssignmentRecipient"/> per contact. When the assignment
-    /// mandates guardian review, also ensure a <see cref="GuardianSubmissionGate"/>
-    /// exists for every student who has a Primary guardian subscriber (spec §4.6 / §4.10).
+    /// <see cref="AssignmentRecipient"/> per contact (deduplicated; optional
+    /// contact selection subset per spec §8). When the assignment mandates
+    /// guardian review, also ensure a <see cref="GuardianSubmissionGate"/> exists
+    /// for every student who has a Primary guardian subscriber (spec §4.6 / §4.10).
     /// </summary>
-    private async Task ResolveRecipientsAndGatesAsync(Assignment assignment, Guid tenantId, CancellationToken cancellationToken)
+    private async Task<List<AssignmentRecipient>> ResolveRecipientsAndGatesAsync(
+        Assignment assignment, Guid tenantId, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
     {
         var subscribers = await contactResolver.ResolveSubscribersAsync(
             new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, assignment.GradeLevelId),
             cancellationToken);
 
+        var recipients = new List<AssignmentRecipient>();
         foreach (var s in subscribers)
         {
+            // Optional contact selection (spec §8): publish to a subset of contacts.
+            if (selectedContactIds is { Count: > 0 } && !selectedContactIds.Contains(s.ContactId))
+                continue;
+
             var existing = await submissionRepository.GetRecipientAsync(assignment.Id, s.ContactId, cancellationToken);
             if (existing is null)
             {
@@ -74,20 +73,22 @@ public sealed class PublishAssignmentCommandHandler(
                     tenantId, assignment.Id, s.OwnerType, s.OwnerId, s.StudentId,
                     s.ContactId, s.Channel, s.Role, notifyOnBroadcast: true, subscriptionActive: true);
                 submissionRepository.Add(recipient);
+                recipients.Add(recipient);
             }
             else
             {
                 existing.MarkSubscribed(true);
                 submissionRepository.Update(existing);
+                recipients.Add(existing);
             }
         }
 
         if (!assignment.MandatoryReview)
-            return;
+            return recipients;
 
-        var studentsWithPrimary = subscribers
-            .Where(s => s.Role == GuardianRole.Primary && s.StudentId.HasValue)
-            .Select(s => s.StudentId!.Value)
+        var studentsWithPrimary = recipients
+            .Where(r => r.Role == GuardianRole.Primary && r.WardStudentId.HasValue)
+            .Select(r => r.WardStudentId!.Value)
             .Distinct()
             .ToArray();
 
@@ -95,9 +96,9 @@ public sealed class PublishAssignmentCommandHandler(
         {
             var gate = await submissionRepository.GetGateByAssignmentStudentAsync(assignment.Id, studentId, cancellationToken);
             if (gate is null)
-            {
                 submissionRepository.Add(GuardianSubmissionGate.Create(tenantId, assignment.Id, studentId));
-            }
         }
+
+        return recipients;
     }
 }

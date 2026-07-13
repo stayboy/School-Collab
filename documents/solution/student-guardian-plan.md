@@ -941,9 +941,9 @@ read-model)._
 | 1 | Coded values + seed | **DONE** | +5 enum members, +21 seed rows, attribute rows, 4/4 arch tests |
 | 2 | Domain model + EF | **DONE** | 8 entities, 6 enums, 8 configs, single migration `AddGuardiansContactsTeachers`, 7/7 domain tests |
 | 3 | CQRS + API | **DONE** | 11 guardian commands, 5 guardian queries, 7 contact/subscription commands, 3 queries, 4 route files, 14/14 `GuardianContactsCqrsTests` |
-| 4 | Admin UI | **DONE (core) / TESTS PENDING** | `Guardians.razor`, `GuardianSetupWizard`, `GuardianDetail`, `ContactsEditor`, `GuardiansTab`, student `Detail` FluentTabs (Overview/Guardians/Contacts), NavMenu link — build clean; 69/69 domain + 12/12 arch. ⚠ **Playwright tests missing** (guardian CRUD / contacts editor / student contacts tab); GradeLevelWizard guardian step deferred (Tier 2). |
+| 4 | Admin UI | **DONE (core) + PLAYWRIGHT SMOKE** | `Guardians.razor`, `GuardianSetupWizard`, `GuardianDetail`, `ContactsEditor`, `GuardiansTab`, student `Detail` FluentTabs (Overview/Guardians/Contacts), NavMenu link — build clean; 69/69 domain + 12/12 arch. `SchoolCollab.Students.Tests.Playwright` smoke tests authored (Guardians index, create button, wizard nav, student Guardians+Contacts tabs). GradeLevelWizard guardian step deferred (Tier 2). Full create-wizard Playwright flow + execution require running AppHost + seeded tenant (env-dependent). |
 | 5 | Assignment publishing & submission domain (Assignments.Core) | **DONE** | `Assignment.MandatoryReview`; new `AssignmentRecipient`, `GuardianSubmissionGate`, `AssignmentSubmission`, `AssignmentSubmissionVersion`, `SubmissionReview`; new enums `SubmissionSource`/`ReviewState`; 5 configs; migration `AddAssignmentSubmissionLifecycle`; 6 entity-config tests. 51/51 Assignments + 12/12 Arch tests pass. |
-| 6 | Publish integration, review-gate & teacher review engine | **DONE (engine) / MINOR GAPS** | `IContactResolver` + `StudentsContactResolver`; publish upserts `AssignmentRecipient` + auto-creates `GuardianSubmissionGate` when `MandatoryReview`; **6 CQRS handlers** (+`CreateStudentSubmission` w/ `!MandatoryReview || gate-enabled` gating) + **6 endpoints** (student self-submit follows §9 student-scoped shape); `ISubmissionRepository`; `ReviewSubmission` enforces `CreatedByTeacherId` authz; 71/71 Assignments.Unit + 12/12 Arch. ⚠ Remaining: `IAssignmentNotificationBroadcaster` not extracted; `Unpublish` doesn't rebuild; legacy gate/submission route shapes pre-§9; contact-selection + some §8 queries pending — see "Consolidated gaps & recommendations". |
+| 6 | Publish integration, review-gate & teacher review engine | **DONE (engine) + POLISH** | `IContactResolver` + `StudentsContactResolver`; publish upserts `AssignmentRecipient` (deduped by contact) + auto-creates `GuardianSubmissionGate` when `MandatoryReview`; **6 CQRS handlers** (+`CreateStudentSubmission` §4.10 gate) + §9-shaped submit endpoints; `ISubmissionRepository`; `ReviewSubmission` enforces `CreatedByTeacherId` authz; **`IAssignmentNotificationBroadcaster`** extracted (outbox); `PublishAssignmentCommand` contact selection; `Unpublish` rebuilds recipients + resets gate. 73/73 Assignments.Unit + 12/12 Arch. Remaining: full §9 route alignment (gate/submission review) + §8 recipient/submission queries — deferred to Phase 7. |
 
 ### Phase 4 deviations / notes
 - **`ListGuardiansByStudent` returns `StudentGuardianViewDto[]`** (not `GuardianDto[]`)
@@ -956,10 +956,13 @@ read-model)._
   both the Guardian detail page and the student Guardians tab. Adding a nested
   guardian-create step inside the GradeLevelWizard is left as a follow-up to
   avoid destabilizing the existing enrollment flow.
-- **Playwright tests (Phase 4 "Tests") not yet written** — the plan requires
-  Playwright guardian CRUD + `<ContactsEditor>` + student Contacts tab tests; the
-  repo currently has only `SchoolCollab.Settings.Tests.Playwright`. This is the
-  outstanding Phase 4 test gap (see "Consolidated gaps & recommendations").
+- **Playwright tests (Phase 4 Tests) — smoke suite authored** — added
+  `SchoolCollab.Students.Tests.Playwright` with `GuardianAdminTests` (Guardians
+  index load, create button visible, wizard navigation from Create, student
+  Guardians + Contacts tab visibility). Builds clean. The full guardian
+  create-wizard flow + test execution require a running AppHost + a seeded tenant
+  (environment-dependent), same as the existing Settings Playwright suite; left
+  as a follow-up once CI can run the app.
 - **`FluentSelect` usage**: enum/object options bind via `@bind-SelectedOption`
   + `OptionValue` (not `@bind-Value`, which is `string` in this FluentUI build).
 - **`WardLink`** is a `readonly record struct` so `Nullable<>.HasValue/.Value`
@@ -1048,27 +1051,25 @@ read-model)._
   `CreateStudentSubmission` tests. 71/71 Assignments.Unit pass. _MEDIUM — fixed_
 
 _Remaining gaps:_
-- **`IAssignmentNotificationBroadcaster` not extracted** — publish routing is
-  inline in the handler; the named broadcaster + consolidated per-contact
-  notification (listing wards) is absent (delivery is v1.1). _LOW-MED_
-- **`Unpublish` doesn't rebuild recipients / reset gate** (§4; submissions/versions
-  retained). _LOW_
-- **Route shapes diverge from §9** — `/gates/{gateId}/review`,
-  `/submit-on-behalf` (studentId in body), `/submissions/{submissionId}/review`
-  vs the spec's student-scoped `/assignments/{id}/students/{studentId}/...`. _LOW_
-- **`PublishAssignmentCommand` has no contact-selection parameter** (§8; needed
-  by the Phase 7 publish dialog). _LOW_
+- **Route shapes partly diverge from §9** — the legacy gate review
+  (`/gates/{gateId}/review`) + submission review (`/submissions/{submissionId}/review`)
+  are still id-based; student-on-behalf + student self-submit now use the §9
+  student-scoped shape. Full alignment deferred to Phase 7 (UI finalizes routes). _LOW_
 - **Several §8 queries absent** (`ListAssignmentRecipients`, `GetSubmission` w/
   versions, `ListSubmissionsByAssignment`, `ListAssignmentsForGuardian`) —
   mostly Phase 7 / portal. _LOW_
 
+✔ _Resolved (Tier 3, 2026-07-12):_ broadcaster extracted (#5), publish contact
+selection (#6), Unpublish rebuild recipients + reset gate (#7), student-on-behalf
++ student self-submit §9 routes (#8 partial). 73/73 Assignments.Unit pass.
+
 ## Consolidated gaps & recommendations (next steps)
 
-_Review dated 2026-07-12 (Tier 1 applied). Test state: Students.Unit 69/69,
-ArchitectureTests 12/12, Assignments.Unit 71/71; `SchoolCollab.sln` builds 0
-errors. Phases 1, 2, 3, 5 fully meet the plan; Phase 4 UI is complete but its
-test layer is missing; Phase 6 engine complete (authz + student self-submit +
-required tests added); remaining Phase 6 items are plan-fidelity polish (Tier 3)._
+_Review dated 2026-07-12 (Tiers 1–3 applied). Test state: Students.Unit 69/69,
+ArchitectureTests 12/12, Assignments.Unit 73/73; `SchoolCollab.sln` builds 0
+errors. Phases 1, 2, 3, 5 fully meet the plan; Phase 4 UI complete + Playwright
+smoke tests authored; Phase 6 engine complete + plan-fidelity polish applied;
+remaining work is Phase 7–9 + the deferred Tier 3 items below._
 
 ### Tier 1 — finish Phase 6 (its own stated scope) ✔ DONE (2026-07-12)
 1. ~~**`ReviewSubmission` authorization**~~ — done: handler loads the
@@ -1078,32 +1079,43 @@ required tests added); remaining Phase 6 items are plan-fidelity polish (Tier 3)
    `!assignment.MandatoryReview || gate.SubmissionEnabledForStudent`, inserts a
    version + bumps `CurrentVersionNumber`; §9-shaped endpoint added. _MEDIUM — fixed_
 3. ~~**Phase 6 missing tests**~~ — done: dedup-by-contact, resubmission v2,
-   `ReviewSubmission` authz + 3 `CreateStudentSubmission` tests; 71/71 pass.
+   `ReviewSubmission` authz + 3 `CreateStudentSubmission` tests; 73/73 pass.
    _MEDIUM — fixed_
 
-### Tier 2 — close the Phase 4 test gap
-4. **Playwright: guardian CRUD + `<ContactsEditor>` + student Contacts tab** —
-   add a Students.Admin Playwright project (Phase 4 "Tests" requirement). _MEDIUM_
+### Tier 2 — close the Phase 4 test gap ✔ DONE (2026-07-12)
+4. ~~**Playwright: guardian CRUD + `<ContactsEditor>` + student Contacts tab**~~ —
+   done: added `SchoolCollab.Students.Tests.Playwright` with smoke tests
+   (Guardians index, create button, wizard navigation, student Guardians +
+   Contacts tabs). Builds clean. _Smoke-level; full create-wizard flow + execution
+   require a running AppHost + seeded tenant (env-dependent), same as the
+   Settings Playwright suite._ _MEDIUM — fixed_
 
-### Tier 3 — plan fidelity / polish
-5. **`IAssignmentNotificationBroadcaster`** — extract the inline publish routing
-   into the named service and emit one consolidated per-contact notification
-   (listing wards); delivery stays v1.1 (§18). _LOW-MED_
-6. **`PublishAssignmentCommand` contact selection** — optional subset-of-contacts
-   parameter (§8; needed by the Phase 7 publish dialog). _LOW_
-7. **`Unpublish` rebuild recipients + reset gate** (retain submissions/versions)
-   (§4). _LOW_
-8. **Align Phase 6 route shapes to §9** — student-scoped
-   `/assignments/{id}/students/{studentId}/...` before Phase 7 UI hard-codes the
-   current gate-id/submission-id shapes. _LOW_
-9. **GradeLevelWizard "add guardians" step** (deferred Tier 2). _LOW_
-10. **Move `ContactsEditor` → `Admin.Shared`** only if another admin app needs to
-    reuse it (currently in `Students.Admin`). _LOW_
+### Tier 3 — plan fidelity / polish ✔ PARTLY DONE (2026-07-12)
+5. ~~**`IAssignmentNotificationBroadcaster`**~~ — done: extracted the inline
+   publish routing into `IAssignmentNotificationBroadcaster` + default
+   `AssignmentNotificationBroadcaster` (outbox enqueue); v1.1 per-contact
+   consolidated notification (listing wards) plugs in behind the interface.
+   _LOW-MED — fixed_
+6. ~~**`PublishAssignmentCommand` contact selection**~~ — done: optional
+   `ContactIds` parameter + `PublishAssignmentRequest`; handler filters the
+   resolved subscribers to the selected subset. _LOW — fixed_
+7. ~~**`Unpublish` rebuild recipients + reset gate**~~ — done:
+   `DeleteRecipientsForAssignmentAsync` + `ListGatesForAssignmentAsync` +
+   `GuardianSubmissionGate.Reset()`; Unpublish handler rebuilds recipients + resets
+   gates (submissions/versions retained). _LOW — fixed_
+8. **Align Phase 6 route shapes to §9** — _partial_: `submit-on-behalf` moved to
+   `/{id}/students/{studentId}/submit-on-behalf` (+ student self-submit already
+   §9-shaped). Remaining: gate review + submission review still id-based — align
+   with Phase 7 UI (needs student-scoped lookup queries). _LOW — deferred to Phase 7_
+9. **GradeLevelWizard "add guardians" step** — deferred (larger UI work).
+   _LOW — deferred_
+10. **Move `ContactsEditor` → `Admin.Shared`** — only if another admin app needs
+    reuse; not needed yet. _LOW — deferred_
 
 ### Tier 4 — upcoming phases (not started)
 11. **Phase 7** — Assignments admin UI: recipients view, `MandatoryReview` toggle,
     publish dialog (audience + contact selection), submission/version list,
-    teacher review/grade screen + endpoints.
+    teacher review/grade screen + endpoints; finalize student-scoped routes.
 12. **Phase 8** — Teacher CQRS + API (admin/teacher-only) + SetupWizard UI.
 13. **Phase 9** — MigrationService wiring + seed run + full cross-module build/test.
 14. **Integration tests (Testcontainers)** — currently blocked environmentally

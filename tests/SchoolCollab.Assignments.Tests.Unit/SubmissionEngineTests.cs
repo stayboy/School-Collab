@@ -7,6 +7,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentC
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewSubmissionGate;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SubmitAssignmentOnBehalf;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
@@ -128,11 +129,11 @@ public class SubmissionEngineTests
 
         var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
         var submissionRepo = new FakeSubmissionRepository();
-        var publisher = new FakePublisher();
+        var broadcaster = new FakeBroadcaster();
 
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
-            TenantProvider(), publisher, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -142,7 +143,8 @@ public class SubmissionEngineTests
         submissionRepo.AddedRecipients.Should().Contain(r => r.OwnerType == ContactOwnerType.Student && r.ContactId == ContactStudent);
         submissionRepo.AddedRecipients.Should().Contain(r => r.OwnerType == ContactOwnerType.Guardian && r.ContactId == ContactGuardian && r.Role == GuardianRole.Primary);
         submissionRepo.AddedGates.Should().ContainSingle(g => g.StudentId == StudentId && g.SubmissionEnabledForStudent == false);
-        publisher.Count.Should().Be(1);
+        broadcaster.BroadcastCount.Should().Be(1);
+        broadcaster.Last!.Recipients.Should().HaveCount(2);
     }
 
     [TestMethod]
@@ -158,7 +160,7 @@ public class SubmissionEngineTests
         var submissionRepo = new FakeSubmissionRepository();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
-            TenantProvider(), new FakePublisher(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), new FakeBroadcaster(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -281,14 +283,16 @@ public class SubmissionEngineTests
 
         var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
         var submissionRepo = new FakeSubmissionRepository { RecipientToReturn = existing };
+        var broadcaster = new FakeBroadcaster();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
-            TenantProvider(), new FakePublisher(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
         submissionRepo.AddedRecipients.Should().BeEmpty();               // no duplicate add
         submissionRepo.UpdatedRecipients.Should().ContainSingle(r => r.ContactId == ContactGuardian && r.SubscriptionActive);
+        broadcaster.Last!.Recipients.Should().ContainSingle();
     }
 
     [TestMethod]
@@ -360,7 +364,52 @@ public class SubmissionEngineTests
         submissionRepo.UpdatedSubmissions.Should().ContainSingle(s => s.CurrentVersionNumber == 1);
     }
 
-    // ── Fakes ────────────────────────────────────────────────────────────────
+    [TestMethod]
+    public async Task PublishAssignment_ContactSelection_FiltersToSubset()
+    {
+        var assignment = NewAssignment();
+        var subscribers = new List<SubscriberInfo>
+        {
+            new(ContactStudent, ContactOwnerType.Student, StudentId, StudentId, ContactChannel.Email, null),
+            new(ContactGuardian, ContactOwnerType.Guardian, GuardianId, StudentId, ContactChannel.Email, GuardianRole.Primary),
+        };
+        var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
+        var submissionRepo = new FakeSubmissionRepository();
+        var broadcaster = new FakeBroadcaster();
+        var handler = new PublishAssignmentCommandHandler(
+            assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+            TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+
+        // Select only the guardian contact (spec §8).
+        await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id, new[] { ContactGuardian }));
+
+        submissionRepo.AddedRecipients.Should().ContainSingle(r => r.ContactId == ContactGuardian);
+        broadcaster.Last!.Recipients.Should().ContainSingle();
+    }
+
+    [TestMethod]
+    public async Task Unpublish_RebuildsRecipientsAndResetsGate()
+    {
+        var assignment = NewAssignment();
+        assignment.Publish(); // Unpublish() requires Published status
+        var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
+        var gate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId);
+        gate.Review(GuardianId, approve: true, "ok"); // enabled + reviewed
+        var submissionRepo = new FakeSubmissionRepository();
+        submissionRepo.GatesForAssignment.Add(gate);
+        var handler = new UnpublishAssignmentCommandHandler(
+            assignmentRepo, submissionRepo, new FakePublisher(), Cache(), NullLogger<UnpublishAssignmentCommandHandler>.Instance);
+
+        await handler.HandleAsync(new UnpublishAssignmentCommand(AssignmentId));
+
+        assignment.Status.Should().Be(AssignmentStatus.Draft);
+        submissionRepo.DeletedRecipientsCount.Should().Be(1);          // recipients rebuilt
+        gate.SubmissionEnabledForStudent.Should().BeFalse();            // gate reset
+        gate.ReviewedByGuardianId.Should().BeNull();
+        submissionRepo.UpdatedGates.Should().ContainSingle(g => !g.SubmissionEnabledForStudent);
+    }
+
+    // ── Fakes ────────────────────────────────────────────────────────────
 
     private sealed class FakeTenantProvider : ITenantProvider
     {
@@ -375,6 +424,14 @@ public class SubmissionEngineTests
         public FakeContactResolver(IReadOnlyList<SubscriberInfo> subscribers) => _subscribers = subscribers;
         public Task<IReadOnlyList<SubscriberInfo>> ResolveSubscribersAsync(ResolveSubscribersRequest request, CancellationToken ct = default)
             => Task.FromResult(_subscribers);
+    }
+
+    private sealed class FakeBroadcaster : IAssignmentNotificationBroadcaster
+    {
+        public int BroadcastCount;
+        public AssignmentPublishedContext? Last;
+        public Task BroadcastPublishedAsync(AssignmentPublishedContext context, CancellationToken ct = default)
+        { BroadcastCount++; Last = context; return Task.CompletedTask; }
     }
 
     private sealed class FakePublisher : IIntegrationEventPublisher
@@ -412,10 +469,16 @@ public class SubmissionEngineTests
         public Task<AssignmentRecipient?> GetRecipientAsync(Guid a, Guid c, CancellationToken ct = default) => Task.FromResult(RecipientToReturn);
         public void Add(AssignmentRecipient r) => AddedRecipients.Add(r);
         public void Update(AssignmentRecipient r) => UpdatedRecipients.Add(r);
+        public int DeletedRecipientsCount;
+        public Task<int> DeleteRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+        { DeletedRecipientsCount++; return Task.FromResult(1); }
         public Task<GuardianSubmissionGate?> GetGateAsync(Guid id, CancellationToken ct = default) => Task.FromResult(GateToReturn);
         public Task<GuardianSubmissionGate?> GetGateByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult(GateToReturn);
         public void Add(GuardianSubmissionGate g) => AddedGates.Add(g);
         public void Update(GuardianSubmissionGate g) => UpdatedGates.Add(g);
+        public List<GuardianSubmissionGate> GatesForAssignment { get; } = new();
+        public Task<List<GuardianSubmissionGate>> ListGatesForAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+            => Task.FromResult(GatesForAssignment);
         public Task<AssignmentSubmission?> GetSubmissionAsync(Guid id, CancellationToken ct = default) => Task.FromResult(SubmissionToReturn);
         public Task<AssignmentSubmission?> GetSubmissionByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult(SubmissionToReturn);
         public void Add(AssignmentSubmission s) => AddedSubmissions.Add(s);

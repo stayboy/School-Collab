@@ -66,4 +66,17 @@ public sealed class GuardianSubmissionGate : ITenantEntity, IEntity, IAuditableE
         SubmissionEnabledForStudent = true;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    /// <summary>Reset the gate to its initial state on unpublish (spec §4).
+    /// Submissions + versions are retained; the gate returns to "awaiting review".</summary>
+    public void Reset()
+    {
+        ReviewedByGuardianId = null;
+        ReviewedAt = null;
+        ReviewComment = null;
+        SubmissionEnabledForStudent = false;
+        SubmittedByGuardianId = null;
+        SubmittedByGuardianAt = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
 }

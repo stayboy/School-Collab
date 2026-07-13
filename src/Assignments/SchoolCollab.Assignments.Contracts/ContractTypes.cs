@@ -79,6 +79,11 @@ public record UpdateAssignmentRequest(
     DateTimeOffset? DueDate = null,
     decimal? MaxScore = null);
 
+/// <summary>Publish an assignment (spec §8). Optional contact selection:
+/// when <see cref="ContactIds"/> is non-empty, only those subscribed contacts
+/// receive the broadcast; null/empty = all subscribed contacts.</summary>
+public record PublishAssignmentRequest(IReadOnlyList<Guid>? ContactIds);
+
 public record ReviewAssignmentRequest(
     Guid TeacherId,
     decimal? Score,
@@ -119,7 +124,6 @@ public record ReviewSubmissionGateRequest(
     string? Comment);
 
 public record SubmitAssignmentOnBehalfRequest(
-    Guid StudentId,
     Guid GuardianId,
     string? Content);
 

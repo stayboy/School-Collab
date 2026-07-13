@@ -15,12 +15,14 @@ public interface ISubmissionRepository
     Task<AssignmentRecipient?> GetRecipientAsync(Guid assignmentId, Guid contactId, CancellationToken ct = default);
     void Add(AssignmentRecipient recipient);
     void Update(AssignmentRecipient recipient);
+    Task<int> DeleteRecipientsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
 
     // Gates
     Task<GuardianSubmissionGate?> GetGateAsync(Guid gateId, CancellationToken ct = default);
     Task<GuardianSubmissionGate?> GetGateByAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default);
     void Add(GuardianSubmissionGate gate);
     void Update(GuardianSubmissionGate gate);
+    Task<List<GuardianSubmissionGate>> ListGatesForAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
 
     // Submissions
     Task<AssignmentSubmission?> GetSubmissionAsync(Guid submissionId, CancellationToken ct = default);
