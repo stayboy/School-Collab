@@ -121,7 +121,10 @@
                             </div>
                             <div class="link-ward-row">
                                 <FluentSelect TOption="SchoolCollab.Students.Admin.Services.StudentDto" Items="_availableStudents" @bind-SelectedOption="_newWard" OptionText="@(s => $"{s.StudentNumber} — {s.FirstName} {s.LastName}")" OptionValue="@(s => s.Id.ToString())" Placeholder="Student" class="link-ward-student" />
-                                <FluentSelect TOption="GuardianRole" Items="_roles" @bind-SelectedOption="_newWardRole" OptionText="@(r => r.ToString())" OptionValue="@(r => r.ToString())" Placeholder="Role" class="link-ward-role" />
+                                <DropdownForEnum TEnum="GuardianRole"
+                                                  @bind-SelectedValue="_newWardRole"
+                                                  Placeholder="Role"
+                                                  Class="link-ward-role" />
                                 <CodedValueDropdown Parent="CodedValueParent.Relationships" @bind-SelectedId="_newWardRelationship" Placeholder="Relationship" class="link-ward-rel" />
                                 <FluentButton Appearance="Appearance.Accent" OnClick="AddLinkAsync" Disabled="@(_newWard is null || _saving)">Link</FluentButton>
                             </div>
@@ -212,7 +215,6 @@
     private SchoolCollab.Students.Admin.Services.StudentDto? _newWard;
     private GuardianRole _newWardRole = GuardianRole.Primary;
     private Guid? _newWardRelationship;
-    private static readonly GuardianRole[] _roles = (GuardianRole[])Enum.GetValues(typeof(GuardianRole));
 
     protected override async Task OnInitializedAsync()
     {

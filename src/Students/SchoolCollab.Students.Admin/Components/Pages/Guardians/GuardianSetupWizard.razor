@@ -131,13 +131,10 @@
                                             <span class="ward-name"><strong>@s.StudentNumber</strong> — @s.FirstName @s.LastName</span>
                                             @if (sel.HasValue)
                                             {
-                                                <FluentSelect TOption="GuardianRole"
-                                                              Items="_roles"
-                                                              SelectedOption="@sel.Value.Role"
-                                                              SelectedOptionChanged="@(r => OnWardRoleChanged(s.Id, r))"
-                                                              OptionText="@(r => r.ToString())"
-                                                              OptionValue="@(r => r.ToString())"
-                                                              class="ward-role" />
+                                                <DropdownForEnum TEnum="GuardianRole"
+                                                                 SelectedValue="sel.Value.Role"
+                                                                 SelectedValueChanged="@(r => OnWardRoleChanged(s.Id, r))"
+                                                                 Class="ward-role" />
                                                 <CodedValueDropdown Parent="CodedValueParent.Relationships"
                                                                     SelectedId="@sel.Value.RelationshipCodedValueId"
                                                                     SelectedIdChanged="@(id => OnWardRelationshipChanged(s.Id, id))"
@@ -287,7 +284,6 @@
     // Wards.
     private SchoolCollab.Students.Admin.Services.StudentDto[]? _students;
     private Dictionary<Guid, WardLink?> _wards = new();
-    private static readonly GuardianRole[] _roles = (GuardianRole[])Enum.GetValues(typeof(GuardianRole));
 
     // Review.
     private int _contactCount;

@@ -1,0 +1,82 @@
+@typeparam TEnum where TEnum : struct, Enum
+@* Generic enum <FluentSelect> wrapper. Part of the "DropdownFor[CustomName]"
+   naming family (DropdownForEnum, CodedValueDropdown) that gives the
+   Students admin module a uniform surface for the various kinds of
+   dropdowns a form can present. Mirrors the CodedValueDropdown pattern
+   (`@bind-SelectedValue` two-way binding, `Label` / `Placeholder` /
+   `Class` / `Disabled` params, semantic placeholder when nothing is
+   selected) so callers don't repeat the TOption/Items/OptionText/
+   OptionValue boilerplate at every enum-select site.
+
+   Usage (two-way binding to a non-nullable TEnum field):
+       <DropdownForEnum TEnum="GuardianRole"
+                         @bind-SelectedValue="_form.Role"
+                         Placeholder="Role" />
+
+   Implementation notes
+   ────────────────────
+   * The generic `TEnum` constraint is `: struct, Enum` so the compiler
+     accepts any concrete enum.
+   * The `Items` array is computed once via `Enum.GetValues(typeof(TEnum))`
+     and cached in a static field — the enum surface never changes at
+     runtime.
+   * `OptionText` uses `ToString()` (the default enum member name) and
+     `OptionValue` uses `ToString()` (FluentSelect keys the selection
+     on the value string, so we re-encode the enum member name back
+     to its string form for parity).
+   * Unlike CodedValueDropdown there is no async load — the enum
+     surface is statically known. The component therefore has no
+     `_loadCts` / `Dispose` lifecycle; it is just a presentational
+     wrapper. *@
+
+<FluentSelect TOption="TEnum"
+              Items="@_items"
+              SelectedOption="@_selectedOption"
+              SelectedOptionChanged="@OnSelectedOptionChanged"
+              OptionText="@(e => e.ToString())"
+              OptionValue="@(e => e.ToString())"
+              Label="@Label"
+              Placeholder="@(Placeholder ?? "Select…")"
+              Disabled="@Disabled"
+              class="@EffectiveClass" />
+
+@code {
+    /// <summary>The selected enum value (two-way bindable).</summary>
+    [Parameter] public TEnum SelectedValue { get; set; }
+
+    /// <summary>Two-way binder callback.</summary>
+    [Parameter] public EventCallback<TEnum> SelectedValueChanged { get; set; }
+
+    /// <summary>Optional label rendered above the dropdown.</summary>
+    [Parameter] public string? Label { get; set; }
+
+    /// <summary>Optional placeholder text for the empty selection.</summary>
+    [Parameter] public string? Placeholder { get; set; }
+
+    /// <summary>Optional CSS class applied to the underlying <see cref="FluentSelect"/>.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Disables the dropdown.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    private static readonly TEnum[] _items = (TEnum[])Enum.GetValues(typeof(TEnum));
+
+    private string EffectiveClass => string.IsNullOrWhiteSpace(Class)
+        ? "dropdown-for-enum"
+        : $"{Class} dropdown-for-enum";
+
+    private TEnum _selectedOption;
+
+    protected override void OnParametersSet()
+    {
+        // Keep the internal selection in sync with the bound field so the
+        // dropdown highlights the right option on every re-render.
+        _selectedOption = SelectedValue;
+    }
+
+    private Task OnSelectedOptionChanged(TEnum value)
+    {
+        _selectedOption = value;
+        return SelectedValueChanged.InvokeAsync(value);
+    }
+}

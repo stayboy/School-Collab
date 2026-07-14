@@ -55,7 +55,10 @@
             </div>
             <div class="link-guardian-row">
                 <FluentSelect TOption="GuardianDto" Items="_availableGuardians" @bind-SelectedOption="_newGuardian" OptionText="@(g => $"{g.FirstName} {g.LastName}")" OptionValue="@(g => g.Id.ToString())" Placeholder="Guardian" class="link-guardian-select" />
-                <FluentSelect TOption="GuardianRole" Items="_roles" @bind-SelectedOption="_newRole" OptionText="@(r => r.ToString())" OptionValue="@(r => r.ToString())" Placeholder="Role" class="link-guardian-role" />
+                <DropdownForEnum TEnum="GuardianRole"
+                                  @bind-SelectedValue="_newRole"
+                                  Placeholder="Role"
+                                  Class="link-guardian-role" />
                 <CodedValueDropdown Parent="CodedValueParent.Relationships" @bind-SelectedId="_newRelationship" Placeholder="Relationship" class="link-guardian-rel" />
                 <FluentButton Appearance="Appearance.Accent" OnClick="AddAsync" Disabled="@(_newGuardian is null || _saving)">Link</FluentButton>
             </div>

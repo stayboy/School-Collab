@@ -399,81 +399,7 @@
                             </div>
                         </div>
 
-                        @if (_assignedStudents.Count == 0)
-                        {
-                            <FluentMessageBar Intent="MessageIntent.Info">
-                                No students enrolled yet. Add students in the previous step, then return here to attach guardians.
-                            </FluentMessageBar>
-                        }
-                        else
-                        {
-                            <div class="guardian-student-list">
-                                @foreach (var s in _assignedStudents)
-                                {
-                                    var drafts = _guardianDrafts.TryGetValue(s.Id, out var d) ? d : null;
-                                    <div class="guardian-student-card">
-                                        <h4><strong>@s.StudentNumber</strong> — @s.FirstName @s.LastName</h4>
-
-                                        @if (d is { Count: > 0 })
-                                        {
-                                            <ul class="guardian-draft-list">
-                                                @for (var i = 0; i < d.Count; i++)
-                                                {
-                                                    var idx = i;
-                                                    var g = d[i];
-                                                    <li>
-                                                        <span><strong>@g.FirstName @g.LastName</strong> — @g.Role.ToString()</span>
-                                                        @if (g.RelationshipCodedValueId is not null)
-                                                        {
-                                                            <span class="muted">(relationship set)</span>
-                                                        }
-                                                            <FluentButton Appearance="Appearance.Lightweight"
-                                                                      Title="Remove guardian"
-                                                                      IconStart="@FluentIcons.Delete"
-                                                                      OnClick="@(() => RemoveGuardianDraft(s.Id, idx))" />
-                                                    </li>
-                                                }
-                                            </ul>
-                                        }
-
-                                        <div class="guardian-form">
-                                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                                                SelectedId="GetForm(s.Id).TitleCodedValueId"
-                                                                SelectedIdChanged="@(id => GetForm(s.Id).TitleCodedValueId = id)"
-                                                                Placeholder="Title (optional)" />
-                                            <FluentTextField @bind-Value="GetForm(s.Id).FirstName" Placeholder="First name" class="gw-guardian-first" />
-                                            <FluentTextField @bind-Value="GetForm(s.Id).LastName" Placeholder="Last name" class="gw-guardian-last" />
-                                            <CodedValueDropdown Parent="CodedValueParent.Relationships"
-                                                                SelectedId="GetForm(s.Id).RelationshipCodedValueId"
-                                                                SelectedIdChanged="@(id => OnGuardianRelationshipChanged(s.Id, id))"
-                                                                Placeholder="Relationship" />
-                                            <FluentSelect TOption="GuardianRole"
-                                                          Items="_guardianRoles"
-                                                          SelectedOption="GetForm(s.Id).Role"
-                                                          SelectedOptionChanged="@(r => GetForm(s.Id).Role = r)"
-                                                          OptionText="@(r => r.ToString())"
-                                                          OptionValue="@(r => r.ToString())"
-                                                          class="gw-guardian-role" />
-                                            <FluentSelect TOption="ContactChannel"
-                                                          Items="_contactChannels"
-                                                          SelectedOption="GetForm(s.Id).Channel"
-                                                          SelectedOptionChanged="@(c => GetForm(s.Id).Channel = c)"
-                                                          OptionText="@(c => c.ToString())"
-                                                          OptionValue="@(c => c.ToString())"
-                                                          class="gw-guardian-channel" />
-                                            <FluentTextField @bind-Value="GetForm(s.Id).ContactValue" Placeholder="Contact value (optional)" class="gw-guardian-contact" />
-                                            <FluentButton Appearance="Appearance.Accent"
-                                                          IconStart="@FluentIcons.PersonAdd"
-                                                          OnClick="@(() => AddGuardianDraft(s.Id))"
-                                                          Disabled="@(string.IsNullOrWhiteSpace(GetForm(s.Id).FirstName) || string.IsNullOrWhiteSpace(GetForm(s.Id).LastName))">
-                                                Add guardian
-                                            </FluentButton>
-                                            <span class="visually-hidden" aria-live="polite">@GetAddAnnouncement(s.Id)</span>
-                                        </div>
-                                    </div>
-                                }
-                            </div>
-                        }
+                        <GuardianDraftList @ref="_guardianDraftList" Students="_assignedStudents" />
                     </section>
                 </FluentWizardStep>
 
@@ -582,15 +508,16 @@
                         </div>
 
                         <div class="review-card">
-                            <h4>Guardians to create (@_guardianDrafts.Sum(kv => kv.Value.Count))</h4>
-                            @if (_guardianDrafts.Sum(kv => kv.Value.Count) == 0)
+                            @{ var draftCount = GuardianDraftCount(); }
+                            <h4>Guardians to create (@draftCount)</h4>
+                            @if (draftCount == 0)
                             {
                                 <FluentMessageBar Intent="MessageIntent.Info">No guardians will be created. Use the Guardians step to add them.</FluentMessageBar>
                             }
                             else
                             {
                                 <ul class="review-list">
-                                    @foreach (var kv in _guardianDrafts.Where(k => k.Value.Count > 0))
+                                    @foreach (var kv in GuardianDrafts().Where(k => k.Value.Count > 0))
                                     {
                                         var student = _assignedStudents.FirstOrDefault(s => s.Id == kv.Key);
                                         <li>
@@ -703,6 +630,7 @@
     private FluentWizard? _wizard;
     private int _stepIndex;
     private CodedValueDropdown? _codedValueDropdown;
+    private GuardianDraftList? _guardianDraftList;
     private Guid? _codedValueIdNullable;
     private CodedValueDto? _selectedCodedValue;
     private string? _error;
@@ -793,38 +721,6 @@
     // was skipped, or failed.
     private readonly List<SavePhaseStatus> _savePhases = new();
     private int _enrollSkippedCount;
-
-    // Guardians step (deferred Tier-3, #9). Drafts collected per enrolled
-    // student, created + linked on save (Phase 4). Keyed by student id.
-    private readonly Dictionary<Guid, List<GuardianDraft>> _guardianDrafts = new();
-    private readonly Dictionary<Guid, GuardianForm> _guardianForms = new();
-    // Per-student screen-reader announcement text, populated on add. The
-    // value includes a nonce so aria-live re-fires for repeated adds.
-    private readonly Dictionary<Guid, string> _guardianAddAnnouncements = new();
-
-    // A drafted guardian awaiting creation on save.
-    private sealed record GuardianDraft(
-        string FirstName,
-        string LastName,
-        Guid? RelationshipCodedValueId,
-        GuardianRole Role,
-        ContactChannel? ContactChannel,
-        string? ContactValue,
-        Guid? TitleCodedValueId);
-
-    // Mutable in-progress form state for one student's "add guardian" row.
-    private sealed class GuardianForm
-    {
-        public Guid? TitleCodedValueId { get; set; }
-        public string? FirstName { get; set; }
-        public string? LastName { get; set; }
-        public Guid? RelationshipCodedValueId { get; set; }
-        public GuardianRole Role { get; set; } = GuardianRole.Primary;
-        // Named "Channel" (not "ContactChannel") so the initializer doesn't
-        // shadow the ContactChannel enum type.
-        public ContactChannel Channel { get; set; } = ContactChannel.Email;
-        public string? ContactValue { get; set; }
-    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -1323,70 +1219,12 @@
         _assignedStudents.Remove(student);
         // Drop any guardian drafts for the un-enrolled student so we don't try
         // to link guardians to a student that's no longer in this grade.
-        _guardianDrafts.Remove(student.Id);
-        _guardianForms.Remove(student.Id);
+        _guardianDraftList?.ClearForStudent(student.Id);
         // Re-derive the available grid in case the removed student wasn't there
         // (defensive — AddStudent moves them out, but a prior save failure or
         // a hot-reload could leave the lists out of sync).
         var ct = _loadCts?.Token ?? CancellationToken.None;
         await LoadStudentsAsync(ct);
-    }
-
-    // ── Guardians step (deferred Tier-3, #9) ──────────────────────────────
-
-    private static readonly GuardianRole[] _guardianRoles = (GuardianRole[])Enum.GetValues(typeof(GuardianRole));
-    private static readonly ContactChannel[] _contactChannels = (ContactChannel[])Enum.GetValues(typeof(ContactChannel));
-
-    private GuardianForm GetForm(Guid studentId)
-    {
-        if (!_guardianForms.TryGetValue(studentId, out var form))
-        {
-            form = new GuardianForm();
-            _guardianForms[studentId] = form;
-        }
-        return form;
-    }
-
-    private void OnGuardianRelationshipChanged(Guid studentId, Guid? id) =>
-        GetForm(studentId).RelationshipCodedValueId = id;
-
-    private void AddGuardianDraft(Guid studentId)
-    {
-        var f = GetForm(studentId);
-        if (string.IsNullOrWhiteSpace(f.FirstName) || string.IsNullOrWhiteSpace(f.LastName))
-            return;
-        if (!_guardianDrafts.TryGetValue(studentId, out var list))
-        {
-            list = new List<GuardianDraft>();
-            _guardianDrafts[studentId] = list;
-        }
-        list.Add(new GuardianDraft(
-            f.FirstName.Trim(),
-            f.LastName.Trim(),
-            f.RelationshipCodedValueId,
-            f.Role,
-            string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.Channel,
-            string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.ContactValue.Trim(),
-            f.TitleCodedValueId));
-        _guardianForms[studentId] = new GuardianForm();
-        // Brief screen-reader announcement. A nonce forces the live region
-        // to re-announce on subsequent adds (browsers only re-read identical
-        // live-region text if the value changes).
-        _guardianAddAnnouncements[studentId] = $"Guardian added. ({Guid.NewGuid():N})";
-        StateHasChanged();
-    }
-
-    private string GetAddAnnouncement(Guid studentId)
-        => _guardianAddAnnouncements.TryGetValue(studentId, out var msg) ? msg : string.Empty;
-
-    private void RemoveGuardianDraft(Guid studentId, int index)
-    {
-        if (_guardianDrafts.TryGetValue(studentId, out var list) && index >= 0 && index < list.Count)
-        {
-            list.RemoveAt(index);
-            if (list.Count == 0) _guardianDrafts.Remove(studentId);
-        }
-        StateHasChanged();
     }
 
     // ── Inline "new student" form (step 2) ──────────────────────────────────
@@ -1609,7 +1447,7 @@
         // An optional contact is seeded when a value was supplied. Guardians are
         // only created once the grade + enrolment succeeded, so we never create
         // orphans against a grade that failed to persist.
-        var guardianEntries = _guardianDrafts.Where(kv => kv.Value.Count > 0).ToList();
+        var guardianEntries = GuardianDrafts().Where(kv => kv.Value.Count > 0).ToList();
         if (guardianEntries.Count > 0 && gradeId is not null)
         {
             var gCreated = 0;
@@ -1751,6 +1589,15 @@
         SavePhaseOutcome.Failed => "Failed",
         _ => phase.Outcome.ToString()
     };
+
+    // Thin wrappers over the GuardianDraftList ref. Empty dict when the
+    // ref isn't bound yet (e.g. wizard step not yet rendered) so the
+    // Review step and SaveAsync Phase 4 are no-ops in that case.
+    private IReadOnlyDictionary<Guid, IReadOnlyList<GuardianDraft>> GuardianDrafts()
+        => _guardianDraftList?.GetDrafts() ?? new Dictionary<Guid, IReadOnlyList<GuardianDraft>>();
+
+    private int GuardianDraftCount()
+        => GuardianDrafts().Sum(kv => kv.Value.Count);
 
     public void Dispose()
     {
