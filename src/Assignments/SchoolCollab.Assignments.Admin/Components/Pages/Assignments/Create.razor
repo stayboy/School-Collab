@@ -220,7 +220,9 @@
 
                         <FluentEditForm Model="_model" class="wizard-form details-form">
                             <FluentStack Orientation="Orientation.Vertical" Gap="1rem" class="details-form-fields">
-                                <FluentTextField @bind-Value="_model.Title" Label="Title *" Placeholder="e.g. Chapter 5 Quiz" class="full-width required-field" Required />
+                                <FormRow Label="Title" Required For="assignmentCreateTitle">
+                                    <FluentTextField Id="assignmentCreateTitle" @bind-Value="_model.Title" Required Placeholder="e.g. Chapter 5 Quiz" class="full-width required-field" />
+                                </FormRow>
 
                                 @if (_gradeLevels is null || _gradeLevels.Length == 0)
                                 {
@@ -230,30 +232,40 @@
                                 }
                                 else
                                 {
-                                    <FluentSelect TOption="GradeLevelOption"
-                                                  Items="@_gradeLevelOptions"
-                                                  @bind-SelectedOption="_selectedGradeLevel"
-                                                  OptionText="@(o => o?.Label ?? "")"
-                                                  OptionValue="@(o => o?.Value ?? "")"
-                                                  Label="Grade Level *"
-                                                  Placeholder="Select a grade level"
-                                                  class="full-width"
-                                                  OnSelectedOptionChanged="OnGradeLevelChangedAsync" />
+                                    <FormRow Label="Grade Level" Required For="assignmentCreateGrade">
+                                        <FluentSelect TOption="GradeLevelOption"
+                                                      Id="assignmentCreateGrade"
+                                                      Items="@_gradeLevelOptions"
+                                                      @bind-SelectedOption="_selectedGradeLevel"
+                                                      OptionText="@(o => o?.Label ?? "")"
+                                                      OptionValue="@(o => o?.Value ?? "")"
+                                                      Placeholder="Select a grade level"
+                                                      class="full-width"
+                                                      OnSelectedOptionChanged="OnGradeLevelChangedAsync" />
+                                    </FormRow>
                                 }
 
-                                <FluentSelect TOption="SubjectOption"
-                                              Items="@_subjectOptions"
-                                              @bind-SelectedOption="_selectedSubject"
-                                              OptionText="@(o => o?.Label ?? "")"
-                                              OptionValue="@(o => o?.Value ?? "")"
-                                              Label="Subject *"
-                                              Placeholder="@(_selectedGradeLevel is null ? "Select a grade level first" : "Select a subject")"
-                                              Disabled="@(_selectedGradeLevel is null || _loadingSubjects)"
-                                              class="full-width" />
+                                <FormRow Label="Subject" Required For="assignmentCreateSubject">
+                                    <FluentSelect TOption="SubjectOption"
+                                                  Id="assignmentCreateSubject"
+                                                  Items="@_subjectOptions"
+                                                  @bind-SelectedOption="_selectedSubject"
+                                                  OptionText="@(o => o?.Label ?? "")"
+                                                  OptionValue="@(o => o?.Value ?? "")"
+                                                  Placeholder="@(_selectedGradeLevel is null ? "Select a grade level first" : "Select a subject")"
+                                                  Disabled="@(_selectedGradeLevel is null || _loadingSubjects)"
+                                                  class="full-width" />
+                                </FormRow>
 
-                                <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="4" Placeholder="Assignment instructions…" class="full-width" />
-                                <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" Style="width: 12rem;" />
-                                <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" Style="width: 12rem;" />
+                                <FormRow Label="Description" For="assignmentCreateDescription">
+                                    <FluentTextArea Id="assignmentCreateDescription" @bind-Value="_model.Description" Rows="4" Placeholder="Assignment instructions…" class="full-width" />
+                                </FormRow>
+                                <FormRow Label="Due Date" For="assignmentCreateDue">
+                                    <FluentDatePicker Id="assignmentCreateDue" @bind-Value="_model.DueDate" Style="width: 12rem;" />
+                                </FormRow>
+                                <FormRow Label="Max Score" For="assignmentCreateMaxScore">
+                                    <FluentNumberField Id="assignmentCreateMaxScore" @bind-Value="_model.MaxScore" Style="width: 12rem;" />
+                                </FormRow>
                             </FluentStack>
                         </FluentEditForm>
                     </section>

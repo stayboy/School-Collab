@@ -1,4 +1,13 @@
 /* ── Wizard sections ─────────────────────────────────────────────── */
+/*
+   NOTE on `--accent-color`: the "selected card" highlight below uses
+   `var(--accent-color, #e65100)`. The fallback (#e65100) is the
+   canonical orange when the var is unset; FluentUI v4.14.2 does not
+   expose a direct semantic token for this use case, so the var+fallback
+   pair is the repo's override hook. Theme authors can define
+   `--accent-color` at the layout level to re-skin the selected-card
+   state without touching this file. */
+
 .wizard-section {
     margin-bottom: 2rem;
 }
@@ -450,3 +459,29 @@
         flex: 1 1 200px;
         min-width: 160px;
     }
+
+/* Save-status badge: Failed state. Uses semantic error tokens so the
+   badge is visually distinct from Skipped in both light and dark
+   themes (FluentBadge Appearance.Outline read as 'Skipped' in dark
+   mode, which masked real failures during review). */
+.gw-phase-badge-failed {
+    border: 1px solid var(--error, #c50f1f);
+    color: var(--error, #c50f1f);
+    background: transparent;
+}
+
+/* Screen-reader-only text (used by aria-live regions that don't need
+   to be visible). The 1px clip + overflow:hidden pattern is the
+   widely-recommended way to hide content from sighted users while
+   keeping it readable to AT. */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

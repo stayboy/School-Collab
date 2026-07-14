@@ -16,6 +16,7 @@
 @using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Admin.Shared.Constants
 @inject IContactsClient Api
 @inject ILogger<ContactsEditor> Logger
 
@@ -46,7 +47,7 @@
                 Primary
             </FluentCheckbox>
             <FluentButton Appearance="Appearance.Accent"
-                          IconStart="@(new Icons.Regular.Size20.Add())"
+                          IconStart="@FluentIcons.Add"
                           OnClick="AddAsync"
                           Disabled="@(_adding || string.IsNullOrWhiteSpace(_newValue))">
                 @(_adding ? "Adding…" : "Add")
@@ -101,23 +102,20 @@
                             {
                                 <FluentButton Appearance="Appearance.Lightweight"
                                               Title="Mark verified"
-                                              OnClick="@(() => VerifyAsync(c.Id))">
-                                    <FluentIcon Icon="@(Icons.Regular.Size20.Checkmark)" />
-                                </FluentButton>
+                                              IconStart="@FluentIcons.Checkmark"
+                                              OnClick="@(() => VerifyAsync(c.Id))" />
                             }
                             @if (!c.IsPrimary)
                             {
                                 <FluentButton Appearance="Appearance.Lightweight"
                                               Title="Set as primary"
-                                              OnClick="@(() => SetPrimaryAsync(c.Id))">
-                                    <FluentIcon Icon="@(Icons.Regular.Size20.Star)" />
-                                </FluentButton>
+                                              IconStart="@FluentIcons.Star"
+                                              OnClick="@(() => SetPrimaryAsync(c.Id))" />
                             }
                             <FluentButton Appearance="Appearance.Lightweight"
                                           Title="Remove contact"
-                                          OnClick="@(() => RemoveAsync(c.Id))">
-                                <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
-                            </FluentButton>
+                                          IconStart="@FluentIcons.Delete"
+                                          OnClick="@(() => RemoveAsync(c.Id))" />
                         </span>
                     </li>
                 }
@@ -145,11 +143,30 @@
     private string? _error;
     private Guid? _loadedOwnerId;
 
+    // Cancellation: a single CTS for the in-flight load plus a disposed flag
+    // so synchronous post-await StateHasChanged calls after teardown don't
+    // throw. The pattern mirrors TeacherSetupWizard / GuardianSetupWizard
+    // (see PR #75, 76) and is the established convention for async-load
+    // blazor pages in this repo.
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private CancellationToken LoadToken => _loadCts?.Token ?? CancellationToken.None;
+
     // New-contact form state.
     private ContactChannel _newChannel = ContactChannel.Email;
     private string _newValue = string.Empty;
     private string _newLabel = string.Empty;
     private bool _newIsPrimary;
+
+    public void Dispose()
+    {
+        _disposed = true;
+        // Cancel any in-flight load so an awaited Api call doesn't try to
+        // touch _contacts / _subscribed on a torn-down component.
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -164,30 +181,54 @@
 
     private async Task LoadAsync()
     {
+        // Each load gets its own CTS so a stale load doesn't tear down a
+        // newer one (e.g. navigating rapidly between owners). The previous
+        // CTS is cancelled before being replaced.
+        var previousCts = _loadCts;
+        var cts = new CancellationTokenSource();
+        _loadCts = cts;
+        var ct = cts.Token;
+        var superseded = false;
+
         _loading = true;
         _error = null;
         try
         {
-            var contacts = await Api.ListContactsAsync(OwnerType, OwnerId);
+            var contacts = await Api.ListContactsAsync(OwnerType, OwnerId, ct);
+            ct.ThrowIfCancellationRequested();
             _contacts = contacts?.ToList() ?? new List<ContactDto>();
 
             if (ShowSubscription)
             {
-                var subscribed = await Api.ListSubscribedContactsAsync(OwnerType, OwnerId);
+                var subscribed = await Api.ListSubscribedContactsAsync(OwnerType, OwnerId, ct: ct);
+                ct.ThrowIfCancellationRequested();
                 _subscribed = new HashSet<Guid>(subscribed?.Select(s => s.Id) ?? []);
             }
         }
+        catch (OperationCanceledException)
+        {
+            // Load was superseded by a newer load, or the component was
+            // disposed; either way, do not touch state.
+        }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to load contacts for {OwnerType} {OwnerId}", OwnerType, OwnerId);
             _error = ex.Message;
             _contacts = new List<ContactDto>();
         }
         finally
         {
-            _loading = false;
-            await InvokeAsync(StateHasChanged);
+            // A newer LoadAsync has replaced us; don't reset _loading (the
+            // newer load owns it) and don't fire StateHasChanged.
+            superseded = !ReferenceEquals(_loadCts, cts);
+            cts.Dispose();
+            previousCts?.Dispose();
         }
+
+        if (superseded || _disposed) return;
+        _loading = false;
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task AddAsync()
@@ -201,7 +242,7 @@
             await Api.AddContactAsync(new AddContactRequest(
                 OwnerType, OwnerId, _newChannel, _newValue.Trim(),
                 string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
-                _newIsPrimary));
+                _newIsPrimary), LoadToken);
 
             _newValue = string.Empty;
             _newLabel = string.Empty;
@@ -209,15 +250,20 @@
             _newChannel = ContactChannel.Email;
             await LoadAsync();
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to add contact for {OwnerType} {OwnerId}", OwnerType, OwnerId);
             _error = ex.Message;
         }
         finally
         {
             _adding = false;
-            await InvokeAsync(StateHasChanged);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 
@@ -226,15 +272,20 @@
         _error = null;
         try
         {
-            await Api.DeleteContactAsync(id);
+            await Api.DeleteContactAsync(id, LoadToken);
             _subscribed.Remove(id);
             await LoadAsync();
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to remove contact {ContactId}", id);
             _error = ex.Message;
-            await InvokeAsync(StateHasChanged);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 
@@ -243,14 +294,19 @@
         _error = null;
         try
         {
-            await Api.VerifyContactAsync(id);
+            await Api.VerifyContactAsync(id, LoadToken);
             await LoadAsync();
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to verify contact {ContactId}", id);
             _error = ex.Message;
-            await InvokeAsync(StateHasChanged);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 
@@ -259,14 +315,19 @@
         _error = null;
         try
         {
-            await Api.SetPrimaryContactAsync(id);
+            await Api.SetPrimaryContactAsync(id, LoadToken);
             await LoadAsync();
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to set primary contact {ContactId}", id);
             _error = ex.Message;
-            await InvokeAsync(StateHasChanged);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 
@@ -276,22 +337,30 @@
         try
         {
             if (subscribe)
-                await Api.SubscribeAsync(id);
+                await Api.SubscribeAsync(id, ct: LoadToken);
             else
-                await Api.UnsubscribeAsync(id);
+                await Api.UnsubscribeAsync(id, ct: LoadToken);
 
             if (subscribe)
                 _subscribed.Add(id);
             else
                 _subscribed.Remove(id);
 
-            await InvokeAsync(StateHasChanged);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            if (_disposed) return;
             Logger.LogError(ex, "Failed to toggle subscription for contact {ContactId}", id);
             _error = ex.Message;
-            await InvokeAsync(StateHasChanged);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 

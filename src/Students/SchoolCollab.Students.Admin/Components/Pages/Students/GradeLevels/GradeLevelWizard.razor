@@ -225,8 +225,8 @@
                                                 }
                                                 <span class="assigned-subject-actions">
 
-                                                        <FluentButton Appearance="Appearance.Lightweight" Title="Override the default name for this tenant" OnClick="@(() => OverrideSubjectAsync(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Edit)" /></FluentButton>
-                                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove subject" OnClick="@(() => RemoveSubject(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Delete)" /></FluentButton>
+                                                        <FluentButton Appearance="Appearance.Lightweight" Title="Override the default name for this tenant" IconStart="@FluentIcons.Edit" OnClick="@(() => OverrideSubjectAsync(s))" Disabled="@(_overridingSubjectId == s.Id)" />
+                                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove subject" IconStart="@FluentIcons.Delete" OnClick="@(() => RemoveSubject(s))" Disabled="@(_overridingSubjectId == s.Id)" />
                                                 </span>
                                             </li>
                                         }
@@ -427,17 +427,20 @@
                                                         {
                                                             <span class="muted">(relationship set)</span>
                                                         }
-                                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                            <FluentButton Appearance="Appearance.Lightweight"
                                                                       Title="Remove guardian"
-                                                                      OnClick="@(() => RemoveGuardianDraft(s.Id, idx))">
-                                                            <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
-                                                        </FluentButton>
+                                                                      IconStart="@FluentIcons.Delete"
+                                                                      OnClick="@(() => RemoveGuardianDraft(s.Id, idx))" />
                                                     </li>
                                                 }
                                             </ul>
                                         }
 
                                         <div class="guardian-form">
+                                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                                                SelectedId="GetForm(s.Id).TitleCodedValueId"
+                                                                SelectedIdChanged="@(id => GetForm(s.Id).TitleCodedValueId = id)"
+                                                                Placeholder="Title (optional)" />
                                             <FluentTextField @bind-Value="GetForm(s.Id).FirstName" Placeholder="First name" class="gw-guardian-first" />
                                             <FluentTextField @bind-Value="GetForm(s.Id).LastName" Placeholder="Last name" class="gw-guardian-last" />
                                             <CodedValueDropdown Parent="CodedValueParent.Relationships"
@@ -465,6 +468,7 @@
                                                           Disabled="@(string.IsNullOrWhiteSpace(GetForm(s.Id).FirstName) || string.IsNullOrWhiteSpace(GetForm(s.Id).LastName))">
                                                 Add guardian
                                             </FluentButton>
+                                            <span class="visually-hidden" aria-live="polite">@GetAddAnnouncement(s.Id)</span>
                                         </div>
                                     </div>
                                 }
@@ -615,7 +619,8 @@
                                     {
                                         <li>
                                             <span><strong>@phase.Name</strong></span>
-                                            <FluentBadge Appearance="@PhaseAppearance(phase.Outcome)">@PhaseLabel(phase)</FluentBadge>
+                                            <FluentBadge Appearance="@PhaseAppearance(phase.Outcome)"
+                                                         class="@PhaseClass(phase.Outcome)">@PhaseLabel(phase)</FluentBadge>
                                             @if (!string.IsNullOrEmpty(phase.Detail))
                                             {
                                                 <span class="muted"> — @phase.Detail</span>
@@ -793,6 +798,9 @@
     // student, created + linked on save (Phase 4). Keyed by student id.
     private readonly Dictionary<Guid, List<GuardianDraft>> _guardianDrafts = new();
     private readonly Dictionary<Guid, GuardianForm> _guardianForms = new();
+    // Per-student screen-reader announcement text, populated on add. The
+    // value includes a nonce so aria-live re-fires for repeated adds.
+    private readonly Dictionary<Guid, string> _guardianAddAnnouncements = new();
 
     // A drafted guardian awaiting creation on save.
     private sealed record GuardianDraft(
@@ -801,11 +809,13 @@
         Guid? RelationshipCodedValueId,
         GuardianRole Role,
         ContactChannel? ContactChannel,
-        string? ContactValue);
+        string? ContactValue,
+        Guid? TitleCodedValueId);
 
     // Mutable in-progress form state for one student's "add guardian" row.
     private sealed class GuardianForm
     {
+        public Guid? TitleCodedValueId { get; set; }
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public Guid? RelationshipCodedValueId { get; set; }
@@ -1356,10 +1366,18 @@
             f.RelationshipCodedValueId,
             f.Role,
             string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.Channel,
-            string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.ContactValue.Trim()));
+            string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.ContactValue.Trim(),
+            f.TitleCodedValueId));
         _guardianForms[studentId] = new GuardianForm();
+        // Brief screen-reader announcement. A nonce forces the live region
+        // to re-announce on subsequent adds (browsers only re-read identical
+        // live-region text if the value changes).
+        _guardianAddAnnouncements[studentId] = $"Guardian added. ({Guid.NewGuid():N})";
         StateHasChanged();
     }
+
+    private string GetAddAnnouncement(Guid studentId)
+        => _guardianAddAnnouncements.TryGetValue(studentId, out var msg) ? msg : string.Empty;
 
     private void RemoveGuardianDraft(Guid studentId, int index)
     {
@@ -1596,6 +1614,7 @@
         {
             var gCreated = 0;
             var gFailures = 0;
+            var gContactFailures = 0;
             foreach (var kv in guardianEntries)
             {
                 var studentId = kv.Key;
@@ -1604,14 +1623,24 @@
                     try
                     {
                         var guardianId = await Api.CreateGuardianAsync(new CreateGuardianRequest(
-                            null, d.FirstName, d.LastName, null, null, null), ct);
+                            d.TitleCodedValueId, d.FirstName, d.LastName, null, null, null), ct);
                         await Api.LinkGuardianAsync(new LinkGuardianRequest(
                             studentId, guardianId, d.RelationshipCodedValueId, d.Role, false, null), ct);
                         if (d.ContactValue is not null)
                         {
-                            await Api.AddContactAsync(new AddContactRequest(
-                                ContactOwnerType.Guardian, guardianId,
-                                d.ContactChannel ?? ContactChannel.Email, d.ContactValue, null, true), ct);
+                            try
+                            {
+                                await Api.AddContactAsync(new AddContactRequest(
+                                    ContactOwnerType.Guardian, guardianId,
+                                    d.ContactChannel ?? ContactChannel.Email, d.ContactValue, null, true), ct);
+                            }
+                            catch (OperationCanceledException) { throw; }
+                            catch (Exception contactEx)
+                            {
+                                if (_disposed) return;
+                                gContactFailures++;
+                                Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                            }
                         }
                         gCreated++;
                     }
@@ -1627,12 +1656,16 @@
             var gOutcome = gFailures == 0
                 ? SavePhaseOutcome.Success
                 : (gCreated == 0 ? SavePhaseOutcome.Failed : SavePhaseOutcome.Partial);
+            var gDetail = gFailures == 0
+                ? (gContactFailures == 0
+                    ? $"{gCreated} guardian link(s) created"
+                    : $"{gCreated} guardian link(s) created; {gContactFailures} contact(s) failed to add")
+                : $"{gCreated}/{gCreated + gFailures} guardian link(s) created; {gFailures} failed" +
+                  (gContactFailures > 0 ? $"; {gContactFailures} contact(s) failed to add" : string.Empty);
             _savePhases.Add(new SavePhaseStatus(
                 "Guardians",
                 gOutcome,
-                gFailures == 0
-                    ? $"{gCreated} guardian link(s) created"
-                    : $"{gCreated}/{gCreated + gFailures} guardian link(s) created; {gFailures} failed"));
+                gDetail));
         }
 
         Logger.LogInformation("Grade {GradeId} save attempt: subjects={SubjectCount} students={StudentCount}",
@@ -1697,8 +1730,17 @@
         SavePhaseOutcome.Success => Appearance.Accent,
         SavePhaseOutcome.Partial => Appearance.Neutral,
         SavePhaseOutcome.Skipped => Appearance.Lightweight,
-        SavePhaseOutcome.Failed => Appearance.Outline,
+        SavePhaseOutcome.Failed => Appearance.Lightweight,
         _ => Appearance.Lightweight
+    };
+
+    // Failed gets its own CSS class so we can paint the error semantic
+    // explicitly (border + colour) rather than relying on FluentBadge
+    // Appearance.Outline, which reads as 'Skipped' in dark mode.
+    private static string PhaseClass(SavePhaseOutcome outcome) => outcome switch
+    {
+        SavePhaseOutcome.Failed => "gw-phase-badge-failed",
+        _ => string.Empty
     };
 
     private static string PhaseLabel(SavePhaseStatus phase) => phase.Outcome switch

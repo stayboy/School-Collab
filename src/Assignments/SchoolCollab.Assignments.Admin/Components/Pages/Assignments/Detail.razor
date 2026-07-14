@@ -42,7 +42,7 @@
                 </div>
 
                 <FluentTabs>
-                    <FluentTab Label="Overview">
+                    <FluentTab Label="Overview" Icon="@FluentIcons.ClipboardCheckmark">
                         <div class="detail-grid">
                             <div class="detail-label">Type</div>
                             <div class="detail-value">@EnumHelper.GetDescription(_item.AssignmentType)</div>
@@ -110,7 +110,7 @@
                         }
                     </FluentTab>
 
-                    <FluentTab Label="Recipients">
+                    <FluentTab Label="Recipients" Icon="@FluentIcons.People">
                         @if (_loadingRecipients)
                         {
                             <FluentProgressRing />
@@ -153,7 +153,7 @@
                         }
                     </FluentTab>
 
-                    <FluentTab Label="Submissions">
+                    <FluentTab Label="Submissions" Icon="@FluentIcons.TextBulletList">
                         @if (_loadingSubmissions)
                         {
                             <FluentProgressRing />
