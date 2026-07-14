@@ -39,7 +39,7 @@
                         @* ── Profile (view / edit) ── *@
                         @if (_editing)
                         {
-                            <FluentCard class="detail-card">
+                            <FluentCard class="detail-card" AreaRestricted="false">
                                 <FluentStack Orientation="Orientation.Vertical" Spacing="3">
                                     <FormRow Label="Title">
                                         <CodedValueDropdown Parent="CodedValueParent.Salutations" @bind-SelectedId="_editTitleId" />
@@ -112,7 +112,7 @@
                             </ul>
                         }
 
-                        <FluentCard class="detail-card">
+                        <FluentCard class="detail-card" AreaRestricted="false">
                             <div class="wizard-section-header">
                                 <div>
                                     <h4>Link a ward</h4>
