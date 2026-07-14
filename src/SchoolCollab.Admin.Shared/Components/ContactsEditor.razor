@@ -30,13 +30,10 @@
     else
     {
         <div class="contacts-editor-add">
-            <FluentSelect TOption="ContactChannel"
-                          Items="_channels"
-                          @bind-SelectedOption="_newChannel"
-                          OptionText="@(c => c.ToString())"
-                          OptionValue="@(c => c.ToString())"
-                          Placeholder="Channel"
-                          class="contacts-channel" />
+            <DropdownForEnum TEnum="ContactChannel"
+                              @bind-SelectedValue="_newChannel"
+                              Placeholder="Channel"
+                              Class="contacts-channel" />
             <FluentTextField @bind-Value="_newValue"
                               Placeholder="Email / phone / WhatsApp…"
                               class="contacts-value" />
@@ -133,8 +130,6 @@
 
     /// <summary>When true (default), shows the subscribe/unsubscribe toggle.</summary>
     [Parameter] public bool ShowSubscription { get; set; } = true;
-
-    private static readonly ContactChannel[] _channels = (ContactChannel[])Enum.GetValues(typeof(ContactChannel));
 
     private List<ContactDto> _contacts = new();
     private HashSet<Guid> _subscribed = new();
