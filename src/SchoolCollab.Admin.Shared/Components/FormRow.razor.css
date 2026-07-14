@@ -80,3 +80,24 @@
        viewports (e.g. <480px) instead of clipping. */
     flex-wrap: wrap;
 }
+
+/* Narrow-viewport fallback: stack the label above the input cell so the
+   fixed 180px column doesn't eat the screen on phones. Triggers under
+   720px (tablet portrait and below). */
+@media (max-width: 720px) {
+    .form-row {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 4px;
+    }
+
+    .form-row-label {
+        width: 100%;
+        flex-shrink: 0;
+        min-height: 0;
+    }
+
+    .form-row--align-top .form-row-label {
+        padding-top: 0;
+    }
+}

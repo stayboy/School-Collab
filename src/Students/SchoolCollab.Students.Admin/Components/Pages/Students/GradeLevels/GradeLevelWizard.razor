@@ -225,8 +225,8 @@
                                                 }
                                                 <span class="assigned-subject-actions">
 
-                                                        <FluentButton Appearance="Appearance.Lightweight" Title="Override the default name for this tenant" OnClick="@(() => OverrideSubjectAsync(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Edit)" /></FluentButton>
-                                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove subject" OnClick="@(() => RemoveSubject(s))" Disabled="@(_overridingSubjectId == s.Id)"><FluentIcon Icon="@(Icons.Regular.Size20.Delete)" /></FluentButton>
+                                                        <FluentButton Appearance="Appearance.Lightweight" Title="Override the default name for this tenant" IconStart="@FluentIcons.Edit" OnClick="@(() => OverrideSubjectAsync(s))" Disabled="@(_overridingSubjectId == s.Id)" />
+                                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove subject" IconStart="@FluentIcons.Delete" OnClick="@(() => RemoveSubject(s))" Disabled="@(_overridingSubjectId == s.Id)" />
                                                 </span>
                                             </li>
                                         }
@@ -427,11 +427,10 @@
                                                         {
                                                             <span class="muted">(relationship set)</span>
                                                         }
-                                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                            <FluentButton Appearance="Appearance.Lightweight"
                                                                       Title="Remove guardian"
-                                                                      OnClick="@(() => RemoveGuardianDraft(s.Id, idx))">
-                                                            <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
-                                                        </FluentButton>
+                                                                      IconStart="@FluentIcons.Delete"
+                                                                      OnClick="@(() => RemoveGuardianDraft(s.Id, idx))" />
                                                     </li>
                                                 }
                                             </ul>

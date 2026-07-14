@@ -16,6 +16,7 @@
 @using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Admin.Shared.Constants
 @inject IContactsClient Api
 @inject ILogger<ContactsEditor> Logger
 
@@ -46,7 +47,7 @@
                 Primary
             </FluentCheckbox>
             <FluentButton Appearance="Appearance.Accent"
-                          IconStart="@(new Icons.Regular.Size20.Add())"
+                          IconStart="@FluentIcons.Add"
                           OnClick="AddAsync"
                           Disabled="@(_adding || string.IsNullOrWhiteSpace(_newValue))">
                 @(_adding ? "Adding…" : "Add")
@@ -101,23 +102,20 @@
                             {
                                 <FluentButton Appearance="Appearance.Lightweight"
                                               Title="Mark verified"
-                                              OnClick="@(() => VerifyAsync(c.Id))">
-                                    <FluentIcon Icon="@(Icons.Regular.Size20.Checkmark)" />
-                                </FluentButton>
+                                              IconStart="@FluentIcons.Checkmark"
+                                              OnClick="@(() => VerifyAsync(c.Id))" />
                             }
                             @if (!c.IsPrimary)
                             {
                                 <FluentButton Appearance="Appearance.Lightweight"
                                               Title="Set as primary"
-                                              OnClick="@(() => SetPrimaryAsync(c.Id))">
-                                    <FluentIcon Icon="@(Icons.Regular.Size20.Star)" />
-                                </FluentButton>
+                                              IconStart="@FluentIcons.Star"
+                                              OnClick="@(() => SetPrimaryAsync(c.Id))" />
                             }
                             <FluentButton Appearance="Appearance.Lightweight"
                                           Title="Remove contact"
-                                          OnClick="@(() => RemoveAsync(c.Id))">
-                                <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
-                            </FluentButton>
+                                          IconStart="@FluentIcons.Delete"
+                                          OnClick="@(() => RemoveAsync(c.Id))" />
                         </span>
                     </li>
                 }

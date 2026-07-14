@@ -1,4 +1,13 @@
 /* ── Wizard sections ─────────────────────────────────────────────── */
+/*
+   NOTE on `--accent-color`: the "selected card" highlight below uses
+   `var(--accent-color, #e65100)`. The fallback (#e65100) is the
+   canonical orange when the var is unset; FluentUI v4.14.2 does not
+   expose a direct semantic token for this use case, so the var+fallback
+   pair is the repo's override hook. Theme authors can define
+   `--accent-color` at the layout level to re-skin the selected-card
+   state without touching this file. */
+
 .wizard-section {
     margin-bottom: 2rem;
 }

@@ -26,4 +26,17 @@ public static class FluentIcons
     public static readonly Icon Open = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Open();
     public static readonly Icon Dismiss = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Dismiss();
     public static readonly Icon Edit = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Edit();
+
+    // Phase 1 design-system hygiene: extend the curated set for shared
+    // components (ContactsEditor) that need a non-generic Icon reference.
+    // Each constant is the canonical icon the rest of the codebase uses
+    // for the same semantic (Checkmark for "verified", Star for "primary",
+    // Delete for "remove"). Curated constants are only safe with
+    // `IconStart` / `IconStart` on `FluentButton`; the typed `Icon`
+    // parameter on `<FluentIcon TIcon>` requires the generated
+    // `Icons.Regular.Size{20,24}.<Name>()` type, which the Razor source
+    // generator needs to resolve `nameof(FluentIcon<TIcon>.Icon)`.
+    public static readonly Icon Checkmark = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Checkmark();
+    public static readonly Icon Star = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Star();
+    public static readonly Icon Delete = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Delete();
 }
