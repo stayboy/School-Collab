@@ -54,6 +54,15 @@ namespace SchoolCollab.Students.Core.Migrations
                     table.PrimaryKey("pk_contacts", x => x.id);
                 });
 
+            // Unique index MUST exist before the backfill below, otherwise its
+            // ON CONFLICT (tenant_id, owner_type, owner_id, channel, value) fails
+            // with "no unique or exclusion constraint matching the ON CONFLICT".
+            migrationBuilder.CreateIndex(
+                name: "ix_contacts_tenant_owner_channel_value",
+                table: "contacts",
+                columns: new[] { "tenant_id", "owner_type", "owner_id", "channel", "value" },
+                unique: true);
+
             // ── Legacy-contact backfill (M1) ───────────────────────────────────
             // Migrate existing student email/phone into the new multi-channel
             // contacts table. Email -> channel 0 (Email); Phone -> channel 1 (SMS).
@@ -201,12 +210,6 @@ namespace SchoolCollab.Students.Core.Migrations
                 name: "ix_contacts_tenant_owner",
                 table: "contacts",
                 columns: new[] { "tenant_id", "owner_type", "owner_id" });
-
-            migrationBuilder.CreateIndex(
-                name: "ix_contacts_tenant_owner_channel_value",
-                table: "contacts",
-                columns: new[] { "tenant_id", "owner_type", "owner_id", "channel", "value" },
-                unique: true);
 
             migrationBuilder.CreateIndex(
                 name: "ix_guardian_name_history_tenant_guardian",
