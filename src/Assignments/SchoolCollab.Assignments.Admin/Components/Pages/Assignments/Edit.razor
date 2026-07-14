@@ -30,36 +30,52 @@
                 <DataAnnotationsValidator />
                 <ValidationSummary />
 
-                <FluentTextField @bind-Value="_model.Title" Label="Title *" class="full-width mb-3" />
-                <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="3" class="full-width mb-3" />
+                <FormRow Label="Title" Required For="assignmentEditTitle">
+                    <FluentTextField Id="assignmentEditTitle" @bind-Value="_model.Title" Required class="full-width" />
+                </FormRow>
+                <FormRow Label="Description" For="assignmentEditDescription">
+                    <FluentTextArea Id="assignmentEditDescription" @bind-Value="_model.Description" Rows="3" class="full-width" />
+                </FormRow>
 
-                <FluentSelect TOption="AssignmentTypeOption"
-                               Items="@_typeOptions"
-                               @bind-SelectedOption="_selectedType"
-                               OptionText="@(o => o.Label)"
-                               OptionValue="@(o => o.Value)"
-                               Label="Assignment Type *"
-                               class="full-width mb-3" />
+                <FormRow Label="Assignment Type" Required For="assignmentEditType">
+                    <FluentSelect TItem="AssignmentTypeOption"
+                                  Id="assignmentEditType"
+                                  Items="@_typeOptions"
+                                  @bind-SelectedOption="_selectedType"
+                                  OptionText="@(o => o.Label)"
+                                  OptionValue="@(o => o.Value)"
+                                  class="full-width" />
+                </FormRow>
 
-                <FluentSelect TOption="GradingFormatOption"
-                               Items="@_gradingFormatOptions"
-                               @bind-SelectedOption="_selectedGradingFormat"
-                               OptionText="@(o => o.Label)"
-                               OptionValue="@(o => o.Value)"
-                               Label="Grading Format"
-                               class="full-width mb-3" />
+                <FormRow Label="Grading Format" For="assignmentEditGrading">
+                    <FluentSelect TItem="GradingFormatOption"
+                                  Id="assignmentEditGrading"
+                                  Items="@_gradingFormatOptions"
+                                  @bind-SelectedOption="_selectedGradingFormat"
+                                  OptionText="@(o => o.Label)"
+                                  OptionValue="@(o => o.Value)"
+                                  class="full-width" />
+                </FormRow>
 
-                <FluentSelect TOption="TargetAudienceOption"
-                               Items="@_targetAudienceOptions"
-                               @bind-SelectedOption="_selectedTargetAudience"
-                               OptionText="@(o => o.Label)"
-                               OptionValue="@(o => o.Value)"
-                               Label="Target Audience"
-                               class="full-width mb-3" />
+                <FormRow Label="Target Audience" For="assignmentEditAudience">
+                    <FluentSelect TItem="TargetAudienceOption"
+                                  Id="assignmentEditAudience"
+                                  Items="@_targetAudienceOptions"
+                                  @bind-SelectedOption="_selectedTargetAudience"
+                                  OptionText="@(o => o.Label)"
+                                  OptionValue="@(o => o.Value)"
+                                  class="full-width" />
+                </FormRow>
 
-                <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" class="full-width mb-3" />
-                <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" class="narrow-field mb-3" />
-                <FluentCheckbox @bind-Value="_mandatoryReview" Label="Require guardian review before student submits" class="mb-3" />
+                <FormRow Label="Due Date" For="assignmentEditDue">
+                    <FluentDatePicker Id="assignmentEditDue" @bind-Value="_model.DueDate" class="full-width" />
+                </FormRow>
+                <FormRow Label="Max Score" For="assignmentEditMaxScore">
+                    <FluentNumberField Id="assignmentEditMaxScore" @bind-Value="_model.MaxScore" class="narrow-field" />
+                </FormRow>
+                <FormRow Label="Guardian review" For="assignmentEditMandatoryReview">
+                    <FluentCheckbox Id="assignmentEditMandatoryReview" @bind-Value="_mandatoryReview" Label="Require guardian review before student submits" />
+                </FormRow>
 
                 @if (!string.IsNullOrEmpty(_error))
                 {
