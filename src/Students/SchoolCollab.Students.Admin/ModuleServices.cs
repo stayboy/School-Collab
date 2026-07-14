@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Students.Admin.Services;
+using SchoolCollab.Students.Core.Contracts;
 
 namespace SchoolCollab.Students.Admin;
 
@@ -15,6 +16,10 @@ public static class ModuleServices
         services.AddHttpClient<StudentsApiClient>(client =>
             client.BaseAddress = new Uri("https+http://students-api"))
             .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+
+        // Shared contact surface (used by ContactsEditor in Admin.Shared) resolves
+        // to the same typed HttpClient-backed client instance.
+        services.AddScoped<IContactsClient>(sp => sp.GetRequiredService<StudentsApiClient>());
 
         // Resolves whether the signed-in user has a real (non-default) tenant.
         // Strict-tenant Admin UI surfaces use it to gate their tools/forms

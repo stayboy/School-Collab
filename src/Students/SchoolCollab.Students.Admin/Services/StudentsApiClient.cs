@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Students.Core.Contracts;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
 
@@ -240,23 +241,9 @@ public record LinkTeacherSubjectRequest(Guid SubjectId);
 
 public record LinkTeacherGradeLevelRequest(Guid GradeLevelId);
 
-// ── Contact / subscription requests ──────────────────────────────────────────
-
-public record AddContactRequest(
-    ContactOwnerType OwnerType,
-    Guid OwnerId,
-    ContactChannel Channel,
-    string Value,
-    string? Label,
-    bool IsPrimary);
-
-public record UpdateContactRequest(string Value, string? Label);
-
-public record SubscriptionRequest(SubscriptionScope Scope, Guid? ScopeRefId);
-
 // ── Client ──────────────────────────────────────────────────────────────────
 
-public sealed class StudentsApiClient
+public sealed class StudentsApiClient : IContactsClient
 {
     private readonly HttpClient _http;
     private readonly ILogger<StudentsApiClient> _logger;

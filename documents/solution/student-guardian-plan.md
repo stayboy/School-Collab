@@ -941,24 +941,26 @@ read-model)._
 | 1 | Coded values + seed | **DONE** | +5 enum members, +21 seed rows, attribute rows, 4/4 arch tests |
 | 2 | Domain model + EF | **DONE** | 8 entities, 6 enums, 8 configs, single migration `AddGuardiansContactsTeachers`, 7/7 domain tests |
 | 3 | CQRS + API | **DONE** | 11 guardian commands, 5 guardian queries, 7 contact/subscription commands, 3 queries, 4 route files, 14/14 `GuardianContactsCqrsTests` |
-| 4 | Admin UI | **DONE (core) + PLAYWRIGHT SMOKE** | `Guardians.razor`, `GuardianSetupWizard`, `GuardianDetail`, `ContactsEditor`, `GuardiansTab`, student `Detail` FluentTabs (Overview/Guardians/Contacts), NavMenu link — build clean; 69/69 domain + 12/12 arch. `SchoolCollab.Students.Tests.Playwright` smoke tests authored (Guardians index, create button, wizard nav, student Guardians+Contacts tabs). GradeLevelWizard guardian step deferred (Tier 2). Full create-wizard Playwright flow + execution require running AppHost + seeded tenant (env-dependent). |
+| 4 | Admin UI | **DONE (core) + PLAYWRIGHT SMOKE** | `Guardians.razor`, `GuardianSetupWizard`, `GuardianDetail`, `ContactsEditor`, `GuardiansTab`, student `Detail` FluentTabs (Overview/Guardians/Contacts), NavMenu link — build clean; 69/69 domain + 12/12 arch. `SchoolCollab.Students.Tests.Playwright` smoke tests authored (Guardians index, create button, wizard nav, student Guardians+Contacts tabs). GradeLevelWizard guardian step **implemented (deferred Tier 3 #9, 2026-07-15)**. Full create-wizard Playwright flow + execution require running AppHost + seeded tenant (env-dependent). |
 | 5 | Assignment publishing & submission domain (Assignments.Core) | **DONE** | `Assignment.MandatoryReview`; new `AssignmentRecipient`, `GuardianSubmissionGate`, `AssignmentSubmission`, `AssignmentSubmissionVersion`, `SubmissionReview`; new enums `SubmissionSource`/`ReviewState`; 5 configs; migration `AddAssignmentSubmissionLifecycle`; 6 entity-config tests. 51/51 Assignments + 12/12 Arch tests pass. |
 | 6 | Publish integration, review-gate & teacher review engine | **DONE (engine) + POLISH** | `IContactResolver` + `StudentsContactResolver`; publish upserts `AssignmentRecipient` (deduped by contact) + auto-creates `GuardianSubmissionGate` when `MandatoryReview`; **6 CQRS handlers** (+`CreateStudentSubmission` §4.10 gate) + §9-shaped submit endpoints; `ISubmissionRepository`; `ReviewSubmission` enforces `CreatedByTeacherId` authz; **`IAssignmentNotificationBroadcaster`** extracted (outbox); `PublishAssignmentCommand` contact selection; `Unpublish` rebuilds recipients + resets gate. 73/73 Assignments.Unit + 12/12 Arch. Remaining: full §9 route alignment (gate/submission review) + §8 recipient/submission queries — deferred to Phase 7. |
 | 7 | Assignments API + admin UI (Assignments.Admin) | **DONE** | §9-shaped endpoints (`/recipients`, `/submissions`, `/students/{studentId}/submission`, `/students/{studentId}/guardian-review`, `/students/{studentId}/enable-submission`, `/students/{studentId}/submit-on-behalf`, `/students/{studentId}/submission/review`, `/submissions/review-queue`, `/gates/student/{studentId}`); legacy id-based gate/submission review routes removed. New CQRS: `ListAssignmentRecipients`, `GetSubmission`, `ListSubmissionsByAssignment`, `EnableStudentSubmission` (→ `GuardianSubmissionGate.EnableForStudent()`). `Detail.razor` FluentTabs (Overview/Recipients/Submissions) + publish dialog (reuses `DialogShellBase<TModel,TResult>` shared shell; optional contact-subset selection via `StudentsApiClient.ListSubscribedContactsAsync`) + teacher review/grade form (`ReviewSubmissionAsync` + `GetSubmissionAsync`). `Create`/`Edit` `MandatoryReview` toggle. `AssignmentSummaryDto`/`CreateAssignmentRequest`/`UpdateAssignmentRequest` carry `MandatoryReview`; `Assignment.Create`/`Update` + `Create/UpdateAssignmentCommand` wired. 76/76 Assignments.Unit + 12/12 Arch. |
 | 8 | Teacher CQRS + API + SetupWizard UI (Students.Admin) | **DONE** | `TeacherDto`; `ITeacherRepository` + `TeacherRepository` (Add/Get/GetIncludingDeleted/Update/SoftDelete + subject/grade-level link add/remove) registered in `Extensions.cs`; `StudentsDbContext` `Teachers`/`TeacherSubjects`/`TeacherGradeLevels` DbSets (no new migration — tables already in `AddGuardiansContactsTeachers`). CQRS: `CreateTeacher`(+`Guid`), `UpdateTeacher`, `DeleteTeacher` (soft-delete), `Link/UnlinkTeacherSubject`, `Link/UnlinkTeacherGradeLevel`, `GetTeacherById`, `ListTeachers`, `ListSubjectsForTeacher`, `ListGradeLevelsForTeacher` (all tenant + HybridCache "teachers" tag; `TeacherNotFoundException` added). Students.Api `/teachers` routes (G2: `RequireAuthorization` unless `FEATURE:DisableOIDCAuth`) mounted in `StudentEndpoints`. Students.Admin `StudentsApiClient` teacher DTO/requests/methods (`/teachers` prefix). UI: `Teachers.razor` list (LandingPage), `TeacherSetupWizard.razor` (FluentWizard Profile→Subjects→GradeLevels→Review, edit diff-sync), `TeacherDetail.razor`; NavMenu Teachers link. `SchoolCollab.Admin.Shared.Constants.FluentIcons` gained `Edit`+`Person`. 8/8 `TeacherCqrsTests`; Students.Unit 77/77, Assignments.Unit 76/76, Arch 12/12. `ListAssignmentsForTeacher` deferred to teacher portal (§18). |
-| 9 | MigrationService wiring + seed run + full cross-module build/test | **DONE** | `SchoolCollab.MigrationService` (`migrator` in AppHost) applies EF migrations for all three contexts — Settings (`SettingsDbContext`), Assignments (`AssignmentsDbContext`), Students (`StudentsDbContext`, incl. `teachers`/`teacher_subjects`/`teacher_grade_levels` from `AddGuardiansContactsTeachers`) — then seeds CodedValues (incl. `SALUTS` Mr/Mrs/Ms/Dr/Prof/Mx for the Teacher title dropdown), the real Tenant registry, and `FEATURE:EnableCodedValuesAiChat`, and backfills assignment `SubjectId`/`GradeLevelId`. `MigrationGuardTests` (Students/Assignments/Settings) confirm zero pending model changes (`HasPendingModelChanges() == false`), so `MigrateAsync` is drift-free. `SchoolCollab.sln` builds 0 errors; **all 9 unit-test projects pass (638 tests)**: Students.Unit 77, Assignments.Unit 76, ArchitectureTests 12, Core.Tests.Unit 64, Admin.Tests.Unit 58, Settings.Tests.Unit 348, Students.Api.Tests.Unit 1, Assignments.Api.Tests.Unit 1, Settings.Api.Tests.Unit 1. Integration/Playwright suites (Testcontainers + browser) remain environment-blocked (no Docker). |
+| 9 | MigrationService wiring + seed run + full cross-module build/test | **DONE** | `SchoolCollab.MigrationService` (`migrator` in AppHost) applies EF migrations for all three contexts — Settings (`SettingsDbContext`), Assignments (`AssignmentsDbContext`), Students (`StudentsDbContext`, incl. `teachers`/`teacher_subjects`/`teacher_grade_levels` from `AddGuardiansContactsTeachers`) — then seeds CodedValues (incl. `SALUTS` Mr/Mrs/Ms/Dr/Prof/Mx for the Teacher title dropdown), the real Tenant registry, and `FEATURE:EnableCodedValuesAiChat`, and backfills assignment `SubjectId`/`GradeLevelId`. `MigrationGuardTests` (Students/Assignments/Settings) confirm zero pending model changes (`HasPendingModelChanges() == false`), so `MigrateAsync` is drift-free. `SchoolCollab.sln` builds 0 errors; **all 9 unit-test projects pass (642 tests)**: Students.Unit 81, Assignments.Unit 76, ArchitectureTests 12, Core.Tests.Unit 64, Admin.Tests.Unit 58, Settings.Tests.Unit 348, Students.Api.Tests.Unit 1, Assignments.Api.Tests.Unit 1, Settings.Api.Tests.Unit 1. Integration/Playwright suites (Testcontainers + browser) remain environment-blocked (no Docker). |
 
 ### Phase 4 deviations / notes
 - **`ListGuardiansByStudent` returns `StudentGuardianViewDto[]`** (not `GuardianDto[]`)
   so the student Guardians tab can render role + name without N round-trips.
   Added `StudentGuardianViewDto` to Core.DTOs.
-- **GradeLevelWizard "Add guardians" step (Tier 2)** — **deferred**. The plan
-  flags this as a larger, deferrable enhancement; the core guardian management
-  UI (list / create wizard / detail / contacts editor / student tabs / nav) is
-  complete and the full API is functional, so guardian linking is available from
-  both the Guardian detail page and the student Guardians tab. Adding a nested
-  guardian-create step inside the GradeLevelWizard is left as a follow-up to
-  avoid destabilizing the existing enrollment flow.
+- **GradeLevelWizard "Add guardians" step (Tier 2 → deferred Tier 3 #9)** —
+  **implemented (2026-07-15).** A new "Guardians" wizard step sits between the
+  Students and Review steps: for each enrolled student the user can draft one or
+  more guardians (first/last name, relationship `CodedValue` dropdown, Primary/CC
+  role, optional contact channel + value), and `SaveAsync` gained a Phase 4 that
+  creates each guardian, links it to the student (`LinkGuardianAsync`) and seeds
+  the optional contact. The Review step also surfaces a "Guardians to create"
+  summary. The core guardian management UI (list / create wizard / detail /
+  contacts editor / student tabs / nav) remains complete and unchanged.
 - **Playwright tests (Phase 4 Tests) — smoke suite authored** — added
   `SchoolCollab.Students.Tests.Playwright` with `GuardianAdminTests` (Guardians
   index load, create button visible, wizard navigation from Create, student
@@ -1069,15 +1071,15 @@ selection (#6), Unpublish rebuild recipients + reset gate (#7), student-on-behal
 ## Consolidated gaps & recommendations (next steps)
 
 _Review dated 2026-07-14 (Phase 9 applied). Test state: all 9 unit-test
-projects pass — Students.Unit 77/77, Assignments.Unit 76/76, ArchitectureTests
+projects pass — Students.Unit 81/81, Assignments.Unit 76/76, ArchitectureTests
 12/12, Core.Tests.Unit 64/64, Admin.Tests.Unit 58/58, Settings.Tests.Unit 348/348,
 Students.Api.Tests.Unit 1/1, Assignments.Api.Tests.Unit 1/1, Settings.Api.Tests.Unit
-1/1 (638 total); `SchoolCollab.sln` builds 0 errors. Phases 1–8 fully meet the
+1/1 (642 total); `SchoolCollab.sln` builds 0 errors. Phases 1–8 fully meet the
 plan; Phase 4 UI complete + Playwright smoke tests authored; Phase 6 engine
 complete + plan-fidelity polish applied; Phase 7 (Assignments API + admin UI)
 complete; Phase 8 (Teacher CQRS + API + SetupWizard UI) complete; Phase 9
 (MigrationService wiring + seed run + full cross-module build/test) complete.
-Remaining work: deferred Tier 3 items + teacher portal (§18)._
+Remaining work: teacher portal (§18) + §18 later features (guardian portal & OIDC, assignment delivery, scoped subscriptions, contact OTP, self-service guardian management)._
 
 ### Post-review fixes (2026-07-14)
 - **Phase 7 — `MandatoryReview` on Create (HIGH):** `POST /assignments` route now
@@ -1142,10 +1144,17 @@ Remaining work: deferred Tier 3 items + teacher portal (§18)._
    routes removed; replaced by §9 student-scoped `/students/{studentId}/guardian-review` +
    `/students/{studentId}/submission/review`; `submit-on-behalf` + student self-submit
    §9-shaped. _LOW — fixed_
-9. **GradeLevelWizard "add guardians" step** — deferred (larger UI work).
-   _LOW — deferred_
-10. **Move `ContactsEditor` → `Admin.Shared`** — only if another admin app needs
-    reuse; not needed yet. _LOW — deferred_
+9. ~~**GradeLevelWizard "add guardians" step**~~ — done (2026-07-15): new
+   "Guardians" wizard step + `SaveAsync` Phase 4 (create guardian → link →
+   optional contact) + Review summary. _LOW — fixed_
+10. ~~**Move `ContactsEditor` → `Admin.Shared`**~~ — done (2026-07-15):
+    `ContactsEditor` (+ .razor.css) moved to `SchoolCollab.Admin.Shared/Components`;
+    the contact surface was extracted as `IContactsClient` (in
+    `SchoolCollab.Students.Core.Contracts`) with the 3 request records
+    (`AddContactRequest`/`UpdateContactRequest`/`SubscriptionRequest`) relocated
+    there too; `StudentsApiClient` implements `IContactsClient`; `Admin.Shared`
+    references `Students.Core`; `ModuleServices` registers
+    `IContactsClient → StudentsApiClient`. _LOW — fixed_
 
 ### Tier 4 — upcoming phases
 11. ~~**Phase 7**~~ — done (see status table): Assignments admin UI recipients view,

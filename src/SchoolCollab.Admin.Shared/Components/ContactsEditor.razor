@@ -9,14 +9,14 @@
      <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@guardianId" />
 
    The component loads the owner's contacts on mount (and whenever OwnerId
-   changes) and owns all mutations against StudentsApiClient, so parents only
-   supply the owner identity. *@
-@using SchoolCollab.Students.Admin.Services
+   changes) and owns all mutations against the injected IContactsClient, so
+   parents only supply the owner identity. *@
+@using SchoolCollab.Students.Core.Contracts
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
-@inject StudentsApiClient Api
+@inject IContactsClient Api
 @inject ILogger<ContactsEditor> Logger
 
 <div class="contacts-editor">
