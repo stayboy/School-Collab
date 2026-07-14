@@ -437,6 +437,10 @@
                                         }
 
                                         <div class="guardian-form">
+                                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                                                SelectedId="GetForm(s.Id).TitleCodedValueId"
+                                                                SelectedIdChanged="@(id => GetForm(s.Id).TitleCodedValueId = id)"
+                                                                Placeholder="Title (optional)" />
                                             <FluentTextField @bind-Value="GetForm(s.Id).FirstName" Placeholder="First name" class="gw-guardian-first" />
                                             <FluentTextField @bind-Value="GetForm(s.Id).LastName" Placeholder="Last name" class="gw-guardian-last" />
                                             <CodedValueDropdown Parent="CodedValueParent.Relationships"
@@ -800,11 +804,13 @@
         Guid? RelationshipCodedValueId,
         GuardianRole Role,
         ContactChannel? ContactChannel,
-        string? ContactValue);
+        string? ContactValue,
+        Guid? TitleCodedValueId);
 
     // Mutable in-progress form state for one student's "add guardian" row.
     private sealed class GuardianForm
     {
+        public Guid? TitleCodedValueId { get; set; }
         public string? FirstName { get; set; }
         public string? LastName { get; set; }
         public Guid? RelationshipCodedValueId { get; set; }
@@ -1355,7 +1361,8 @@
             f.RelationshipCodedValueId,
             f.Role,
             string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.Channel,
-            string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.ContactValue.Trim()));
+            string.IsNullOrWhiteSpace(f.ContactValue) ? null : f.ContactValue.Trim(),
+            f.TitleCodedValueId));
         _guardianForms[studentId] = new GuardianForm();
         StateHasChanged();
     }
@@ -1603,7 +1610,7 @@
                     try
                     {
                         var guardianId = await Api.CreateGuardianAsync(new CreateGuardianRequest(
-                            null, d.FirstName, d.LastName, null, null, null), ct);
+                            d.TitleCodedValueId, d.FirstName, d.LastName, null, null, null), ct);
                         await Api.LinkGuardianAsync(new LinkGuardianRequest(
                             studentId, guardianId, d.RelationshipCodedValueId, d.Role, false, null), ct);
                         if (d.ContactValue is not null)

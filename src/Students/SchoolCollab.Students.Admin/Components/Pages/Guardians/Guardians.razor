@@ -23,7 +23,8 @@
              GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
-             SearchPlaceholder="Search guardians…">
+             SearchPlaceholder="Search guardians…"
+             Error="@_error">
     <Columns>
         <TemplateColumn TGridItem="GuardianDto" Title="Name" Sortable="true" SortBy="@_sortByName">
             <strong>@context.FirstName @context.LastName</strong>
@@ -38,7 +39,7 @@
         <TemplateColumn TGridItem="GuardianDto" Title="Actions">
             <FluentAnchor Href="@($"/students/guardians/{context.Id}")">View</FluentAnchor>
             <FluentAnchor Href="@($"/students/guardians/{context.Id}/edit")" class="ms-2">Edit</FluentAnchor>
-            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, $"{context.FirstName} {context.LastName}"))" class="ms-2">Delete</FluentAnchor>
+            <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => OnDeleteAsync(context.Id, $"{context.FirstName} {context.LastName}"))" class="ms-2">Delete</FluentButton>
         </TemplateColumn>
     </Columns>
 </LandingPage>
@@ -108,12 +109,15 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load guardians");
             _error = ex.Message;
+            _items = [];
         }
     }
 
     private async Task OnDeleteAsync(Guid id, string name)
     {
         if (_disposed) return;
+
+        _error = null;
 
         var dialog = await DialogService.ShowConfirmationAsync(
             $"Are you sure you want to delete guardian '{name}'? This blocks the record but keeps its history, links and contacts.",

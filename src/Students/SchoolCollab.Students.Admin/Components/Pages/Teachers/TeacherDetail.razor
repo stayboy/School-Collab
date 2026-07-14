@@ -19,6 +19,13 @@
                 {
                     <div class="spinner-container"><FluentProgressRing /></div>
                 }
+                else if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                    <div class="mt-3">
+                        <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to teachers</FluentButton>
+                    </div>
+                }
                 else if (_teacher is null)
                 {
                     <FluentMessageBar Intent="MessageIntent.Warning">Teacher not found.</FluentMessageBar>
@@ -104,6 +111,7 @@
     private SubjectDto[]? _subjects;
     private GradeLevelDto[]? _gradeLevels;
     private string? _titleName;
+    private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -114,16 +122,20 @@
 
         try
         {
-            _teacher = await Api.GetTeacherByIdAsync(Id, ct);
-            if (_teacher is not null)
+            // Run the three reads in parallel — the page is read-only and
+            // there are no dependencies between them.
+            var teacherTask = Api.GetTeacherByIdAsync(Id, ct);
+            var subjectsTask = Api.ListSubjectsForTeacherAsync(Id, ct);
+            var gradesTask = Api.ListGradeLevelsForTeacherAsync(Id, ct);
+            await Task.WhenAll(teacherTask, subjectsTask, gradesTask);
+
+            _teacher = teacherTask.Result;
+            _subjects = subjectsTask.Result ?? [];
+            _gradeLevels = gradesTask.Result ?? [];
+
+            if (_teacher is not null && _teacher.TitleCodedValueId is { } titleId)
             {
-                _subjects = await Api.ListSubjectsForTeacherAsync(Id, ct) ?? [];
-                _gradeLevels = await Api.ListGradeLevelsForTeacherAsync(Id, ct) ?? [];
-                if (_teacher.TitleCodedValueId is { } titleId)
-                {
-                    var cv = await CodedValuesApi.GetByIdAsync(titleId, ct);
-                    _titleName = cv?.Name;
-                }
+                _titleName = (await CodedValuesApi.GetByIdAsync(titleId, ct))?.Name;
             }
         }
         catch (OperationCanceledException) { }
@@ -131,11 +143,15 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load teacher {Id}", Id);
+            _error = ex.Message;
         }
         finally
         {
             _loading = false;
-            await InvokeAsync(StateHasChanged);
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
     }
 
