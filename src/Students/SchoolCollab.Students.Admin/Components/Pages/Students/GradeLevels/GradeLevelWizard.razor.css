@@ -393,18 +393,9 @@
     font-size: 0.85rem;
 }
 
-/* The "Open a term" date pickers render inside a FluentCard, which clips to
-   its rounded corners (overflow:hidden) and hides the date-picker popup. The
-   FluentCard elements in the .razor have inline overflow:visible as the
-   primary fix; this scoped rule is defense-in-depth for any descendant
-   .fluent-card the Blazor rendering produces. */
-.open-term-panel {
-    overflow: visible;
-}
-
-::deep .open-term-panel .fluent-card {
-    overflow: visible;
-}
+/* The "Open a term" and "New student" cards contain popup controls
+   (FluentDatePicker, CodedValueDropdown/FluentSelect). The cards now use
+   AreaRestricted="false" so the FluentCard no longer clips those popups. */
 
 /* Save-status badge: Failed state. Uses semantic error tokens so the
    badge is visually distinct from Skipped in both light and dark

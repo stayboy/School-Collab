@@ -27,7 +27,7 @@
         @if (_activePeriod is null)
         {
             <section class="open-term-panel">
-                <FluentCard Style="overflow: visible; height: auto;">
+                <FluentCard AreaRestricted="false" Style="height: auto;">
                     <div class="wizard-section-header">
                         <div>
                             <h3>Open a term</h3>
@@ -296,7 +296,7 @@
 
                             @if (_showNewStudentForm)
                             {
-                                <FluentCard class="new-student-card">
+                                <FluentCard class="new-student-card" AreaRestricted="false">
                                     <div class="form-section-header">
                                         <div>
                                             <h3>New student</h3>
