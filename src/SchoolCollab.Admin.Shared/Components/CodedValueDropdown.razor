@@ -182,12 +182,29 @@
         // Keep the internal selection in sync when the consumer updates SelectedId.
         // Runs synchronously during the normal lifecycle so a re-render triggered by
         // a sibling control does not defer the dropdown update or re-open the list.
-        if (_items is not null && SelectedId.HasValue)
+        if (_items is not null)
         {
-            var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
-            if (!Equals(selected, _selectedOption))
+            // When the consumer sets SelectedId to null (e.g. an optimistic-UI
+            // pick handler that resets the picker immediately after rendering
+            // a confirmation chip from the dropdown's data), clear the
+            // internal selection too — otherwise FluentSelect keeps showing
+            // the stale picked option. We only touch _selectedOption when
+            // the consumer-driven value disagrees with what we have, so we
+            // don't fight the user's mid-pick state.
+            if (!SelectedId.HasValue)
             {
-                _selectedOption = selected;
+                if (_selectedOption is not null)
+                {
+                    _selectedOption = null;
+                }
+            }
+            else
+            {
+                var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
+                if (!Equals(selected, _selectedOption))
+                {
+                    _selectedOption = selected;
+                }
             }
         }
     }
@@ -201,6 +218,31 @@
     {
         if (_disposed) return;
         await LoadAsync(ParentCode);
+    }
+
+    /// <summary>
+    /// Looks up a coded value by id from the dropdown's already-loaded items
+    /// without re-fetching from the server. The dropdown's initial load uses
+    /// <c>GetChildrenByParentCodeAsync</c> which already returns the full
+    /// tenant-resolved <see cref="CodedValueDto"/> (Name, IsOverridden,
+    /// DefaultName, …) — so a pick from the dropdown never needs a follow-up
+    /// <c>GetByIdAsync</c> round-trip just to read the resolved name.
+    ///
+    /// Returns <c>false</c> while the dropdown is still loading, after a load
+    /// error, or when the id is not in the current items (e.g. the items were
+    /// never loaded for this <see cref="Parent"/>). Callers should fall back
+    /// to <c>CodedValuesApi.GetByIdAsync</c> in those rare cases.
+    /// </summary>
+    public bool TryFindItem(Guid id, out CodedValueDto? item)
+    {
+        if (_items is null || _error is not null)
+        {
+            item = null;
+            return false;
+        }
+
+        item = _items.FirstOrDefault(x => x.Id == id);
+        return item is not null;
     }
 
     private async Task LoadAsync(string parentCode)
