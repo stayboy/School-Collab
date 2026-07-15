@@ -3,4 +3,4 @@ using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Core.CQRS.Students.Queries.ListStudents;
 
-public sealed record ListStudents : IQuery<StudentDto[]>;
+public sealed record ListStudents(string? Search = null) : IQuery<StudentDto[]>;

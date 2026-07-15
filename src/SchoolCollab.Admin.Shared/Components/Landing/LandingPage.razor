@@ -49,13 +49,13 @@
         else
         {
             <div class="grid-container">
-                <FluentDataGrid Items="@Items.AsQueryable()"
-                                GridTemplateColumns="@GridSettings.GridTemplateColumns"
-                                GenerateHeader="@GridSettings.GenerateHeader"
-                                MultiLine="@GridSettings.MultiLine"
-                                TGridItem="TItem">
-                    @Columns
-                </FluentDataGrid>
+                <EntityGrid TItem="TItem"
+                            Items="Items"
+                            GridSettings="GridSettings"
+                            Columns="Columns"
+                            Loading="@Loading"
+                            EmptyMessage="@EmptyMessage"
+                            Error="@Error" />
             </div>
         }
 

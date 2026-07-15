@@ -7,6 +7,8 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Students.Admin.Components.Students
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @inject StudentsApiClient Api
@@ -270,96 +272,28 @@
                                 </div>
                             </div>
 
-                            @* Inline "new student" form. Collapsed by default so it
-                               doesn't crowd the grid; expands when the user clicks
-                               "+ New student". This avoids the round-trip out of the
-                               wizard to /students/create and back, which was the
-                               only way to seed students for a fresh tenant. The
-                               toggle button is hidden while the form is open — the
-                               form has its own Cancel button (at the bottom of the
-                               card) that closes the form, so showing two stacked
-                               Cancellable controls would be confusing. The form
-                               itself is the shared <StudentFormFields> component
-                               used by /students/create and /students/{id}/edit, so
-                               the field set and validation stay in lockstep across
-                               the three entry points. *@
-                            @if (!_showNewStudentForm)
-                            {
-                                <div class="coded-value-actions">
-                                    <FluentButton Appearance="Appearance.Neutral"
-                                                  IconStart="@FluentIcons.PersonAdd"
-                                                  OnClick="ToggleNewStudentForm">
-                                        New student
-                                    </FluentButton>
-                                </div>
-                            }
+                            @* “Add students” opens the <StudentPickerDialog>, a reusable
+                               server-filtered multi-select grid (the same EntityGrid
+                               the landing pages use) that can also create a brand-new
+                               student inline and return it. This avoids the round-trip
+                               out of the wizard to /students/create and back, which
+                               was the only way to seed students for a fresh tenant. *@
+                            <div class="coded-value-actions">
+                                <FluentButton Appearance="Appearance.Accent"
+                                              IconStart="@FluentIcons.PersonAdd"
+                                              OnClick="OnRequestAddStudents">
+                                    Add students
+                                </FluentButton>
+                            </div>
 
-                            @if (_showNewStudentForm)
-                            {
-                                <FluentCard class="new-student-card" AreaRestricted="false">
-                                    <div class="form-section-header">
-                                        <div>
-                                            <h3>New student</h3>
-                                            <p class="form-hint">Required fields are marked with <span class="required-marker">*</span>. The student will be enrolled in this grade as soon as you submit.</p>
-                                        </div>
-                                    </div>
-                                    @* The form uses the shared <StudentFormFields>
-                                       component — it owns the date picker, the
-                                       CodedValueDropdown for gender, the
-                                       equal-width label column, and the action
-                                       row. The wizard only contributes the
-                                       wrapper card and the hint text. *@
-                                    <StudentFormFields Model="_newStudentModel"
-                                                       ErrorMessage="@_newStudentError"
-                                                       OnValidSubmit="OnCreateStudentAsync">
-                                        <Actions>
-                                            <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_creatingStudent">
-                                                @(_creatingStudent ? "Creating…" : "Create & enrol")
-                                            </FluentButton>
-                                            <FluentButton Appearance="Appearance.Outline" OnClick="ToggleNewStudentForm">Cancel</FluentButton>
-                                        </Actions>
-                                    </StudentFormFields>
-                                </FluentCard>
-                            }
-
-                            @* Available students grid. The "Enrol" button is
-                               disabled for students already enrolled in another
-                               grade for this active period (pre-loaded into
-                               _alreadyEnrolledStudentIds in OnStep2ChangingAsync).
-                               This prevents the user from clicking through to
-                               review and only learning on save that the
-                               backend rejected the second enrollment. *@
-                            @if (_availableStudents.Length == 0 && _assignedStudents.Count == 0 && !_showNewStudentForm)
+                            @if (_assignedStudents.Count == 0)
                             {
                                 <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
-                                    No students in this tenant yet. Click <strong>New student</strong> to add the first one.
+                                    No students enrolled yet. Click <strong>Add students</strong> to choose from your tenant.
                                 </FluentMessageBar>
                             }
-                            else if (_availableStudents.Length > 0)
-                            {
-                                <div class="grid-container">
-                                    <FluentDataGrid Items="@_availableStudents.AsQueryable()" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto">
-                                        <PropertyColumn Property="@(x => x.StudentNumber)" Title="Number" />
-                                        <PropertyColumn Property="@(x => x.FirstName)" Title="First Name" />
-                                        <PropertyColumn Property="@(x => x.LastName)" Title="Last Name" />
-                                        <TemplateColumn Title="Status">
-                                            @if (_alreadyEnrolledStudentIds.Contains(context.Id))
-                                            {
-                                                <span class="muted" title="Already enrolled in another grade for this period.">Already enrolled</span>
-                                            }
-                                            else
-                                            {
-                                                <span class="muted">Available</span>
-                                            }
-                                        </TemplateColumn>
-                                        <TemplateColumn Title="Action">
-                                            <FluentButton Appearance="Appearance.Lightweight"
-                                                          Disabled="@_alreadyEnrolledStudentIds.Contains(context.Id)"
-                                                          OnClick="@(() => AddStudent(context))">Enrol</FluentButton>
-                                        </TemplateColumn>
-                                    </FluentDataGrid>
-                                </div>
-                            }
+
+
 
                             @if (_assignedStudents.Count > 0)
                             {
@@ -369,13 +303,48 @@
                                         @foreach (var s in _assignedStudents)
                                         {
                                             <li>
-                                                <span><strong>@s.StudentNumber</strong> — @s.FirstName @s.LastName</span>
-                                                <FluentButton Appearance="Appearance.Lightweight"
-                                                              OnClick="@(() => RemoveStudent(s))">Remove</FluentButton>
+                                                <span class="assigned-row-name">
+                                                    <strong>@s.StudentNumber</strong> @s.FirstName @s.LastName
+                                                    <span class="muted">· @GetAgeLabel(s.DateOfBirth) yrs · @GenderName(s.GenderCodedValueId)</span>
+                                                </span>
+                                                <span class="assigned-student-actions">
+                                                    <FluentButton Appearance="Appearance.Lightweight"
+                                                                  Title="Edit student"
+                                                                  IconStart="@FluentIcons.Edit"
+                                                                  OnClick="@(() => EditStudent(s))" />
+                                                    <FluentButton Appearance="Appearance.Lightweight"
+                                                                  Title="Remove student"
+                                                                  IconStart="@FluentIcons.Delete"
+                                                                  OnClick="@(() => RemoveStudent(s))" />
+                                                </span>
                                             </li>
                                         }
                                     </ul>
                                 </div>
+                            }
+
+                            @* Inline edit form for a student already in the
+                               enrolled list. Reuses the shared StudentFormFields
+                               (same field set + validation as /students/{id}/edit),
+                               locked to a read-only student number. *@
+                            @if (_editingStudent is not null)
+                            {
+                                <FluentCard class="student-edit-card new-student-card" AreaRestricted="false">
+                                    <div class="form-section-header">
+                                        <div>
+                                            <h3>Edit student — @_editingStudent.StudentNumber</h3>
+                                            <p class="form-hint">Update the student's details. The student number is locked.</p>
+                                        </div>
+                                    </div>
+                                    <StudentFormFields Model="_editStudentModel"
+                                                       ReadOnlyStudentNumber="true"
+                                                       ErrorMessage="@_editStudentError"
+                                                       OnValidSubmit="OnEditStudentAsync"
+                                                       SubmitLabel="Save"
+                                                       SubmittingLabel="Saving…"
+                                                       Submitting="@_savingEdit"
+                                                       OnCancel="CancelEditStudent" />
+                                </FluentCard>
                             }
                         </section>
                     }
@@ -399,7 +368,11 @@
                             </div>
                         </div>
 
-                        <GuardianDraftList @ref="_guardianDraftList" Students="_assignedStudents" />
+                        <GuardianAssignmentList @ref="_guardianAssignmentList"
+                                                 Students="_assignedStudents"
+                                                 OnRequestAdd="OnRequestAddGuardian"
+                                                 OnRequestEdit="OnRequestEditGuardian"
+                                                 RelationshipNameLookup="RelationshipName" />
                     </section>
                 </FluentWizardStep>
 
@@ -508,23 +481,23 @@
                         </div>
 
                         <div class="review-card">
-                            @{ var draftCount = GuardianDraftCount(); }
-                            <h4>Guardians to create (@draftCount)</h4>
+                            @{ var draftCount = GuardianAssignmentCount(); }
+                            <h4>Guardians to link (@draftCount)</h4>
                             @if (draftCount == 0)
                             {
-                                <FluentMessageBar Intent="MessageIntent.Info">No guardians will be created. Use the Guardians step to add them.</FluentMessageBar>
+                                <FluentMessageBar Intent="MessageIntent.Info">No guardians will be linked. Use the Guardians step to add them.</FluentMessageBar>
                             }
                             else
                             {
                                 <ul class="review-list">
-                                    @foreach (var kv in GuardianDrafts().Where(k => k.Value.Count > 0))
+                                    @foreach (var kv in GuardianAssignments().Where(k => k.Value.Count > 0))
                                     {
                                         var student = _assignedStudents.FirstOrDefault(s => s.Id == kv.Key);
                                         <li>
                                             <span><strong>@(student?.StudentNumber ?? "—")</strong> — @(student?.FirstName ?? "") @(student?.LastName ?? ""):
                                             @foreach (var g in kv.Value)
                                             {
-                                                <span class="muted">@g.FirstName @g.LastName (@g.Role)</span>
+                                                <span class="muted">@g.FirstName @g.LastName — @(RelationshipName(g.RelationshipCodedValueId) ?? "relationship")@ContactLabel(g)</span>
                                             }
                                             </span>
                                         </li>
@@ -579,17 +552,7 @@
 
                     <span class="wizard-actions-spacer" aria-hidden="true"></span>
 
-                    @* The wizard footer's own Cancel button is hidden while the
-                       inline "new student" form is open — the form has its own
-                       Cancel button (toggles the form closed) and showing two
-                       Cancellable controls stacked vertically is confusing. The
-                       other footer buttons (Back / Continue) stay available so
-                       the user can still navigate around the wizard without
-                       first having to dismiss the form. *@
-                    @if (!_showNewStudentForm)
-                    {
-                        <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
-                    }
+                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
 
                     @if (stepIndex < 2)
                     {
@@ -630,7 +593,7 @@
     private FluentWizard? _wizard;
     private int _stepIndex;
     private CodedValueDropdown? _codedValueDropdown;
-    private GuardianDraftList? _guardianDraftList;
+    private GuardianAssignmentList? _guardianAssignmentList;
     private Guid? _codedValueIdNullable;
     private CodedValueDto? _selectedCodedValue;
     private string? _error;
@@ -694,26 +657,24 @@
     private Guid? _overridingSubjectId;
 
     private List<SchoolCollab.Students.Admin.Services.SubjectDto> _assignedSubjects = new();
-    private SchoolCollab.Students.Core.DTOs.StudentDto[] _availableStudents = [];
     private List<SchoolCollab.Students.Core.DTOs.StudentDto> _assignedStudents = new();
 
     // Students already enrolled in ANOTHER grade for the current active period
     // (populated when entering step 2 via ListEnrollmentsByPeriod). Used to
-    // disable the "Enrol" button on the available grid and to skip them in
-    // SaveAsync, so the user never reaches a save that the backend will reject
-    // with a duplicate-enrollment conflict.
+    // skip them in SaveAsync, so the user never reaches a save that the backend
+    // will reject with a duplicate-enrollment conflict.
     private HashSet<Guid> _alreadyEnrolledStudentIds = new();
 
-    // Inline "new student" form (step 2). Collapsed by default — clicking
-    // "New student" expands the shared <StudentFormFields> EditForm bound to
-    // _newStudentModel. On submit we call CreateStudentAsync, refresh
-    // _availableStudents, and auto-enrol the new student. The model is the
-    // shared <StudentFormModel> used by /students/create and
-    // /students/{id}/edit so the three entry points stay in lockstep.
-    private bool _showNewStudentForm;
-    private bool _creatingStudent;
-    private string? _newStudentError;
-    private readonly StudentFormModel _newStudentModel = new();
+    // Inline "edit student" flow (step 2). When the user clicks the edit icon
+    // on a row in the enrolled list, _editingStudent holds the StudentDto being
+    // edited and the shared <StudentFormFields> EditForm (read-only student
+    // number) is shown bound to _editStudentModel. On submit we call
+    // UpdateStudentAsync and patch the student in place in _assignedStudents
+    // so the enrolled list reflects it.
+    private SchoolCollab.Students.Core.DTOs.StudentDto? _editingStudent;
+    private bool _savingEdit;
+    private string? _editStudentError;
+    private readonly StudentFormModel _editStudentModel = new();
 
     // Per-phase save status (step 3). Populated by SaveAsync as the save
     // progresses. Cleared on each new save attempt. Shown as a list of badges
@@ -742,10 +703,6 @@
 
         // Derive the active/current period once on load (§6.3 / FR-A6) — used by step 2.
         await DerivePeriodsAsync(ct);
-
-        // Eagerly load the students list we'll need in step 2 so the user
-        // doesn't see an empty grid the first time they navigate there.
-        await LoadStudentsAsync(ct);
     }
 
     private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
@@ -906,15 +863,22 @@
         // directly from the field — no parameter needed. Declared `void`
         // (not `async Task`) so it converts directly to the `Action` that
         // @bind-SelectedId:after expects — call site is a bare method
-        // group, no lambda wrapper. The synchronous error-clear runs here
-        // so the UI is responsive immediately; the async fetch (or the
-        // sync clear-selection null-out) is fire-and-forget.
+        // group, no lambda wrapper. The synchronous error-clear + local
+        // item lookup run here so the UI is responsive immediately; only
+        // if the dropdown has not loaded the item do we fall back to the
+        // async API fetch.
         _error = null;
         _step1Error = null;
 
         if (_codedValueIdNullable.HasValue)
         {
-            _ = FetchCodedValueAsync();
+            _selectedCodedValue = _codedValueDropdown?.Items
+                .FirstOrDefault(x => x.Id == _codedValueIdNullable.Value);
+
+            if (_selectedCodedValue is null)
+            {
+                _ = FetchCodedValueAsync();
+            }
         }
         else
         {
@@ -924,12 +888,9 @@
 
     private async Task FetchCodedValueAsync()
     {
-        // Async helper that owns the real work (fetch the CodedValueDto so
-        // the review card can show the resolved name + override badge).
-        // Fire-and-forget from the :after handler; the try/catch keeps any
-        // failure (including the benign navigation/disposal cancellation)
-        // out of the unobserved-Task path and surfaces real errors via the
-        // logger + the wizard's error banner.
+        // Fallback async helper used when the dropdown's already-loaded
+        // item list does not contain the selected id (rare — e.g. initial
+        // seed from a saved entity before the dropdown has finished loading).
         try
         {
             var ct = _loadCts?.Token ?? CancellationToken.None;
@@ -941,6 +902,14 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load coded value {CodedValueId}", _codedValueIdNullable);
             _error = ex.Message;
+        }
+
+        // Fire-and-forget from the :after handler, so the synchronous
+        // re-render already happened before this async fetch completed. Re-render
+        // now so the resolved grade name / error is reflected immediately.
+        if (!_disposed)
+        {
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -957,7 +926,8 @@
             await _codedValueDropdown.RefreshAsync();
         }
 
-        var cv = await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
+        var cv = _codedValueDropdown?.Items.FirstOrDefault(x => x.Id == _codedValueIdNullable.Value)
+            ?? await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
         if (cv is null) return;
 
         var result = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
@@ -970,7 +940,8 @@
             {
                 await _codedValueDropdown.RefreshAsync();
             }
-            _selectedCodedValue = await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
+            _selectedCodedValue = _codedValueDropdown?.Items.FirstOrDefault(x => x.Id == _codedValueIdNullable.Value)
+                ?? await CodedValuesApi.GetByIdAsync(_codedValueIdNullable.Value);
         }
     }
 
@@ -1033,7 +1004,8 @@
             await _subjectCodedValueDropdown.RefreshAsync();
         }
 
-        var cv = await CodedValuesApi.GetByIdAsync(codedValueId);
+        var cv = _subjectCodedValueDropdown?.Items.FirstOrDefault(x => x.Id == codedValueId)
+            ?? await CodedValuesApi.GetByIdAsync(codedValueId);
         if (cv is null) return null;
 
         var updated = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
@@ -1047,8 +1019,10 @@
                 await _subjectCodedValueDropdown.RefreshAsync();
             }
             // Return the freshly resolved coded value so callers can update
-            // their local UI (chip or assigned-subjects row).
-            return await CodedValuesApi.GetByIdAsync(codedValueId);
+            // their local UI (chip or assigned-subjects row). Prefer the now
+            // refreshed dropdown item list to avoid an extra API round-trip.
+            return _subjectCodedValueDropdown?.Items.FirstOrDefault(x => x.Id == codedValueId)
+                ?? await CodedValuesApi.GetByIdAsync(codedValueId);
         }
 
         return null;
@@ -1102,22 +1076,25 @@
 
     private async Task AddSubjectFromCodedValueAsync()
     {
-        // Async helper that owns the real work (fetch the CodedValueDto,
-        // find-or-create the Subject, add it to the grade's assignment
-        // list). Fire-and-forget from the :after handler; the try/catch
-        // keeps any failure (including the benign navigation/disposal
-        // cancellation) out of the unobserved-Task path and surfaces
-        // real errors via the logger + the wizard's step 1 error banner.
-        // The finally resets the picker so the next pick is a fresh
-        // selection — without it the dropdown would stay on the same
-        // value and the user couldn't re-pick the same subject to add
-        // it again (the duplicate guard above would also kick in).
+        // Async helper that owns the real work (find-or-create the Subject,
+        // add it to the grade's assignment list). Fire-and-forget from the
+        // :after handler; the try/catch keeps any failure (including the
+        // benign navigation/disposal cancellation) out of the
+        // unobserved-Task path and surfaces real errors via the logger +
+        // the wizard's step 1 error banner. The finally resets the picker so
+        // the next pick is a fresh selection — without it the dropdown
+        // would stay on the same value and the user couldn't re-pick the
+        // same subject to add it again (the duplicate guard above would
+        // also kick in).
         try
         {
             var ct = _loadCts?.Token ?? CancellationToken.None;
-            // Fetch the coded value so we have the code/name/displayOrder for
-            // the Subject entity and for the confirmation chip.
-            var cv = await CodedValuesApi.GetByIdAsync(_selectedSubjectCodedValueId!.Value, ct);
+
+            // Resolve the coded value from the dropdown's already-loaded
+            // items to avoid the redundant per-selection API round-trip.
+            var cv = _subjectCodedValueDropdown?.Items
+                .FirstOrDefault(x => x.Id == _selectedSubjectCodedValueId!.Value)
+                ?? await CodedValuesApi.GetByIdAsync(_selectedSubjectCodedValueId!.Value, ct);
             if (cv is null) return;
 
             // Find-or-create the Subject by CodedValueId so we can add it to
@@ -1145,6 +1122,17 @@
             // duplicate guard above would also kick in).
             _selectedSubjectCodedValueId = null;
             _selectedSubjectCodedValue = null;
+        }
+
+        // The :after handler is fire-and-forget, so the component already
+        // re-rendered once (synchronously) before this async work completed.
+        // Without an explicit re-render the newly added subject, the
+        // confirmation chip, and the cleared picker would not show until some
+        // later interaction triggered a render — i.e. the first subject pick
+        // would appear to do nothing. Re-render now that the state is final.
+        if (!_disposed)
+        {
+            await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -1180,121 +1168,92 @@
         }
     }
 
-    private async Task LoadStudentsAsync(CancellationToken ct)
-    {
-        try
-        {
-            var students = await Api.ListStudentsAsync(ct) ?? [];
-            // Project to the Core DTO type the wizard state uses (the Api
-            // client returns its own StudentDto, but AddStudent and the grid
-            // bind against the Core DTO). Hide students already enrolled in
-            // another grade for the active period from the available grid —
-            // re-enrolling them would fail on the server. They're still in
-            // the tenant, just not eligible for THIS grade in THIS period.
-            var hidden = _alreadyEnrolledStudentIds;
-            _availableStudents = students
-                .Select(s => new SchoolCollab.Students.Core.DTOs.StudentDto(
-                    s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt))
-                .Where(s => !_assignedStudents.Contains(s) && !hidden.Contains(s.Id))
-                .ToArray();
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to load students");
-        }
-    }
-
-    private void AddStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
-    {
-        if (_assignedStudents.Any(s => s.Id == student.Id)) return;
-        if (_alreadyEnrolledStudentIds.Contains(student.Id)) return; // belt-and-braces — grid also disables this row
-        _assignedStudents.Add(student);
-        _availableStudents = _availableStudents.Where(s => s.Id != student.Id).ToArray();
-    }
-
     private async Task RemoveStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
     {
         _assignedStudents.Remove(student);
         // Drop any guardian drafts for the un-enrolled student so we don't try
         // to link guardians to a student that's no longer in this grade.
-        _guardianDraftList?.ClearForStudent(student.Id);
-        // Re-derive the available grid in case the removed student wasn't there
-        // (defensive — AddStudent moves them out, but a prior save failure or
-        // a hot-reload could leave the lists out of sync).
-        var ct = _loadCts?.Token ?? CancellationToken.None;
-        await LoadStudentsAsync(ct);
+        _guardianAssignmentList?.ClearForStudent(student.Id);
     }
 
-    // ── Inline "new student" form (step 2) ──────────────────────────────────
+    // ── Inline "edit student" flow (step 2) ───────────────────────────────
 
-    private void ToggleNewStudentForm()
+    /// <summary>
+    /// Opens the inline edit form for a student already in the enrolled list.
+    /// Seeds the shared form model from the student's current values (the
+    /// student number is locked by the form) and closes the "new student"
+    /// form so only one editor is visible at a time.
+    /// </summary>
+    private void EditStudent(SchoolCollab.Students.Core.DTOs.StudentDto student)
     {
-        _showNewStudentForm = !_showNewStudentForm;
-        _newStudentError = null;
-        if (!_showNewStudentForm)
-        {
-            // Reset the form when the user cancels, so a half-filled form
-            // doesn't leak into the next open.
-            _newStudentModel.StudentNumber = null;
-            _newStudentModel.FirstName = null;
-            _newStudentModel.LastName = null;
-            _newStudentModel.DateOfBirth = null;
-            _newStudentModel.GenderCodedValueId = null;
-        }
+        _editingStudent = student;
+        _editStudentError = null;
+        _editStudentModel.StudentNumber = student.StudentNumber;
+        _editStudentModel.FirstName = student.FirstName;
+        _editStudentModel.LastName = student.LastName;
+        _editStudentModel.DateOfBirth = student.DateOfBirth;
+        _editStudentModel.GenderCodedValueId = student.GenderCodedValueId;
     }
 
-    private async Task OnCreateStudentAsync()
+    /// <summary>
+    /// Cancels the inline edit without persisting. Clears the editing state so
+    /// the form card collapses and the enrolled list is shown again.
+    /// </summary>
+    private void CancelEditStudent()
     {
-        // The shared form component does all the parsing + validation
-        // (date picker, gender dropdown, DataAnnotations). By the time
-        // we get here every field on _newStudentModel is already in its
-        // final type — DateOnly? for the date, Guid? for the gender —
-        // so the request goes out without any string round-tripping.
-        _newStudentError = null;
+        _editingStudent = null;
+        _editStudentError = null;
+    }
 
-        _creatingStudent = true;
+    /// <summary>
+    /// Persists the inline student edit. Validation is owned by the shared
+    /// <see cref="StudentFormFields"/> EditForm (fires only on a valid submit),
+    /// so by the time we get here every field is in its final type. We call
+    /// UpdateStudentAsync and then patch the student in place in both the
+    /// assigned list and the available grid so the change is reflected
+    /// immediately without a full reload. The student number is intentionally
+    /// not changed (it's the stable identifier and is read-only in the form).
+    /// </summary>
+    private async Task OnEditStudentAsync()
+    {
+        if (_editingStudent is null) return;
+        _editStudentError = null;
+        _savingEdit = true;
         try
         {
             var ct = _loadCts?.Token ?? CancellationToken.None;
-            var request = new CreateStudentRequest(
-                _newStudentModel.StudentNumber!,
-                _newStudentModel.FirstName!,
-                _newStudentModel.LastName!,
-                _newStudentModel.DateOfBirth,
-                _newStudentModel.GenderCodedValueId);
+            await Api.UpdateStudentAsync(_editingStudent.Id, new UpdateStudentRequest(
+                _editStudentModel.FirstName!,
+                _editStudentModel.LastName!,
+                _editStudentModel.DateOfBirth,
+                _editStudentModel.GenderCodedValueId), ct);
 
-            await Api.CreateStudentAsync(request, ct);
-
-            // Refresh the available grid so the just-created student is in it,
-            // then auto-enrol them in this grade. The create+enrol pattern
-            // matches the "Pick and add" affordance the subjects section uses
-            // — minimise the number of clicks to go from "no students" to
-            // "students enrolled".
-            await LoadStudentsAsync(ct);
-            var created = _availableStudents.FirstOrDefault(s => s.StudentNumber == _newStudentModel.StudentNumber);
-            if (created is not null)
+            // Mirror the edited values into the in-memory student so both grids
+            // reflect the change without a round-trip. UpdatedAt is bumped so
+            // any display that surfaces it stays truthful.
+            var updated = _editingStudent with
             {
-                AddStudent(created);
-            }
+                FirstName = _editStudentModel.FirstName!,
+                LastName = _editStudentModel.LastName!,
+                DateOfBirth = _editStudentModel.DateOfBirth,
+                GenderCodedValueId = _editStudentModel.GenderCodedValueId,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
 
-            _showNewStudentForm = false;
-            _newStudentModel.StudentNumber = null;
-            _newStudentModel.FirstName = null;
-            _newStudentModel.LastName = null;
-            _newStudentModel.DateOfBirth = null;
-            _newStudentModel.GenderCodedValueId = null;
+            var idx = _assignedStudents.FindIndex(x => x.Id == updated.Id);
+            if (idx >= 0) _assignedStudents[idx] = updated;
+
+            _editingStudent = null;
         }
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to create student in wizard");
-            _newStudentError = ex.Message;
+            Logger.LogError(ex, "Failed to update student {StudentId}", _editingStudent?.Id);
+            _editStudentError = ex.Message;
         }
         finally
         {
-            if (!_disposed) _creatingStudent = false;
+            if (!_disposed) _savingEdit = false;
         }
     }
 
@@ -1447,7 +1406,7 @@
         // An optional contact is seeded when a value was supplied. Guardians are
         // only created once the grade + enrolment succeeded, so we never create
         // orphans against a grade that failed to persist.
-        var guardianEntries = GuardianDrafts().Where(kv => kv.Value.Count > 0).ToList();
+        var guardianEntries = GuardianAssignments().Where(kv => kv.Value.Count > 0).ToList();
         if (guardianEntries.Count > 0 && gradeId is not null)
         {
             var gCreated = 0;
@@ -1460,11 +1419,12 @@
                 {
                     try
                     {
-                        var guardianId = await Api.CreateGuardianAsync(new CreateGuardianRequest(
-                            d.TitleCodedValueId, d.FirstName, d.LastName, null, null, null), ct);
+                        var guardianId = d.ExistingGuardianId
+                            ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                                d.TitleCodedValueId, d.FirstName, d.LastName, null, null, null), ct);
                         await Api.LinkGuardianAsync(new LinkGuardianRequest(
                             studentId, guardianId, d.RelationshipCodedValueId, d.Role, false, null), ct);
-                        if (d.ContactValue is not null)
+                        if (d.ExistingGuardianId is null && d.ContactValue is not null)
                         {
                             try
                             {
@@ -1590,14 +1550,103 @@
         _ => phase.Outcome.ToString()
     };
 
-    // Thin wrappers over the GuardianDraftList ref. Empty dict when the
+    // Thin wrappers over the GuardianAssignmentList ref. Empty dict when the
     // ref isn't bound yet (e.g. wizard step not yet rendered) so the
     // Review step and SaveAsync Phase 4 are no-ops in that case.
-    private IReadOnlyDictionary<Guid, IReadOnlyList<GuardianDraft>> GuardianDrafts()
-        => _guardianDraftList?.GetDrafts() ?? new Dictionary<Guid, IReadOnlyList<GuardianDraft>>();
+    private IReadOnlyDictionary<Guid, IReadOnlyList<GuardianAssignment>> GuardianAssignments()
+        => _guardianAssignmentList?.GetDrafts() ?? new Dictionary<Guid, IReadOnlyList<GuardianAssignment>>();
 
-    private int GuardianDraftCount()
-        => GuardianDrafts().Sum(kv => kv.Value.Count);
+    private int GuardianAssignmentCount()
+        => GuardianAssignments().Sum(kv => kv.Value.Count);
+
+    // ── Guardian assignment helpers ──────────────────────────────────────
+    // Mirror the student coded-value resolution: batch-resolve the gender
+    // (per student) and relationship (per guardian) coded values into a name
+    // map so the enrolled/available lists and guardian summaries can show
+    // friendly names instead of GUIDs.
+    private Dictionary<Guid, string> _codedValueNames = new();
+
+    private string? GenderName(Guid? id)
+        => id is { } g && _codedValueNames.TryGetValue(g, out var n) ? n : null;
+
+    private string? RelationshipName(Guid? id)
+        => id is { } g && _codedValueNames.TryGetValue(g, out var n) ? n : null;
+
+    private static string? GetAgeLabel(DateOnly? dob)
+    {
+        if (dob is not { } d) return null;
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var age = today.Year - d.Year;
+        if (d > today.AddYears(-age)) age--;
+        return age.ToString();
+    }
+
+    private static string ContactLabel(GuardianAssignment g)
+        => g.ContactValue is null ? string.Empty : $" · {g.ContactChannel}: {g.ContactValue}";
+
+    private async Task RefreshCodedValueNamesAsync()
+    {
+        var ids = new HashSet<Guid>();
+        foreach (var s in _assignedStudents) if (s.GenderCodedValueId is { } g) ids.Add(g);
+        foreach (var kv in GuardianAssignments()) foreach (var d in kv.Value) if (d.RelationshipCodedValueId is { } r) ids.Add(r);
+
+        if (ids.Count == 0)
+        {
+            if (_codedValueNames.Count > 0)
+            {
+                _codedValueNames = new Dictionary<Guid, string>();
+                if (!_disposed) await InvokeAsync(StateHasChanged);
+            }
+            return;
+        }
+        try
+        {
+            var dtos = await CodedValuesApi.GetByIdsAsync(ids.ToArray());
+            var map = new Dictionary<Guid, string>();
+            foreach (var x in dtos) if (x is not null) map[x.Id] = x.Name;
+            _codedValueNames = map;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to resolve coded value names for grade-level wizard lists");
+        }
+        if (!_disposed) await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnRequestAddStudents()
+    {
+        var results = await DialogService.ShowShellDialogAsync<StudentPickerDialog, StudentPickerModel, SchoolCollab.Students.Core.DTOs.StudentDto[]>(
+            new StudentPickerModel(), "Add students", DialogSize.ExtraLarge);
+        if (results is null) return;
+        foreach (var s in results)
+        {
+            if (_assignedStudents.Any(x => x.Id == s.Id)) continue;
+            if (_alreadyEnrolledStudentIds.Contains(s.Id)) continue;
+            _assignedStudents.Add(s);
+        }
+        await RefreshCodedValueNamesAsync();
+    }
+
+    private async Task OnRequestAddGuardian(Guid studentId)
+    {
+        var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
+            new GuardianPickerModel(), "Add guardians", DialogSize.Large);
+        if (results is null) return;
+        foreach (var r in results) _guardianAssignmentList?.AddAssignment(studentId, r);
+        await RefreshCodedValueNamesAsync();
+    }
+
+    private async Task OnRequestEditGuardian((Guid StudentId, int Index) req)
+    {
+        var drafts = _guardianAssignmentList?.GetDrafts();
+        if (drafts is null || !drafts.TryGetValue(req.StudentId, out var list) || req.Index < 0 || req.Index >= list.Count)
+            return;
+        var result = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
+            GuardianAssignmentModel.ForEdit(list[req.Index]), "Edit guardian", DialogSize.Medium);
+        if (result is null) return;
+        _guardianAssignmentList?.UpdateAssignment(req.StudentId, req.Index, result);
+        await RefreshCodedValueNamesAsync();
+    }
 
     public void Dispose()
     {

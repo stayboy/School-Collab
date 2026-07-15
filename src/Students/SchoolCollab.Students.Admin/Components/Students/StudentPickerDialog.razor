@@ -1,0 +1,208 @@
+@* Single student picker dialog for the GradeLevelWizard. One dialog handles
+   BOTH enrolment flows:
+     • Browse mode (default): a server-filtered multi-select grid of existing
+       tenant students (the shared <EntityGrid>, the same grid the landing
+       pages render). Selected students are shown as a chip list above the
+       grid and returned on confirm.
+     • Create mode: an inline <StudentFormFields> create form (same field set
+       + validation as /students/create) that creates a brand-new student and
+       drops it straight into the selection, then returns to Browse mode.
+   This replaces the old two-dialog flow (picker + nested create dialog) with
+   a single component, so the wizard opens exactly one dialog. *@
+@inherits DialogShellBase<StudentPickerModel, SchoolCollab.Students.Core.DTOs.StudentDto[]>
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient StudentsApi
+@inject ILogger<StudentPickerDialog> _logger
+
+<div class="picker-dialog">
+    @if (_view == PickerView.Browse)
+    {
+        <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+            <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                <EntityGrid TItem="SchoolCollab.Students.Core.DTOs.StudentDto"
+                            Items="_items"
+                            GridSettings="_gridSettings"
+                            Loading="_loading"
+                            EmptyMessage="@_emptyMessage"
+                            ShowSearch="true"
+                            Search="_search"
+                            SearchChanged="@OnSearchChanged"
+                            SearchPlaceholder="Search by name or student number"
+                            Selected="_selected"
+                            SelectedChanged="@OnSelectedChanged"
+                            GetKey="@(s => s.Id)"
+                            GetDisplayName="@(s => $"{s.FirstName} {s.LastName}")"
+                            GetSubtitle="@(s => s.StudentNumber)">
+                    <Columns>
+                        <PropertyColumn Property="@(x => x.StudentNumber)" Title="Number" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="string" />
+                        <PropertyColumn Property="@(x => x.FirstName)" Title="First name" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="string" />
+                        <PropertyColumn Property="@(x => x.LastName)" Title="Last name" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="string" />
+                        <TemplateColumn TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" Title="Age" Context="row">
+                            <span class="muted">@GetAgeLabel(row.DateOfBirth)</span>
+                        </TemplateColumn>
+                    </Columns>
+                </EntityGrid>
+
+                <FluentButton Appearance="Appearance.Neutral"
+                              IconStart="@FluentIcons.PersonAdd"
+                              Type="ButtonType.Button"
+                              OnClick="OnStartCreate">
+                    Create new student
+                </FluentButton>
+            </FluentStack>
+
+            <DialogShellFooter Saving="@Saving"
+                               Error="@Error"
+                               SubmitText="Add"
+                               SavingText="Adding…"
+                               OnCancel="HandleCancelAsync" />
+        </EditForm>
+    }
+    else
+    {
+        <StudentFormFields Model="_newModel"
+                           OnValidSubmit="OnCreateSubmitAsync"
+                           ErrorMessage="@_newError"
+                           SubmitLabel="Create & enrol"
+                           SubmittingLabel="Creating…"
+                           Submitting="@_creating"
+                           ActionsAlignment="StudentFormFields.StudentFormActionsAlignment.Right"
+                           OnCancel="OnCancelCreate" />
+    }
+</div>
+
+@code {
+    private enum PickerView { Browse, Create }
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "120px minmax(180px,2fr) minmax(180px,2fr) 100px"
+    };
+
+    private PickerView _view = PickerView.Browse;
+    private string _search = string.Empty;
+    private SchoolCollab.Students.Core.DTOs.StudentDto[] _items = [];
+    private bool _loading;
+    private string _emptyMessage = "No students found.";
+    private Dictionary<object, SchoolCollab.Students.Core.DTOs.StudentDto> _selected = new();
+    private CancellationTokenSource? _searchCts;
+
+    // Create-new-student form state (Create mode).
+    private StudentFormModel _newModel = new();
+    private string _newError = string.Empty;
+    private bool _creating;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync(string.Empty);
+    }
+
+    protected override string SubmitText => "Add";
+    protected override string SavingText => "Adding…";
+
+    private async Task OnSearchChanged(string? text)
+    {
+        _search = text ?? string.Empty;
+        await LoadAsync(_search);
+    }
+
+    private async Task LoadAsync(string search)
+    {
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+        _loading = true;
+        try
+        {
+            var apiItems = await StudentsApi.ListStudentsAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search);
+            if (ct.IsCancellationRequested) return;
+            _items = apiItems?.Select(ToCore).ToArray() ?? [];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (ct.IsCancellationRequested) return;
+            _logger.LogWarning(ex, "Failed to load students for the picker");
+            _items = [];
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                _loading = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void OnSelectedChanged(Dictionary<object, SchoolCollab.Students.Core.DTOs.StudentDto> selected)
+        => _selected = selected;
+
+    private void OnStartCreate()
+    {
+        _newModel = new StudentFormModel();
+        _newError = string.Empty;
+        _view = PickerView.Create;
+    }
+
+    private void OnCancelCreate()
+    {
+        _view = PickerView.Browse;
+        _newModel = new StudentFormModel();
+        _newError = string.Empty;
+    }
+
+    private async Task OnCreateSubmitAsync()
+    {
+        _creating = true;
+        _newError = string.Empty;
+        try
+        {
+            var m = _newModel;
+            var request = new CreateStudentRequest(
+                m.StudentNumber!, m.FirstName!, m.LastName!, m.DateOfBirth, m.GenderCodedValueId);
+            var id = await StudentsApi.CreateStudentAsync(request);
+            var created = await StudentsApi.GetStudentByIdAsync(id);
+            if (created is null)
+            {
+                _newError = "The student was created but could not be loaded. Add them from the list instead.";
+                return;
+            }
+            var core = ToCore(created);
+            _selected = new Dictionary<object, SchoolCollab.Students.Core.DTOs.StudentDto>(_selected) { [core.Id] = core };
+            _view = PickerView.Browse;
+            _newModel = new StudentFormModel();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to create student in the picker");
+            _newError = ex.Message;
+        }
+        finally
+        {
+            _creating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static SchoolCollab.Students.Core.DTOs.StudentDto ToCore(SchoolCollab.Students.Admin.Services.StudentDto s) => new(
+        s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt);
+
+    private static string? GetAgeLabel(DateOnly? dob)
+    {
+        if (dob is not { } d) return null;
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var age = today.Year - d.Year;
+        if (d > today.AddYears(-age)) age--;
+        return age.ToString();
+    }
+
+    protected override Task<SchoolCollab.Students.Core.DTOs.StudentDto[]?> SubmitAsync(StudentPickerModel model)
+        => Task.FromResult<SchoolCollab.Students.Core.DTOs.StudentDto[]?>(_selected.Values.ToArray());
+}

@@ -256,8 +256,11 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Students ─────────────────────────────────────────────────────────────
 
-    public async Task<StudentDto[]?> ListStudentsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentDto[]>("/students", ct);
+    public async Task<StudentDto[]?> ListStudentsAsync(CancellationToken ct = default, string? search = null)
+    {
+        var url = string.IsNullOrWhiteSpace(search) ? "/students" : $"/students?search={Uri.EscapeDataString(search)}";
+        return await _http.GetFromJsonAsync<StudentDto[]>(url, ct);
+    }
 
     public async Task<StudentDto[]?> ListDeletedStudentsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<StudentDto[]>("/students/deleted", ct);
@@ -497,8 +500,11 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Guardians ───────────────────────────────────────────────────────────
 
-    public async Task<GuardianDto[]?> ListGuardiansAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GuardianDto[]>("/students/guardians", ct);
+    public async Task<GuardianDto[]?> ListGuardiansAsync(CancellationToken ct = default, string? search = null)
+    {
+        var url = string.IsNullOrWhiteSpace(search) ? "/students/guardians" : $"/students/guardians?search={Uri.EscapeDataString(search)}";
+        return await _http.GetFromJsonAsync<GuardianDto[]>(url, ct);
+    }
 
     public async Task<GuardianDto?> GetGuardianByIdAsync(Guid id, CancellationToken ct = default)
     {

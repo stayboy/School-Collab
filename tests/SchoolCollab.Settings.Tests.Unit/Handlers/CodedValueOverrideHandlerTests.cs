@@ -7,10 +7,13 @@ using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RemoveCodedValueOverride;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.UpsertCodedValueOverride;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValueById;
+using SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValuesByParent;
 using SchoolCollab.Settings.Core.Data;
+using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
 using SchoolCollab.Settings.Core.DTOs;
+using SchoolCollab.Settings.Core.Services;
 
 namespace SchoolCollab.Settings.Tests.Unit.Handlers;
 
@@ -33,26 +36,35 @@ public class CodedValueOverrideHandlerTests
         public SettingsDbContext Db { get; }
         public MutableTenantProvider Tenants { get; } = new();
         public GetCodedValueByIdHandler Resolver { get; }
+        public CodedValueResolver CodedValueResolver { get; }
+        public GetCodedValuesByParentHandler ByParent { get; }
         public UpsertCodedValueOverrideHandler Upsert { get; }
         public RemoveCodedValueOverrideHandler Remove { get; }
+        public HybridCache Cache { get; }
 
         public Scope(string dbName)
         {
-            Db = BuildDb(dbName, Tenants);
+            var services = BuildServices(dbName, Tenants);
+            var provider = services.BuildServiceProvider();
+
+            Db = provider.GetRequiredService<SettingsDbContext>();
+            Cache = provider.GetRequiredService<HybridCache>();
+
             // The handlers only use SuppressTenantGuard() (a static AsyncLocal flag),
             // so a TenantContextAccessor backed by a throwaway TenantProvider is fine —
             // the flag is shared across all accessor instances.
             var accessor = new TenantContextAccessor(new TenantProvider());
-            // No HybridCache in scope — GetCodedValueById reads directly from the DB.
             Resolver = new GetCodedValueByIdHandler(Db);
-            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, accessor, Resolver,
+            CodedValueResolver = new CodedValueResolver(provider.GetRequiredService<ICodedValueRepository>());
+            ByParent = new GetCodedValuesByParentHandler(Db, Cache, Tenants, CodedValueResolver);
+            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, accessor, Resolver, Cache,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<UpsertCodedValueOverrideHandler>.Instance);
-            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, accessor);
+            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, accessor, Cache);
         }
 
         public void Dispose() => Db.Dispose();
 
-        private static SettingsDbContext BuildDb(string name, MutableTenantProvider tenants)
+        private static IServiceCollection BuildServices(string name, MutableTenantProvider tenants)
         {
             var services = new ServiceCollection();
             // Register the test's MutableTenantProvider as the ITenantProvider so
@@ -63,7 +75,12 @@ public class CodedValueOverrideHandlerTests
             // the per-tenant override.
             services.AddSingleton<ITenantProvider>(tenants);
             services.AddDbContext<SettingsDbContext>(o => o.UseInMemoryDatabase(name));
-            return services.BuildServiceProvider().GetRequiredService<SettingsDbContext>();
+            services.AddScoped<ICodedValueRepository, CodedValueRepository>();
+            // In-memory HybridCache so cache-invalidation calls in the handlers
+            // do not fail in unit tests.
+            services.AddDistributedMemoryCache();
+            services.AddHybridCache();
+            return services;
         }
     }
 
@@ -102,6 +119,27 @@ public class CodedValueOverrideHandlerTests
 
         dto.Name.Should().Be("Second");
         s.Db.TenantCodedValueOverrides.Should().ContainSingle(o => o.GlobalCodedValueId == id);
+    }
+
+    [TestMethod]
+    public async Task Upsert_InvalidatesCodedValuesCache()
+    {
+        // Warm the by-parent cache, apply an override, then re-query by parent.
+        // If cache invalidation is missing the second query will return the stale
+        // blueprint name from the cached entry.
+        using var s = new Scope("override-cache-invalidate");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_2_5", "Grade 2.5");
+
+        var before = await s.ByParent.HandleAsync(new GetCodedValuesByParent(null, "", null, false));
+        before.Should().ContainSingle(x => x.Id == id)
+            .Which.Name.Should().Be("Grade 2.5");
+
+        await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, "Standard 2.5", null));
+
+        var after = await s.ByParent.HandleAsync(new GetCodedValuesByParent(null, "", null, false));
+        after.Should().ContainSingle(x => x.Id == id)
+            .Which.Name.Should().Be("Standard 2.5");
     }
 
     [TestMethod]

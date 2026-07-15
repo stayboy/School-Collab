@@ -48,6 +48,21 @@
     flex-wrap: wrap;
 }
 
+/* Student-step filter bar: search box + bulk "Add selected" button on one row
+   above the available-students grid. */
+.student-filter-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+    .student-filter-bar .gw-field {
+        flex: 1 1 240px;
+        min-width: 200px;
+    }
+
 /* ── Selected grade card ────────────────────────────────────────── */
 .wizard-card {
     position: relative;
@@ -148,6 +163,25 @@
     align-items: center;
     gap: 8px;
     margin-left: auto;
+}
+
+/* Edit/remove icon buttons on each enrolled-student row. Pushed to the
+   far right via margin-left:auto so the action group hugs the row edge. */
+.assigned-student-actions {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+}
+
+/* Let the name span take the leftover space so the action group is
+   pinned to the far right regardless of name length. */
+.assigned-row-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* ── Wizard actions (Bottom button bar) ─────────────────────────── */

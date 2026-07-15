@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Tenancy;
@@ -31,6 +32,7 @@ public sealed class UpsertCodedValueOverrideHandler(
     ITenantProvider tenantProvider,
     ITenantContextAccessor tenantContextAccessor,
     IQueryHandler<GetCodedValueById, CodedValueDto?> resolver,
+    HybridCache cache,
     ILogger<UpsertCodedValueOverrideHandler> logger) : ICommandHandler<UpsertCodedValueOverride, CodedValueDto>
 {
     public async Task<CodedValueDto> HandleAsync(UpsertCodedValueOverride command, CancellationToken ct = default)
@@ -83,6 +85,11 @@ public sealed class UpsertCodedValueOverrideHandler(
         // is involved — GetCodedValueById reads directly from the DB.
         var resolved = await resolver.HandleAsync(new GetCodedValueById(command.GlobalCodedValueId), ct)
             ?? throw new CodedValueNotFoundException(command.GlobalCodedValueId);
+
+        // Invalidate the coded-values cache so the dropdown lists (by-parent,
+        // by-code, search, etc.) refresh promptly after an override change.
+        await cache.RemoveByTagAsync("coded-values", ct);
+        await cache.RemoveByTagAsync($"tenant:{tenantId}", ct);
 
         return resolved;
     }

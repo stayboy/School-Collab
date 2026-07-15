@@ -24,17 +24,24 @@ public sealed class ListStudentsHandler(
         // inside the HybridCache factory, so the global "Tenant" filter would
         // hide every row. Scope the query explicitly instead.
         var tenantId = db.CurrentTenantId;
+        var search = (query.Search ?? string.Empty).Trim();
 
         return await cache.GetOrCreateAsync(
-            $"students:list:{tenantId}",
-            (db, tenantId),
+            $"students:list:{tenantId}:{search}",
+            (db, tenantId, search),
             static async (state, ct) =>
             {
-                var (db, tenantId) = state;
-                var results = await db.Students
+                var (db, tenantId, search) = state;
+                var q = db.Students
                     .IgnoreQueryFilters(["Tenant"])
-                    .Where(s => s.TenantId == tenantId)
-                    .AsNoTracking()
+                    .Where(s => s.TenantId == tenantId);
+                if (search.Length > 0)
+                {
+                    q = q.Where(s => s.StudentNumber.Contains(search)
+                                 || s.FirstName.Contains(search)
+                                 || s.LastName.Contains(search));
+                }
+                var results = await q.AsNoTracking()
                     .OrderBy(x => x.LastName)
                     .ThenBy(x => x.FirstName)
                     .ToArrayAsync(ct);

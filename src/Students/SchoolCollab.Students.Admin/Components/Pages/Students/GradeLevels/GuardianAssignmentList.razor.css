@@ -1,0 +1,65 @@
+/* Guardian assignment list — per-student card holding its assigned guardians
+   and a single "Add guardian" affordance. Mirrors the wizard's student
+   enrolled-list: compact rows with far-right Edit/Remove icon buttons. */
+
+.guardian-assignment-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.guardian-student-card {
+    border: 1px solid var(--neutral-stroke-divider-rest);
+    border-radius: 6px;
+    padding: 12px 16px;
+    background: var(--neutral-layer-1);
+}
+
+    .guardian-student-card h4 {
+        margin: 0 0 8px;
+        font-size: 0.95rem;
+    }
+
+/* The list of guardians already attached to a student. */
+.guardian-assigned-list {
+    list-style: none;
+    margin: 0 0 10px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+    .guardian-assigned-list li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 0.9rem;
+    }
+
+/* The row name fills the available space; actions are pinned far-right. */
+.guardian-row-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.guardian-actions {
+    margin-left: auto;
+    display: flex;
+    gap: 4px;
+}
+
+/* Screen-reader-only live-region text. */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}

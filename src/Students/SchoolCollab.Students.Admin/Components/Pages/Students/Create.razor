@@ -25,14 +25,11 @@
                    validation runs on the model via <DataAnnotationsValidator />. *@
                 <StudentFormFields Model="_model"
                                    ErrorMessage="@_error"
-                                   OnValidSubmit="OnSaveAsync">
-                    <Actions>
-                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
-                            @(_saving ? "Saving…" : "Create Student")
-                        </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" OnClick="@(() => Nav.NavigateTo("/students"))">Cancel</FluentButton>
-                    </Actions>
-                </StudentFormFields>
+                                   OnValidSubmit="OnSaveAsync"
+                                   SubmitLabel="Create Student"
+                                   SubmittingLabel="Saving…"
+                                   Submitting="@_saving"
+                                   OnCancel="@(() => Nav.NavigateTo("/students"))" />
             </ChildContent>
             <Fallback>
                 <FluentMessageBar Intent="MessageIntent.Warning">

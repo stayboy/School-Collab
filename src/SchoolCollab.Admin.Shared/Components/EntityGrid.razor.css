@@ -1,0 +1,36 @@
+.entity-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.entity-grid-loading {
+    display: flex;
+    justify-content: center;
+    padding: 24px 0;
+}
+
+.entity-grid-scroll {
+    width: 100%;
+    overflow-x: auto;
+}
+
+/* Chip list of selected items, rendered above the grid. Individual chips are
+   the shared <Chip> component, which owns its own styling. */
+.entity-grid-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+}
+
+/* Optional search box, rendered top-right above the grid. */
+.entity-grid-toolbar {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.entity-grid-search {
+    max-width: 320px;
+    width: 100%;
+}

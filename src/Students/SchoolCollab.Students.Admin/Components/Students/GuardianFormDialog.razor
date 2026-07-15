@@ -1,0 +1,99 @@
+@* Guardian form dialog used by the GradeLevelWizard's guardian picker.
+   Handles both "create a new guardian" (opened from the picker with
+   GuardianAssignmentModel.ForAdd) and "edit an existing assignment"
+   (opened from the guardian list with GuardianAssignmentModel.ForEdit).
+   Every guardian added through the wizard is Primary — the role is not
+   surfaced. Fields use the canonical <FormRow> label+input layout. *@
+@inherits DialogShellBase<GuardianAssignmentModel, GuardianAssignment>
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels
+@inject ILogger<GuardianFormDialog> _logger
+
+<div class="guardian-dialog">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+        <p class="gw-hint">@(_isEdit ? "Edit the guardian's details." : "Create a new guardian and attach them to this student.")</p>
+
+        <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+            <FormRow Label="Title">
+                <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                    @bind-SelectedId="Model.TitleCodedValueId"
+                                    Placeholder="Optional" />
+            </FormRow>
+
+            <FormRow Label="First name" Required For="guardianFirstName">
+                <FluentTextField Id="guardianFirstName"
+                                 @bind-Value="Model.FirstName"
+                                 Required
+                                 Placeholder="First name"
+                                 class="gw-field" />
+            </FormRow>
+
+            <FormRow Label="Last name" Required For="guardianLastName">
+                <FluentTextField Id="guardianLastName"
+                                 @bind-Value="Model.LastName"
+                                 Required
+                                 Placeholder="Last name"
+                                 class="gw-field" />
+            </FormRow>
+
+            <FormRow Label="Relationship">
+                <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                                    @bind-SelectedId="Model.RelationshipCodedValueId"
+                                    Placeholder="Select relationship" />
+            </FormRow>
+
+            <FormRow Label="Preferred mode of contact">
+                <DropdownForEnum TEnum="ContactChannel"
+                                 @bind-SelectedValue="Model.ContactChannel"
+                                 Placeholder="Select mode"
+                                 Class="gw-field" />
+            </FormRow>
+
+            <FormRow Label="Contact value">
+                <FluentTextField Id="guardianContact"
+                                 @bind-Value="Model.ContactValue"
+                                 Placeholder="e.g. 0712345678"
+                                 class="gw-field" />
+            </FormRow>
+        </FluentStack>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@SubmitText"
+                           SavingText="@SavingText"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    private bool _isEdit => Model.IsEdit;
+
+    protected override string SubmitText => Model.IsEdit ? "Save" : "Add guardian";
+    protected override string SavingText => Model.IsEdit ? "Saving…" : "Adding…";
+
+    protected override Task<GuardianAssignment?> SubmitAsync(GuardianAssignmentModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.FirstName) || string.IsNullOrWhiteSpace(model.LastName))
+        {
+            Error = "First and last name are required.";
+            return Task.FromResult<GuardianAssignment?>(null);
+        }
+
+        var assignment = new GuardianAssignment(
+            model.ExistingGuardianId,
+            model.FirstName!.Trim(),
+            model.LastName!.Trim(),
+            model.RelationshipCodedValueId,
+            model.ContactChannel,
+            string.IsNullOrWhiteSpace(model.ContactValue) ? null : model.ContactValue.Trim(),
+            model.TitleCodedValueId);
+        return Task.FromResult<GuardianAssignment?>(assignment);
+    }
+}

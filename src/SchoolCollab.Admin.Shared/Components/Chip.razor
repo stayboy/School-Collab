@@ -1,0 +1,40 @@
+@* Reusable "chip" (pill) used to represent a selected / added item — e.g. the
+   selected-students and selected-guardians chips shown above the picker grids.
+   Built on the native <FluentBadge>: FluentUI Blazor 4.14.2 has no dedicated
+   Chip component, and <FluentBadge> already supplies a built-in dismiss button
+   (rendered automatically when `OnDismiss` is set). The badge uses a fill-less
+   (Lightweight) appearance and is further neutralized in CSS so it shows no
+   inner background of its own — all the visible styling (border, fill, radius,
+   padding, hover) comes from our own .chip wrapper, which wraps BOTH the text
+   and the dismiss button. *@
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<span class="chip">
+    <FluentBadge Class="chip-badge"
+                 Appearance="Appearance.Lightweight"
+                 DismissTitle="@DismissTitle"
+                 OnDismissClick="OnDismiss">
+        <span class="chip-inner">
+            <span class="chip-label">@Label</span>
+            @if (!string.IsNullOrEmpty(Subtitle))
+            {
+                <span class="chip-sub">@Subtitle</span>
+            }
+        </span>
+    </FluentBadge>
+</span>
+
+@code {
+    /// <summary>Primary text shown in the chip (usually a name).</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Optional secondary text shown after the label (e.g. a number).</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Tooltip for the dismiss (remove) button. Default "Remove".</summary>
+    [Parameter] public string DismissTitle { get; set; } = "Remove";
+
+    /// <summary>When set, a dismiss button is shown and invoked to remove the chip.
+    /// When not set, the chip is read-only.</summary>
+    [Parameter] public EventCallback OnDismiss { get; set; }
+}

@@ -6,11 +6,21 @@
       - the inline "new student" form inside the GradeLevelWizard step 2
 
     The component owns the <EditForm>, the <DataAnnotationsValidator />, the
-    field rows, and the action-row container. Parents supply:
+    field rows, AND the action row (Submit / Cancel buttons). Parents supply:
       - the model (bound to <EditForm Model>)
       - the OnValidSubmit handler
-      - the action buttons (Submit / Cancel) via the Actions RenderFragment
+      - the action buttons via parameters (SubmitLabel, Submitting,
+        SubmittingLabel, ShowCancel, CancelLabel, OnCancel). The action row
+        is rendered by the component itself — calling pages do NOT need to
+        pass an external <Actions> block for the common case.
+      - the horizontal alignment of those buttons via ActionsAlignment
+        (Left = default, Right = trailing edge)
       - any visible error message via ErrorMessage
+
+    Advanced: a calling page may still override the entire action row by
+    supplying an <Actions> RenderFragment (e.g. a dialog that needs its own
+    footer component such as DialogShellFooter). When present, the override
+    replaces the built-in buttons.
 
     Each field row uses the canonical <FormRow> primitive from
     SchoolCollab.Admin.Shared — the repo-wide fixed-width (180px) label
@@ -96,12 +106,37 @@
     @* Action row. The .form-actions CSS class draws the horizontal line
        (border-top) that separates the field block above from the action
        buttons below, and adds comfortable margin/padding so the line
-       breathes. The parent supplies the actual buttons via the Actions
-       RenderFragment. *@
-    <div class="form-actions">
-        <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
+       breathes. The action buttons are rendered by THIS component (not by
+       the calling page): a built-in Submit / Cancel pair driven by the
+       SubmitLabel / CancelLabel / OnCancel / Submitting / ShowCancel
+       parameters. The ActionsAlignment parameter controls whether the
+       buttons hug the left edge (default) or the right / trailing edge
+       (via the .form-actions--right modifier). A calling page may still
+       override the whole row via the optional <Actions> RenderFragment
+       (e.g. a dialog that supplies its own DialogShellFooter). *@
+    <div class="form-actions @(ActionsAlignment == StudentFormActionsAlignment.Right ? "form-actions--right" : null)">
+        @if (Actions is not null)
+        {
             @Actions
-        </FluentStack>
+        }
+        else
+        {
+            <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
+                @if (ShowCancel)
+                {
+                    <FluentButton Appearance="Appearance.Outline"
+                                  OnClick="@OnCancel"
+                                  Disabled="@Submitting">
+                        @CancelLabel
+                    </FluentButton>
+                }
+                <FluentButton Type="ButtonType.Submit"
+                              Appearance="Appearance.Accent"
+                              Disabled="@Submitting">
+                    @(Submitting ? SubmittingLabel : SubmitLabel)
+                </FluentButton>
+            </FluentStack>
+        }
     </div>
 </EditForm>
 
@@ -112,8 +147,39 @@
     /// <summary>Submit handler. Fires only when DataAnnotations validation passes.</summary>
     [Parameter, EditorRequired] public EventCallback OnValidSubmit { get; set; }
 
-    /// <summary>Action buttons (Submit, Cancel) rendered in the bottom row. Required.</summary>
-    [Parameter, EditorRequired] public RenderFragment Actions { get; set; } = default!;
+    /// <summary>Action buttons (Submit, Cancel) rendered in the bottom row.
+    /// Optional. When supplied, it REPLACES the built-in button row (use this
+    /// for special cases such as a dialog that needs its own footer component
+    /// like <c>DialogShellFooter</c>). When omitted, the component renders its
+    /// own Submit / Cancel buttons driven by the parameters below.</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>Label on the built-in Submit button. Default: "Save".</summary>
+    [Parameter] public string SubmitLabel { get; set; } = "Save";
+
+    /// <summary>Label shown on the built-in Submit button while <see cref="Submitting"/> is true. Default: "Saving…".</summary>
+    [Parameter] public string SubmittingLabel { get; set; } = "Saving…";
+
+    /// <summary>When true, disables the built-in buttons and shows <see cref="SubmittingLabel"/> on Submit. Use to reflect an in-flight save.</summary>
+    [Parameter] public bool Submitting { get; set; }
+
+    /// <summary>Whether the built-in Cancel button is shown. Default: true.</summary>
+    [Parameter] public bool ShowCancel { get; set; } = true;
+
+    /// <summary>Label on the built-in Cancel button. Default: "Cancel".</summary>
+    [Parameter] public string CancelLabel { get; set; } = "Cancel";
+
+    /// <summary>Invoked when the built-in Cancel button is clicked. Optional.</summary>
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    /// <summary>Horizontal alignment of the action buttons. Defaults to
+    /// <see cref="StudentFormActionsAlignment.Left"/>; set to
+    /// <see cref="StudentFormActionsAlignment.Right"/> to push the buttons
+    /// to the trailing edge of the form.</summary>
+    [Parameter] public StudentFormActionsAlignment ActionsAlignment { get; set; } = StudentFormActionsAlignment.Left;
+
+    /// <summary>Horizontal alignment of the action buttons.</summary>
+    public enum StudentFormActionsAlignment { Left, Right }
 
     /// <summary>When true, the student number field is read-only (used by Edit.razor).</summary>
     [Parameter] public bool ReadOnlyStudentNumber { get; set; }

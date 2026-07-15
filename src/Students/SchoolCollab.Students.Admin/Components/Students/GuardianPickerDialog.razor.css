@@ -1,0 +1,15 @@
+.picker-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Chip list of selected guardians (existing picks + created-in-dialog),
+   rendered above the grid. Individual chips are the shared <Chip> component,
+   which owns its own styling. */
+.entity-grid-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-bottom: 4px;
+}

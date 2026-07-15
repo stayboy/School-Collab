@@ -1,0 +1,172 @@
+@* Guardian picker dialog for the GradeLevelWizard. Lists existing tenant
+   guardians with server-side search + multi-select, and a "New guardian"
+   button that opens the create/edit form dialog. Selected guardians are
+   shown as a chip list above the grid (the shared <EntityGrid> handles the
+   checkbox column; this dialog renders the combined chip list). On confirm
+   it returns one <see cref="GuardianAssignment"/> per picked existing
+   guardian plus any created-in-dialog guardians. *@
+@inherits DialogShellBase<GuardianPickerModel, GuardianAssignment[]>
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient StudentsApi
+@inject IDialogService DialogService
+@inject ILogger<GuardianPickerDialog> _logger
+
+<div class="picker-dialog">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+            @* Combined chip list: existing picks (from the grid) + guardians
+               created in the dialog. Rendered above the grid. Each chip is the
+               shared <Chip> component (built on FluentBadge) whose dismiss
+               button removes it. *@
+            @if (_picked.Count > 0 || _pendingNew.Count > 0)
+            {
+                <div class="entity-grid-chips">
+                    @foreach (var g in _picked.Values)
+                    {
+                        <Chip Label="@($"{g.FirstName} {g.LastName}")"
+                              Subtitle="@g.DisplayName"
+                              OnDismiss="@(() => RemovePicked(g.Id))" />
+                    }
+                    @foreach (var a in _pendingNew)
+                    {
+                        <Chip Label="@($"{a.FirstName} {a.LastName}")"
+                              OnDismiss="@(() => RemovePending(a))" />
+                    }
+                </div>
+            }
+
+            <EntityGrid TItem="GuardianDto"
+                        Items="_items"
+                        GridSettings="_gridSettings"
+                        Loading="_loading"
+                        EmptyMessage="@_emptyMessage"
+                        ShowSearch="true"
+                        Search="_search"
+                        SearchChanged="@OnSearchChanged"
+                        SearchPlaceholder="Search guardians by name"
+                        Selected="_picked"
+                        SelectedChanged="@OnPickedChanged"
+                        GetKey="@(g => g.Id)"
+                        GetDisplayName="@(g => $"{g.FirstName} {g.LastName}")"
+                        GetSubtitle="@(g => g.DisplayName)"
+                        ShowChips="false">
+                <Columns>
+                    <PropertyColumn Property="@(x => x.FirstName)" Title="First name" TGridItem="GuardianDto" TProp="string" />
+                    <PropertyColumn Property="@(x => x.LastName)" Title="Last name" TGridItem="GuardianDto" TProp="string" />
+                    <TemplateColumn TGridItem="GuardianDto" Title="Display name" Context="row">
+                        <span>@row.DisplayName</span>
+                    </TemplateColumn>
+                </Columns>
+            </EntityGrid>
+
+            <FluentButton Appearance="Appearance.Neutral"
+                          IconStart="@FluentIcons.PersonAdd"
+                          Type="ButtonType.Button"
+                          OnClick="OnCreateNew">
+                New guardian
+            </FluentButton>
+        </FluentStack>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Add"
+                           SavingText="Adding…"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(180px,2fr) minmax(180px,2fr) minmax(160px,1fr)"
+    };
+
+    private string _search = string.Empty;
+    private GuardianDto[] _items = [];
+    private bool _loading;
+    private string _emptyMessage = "No guardians found.";
+    private Dictionary<object, GuardianDto> _picked = new();
+    private readonly List<GuardianAssignment> _pendingNew = new();
+    private CancellationTokenSource? _searchCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync(string.Empty);
+    }
+
+    protected override string SubmitText => "Add";
+    protected override string SavingText => "Adding…";
+
+    private async Task OnSearchChanged(string? text)
+    {
+        _search = text ?? string.Empty;
+        await LoadAsync(_search);
+    }
+
+    private async Task LoadAsync(string search)
+    {
+        _searchCts?.Cancel();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+        _loading = true;
+        try
+        {
+            _items = await StudentsApi.ListGuardiansAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search) ?? [];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (ct.IsCancellationRequested) return;
+            _logger.LogWarning(ex, "Failed to load guardians for the picker");
+            _items = [];
+        }
+        finally
+        {
+            if (!ct.IsCancellationRequested)
+            {
+                _loading = false;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    private void OnPickedChanged(Dictionary<object, GuardianDto> picked)
+        => _picked = picked;
+
+    private void RemovePicked(Guid id)
+    {
+        var next = new Dictionary<object, GuardianDto>(_picked);
+        next.Remove(id);
+        _picked = next;
+    }
+
+    private async Task OnCreateNew()
+    {
+        var created = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
+            GuardianAssignmentModel.ForAdd(), "New guardian", DialogSize.Medium);
+        if (created is null) return;
+        _pendingNew.Add(created);
+    }
+
+    private void RemovePending(GuardianAssignment a) => _pendingNew.Remove(a);
+
+    protected override Task<GuardianAssignment[]?> SubmitAsync(GuardianPickerModel model)
+    {
+        var result = new List<GuardianAssignment>();
+        foreach (var g in _picked.Values)
+        {
+            // Link the existing tenant guardian with no relationship/contact
+            // yet — those are edited per-assignment in the guardian list.
+            result.Add(new GuardianAssignment(g.Id, g.FirstName, g.LastName, null, null, null, g.TitleCodedValueId));
+        }
+        result.AddRange(_pendingNew);
+        return Task.FromResult<GuardianAssignment[]?>(result.ToArray());
+    }
+}

@@ -21,8 +21,9 @@ public static class StudentRoutes
 
         group.MapGet("/", async (
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListStudents, SchoolCollab.Students.Core.DTOs.StudentDto[]> handler,
-            CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListStudents(), ct)));
+            CancellationToken ct,
+            [FromQuery] string? search = null) =>
+            Results.Ok(await handler.HandleAsync(new ListStudents(search), ct)));
 
         group.MapGet("/{id:guid}", async (
             Guid id,
