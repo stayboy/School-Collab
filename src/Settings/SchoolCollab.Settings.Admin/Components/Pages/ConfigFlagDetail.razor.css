@@ -1,0 +1,35 @@
+/* ── FluentCard popup / dropdown clipping fix ─────────────────────────
+   This component hosts a FluentSelect control inside a FluentCard
+   ("Tenant overrides" add-override form). The <fluent-card> host style is
+   `:host{ display:block; contain:content }`. `contain:paint` clips
+   descendants to the card's padding box independent of `overflow`, and
+   `contain:layout` makes the card a containing block for `position:fixed`
+   descendants. That clips the popup list used by FluentSelect.
+
+   Fixing the card alone is not enough because the layout's `.page-scroll`
+   (`MainLayout.razor.css`, overflow:auto) is the sole scroll region and
+   also clips a `position:absolute` popup that extends past its bottom
+   edge. The pragmatic fix is:
+     1. `contain: none !important` on the card — removes paint clipping and
+        removes the card as a fixed containing block.
+     2. `position: fixed !important` on the popup element — the anchored
+        region inside FluentSelect uses delta-based viewport positioning,
+        so fixed placement still positions correctly under the trigger, and
+        it escapes .page-scroll overflow.
+
+   Reference: microsoft/fluentui-blazor#2791 (closed with only a CSS
+   workaround; no library fix as of FluentUI v4.14.2). */
+
+.pa-4 {
+    overflow: visible;
+    contain: none !important;
+}
+
+/* FluentSelect renders its popup list as a <fluent-anchored-region> with
+   class `fluent-popup-body`. The library sets `position: absolute` inline
+   because FixedPlacement is not used by this high-level component. Force
+   fixed so it escapes the card and the page scroll region. */
+::deep .pa-4 .fluent-popup-body,
+::deep .pa-4 .fluent-listbox {
+    position: fixed !important;
+}
