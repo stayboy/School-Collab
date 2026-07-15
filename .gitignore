@@ -487,3 +487,7 @@ graphify-out/
 TestResults/
 test-results/
 aspire.config.json
+
+# Agent / tooling artifacts
+.pi/
+School-Collab/
