@@ -87,6 +87,15 @@ public sealed class CodedValuesApiClient(HttpClient http)
         return await response.Content.ReadFromJsonAsync<CodedValueDto>(ct);
     }
 
+    public async Task<CodedValueDto[]> GetByIdsAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    {
+        var idArray = ids as Guid[] ?? ids.ToArray();
+        if (idArray.Length == 0) return [];
+        var query = string.Join("&", idArray.Select(id => $"ids={id}"));
+        var result = await http.GetFromJsonAsync<CodedValueDto[]>($"/api/coded-values/by-ids?{query}", ct);
+        return result ?? [];
+    }
+
     public async Task<CodedValueDto?> GetByCodeAsync(string code, Guid? parentId = null, CancellationToken ct = default)
     {
         var url = parentId.HasValue

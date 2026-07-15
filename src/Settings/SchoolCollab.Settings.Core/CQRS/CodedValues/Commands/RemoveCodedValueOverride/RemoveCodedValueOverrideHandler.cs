@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Data;
@@ -18,7 +19,8 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RemoveCodedValueO
 public sealed class RemoveCodedValueOverrideHandler(
     SettingsDbContext db,
     ITenantProvider tenantProvider,
-    ITenantContextAccessor tenantContextAccessor) : ICommandHandler<RemoveCodedValueOverride>
+    ITenantContextAccessor tenantContextAccessor,
+    HybridCache cache) : ICommandHandler<RemoveCodedValueOverride>
 {
     public async Task HandleAsync(RemoveCodedValueOverride command, CancellationToken ct = default)
     {
@@ -46,5 +48,10 @@ public sealed class RemoveCodedValueOverrideHandler(
         {
             await db.SaveChangesAsync(ct);
         }
+
+        // Invalidate the coded-values cache so the dropdown lists (by-parent,
+        // by-code, search, etc.) refresh promptly after an override is removed.
+        await cache.RemoveByTagAsync("coded-values", ct);
+        await cache.RemoveByTagAsync($"tenant:{tenantId}", ct);
     }
 }

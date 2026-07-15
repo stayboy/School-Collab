@@ -3,4 +3,4 @@ using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Core.CQRS.Guardians.Queries.ListGuardians;
 
-public sealed record ListGuardians() : IQuery<GuardianDto[]>;
+public sealed record ListGuardians(string? Search = null) : IQuery<GuardianDto[]>;

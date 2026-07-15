@@ -57,3 +57,11 @@
     display: flex;
     align-items: center;
 }
+
+/* Right-aligned action buttons. The .form-actions flex container pushes
+   its single flex child (the FluentStack holding the buttons) to the
+   trailing edge. Left (default) relies on the flex-start default, so no
+   modifier is needed. */
+.form-actions--right {
+    justify-content: flex-end;
+}

@@ -48,6 +48,12 @@
         gap: 8px;
         margin-top: 16px;
         flex-wrap: wrap;
+        /* Horizontal separator between dialog content and the action
+           buttons. Mirrors the .form-actions border-top used by
+           StudentFormFields so every DialogShellBase dialog gets the
+           same content/actions divider. */
+        border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+        padding-top: 16px;
     }
     .mb-3 { margin-bottom: 12px; }
 </style>

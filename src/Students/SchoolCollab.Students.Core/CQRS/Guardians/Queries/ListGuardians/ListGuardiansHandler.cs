@@ -20,17 +20,24 @@ public sealed class ListGuardiansHandler(
     {
         // Capture the tenant: db.CurrentTenantId is lost inside the HybridCache factory.
         var tenantId = db.CurrentTenantId;
+        var search = (query.Search ?? string.Empty).Trim();
 
         return await cache.GetOrCreateAsync(
-            $"guardians:list:{tenantId}",
-            (db, tenantId),
+            $"guardians:list:{tenantId}:{search}",
+            (db, tenantId, search),
             static async (state, ct) =>
             {
-                var (db, tenantId) = state;
-                var results = await db.Guardians
+                var (db, tenantId, search) = state;
+                var q = db.Guardians
                     .IgnoreQueryFilters(["Tenant"])
-                    .Where(g => g.TenantId == tenantId)
-                    .OrderBy(g => g.LastName).ThenBy(g => g.FirstName)
+                    .Where(g => g.TenantId == tenantId);
+                if (search.Length > 0)
+                {
+                    q = q.Where(g => g.FirstName.Contains(search)
+                                 || g.LastName.Contains(search)
+                                 || (g.DisplayName != null && g.DisplayName.Contains(search)));
+                }
+                var results = await q.OrderBy(g => g.LastName).ThenBy(g => g.FirstName)
                     .ToArrayAsync(ct);
 
                 return results.Select(g => new GuardianDto(

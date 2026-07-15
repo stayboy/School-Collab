@@ -1,0 +1,160 @@
+@* Reusable data-grid for listing entities (students, guardians, …) that is
+   shared by the GradeLevelWizard's picker dialogs AND the landing pages
+   (Students/Index, Guardians/Guardians) so both surfaces render the same
+   grid. It owns:
+     • the <FluentDataGrid> + column template (GridSettings + Columns);
+     • an optional leading multi-select checkbox column (when `Selected` is
+       supplied), with the selection tracked by key in the parent;
+     • an optional chip list of the currently-selected items (rendered via the
+       shared <Chip> component) ABOVE the grid (when `Selected` is supplied and
+       `ShowChips` is true);
+     • an optional debounced search text box rendered at the TOP-RIGHT of the
+       grid (when `ShowSearch` is true). The grid stays "dumb" about data: the
+       box only emits `SearchChanged`; the parent owns the actual
+       filtering and passes the resolved `Items` back in. *@
+@typeparam TItem
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Admin.Shared.Components.Landing
+
+<div class="entity-grid">
+    @if (ShowSearch)
+    {
+        <div class="entity-grid-toolbar">
+            <FluentTextField Value="@Search"
+                             ValueChanged="@OnSearchChangedAsync"
+                             Immediate="true"
+                             ImmediateDelay="300"
+                             Placeholder="@(SearchPlaceholder ?? "Search")"
+                             class="entity-grid-search" />
+        </div>
+    }
+
+    @if (Selected is not null && ShowChips && Selected.Count > 0)
+    {
+        <div class="entity-grid-chips" aria-label="Selected items">
+            @foreach (var (key, item) in Selected)
+            {
+                <Chip Label="@(GetDisplayName?.Invoke(item) ?? KeyOf(item).ToString())"
+                      Subtitle="@GetSubtitle?.Invoke(item)"
+                      OnDismiss="@(() => RemoveItem(key))" />
+            }
+        </div>
+    }
+
+    @if (Loading || Items is null)
+    {
+        <div class="entity-grid-loading"><FluentProgressRing /></div>
+    }
+    else if (Items.Length == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
+    }
+    else
+    {
+        <div class="entity-grid-scroll">
+            <FluentDataGrid Items="@Items.AsQueryable()"
+                            GridTemplateColumns="@EffectiveTemplate"
+                            GenerateHeader="@GridSettings.GenerateHeader"
+                            MultiLine="@GridSettings.MultiLine"
+                            TGridItem="TItem">
+                @if (Selected is not null)
+                {
+                    <TemplateColumn TGridItem="TItem" Title="" Sortable="false">
+                        <FluentCheckbox Value="@(Selected.ContainsKey(KeyOf(context)))"
+                                        ValueChanged="@(v => OnToggle(context, v))" />
+                    </TemplateColumn>
+                }
+                @Columns
+            </FluentDataGrid>
+            @if (ShowPager)
+            {
+                <Pager />
+            }
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error" class="entity-grid-error">@Error</FluentMessageBar>
+    }
+</div>
+
+@code {
+    /// <summary>The rows to display. <c>null</c> shows the loading spinner; an
+    /// empty array shows <see cref="EmptyMessage"/>.</summary>
+    [Parameter, EditorRequired] public TItem[]? Items { get; set; }
+
+    /// <summary>Grid layout (column template + header/multiline options).</summary>
+    [Parameter, EditorRequired] public LandingGridSettings GridSettings { get; set; } = new();
+
+    /// <summary>Column definitions, compiled in the consumer's scope so each
+    /// <c>TemplateColumn</c>/<c>PropertyColumn</c> declares its own
+    /// <c>TGridItem</c>.</summary>
+    [Parameter] public RenderFragment? Columns { get; set; }
+
+    /// <summary>Show the loading spinner even when <see cref="Items"/> is non-null.</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>Message shown when <see cref="Items"/> is an empty array.</summary>
+    [Parameter] public string EmptyMessage { get; set; } = "No items.";
+
+    /// <summary>Optional error message bar rendered beneath the grid.</summary>
+    [Parameter] public string? Error { get; set; }
+
+    /// <summary>Render a <see cref="Pager"/> beneath the grid. Default false.</summary>
+    [Parameter] public bool ShowPager { get; set; }
+
+    // ── Optional search box ──────────────────────────────────────────────
+    // When enabled, a debounced search text box is rendered top-right above
+    // the grid. The grid does NOT filter its own rows — it only raises
+    // SearchChanged so the parent (which owns the data source) can reload
+    // `Items`. Two-way bind with `Search` / `SearchChanged` (or `@bind-Search`).
+    [Parameter] public bool ShowSearch { get; set; }
+    [Parameter] public string? Search { get; set; }
+    [Parameter] public EventCallback<string?> SearchChanged { get; set; }
+    [Parameter] public string? SearchPlaceholder { get; set; }
+
+    private Task OnSearchChangedAsync(string? value)
+    {
+        Search = value;
+        return SearchChanged.InvokeAsync(value);
+    }
+
+    // ── Optional multi-select ────────────────────────────────────────────
+    // When supplied, a leading checkbox column is rendered and the selected
+    // items are tracked here (by key) in the parent via SelectedChanged.
+    [Parameter] public Dictionary<object, TItem>? Selected { get; set; }
+    [Parameter] public EventCallback<Dictionary<object, TItem>> SelectedChanged { get; set; }
+    [Parameter] public Func<TItem, object>? GetKey { get; set; }
+    [Parameter] public Func<TItem, string>? GetDisplayName { get; set; }
+    [Parameter] public Func<TItem, string?>? GetSubtitle { get; set; }
+
+    /// <summary>Render the chip list of selected items above the grid. Default true
+    /// (only has an effect when <see cref="Selected"/> is supplied). Set false
+    /// when the parent wants to render its own combined chip list.</summary>
+    [Parameter] public bool ShowChips { get; set; } = true;
+
+    private string EffectiveTemplate
+        => (Selected is not null ? "44px " : string.Empty) + GridSettings.GridTemplateColumns;
+
+    private object KeyOf(TItem item) => GetKey is not null ? GetKey(item) : item!;
+
+    private void OnToggle(TItem item, bool? selected)
+    {
+        if (Selected is null || GetKey is null) return;
+        var key = GetKey(item);
+        var next = new Dictionary<object, TItem>(Selected);
+        if (selected ?? false) next[key] = item; else next.Remove(key);
+        Selected = next;
+        _ = SelectedChanged.InvokeAsync(next);
+    }
+
+    private void RemoveItem(object key)
+    {
+        if (Selected is null) return;
+        var next = new Dictionary<object, TItem>(Selected);
+        next.Remove(key);
+        Selected = next;
+        _ = SelectedChanged.InvokeAsync(next);
+    }
+}

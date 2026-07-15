@@ -1,0 +1,15 @@
+.guardian-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.gw-field {
+    width: 100%;
+}
+
+.gw-hint {
+    margin: 0 0 4px;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.9rem;
+}

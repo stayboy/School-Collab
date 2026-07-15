@@ -33,14 +33,11 @@
                 <StudentFormFields Model="_model"
                                    ReadOnlyStudentNumber="true"
                                    ErrorMessage="@_error"
-                                   OnValidSubmit="OnSaveAsync">
-                    <Actions>
-                        <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
-                            @(_saving ? "Saving…" : "Save")
-                        </FluentButton>
-                        <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}")'>Cancel</FluentButton>
-                    </Actions>
-                </StudentFormFields>
+                                   OnValidSubmit="OnSaveAsync"
+                                   SubmitLabel="Save"
+                                   SubmittingLabel="Saving…"
+                                   Submitting="@_saving"
+                                   OnCancel='@(() => Nav.NavigateTo($"/students/{Id}"))' />
             }
                 </ChildContent>
                 <Fallback>

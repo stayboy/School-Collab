@@ -1,0 +1,46 @@
+/* The visible pill is our own .chip wrapper, so the border wraps BOTH the text
+   and the badge's built-in dismiss button. Fill / border use Fluent design
+   tokens (--neutral-*-rest / *-hover) and flip with the light/dark theme; the
+   "strong" stroke variant is used because the default --neutral-stroke-rest is
+   intentionally very faint. The fluent-badge inside is neutralized so its own
+   shadow-DOM pill can't paint a second fill / border over ours. */
+.chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 6px 8px 6px 14px;
+    border-radius: 999px;
+    background: var(--neutral-fill-rest, #f0f0f0);
+    border: 1px solid var(--neutral-stroke-strong-rest, #b0b0b0);
+    font-size: 0.85rem;
+    line-height: 1.2;
+    transition: background-color 0.12s ease, border-color 0.12s ease;
+    cursor: default;
+}
+
+    .chip:hover {
+        background: var(--neutral-fill-hover, #e6e6e6);
+        border-color: var(--neutral-stroke-strong-hover, #8a8a8a);
+    }
+
+.chip ::deep .chip-badge {
+    background: transparent;
+    border: none;
+    padding: 0;
+}
+
+/* Content row inside the badge; the right padding leaves a small gap before
+   the badge's dismiss button. */
+.chip-inner {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 8px;
+}
+
+.chip-label {
+    font-weight: 600;
+}
+
+.chip-sub {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}

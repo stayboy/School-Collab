@@ -119,9 +119,16 @@
     private CodedValueDto[]? _items;
     private CodedValueDto? _selectedOption;
     private string? _error;
-    private string _lastLoadedParentCode = string.Empty;
+    private string? _loadedParentCode;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+
+    /// <summary>
+    /// The currently loaded dropdown items. Callers can use this to resolve the
+    /// full <see cref="CodedValueDto"/> for the selected id without a redundant
+    /// per-item API round-trip.
+    /// </summary>
+    public IReadOnlyList<CodedValueDto> Items => _items ?? Array.Empty<CodedValueDto>();
 
     private bool IsDisabled => Disabled || _items is null || _error is not null;
 
@@ -139,20 +146,42 @@
 
     protected override async Task OnInitializedAsync()
     {
+        if (string.IsNullOrWhiteSpace(ParentCode)) return;
         await LoadAsync(ParentCode);
     }
 
     protected override async Task OnParametersSetAsync()
     {
         // Parent is an enum parameter that may change after initialization
-        // (e.g. cascading value, wizard step, or form field dependency). When it
-        // changes we must discard the previous items and reload for the new parent.
-        if (ParentCode != _lastLoadedParentCode)
+        // (e.g. cascading value, wizard step, or form field dependency). When
+        // it changes we discard the previous items and reload for the new parent.
+        // When it does NOT change (e.g. a sibling control on the page changed and
+        // triggered a re-render) we only re-sync the current selection — no async
+        // reload round-trip — so interacting elsewhere on the page never causes an
+        // unwanted dropdown refresh or latency.
+        if (string.IsNullOrWhiteSpace(ParentCode))
+        {
+            _items = [];
+            _error = null;
+            _selectedOption = null;
+            return;
+        }
+
+        if (ParentCode != _loadedParentCode)
         {
             await LoadAsync(ParentCode);
         }
+        else
+        {
+            SyncSelection();
+        }
+    }
 
+    private void SyncSelection()
+    {
         // Keep the internal selection in sync when the consumer updates SelectedId.
+        // Runs synchronously during the normal lifecycle so a re-render triggered by
+        // a sibling control does not defer the dropdown update or re-open the list.
         if (_items is not null && SelectedId.HasValue)
         {
             var selected = _items.FirstOrDefault(x => x.Id == SelectedId);
@@ -184,7 +213,10 @@
         _items = null;
         _error = null;
         _selectedOption = null;
-        _lastLoadedParentCode = parentCode;
+        // Mark the parent we are now loading so a subsequent re-render with the
+        // same (or default) Parent does not reload, and an errored load is not
+        // retried on every re-render.
+        _loadedParentCode = parentCode;
 
         try
         {
@@ -207,7 +239,7 @@
         }
     }
 
-    private async Task OnSelectedOptionChanged(CodedValueDto? value)
+    private Task OnSelectedOptionChanged(CodedValueDto? value)
     {
         _selectedOption = value;
         // Notifies the binder (drives the @bind-SelectedId target). When the
@@ -217,7 +249,12 @@
         // pass SelectedIdChanged= directly — that overrides the binder and
         // the bound field stops updating. Use @bind-SelectedId:after for
         // side-effects; the binder owns SelectedIdChanged.
-        await SelectedIdChanged.InvokeAsync(value?.Id);
+        //
+        // Returning the EventCallback task directly (instead of awaiting it)
+        // keeps this event handler synchronous and avoids the Blazor renderer
+        // having to schedule an async continuation before FluentSelect can
+        // close the dropdown and refresh the UI.
+        return SelectedIdChanged.InvokeAsync(value?.Id);
     }
 
     public void Dispose()
