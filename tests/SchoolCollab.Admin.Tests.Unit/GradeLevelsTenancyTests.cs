@@ -80,8 +80,9 @@ public class GradeLevelsTenancyTests : BunitContext
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
 
         Services.AddSingleton<AuthenticationStateProvider>(auth);
-        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance));
-        Services.AddSingleton(new CodedValuesApiClient(http));
+        var codedValuesClient = new CodedValuesApiClient(http);
+        Services.AddSingleton(codedValuesClient);
+        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
         Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
 
         return (auth, handler);

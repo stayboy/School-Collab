@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Core.Contracts;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
@@ -18,7 +19,10 @@ public sealed record StudentDto(
     Guid? GenderCodedValueId,
     bool IsDeleted,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    // Enriched client-side (see EnrichStudentsAsync). Left null by the API.
+    int? Age = null,
+    string? GenderName = null);
 
 public sealed record GradeLevelDto(
     Guid Id,
@@ -160,7 +164,8 @@ public record EnrollStudentRequest(
 
 public record TransferStudentRequest(
     Guid NewGradeLevelId,
-    DateOnly? TransferDate);
+    DateOnly? TransferDate,
+    string Reason);
 
 public record WithdrawStudentRequest(
     DateOnly? ExitDate);
@@ -247,11 +252,13 @@ public sealed class StudentsApiClient : IContactsClient
 {
     private readonly HttpClient _http;
     private readonly ILogger<StudentsApiClient> _logger;
+    private readonly CodedValuesApiClient _codedValues;
 
-    public StudentsApiClient(HttpClient http, ILogger<StudentsApiClient> logger)
+    public StudentsApiClient(HttpClient http, ILogger<StudentsApiClient> logger, CodedValuesApiClient codedValues)
     {
         _http = http;
         _logger = logger;
+        _codedValues = codedValues;
     }
 
     // ── Students ─────────────────────────────────────────────────────────────
@@ -259,18 +266,18 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<StudentDto[]?> ListStudentsAsync(CancellationToken ct = default, string? search = null)
     {
         var url = string.IsNullOrWhiteSpace(search) ? "/students" : $"/students?search={Uri.EscapeDataString(search)}";
-        return await _http.GetFromJsonAsync<StudentDto[]>(url, ct);
+        return await EnrichStudentsAsync(await _http.GetFromJsonAsync<StudentDto[]>(url, ct), ct);
     }
 
     public async Task<StudentDto[]?> ListDeletedStudentsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentDto[]>("/students/deleted", ct);
+        await EnrichStudentsAsync(await _http.GetFromJsonAsync<StudentDto[]>("/students/deleted", ct), ct);
 
     public async Task<StudentDto[]?> ListStudentsByGradeAsync(Guid gradeLevelId, Guid? periodId = null, CancellationToken ct = default)
     {
         var url = periodId.HasValue
             ? $"/students/by-grade/{gradeLevelId}?periodId={periodId}"
             : $"/students/by-grade/{gradeLevelId}";
-        return await _http.GetFromJsonAsync<StudentDto[]>(url, ct);
+        return await EnrichStudentsAsync(await _http.GetFromJsonAsync<StudentDto[]>(url, ct), ct);
     }
 
     public async Task<StudentDto?> GetStudentByIdAsync(Guid id, CancellationToken ct = default)
@@ -278,7 +285,7 @@ public sealed class StudentsApiClient : IContactsClient
         var response = await _http.GetAsync($"/students/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<StudentDto>(ct);
+        return await EnrichSingleAsync(await response.Content.ReadFromJsonAsync<StudentDto>(ct), ct);
     }
 
     public async Task<StudentDto?> GetStudentByNumberAsync(string studentNumber, CancellationToken ct = default)
@@ -286,8 +293,40 @@ public sealed class StudentsApiClient : IContactsClient
         var response = await _http.GetAsync($"/students/by-number/{Uri.EscapeDataString(studentNumber)}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<StudentDto>(ct);
+        return await EnrichSingleAsync(await response.Content.ReadFromJsonAsync<StudentDto>(ct), ct);
     }
+
+    // ── DTO enrichment (client service) ──────────────────────────────────────
+    // Age + GenderName are computed here (not in the UI, not in Students.Core)
+    // so the Students module stays decoupled from the CodedValues module. The
+    // server projection leaves them null; we fill them once, batched.
+    private static int? ComputeAge(DateOnly? dob)
+    {
+        if (dob is not { } d) return null;
+        var today = DateOnly.FromDateTime(DateTime.Today);
+        var age = today.Year - d.Year;
+        if (d > today.AddYears(-age)) age--;
+        return age;
+    }
+
+    private async Task<StudentDto[]?> EnrichStudentsAsync(StudentDto[]? items, CancellationToken ct = default)
+    {
+        if (items is null || items.Length == 0) return items;
+
+        var withAge = items.Select(s => s with { Age = ComputeAge(s.DateOfBirth) }).ToArray();
+        var genderIds = withAge.Select(s => s.GenderCodedValueId).OfType<Guid>().Distinct().ToArray();
+        if (genderIds.Length == 0) return withAge;
+
+        var names = await _codedValues.GetByIdsAsync(genderIds, ct);
+        var map = names.ToDictionary(x => x.Id, x => x.Name);
+        return withAge.Select(s => s with
+        {
+            GenderName = s.GenderCodedValueId is { } id && map.TryGetValue(id, out var name) ? name : null
+        }).ToArray();
+    }
+
+    private async Task<StudentDto?> EnrichSingleAsync(StudentDto? item, CancellationToken ct = default)
+        => item is null ? null : (await EnrichStudentsAsync(new[] { item }, ct))?[0];
 
     public async Task<Guid> CreateStudentAsync(CreateStudentRequest req, CancellationToken ct = default)
     {
@@ -532,7 +571,7 @@ public sealed class StudentsApiClient : IContactsClient
         await _http.GetFromJsonAsync<GuardianNameHistoryDto[]>($"/students/guardians/{id}/name-history", ct);
 
     public async Task<StudentDto[]?> ListStudentsForGuardianAsync(Guid guardianId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentDto[]>($"/students/guardians/{guardianId}/students", ct);
+        await EnrichStudentsAsync(await _http.GetFromJsonAsync<StudentDto[]>($"/students/guardians/{guardianId}/students", ct), ct);
 
     // ── Student ↔ Guardian links ─────────────────────────────────────────────
 

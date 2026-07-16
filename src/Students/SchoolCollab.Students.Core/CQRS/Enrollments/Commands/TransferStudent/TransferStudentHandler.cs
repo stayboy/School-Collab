@@ -3,8 +3,10 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Students.Contracts.Events;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain.Events;
+using SchoolCollab.Students.Core.Services;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Core.Messaging;
 
@@ -12,6 +14,8 @@ namespace SchoolCollab.Students.Core.CQRS.Enrollments.Commands.TransferStudent;
 
 public sealed class TransferStudentHandler(
     IStudentEnrollmentRepository repository,
+    StudentsDbContext db,
+    IActorAccessor actorAccessor,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
     ILogger<TransferStudentHandler> logger) : ICommandHandler<TransferStudent>
@@ -24,7 +28,18 @@ public sealed class TransferStudentHandler(
             ?? throw new InvalidOperationException($"Enrollment with ID '{command.EnrollmentId}' not found.");
 
         var fromGradeLevelId = enrollment.GradeLevelId;
-        enrollment.Transfer(command.NewGradeLevelId, command.TransferDate);
+        enrollment.Transfer(command.NewGradeLevelId, command.TransferDate, command.Reason);
+
+        // Audit the transfer in the same transaction as the enrollment update
+        // (the repository's SaveChangesAsync flushes both tracked changes).
+        new StudentTransferAuditor(actorAccessor).Record(
+            db,
+            enrollment.TenantId,
+            enrollment.StudentId,
+            fromGradeLevelId,
+            command.NewGradeLevelId,
+            enrollment.PeriodId,
+            command.Reason);
 
         try
         {
@@ -49,6 +64,6 @@ public sealed class TransferStudentHandler(
 
         enrollment.ClearDomainEvents();
 
-        logger.LogInformation("Student {StudentId} transferred to grade level {GradeLevelId}", enrollment.StudentId, command.NewGradeLevelId);
+        logger.LogInformation("Student {StudentId} transferred from grade {FromGrade} to {ToGrade}", enrollment.StudentId, fromGradeLevelId, command.NewGradeLevelId);
     }
 }

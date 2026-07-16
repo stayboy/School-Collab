@@ -170,8 +170,9 @@ public class GradeLevelWizardTenancyTests : BunitContext
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
 
         Services.AddSingleton<AuthenticationStateProvider>(authProvider);
-        Services.AddSingleton(new CodedValuesApiClient(http));
-        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance));
+        var codedValuesClient = new CodedValuesApiClient(http);
+        Services.AddSingleton(codedValuesClient);
+        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
         Services.AddSingleton(new VisibleTenantService(authProvider, NullLogger<VisibleTenantService>.Instance));
 
         return authProvider;
@@ -306,8 +307,9 @@ public class GradeLevelWizardTenancyTests : BunitContext
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
 
         Services.AddSingleton<AuthenticationStateProvider>(authProvider);
-        Services.AddSingleton(new CodedValuesApiClient(http));
-        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance));
+        var codedValuesClient = new CodedValuesApiClient(http);
+        Services.AddSingleton(codedValuesClient);
+        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
         Services.AddSingleton(new VisibleTenantService(authProvider, NullLogger<VisibleTenantService>.Instance));
 
         // Act: render with the real tenant

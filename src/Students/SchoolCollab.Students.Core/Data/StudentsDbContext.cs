@@ -29,6 +29,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<SubjectStrand> SubjectStrands => Set<SubjectStrand>();
     public DbSet<SubjectLesson> SubjectLessons => Set<SubjectLesson>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+    public DbSet<StudentTransferAuditEntry> StudentTransferAuditEntries => Set<StudentTransferAuditEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -55,6 +56,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new SubjectStrandConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new SubjectLessonConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<StudentsDbContext>()));
+        modelBuilder.ApplyConfiguration(new StudentTransferAuditEntryConfiguration(() => CurrentTenantId));
 
         // FR-18 / AC-17: build-time model audit — every non-allow-listed, non-owned
         // entity MUST have a "Tenant" named query filter.

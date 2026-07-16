@@ -23,8 +23,6 @@ public sealed record GradeSubjectAssignedEvent(Guid AssignmentId, Guid GradeLeve
 
 public sealed record StudentSubjectAssignedEvent(Guid AssignmentId, Guid StudentId, Guid SubjectId, Guid PeriodId) : IDomainEvent;
 
-public sealed record StudentsPromotedEvent(Guid FromPeriodId, Guid ToPeriodId, int StudentCount) : IDomainEvent;
-
 // --- Subject Strands ---
 public sealed record SubjectStrandCreatedEvent(Guid StrandId, string Name, Guid SubjectId) : IDomainEvent;
 public sealed record SubjectStrandUpdatedEvent(Guid StrandId, string Name) : IDomainEvent;
