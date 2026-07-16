@@ -4,6 +4,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Admin.Components.Students
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject ILogger<Index> Logger
@@ -63,6 +64,7 @@
             <FluentAnchor Href="@($"/students/{context.Id}")">View</FluentAnchor>
             @if (!context.IsDeleted)
             {
+                <FluentAnchor Href="#" OnClick="@(() => OnTransferAsync(context.Id))" class="ms-2">Transfer</FluentAnchor>
                 <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="ms-2">Delete</FluentAnchor>
             }
             else
@@ -311,6 +313,30 @@
             Logger.LogError(ex, "Failed to recover student {Id}", id);
             _error = ex.Message;
             StateHasChanged();
+        }
+    }
+
+    private async Task OnTransferAsync(Guid studentId)
+    {
+        if (_disposed) return;
+        var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
+            new StudentTransferModel(studentId), "Transfer student", DialogSize.Medium);
+        if (result is not { Success: true }) return;
+
+        // Reload the current view (respecting the active grade filter, if any).
+        try
+        {
+            _items = _filterGradeLevelId.HasValue
+                ? await Api.ListStudentsByGradeAsync(_filterGradeLevelId.Value, _filterPeriodId, default)
+                : await Api.ListStudentsAsync();
+            if (_disposed) return;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reload students after transfer");
+            _error = ex.Message;
         }
     }
 

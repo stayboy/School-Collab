@@ -22,7 +22,7 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
     public DateOnly EnrolledOn { get; private set; }
     public DateOnly? ExitDate { get; private set; }
     public EnrollmentStatus Status { get; private set; }
-    public PromotionOutcome? PromotionOutcome { get; private set; }
+    public string? TransferReason { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -33,8 +33,7 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
         Guid studentId,
         Guid periodId,
         Guid gradeLevelId,
-        DateOnly? enrolledOn = null,
-        PromotionOutcome? promotionOutcome = null)
+        DateOnly? enrolledOn = null)
     {
         var now = DateTimeOffset.UtcNow;
         var enrollment = new StudentEnrollment
@@ -45,7 +44,6 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
             GradeLevelId = gradeLevelId,
             EnrolledOn = enrolledOn ?? DateOnly.FromDateTime(DateTime.UtcNow),
             Status = EnrollmentStatus.Active,
-            PromotionOutcome = promotionOutcome,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -54,7 +52,7 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
         return enrollment;
     }
 
-    public void Transfer(Guid newGradeLevelId, DateOnly? transferDate = null)
+    public void Transfer(Guid newGradeLevelId, DateOnly? transferDate = null, string? reason = null)
     {
         if (Status != EnrollmentStatus.Active)
             throw new InvalidOperationException("Only active enrollments can be transferred.");
@@ -62,6 +60,7 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
         GradeLevelId = newGradeLevelId;
         Status = EnrollmentStatus.Transferred;
         ExitDate = transferDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        TransferReason = reason;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new StudentTransferredEvent(Id, StudentId, PeriodId, newGradeLevelId));
     }

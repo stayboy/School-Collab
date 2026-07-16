@@ -6,6 +6,7 @@ using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Tenancy;
+using SchoolCollab.Students.Core.Services;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Messaging;
 
@@ -39,6 +40,9 @@ public static class Extensions
         services.AddScoped<IGuardianRepository, GuardianRepository>();
         services.AddScoped<IContactRepository, ContactRepository>();
         services.AddScoped<ITeacherRepository, TeacherRepository>();
+
+        // Default audit actor; the API host overrides this with ClaimsPrincipalActorAccessor.
+        services.AddSingleton<IActorAccessor>(_ => new SystemActorAccessor("system:students", "Students System"));
 
         services.AddHybridCache(options =>
         {

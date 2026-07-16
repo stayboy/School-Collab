@@ -3,6 +3,8 @@ using SchoolCollab.Students.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Api;
+using SchoolCollab.Students.Api.Auth;
+using SchoolCollab.Students.Core.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -22,6 +24,8 @@ else
 }
 
 builder.Services.AddStudentsCore(builder.Configuration);
+// Audit actor for student transfer audit rows — reads the authenticated user's claims.
+builder.Services.AddSingleton<IActorAccessor, ClaimsPrincipalActorAccessor>();
 builder.Services.AddOpenApi();
 
 // Auth + tenancy (OIDC via Keycloak)

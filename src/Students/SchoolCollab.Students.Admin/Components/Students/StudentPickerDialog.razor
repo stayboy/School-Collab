@@ -41,10 +41,13 @@
                             GetSubtitle="@(s => s.StudentNumber)">
                     <Columns>
                         <PropertyColumn Property="@(x => x.StudentNumber)" Title="Number" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="string" />
-                        <PropertyColumn Property="@(x => x.FirstName)" Title="First name" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="string" />
-                        <PropertyColumn Property="@(x => x.LastName)" Title="Last name" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="string" />
-                        <TemplateColumn TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" Title="Age" Context="row">
-                            <span class="muted">@GetAgeLabel(row.DateOfBirth)</span>
+                        <TemplateColumn TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" Title="Name" Context="row">
+                            <span>@GetStudentNameLabel(row)</span>
+                        </TemplateColumn>
+                        <PropertyColumn Property="@(x => x.GenderName)" Title="Gender" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="string" />
+                        <PropertyColumn Property="@(x => x.Age)" Title="Age" TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" TProp="int?" />
+                        <TemplateColumn TGridItem="SchoolCollab.Students.Core.DTOs.StudentDto" Title="Date of Birth" Context="dob">
+                            <span class="muted">@dob.DateOfBirth?.ToShortDateString()</span>
                         </TemplateColumn>
                     </Columns>
                 </EntityGrid>
@@ -82,7 +85,7 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "120px minmax(180px,2fr) minmax(180px,2fr) 100px"
+        GridTemplateColumns = "120px minmax(260px,1fr) 150px 90px 160px"
     };
 
     private PickerView _view = PickerView.Browse;
@@ -122,7 +125,15 @@
         {
             var apiItems = await StudentsApi.ListStudentsAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search);
             if (ct.IsCancellationRequested) return;
-            _items = apiItems?.Select(ToCore).ToArray() ?? [];
+            var items = apiItems?.Select(ToCore).ToArray() ?? [];
+            // Scope the picker to students not already assigned to this (or any
+            // other) grade for the period — transfers are handled elsewhere.
+            if (Model.ExcludedStudentIds is { } excluded && excluded.Any())
+            {
+                var excludedSet = new HashSet<Guid>(excluded);
+                items = items.Where(x => !excludedSet.Contains(x.Id)).ToArray();
+            }
+            _items = items;
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -192,15 +203,12 @@
     }
 
     private static SchoolCollab.Students.Core.DTOs.StudentDto ToCore(SchoolCollab.Students.Admin.Services.StudentDto s) => new(
-        s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt);
+        s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt, s.Age, s.GenderName);
 
-    private static string? GetAgeLabel(DateOnly? dob)
+    private static string GetStudentNameLabel(SchoolCollab.Students.Core.DTOs.StudentDto s)
     {
-        if (dob is not { } d) return null;
-        var today = DateOnly.FromDateTime(DateTime.Today);
-        var age = today.Year - d.Year;
-        if (d > today.AddYears(-age)) age--;
-        return age.ToString();
+        const string dash = "—";
+        return string.Format("{0} {1} ({2}, {3})", s.FirstName, s.LastName, s.GenderName ?? dash, s.Age?.ToString() ?? dash);
     }
 
     protected override Task<SchoolCollab.Students.Core.DTOs.StudentDto[]?> SubmitAsync(StudentPickerModel model)

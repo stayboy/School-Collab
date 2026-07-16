@@ -25,8 +25,8 @@ public sealed class ActivatePeriodHandler(
 
         // ── "At most one active period" invariant (§5.6 / FR-A1): opening this
         //    period MUST close any other currently-Active period for the tenant.
-        //    Closing (Complete) is what triggers promotion/repetition — the
-        //    PromotionService polls Completed periods that have a NextPeriodId.
+        //    (Transfers between grades are handled explicitly via the transfer
+        //    feature; NextPeriodId links periods for navigation.)
         var activeOther = await repository.GetActivePeriodAsync(
             excludeId: command.Id, cancellationToken);
         if (activeOther is not null)

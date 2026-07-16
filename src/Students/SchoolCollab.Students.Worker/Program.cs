@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using SchoolCollab.Settings.Core;
 using SchoolCollab.Students.Core;
-using SchoolCollab.Students.Worker.Services;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -46,13 +44,6 @@ else
 }
 
 builder.Services.AddStudentsCore(builder.Configuration);
-// FR-16: register the cross-context tenant directory so the PromotionService can
-// enumerate tenants and run its per-tenant promotion loop. Reads the settings DB
-// (where the Tenants registry lives) — lightweight, no full Settings aggregate.
-builder.Services.AddTenantDirectory(builder.Configuration);
-builder.Services.Configure<PromotionOptions>(
-    builder.Configuration.GetSection(PromotionOptions.SectionName));
-builder.Services.AddHostedService<PromotionService>();
 
 var host = builder.Build();
 host.Run();

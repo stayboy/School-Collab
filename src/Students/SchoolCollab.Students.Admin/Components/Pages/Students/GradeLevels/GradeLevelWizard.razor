@@ -305,7 +305,7 @@
                                             <li>
                                                 <span class="assigned-row-name">
                                                     <strong>@s.StudentNumber</strong> @s.FirstName @s.LastName
-                                                    <span class="muted">· @GetAgeLabel(s.DateOfBirth) yrs · @GenderName(s.GenderCodedValueId)</span>
+                                                    <span class="muted">· @s.Age yrs · @s.GenderName</span>
                                                 </span>
                                                 <span class="assigned-student-actions">
                                                     <FluentButton Appearance="Appearance.Lightweight"
@@ -1566,20 +1566,8 @@
     // friendly names instead of GUIDs.
     private Dictionary<Guid, string> _codedValueNames = new();
 
-    private string? GenderName(Guid? id)
-        => id is { } g && _codedValueNames.TryGetValue(g, out var n) ? n : null;
-
     private string? RelationshipName(Guid? id)
         => id is { } g && _codedValueNames.TryGetValue(g, out var n) ? n : null;
-
-    private static string? GetAgeLabel(DateOnly? dob)
-    {
-        if (dob is not { } d) return null;
-        var today = DateOnly.FromDateTime(DateTime.Today);
-        var age = today.Year - d.Year;
-        if (d > today.AddYears(-age)) age--;
-        return age.ToString();
-    }
 
     private static string ContactLabel(GuardianAssignment g)
         => g.ContactValue is null ? string.Empty : $" · {g.ContactChannel}: {g.ContactValue}";
@@ -1615,8 +1603,14 @@
 
     private async Task OnRequestAddStudents()
     {
+        // Exclude students already in this grade (already picked) and students
+        // already enrolled in another grade for the period — the picker should
+        // only offer students not yet assigned anywhere.
+        var excluded = _alreadyEnrolledStudentIds
+            .Concat(_assignedStudents.Select(s => s.Id))
+            .ToHashSet();
         var results = await DialogService.ShowShellDialogAsync<StudentPickerDialog, StudentPickerModel, SchoolCollab.Students.Core.DTOs.StudentDto[]>(
-            new StudentPickerModel(), "Add students", DialogSize.ExtraLarge);
+            new StudentPickerModel(ExcludedStudentIds: excluded, PeriodId: _activePeriod?.Id), "Add students", DialogSize.ExtraLarge);
         if (results is null) return;
         foreach (var s in results)
         {

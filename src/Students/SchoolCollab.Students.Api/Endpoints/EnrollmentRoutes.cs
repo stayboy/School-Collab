@@ -55,7 +55,7 @@ public static class EnrollmentRoutes
         {
             try
             {
-                await handler.HandleAsync(new TransferStudent(id, req.NewGradeLevelId, req.TransferDate), ct);
+                await handler.HandleAsync(new TransferStudent(id, req.NewGradeLevelId, req.TransferDate, req.Reason), ct);
                 return Results.NoContent();
             }
             catch (InvalidOperationException ex)
@@ -93,5 +93,5 @@ public static class EnrollmentRoutes
     }
 }
 
-internal record TransferStudentRequest(Guid NewGradeLevelId, DateOnly? TransferDate);
+internal record TransferStudentRequest(Guid NewGradeLevelId, DateOnly? TransferDate, string Reason);
 internal record WithdrawStudentRequest(DateOnly? ExitDate);

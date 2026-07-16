@@ -1,0 +1,139 @@
+@* Transfer a student to another grade level. This is the unified promote/demote
+   mechanism: picking a higher-level grade promotes, a lower-level grade demotes,
+   and an equal level is a lateral move. Records a reason and an audit entry. *@
+@inherits DialogShellBase<StudentTransferModel, StudentTransferResult>
+@using SchoolCollab.Students.Admin.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject ILogger<StudentTransferDialog> Logger
+
+<div class="transfer-dialog">
+    @if (_loading)
+    {
+        <FluentProgressRing />
+    }
+    else if (_error is not null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+    else if (_enrollment is null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">
+            This student has no active enrollment to transfer.
+        </FluentMessageBar>
+    }
+    else if (_gradeOptions.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">
+            There are no other grade levels to transfer @(_currentGradeName) students to.
+        </FluentMessageBar>
+    }
+    else
+    {
+        <EditForm Model="_model" OnValidSubmit="HandleSubmitAsync">
+            <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                <FluentTextField Value="@_currentGradeName" Label="Current grade" ReadOnly="true" />
+
+                @if (DirectionHint is { } hint)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info">@hint</FluentMessageBar>
+                }
+
+                <FluentSelect TOption="GradeLevelDto"
+                              Items="_gradeOptions"
+                              @bind-SelectedOption="_selectedGrade"
+                              OptionText="@(g => g.Name)"
+                              OptionValue="@(g => g.Id.ToString())"
+                              Label="Transfer to grade"
+                              Required="true" />
+
+                <FluentTextArea @bind-Value="_model.Reason" Label="Reason" Required="true" />
+            </FluentStack>
+
+            <DialogShellFooter Saving="@Saving"
+                               Error="@Error"
+                               SubmitText="Transfer"
+                               SavingText="Transferring…"
+                               OnCancel="HandleCancelAsync" />
+        </EditForm>
+    }
+</div>
+
+@code {
+    private sealed class TransferModel
+    {
+        public string Reason { get; set; } = "";
+    }
+
+    private readonly TransferModel _model = new();
+    private bool _loading = true;
+    private string? _error;
+    private string? _currentGradeName;
+    private StudentEnrollmentDto? _enrollment;
+    private List<GradeLevelDto> _allGrades = new();
+    private List<GradeLevelDto> _gradeOptions = new();
+    private GradeLevelDto? _selectedGrade;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var enrollments = await Api.ListEnrollmentsByStudentAsync(Model.StudentId, CancellationToken.None) ?? [];
+            _enrollment = enrollments.FirstOrDefault(e => e.Status == "Active" && e.ExitDate is null)
+                ?? enrollments.FirstOrDefault(e => e.ExitDate is null);
+
+            if (_enrollment is null)
+            {
+                _loading = false;
+                return;
+            }
+
+            _allGrades = (await Api.ListGradeLevelsAsync(CancellationToken.None) ?? []).ToList();
+            _currentGradeName = _allGrades.FirstOrDefault(g => g.Id == _enrollment.GradeLevelId)?.Name ?? "—";
+
+            _gradeOptions = _allGrades
+                .Where(g => g.Id != _enrollment.GradeLevelId)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load transfer data for student {StudentId}", Model.StudentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private string? DirectionHint
+    {
+        get
+        {
+            if (_enrollment is null || _selectedGrade is null) return null;
+            var current = _allGrades.FirstOrDefault(g => g.Id == _enrollment.GradeLevelId);
+            if (current is null) return null;
+            if (_selectedGrade.Level > current.Level) return $"This will PROMOTE the student to {_selectedGrade.Name}.";
+            if (_selectedGrade.Level < current.Level) return $"This will DEMOTE the student to {_selectedGrade.Name}.";
+            return $"This is a lateral transfer to {_selectedGrade.Name}.";
+        }
+    }
+
+    protected override async Task<StudentTransferResult?> SubmitAsync(StudentTransferModel model)
+    {
+        if (_enrollment is null) return null;
+        if (_selectedGrade is null) return null;
+
+        try
+        {
+            await Api.TransferStudentAsync(_enrollment.Id, new TransferStudentRequest(_selectedGrade.Id, null, _model.Reason));
+            return new StudentTransferResult(true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to transfer student {StudentId}", model.StudentId);
+            Error = ex.Message;
+            return null;
+        }
+    }
+}
