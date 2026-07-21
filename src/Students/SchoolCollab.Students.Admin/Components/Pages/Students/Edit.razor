@@ -31,6 +31,8 @@
                    on save the model's typed values go straight into
                    UpdateStudentRequest. *@
                 <StudentFormFields Model="_model"
+                                   ShowGuardians="true"
+                                   StudentId="Id"
                                    ReadOnlyStudentNumber="true"
                                    ErrorMessage="@_error"
                                    OnValidSubmit="OnSaveAsync"

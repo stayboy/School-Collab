@@ -24,6 +24,7 @@
                    (Guid?), and DataAnnotations
                    validation runs on the model via <DataAnnotationsValidator />. *@
                 <StudentFormFields Model="_model"
+                                   ShowGuardians="true"
                                    ErrorMessage="@_error"
                                    OnValidSubmit="OnSaveAsync"
                                    SubmitLabel="Create Student"
@@ -80,7 +81,27 @@
                 _model.DateOfBirth,
                 _model.GenderCodedValueId);
 
-            await Api.CreateStudentAsync(request, ct);
+            var studentId = await Api.CreateStudentAsync(request, ct);
+
+            // Link any guardians drafted on the form (existing or newly created).
+            try
+            {
+                foreach (var draft in _model.GuardianLinks)
+                {
+                    var guardianId = draft.ExistingGuardianId
+                        ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                            draft.TitleCodedValueId, draft.FirstName, draft.LastName, null, null, null), ct);
+                    await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                        studentId, guardianId, draft.RelationshipCodedValueId, draft.Role, false, null), ct);
+                }
+            }
+            catch (Exception gEx)
+            {
+                Logger.LogError(gEx, "Student {StudentId} created but guardian linking failed", studentId);
+                _error = $"Student created, but some guardians could not be linked: {gEx.Message}";
+                return;
+            }
+
             Nav.NavigateTo("/students");
         }
         catch (OperationCanceledException) { }

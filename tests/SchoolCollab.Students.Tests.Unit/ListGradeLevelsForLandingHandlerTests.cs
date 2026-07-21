@@ -64,7 +64,7 @@ public class ListGradeLevelsForLandingHandlerTests
         await s.Db.SaveChangesAsync();
 
         // One current-tenant student enrolled in this grade for the current period.
-        var student = Student.Create("S1", "Anna", "Smith", null, null);
+        var student = Student.Create("S1", "Anna", "Smith", new DateOnly(2015, 1, 1), Guid.NewGuid());
         student.WithTenant(s.Tenants); // current tenant (System/Empty)
         s.Db.Students.Add(student);
         s.Db.StudentEnrollments.Add(StudentEnrollment.Create(student.Id, periodId, glId));
@@ -88,14 +88,14 @@ public class ListGradeLevelsForLandingHandlerTests
         var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
 
         // Current-tenant student → counted.
-        var s1 = Student.Create("S1", "Anna", "Smith", null, null)
+        var s1 = Student.Create("S1", "Anna", "Smith", new DateOnly(2015, 1, 1), Guid.NewGuid())
             .WithTenant(s.Tenants);
         s.Db.Students.Add(s1);
         s.Db.StudentEnrollments.Add(StudentEnrollment.Create(s1.Id, periodId, glId));
 
         // Other-tenant student → NOT counted (tenant query filter excludes them).
         var otherTenant = Guid.NewGuid();
-        var s2 = Student.Create("S2", "Bob", "Jones", null, null)
+        var s2 = Student.Create("S2", "Bob", "Jones", new DateOnly(2015, 1, 1), Guid.NewGuid())
             .WithTenant(otherTenant);
         s.Db.Students.Add(s2);
         s.Db.StudentEnrollments.Add(StudentEnrollment.Create(s2.Id, periodId, glId));
@@ -118,7 +118,7 @@ public class ListGradeLevelsForLandingHandlerTests
         var periodId = await SeedCurrentPeriodAsync(s, "Term 1");
         var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
 
-        var student = Student.Create("S1", "Anna", "Smith", null, null)
+        var student = Student.Create("S1", "Anna", "Smith", new DateOnly(2015, 1, 1), Guid.NewGuid())
             .WithTenant(s.Tenants);
         s.Db.Students.Add(student);
         var enrollment = StudentEnrollment.Create(student.Id, periodId, glId);
