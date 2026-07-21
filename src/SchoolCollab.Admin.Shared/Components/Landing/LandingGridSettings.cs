@@ -22,4 +22,7 @@ public sealed class LandingGridSettings
 
     /// <summary>Whether cells wrap onto multiple lines. Defaults to <c>true</c>.</summary>
     public bool MultiLine { get; set; } = true;
+
+    /// <summary>Number of items to display per page. Defaults to 10.</summary>
+    public int ItemsPerPage { get; set; } = 10;
 }

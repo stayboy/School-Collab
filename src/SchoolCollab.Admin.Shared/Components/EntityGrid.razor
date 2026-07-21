@@ -54,6 +54,7 @@
         <div class="entity-grid-scroll">
             <FluentDataGrid Items="@Items.AsQueryable()"
                             GridTemplateColumns="@EffectiveTemplate"
+                            Pagination="@_paginationState"
                             GenerateHeader="@GridSettings.GenerateHeader"
                             MultiLine="@GridSettings.MultiLine"
                             TGridItem="TItem">
@@ -68,7 +69,7 @@
             </FluentDataGrid>
             @if (ShowPager)
             {
-                <Pager />
+                <FluentPaginator State="@_paginationState" />
             }
         </div>
     }
@@ -138,6 +139,20 @@
         => (Selected is not null ? "56px " : string.Empty) + GridSettings.GridTemplateColumns;
 
     private object KeyOf(TItem item) => GetKey is not null ? GetKey(item) : item!;
+
+    private PaginationState? _paginationState;
+
+    protected override void OnParametersSet()
+    {
+        if (_paginationState == null)
+        {
+            _paginationState = new PaginationState { ItemsPerPage = GridSettings.ItemsPerPage };
+        }
+        else if (_paginationState.ItemsPerPage != GridSettings.ItemsPerPage)
+        {
+            _paginationState.ItemsPerPage = GridSettings.ItemsPerPage;
+        }
+    }
 
     private void OnToggle(TItem item, bool? selected)
     {
