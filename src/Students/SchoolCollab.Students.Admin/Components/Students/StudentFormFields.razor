@@ -39,6 +39,9 @@
         the GENDER parent)
 *@
 @using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Core.Domain
+@using StudentDto = SchoolCollab.Students.Admin.Services.StudentDto
 
 <EditForm Model="@Model" OnValidSubmit="@OnValidSubmit" class="student-form-fields">
     <DataAnnotationsValidator />
@@ -77,25 +80,196 @@
         @* Date of birth. FluentDatePicker binds to DateTime?, so we
            convert from the model's DateOnly? on the way in and back on
            the way out. Narrow input (160px) — a date picker doesn't
-           need more room than that. *@
-        <FormRow Label="Date of birth" For="studentFormDob">
+           need more room than that. Required (spec: DOB mandatory). *@
+        <FormRow Label="Date of birth" Required For="studentFormDob">
             <FluentDatePicker Id="studentFormDob"
                               Value="@DateOfBirthAsDateTime"
                               ValueChanged="@OnDateOfBirthChanged"
+                              Required
                               class="student-form-input--dob" />
         </FormRow>
 
-        @* Gender. Optional coded-value dropdown for the GENDER parent.
-           Simple two-way binding — the binder updates
-           Model.GenderCodedValueId directly; no callback boilerplate
+        @* Gender. Required coded-value dropdown for the GENDER parent
+           (spec: gender mandatory). Simple two-way binding — the binder
+           updates Model.GenderCodedValueId directly; no callback boilerplate
            needed (the previous OnGenderChanged did nothing but mirror
            the new value into the model). *@
-        <FormRow Label="Gender">
+        <FormRow Label="Gender" Required>
             <CodedValueDropdown Parent="CodedValueParent.Genders"
                                 @bind-SelectedId="Model.GenderCodedValueId"
-                                Placeholder="Select gender (optional)"
+                                Placeholder="Select gender"
                                 class="student-form-input--gender" />
         </FormRow>
+
+        @* Guardians. Create mode keeps a draft list on the model that the
+           parent links after the student is saved; edit mode loads the links
+           from the API and links/unlinks immediately. Adding a guardian is an
+           INLINE section switch (no nested dialog): "New guardian" reveals the
+           shared <GuardianFormFields> component; "Add existing" uses the shared
+           <EntityGrid> to search by contact or by student and select guardians.
+           The linked/draft list is also rendered with <EntityGrid>. *@
+        @if (ShowGuardians)
+        {
+            <div class="">
+                <FluentDivider Orientation="Orientation.Horizontal" Style="width:100%" />
+            </div>
+            <FormRow Label="Guardians">
+                <div class="student-guardians">
+                    @if (_loadingGuardians)
+                    {
+                        <FluentProgressRing />
+                    }
+                    else
+                    {
+                        @* ── Linked / drafted guardians (grid list) ── *@
+                        <EntityGrid TItem="GuardianGridRow"
+                                    Items="GuardianGridRows"
+                                    GridSettings="@LinkedGridSettings"
+                                    EmptyMessage="@(IsEditMode ? "No guardians linked yet." : "No guardians added yet.")">
+                            <Columns>
+                                <PropertyColumn Property="@(r => r.FirstName)" Title="First name" TGridItem="GuardianGridRow" TProp="string" />
+                                <PropertyColumn Property="@(r => r.LastName)" Title="Last name" TGridItem="GuardianGridRow" TProp="string" />
+                                <TemplateColumn TGridItem="GuardianGridRow" Title="Relationship" Context="cell">
+                                    <span>@(cell.RelationshipCodedValueId is { } id && _relNames.TryGetValue(id, out var rn) ? rn : "")</span>
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="GuardianGridRow" Title="" Sortable="false" Context="cell">
+                                    @if (cell.IsEmergencyContact)
+                                    {
+                                        <FluentBadge Appearance="Appearance.Accent">Emergency</FluentBadge>
+                                    }
+                                </TemplateColumn>
+                                <TemplateColumn TGridItem="GuardianGridRow" Title="" Sortable="false" Context="cell">
+                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove guardian"
+                                                  OnClick="@(() => RemoveGuardianRow(cell.Key))">
+                                        <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
+                                    </FluentButton>
+                                </TemplateColumn>
+                            </Columns>
+                        </EntityGrid>
+
+                        @if (!string.IsNullOrEmpty(_guardianError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
+                        }
+
+                        @* ── Panel switch: list actions, or the add section ── *@
+                        @if (_panelMode == GuardianPanelMode.List)
+                        {
+                            <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-buttons">
+                                <FluentButton Appearance="Appearance.Outline"
+                                              IconStart="@FluentIcons.PersonAdd"
+                                              OnClick="StartNewGuardian">New guardian</FluentButton>
+                                <FluentButton Appearance="Appearance.Neutral"
+                                              IconStart="@FluentIcons.PersonAdd"
+                                              OnClick="StartAddExisting">Add existing</FluentButton>
+                            </FluentStack>
+                        }
+                        else
+                        {
+                            <div class="guardian-add-section">
+                                @if (_panelMode == GuardianPanelMode.New)
+                                {
+                                    <h4 class="guardian-add-title">New guardian</h4>
+                                    <GuardianFormFields Model="_newGuardian" />
+                                    <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
+                                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button" OnClick="SaveNewGuardianAsync">Add to list</FluentButton>
+                                        <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
+                                    </FluentStack>
+                                }
+                                else
+                                {
+                                    <h4 class="guardian-add-title">Add existing guardian</h4>
+                                    <FluentStack Orientation="Orientation.Horizontal" Spacing="4" class="guardian-tabs">
+                                        <FluentButton Appearance="@(_existingTab == ExistingTab.Contact ? Appearance.Accent : Appearance.Neutral)"
+                                                      Type="ButtonType.Button" OnClick="@(() => SwitchExistingTab(ExistingTab.Contact))">By contact</FluentButton>
+                                        <FluentButton Appearance="@(_existingTab == ExistingTab.Student ? Appearance.Accent : Appearance.Neutral)"
+                                                      Type="ButtonType.Button" OnClick="@(() => SwitchExistingTab(ExistingTab.Student))">By student</FluentButton>
+                                    </FluentStack>
+
+                                    @if (_existingTab == ExistingTab.Contact)
+                                    {
+                                        <EntityGrid TItem="GuardianPickerRow"
+                                                    Items="_pickerRows"
+                                                    GridSettings="@PickerGridSettings"
+                                                    Loading="_contactLoading"
+                                                    EmptyMessage="Type a contact email or phone to search."
+                                                    ShowSearch="true"
+                                                    SearchChanged="@OnContactSearchAsync"
+                                                    SearchPlaceholder="Search by email or phone"
+                                                    Selected="_selectedRows"
+                                                    SelectedChanged="@OnSelectedRowsChanged"
+                                                    GetKey="@(r => r.Id)"
+                                                    GetDisplayName="@(r => $"{r.FirstName} {r.LastName}")"
+                                                    GetSubtitle="@(r => r.Subtitle)"
+                                                    ShowChips="false">
+                                            <Columns>
+                                                <PropertyColumn Property="@(r => r.FirstName)" Title="First name" TGridItem="GuardianPickerRow" TProp="string" />
+                                                <PropertyColumn Property="@(r => r.LastName)" Title="Last name" TGridItem="GuardianPickerRow" TProp="string" />
+                                                <TemplateColumn TGridItem="GuardianPickerRow" Title="Contact" Context="cell">
+                                                    <span>@cell.Subtitle</span>
+                                                </TemplateColumn>
+                                            </Columns>
+                                        </EntityGrid>
+                                    }
+                                    else
+                                    {
+                                        @if (_selectedStudentId is null)
+                                        {
+                                            <EntityGrid TItem="StudentDto"
+                                                        Items="_studentResults"
+                                                        GridSettings="@StudentGridSettings"
+                                                        Loading="_studentLoading"
+                                                        EmptyMessage="Type a student name or number to search."
+                                                        ShowSearch="true"
+                                                        SearchChanged="@OnStudentSearchAsync"
+                                                        SearchPlaceholder="Search students by name or number">
+                                                <Columns>
+                                                    <PropertyColumn Property="@(s => s.StudentNumber)" Title="Number" TGridItem="StudentDto" TProp="string" />
+                                                    <PropertyColumn Property="@(s => s.FirstName)" Title="First name" TGridItem="StudentDto" TProp="string" />
+                                                    <PropertyColumn Property="@(s => s.LastName)" Title="Last name" TGridItem="StudentDto" TProp="string" />
+                                                    <TemplateColumn TGridItem="StudentDto" Title="" Sortable="false" Context="cell">
+                                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => SelectStudentAsync(cell.Id))">Choose</FluentButton>
+                                                    </TemplateColumn>
+                                                </Columns>
+                                            </EntityGrid>
+                                        }
+                                        else
+                                        {
+                                            <EntityGrid TItem="GuardianPickerRow"
+                                                        Items="_pickerRows"
+                                                        GridSettings="@PickerGridSettings"
+                                                        EmptyMessage="This student has no guardians."
+                                                        Selected="_selectedRows"
+                                                        SelectedChanged="@OnSelectedRowsChanged"
+                                                        GetKey="@(r => r.Id)"
+                                                        GetDisplayName="@(r => $"{r.FirstName} {r.LastName}")"
+                                                        GetSubtitle="@(r => r.Subtitle)"
+                                                        ShowChips="false">
+                                                <Columns>
+                                                    <PropertyColumn Property="@(r => r.FirstName)" Title="First name" TGridItem="GuardianPickerRow" TProp="string" />
+                                                    <PropertyColumn Property="@(r => r.LastName)" Title="Last name" TGridItem="GuardianPickerRow" TProp="string" />
+                                                    <TemplateColumn TGridItem="GuardianPickerRow" Title="Relationship" Context="cell">
+                                                        <span>@(cell.RelationshipCodedValueId is { } id && _relNames.TryGetValue(id, out var rn) ? rn : "")</span>
+                                                    </TemplateColumn>
+                                                </Columns>
+                                            </EntityGrid>
+                                            <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="BackToStudentSearch">Back</FluentButton>
+                                        }
+                                    }
+
+                                    <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
+                                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button"
+                                                      Disabled="@(_selectedRows.Count == 0)"
+                                                      OnClick="AddSelectedGuardiansAsync">Add selected</FluentButton>
+                                        <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
+                                    </FluentStack>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </FormRow>
+        }
     </FluentStack>
 
     @if (!string.IsNullOrEmpty(ErrorMessage))
@@ -173,10 +347,11 @@
     [Parameter] public EventCallback OnCancel { get; set; }
 
     /// <summary>Horizontal alignment of the action buttons. Defaults to
-    /// <see cref="StudentFormActionsAlignment.Left"/>; set to
-    /// <see cref="StudentFormActionsAlignment.Right"/> to push the buttons
-    /// to the trailing edge of the form.</summary>
-    [Parameter] public StudentFormActionsAlignment ActionsAlignment { get; set; } = StudentFormActionsAlignment.Left;
+    /// <see cref="StudentFormActionsAlignment.Right"/> so the buttons sit
+    /// at the trailing edge of the form (matches the dialog footer);
+    /// set to <see cref="StudentFormActionsAlignment.Left"/> to keep them
+    /// at the leading edge.</summary>
+    [Parameter] public StudentFormActionsAlignment ActionsAlignment { get; set; } = StudentFormActionsAlignment.Right;
 
     /// <summary>Horizontal alignment of the action buttons.</summary>
     public enum StudentFormActionsAlignment { Left, Right }
@@ -197,5 +372,376 @@
     {
         Model.DateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
         await Task.CompletedTask;
+    }
+
+    // ── Guardians ──────────────────────────────────────────────────────────
+    // Create mode: drafts live on Model.GuardianLinks and are linked by the
+    // parent after the student is created. Edit mode (StudentId set): links are
+    // loaded from the API and added/removed immediately, mirroring the
+    // GradeLevelWizard's Phase 4 guardian logic.
+
+    /// <summary>When true, renders the guardian list + add controls. Opt-in so
+    /// the shared form can be embedded where guardians are managed elsewhere
+    /// (e.g. the GradeLevelWizard inline edit form). Enabled by /students/create
+    /// and /students/{id}/edit.</summary>
+    [Parameter] public bool ShowGuardians { get; set; }
+
+    /// <summary>Student id for edit mode. Null (default) ⇒ create mode.</summary>
+    [Parameter] public Guid? StudentId { get; set; }
+
+    [Inject] private StudentsApiClient Api { get; set; } = default!;
+    [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
+    [Inject] private ILogger<StudentFormFields> Logger { get; set; } = default!;
+
+    private bool IsEditMode => StudentId.HasValue;
+    private bool _loadingGuardians;
+    private string? _guardianError;
+    private List<StudentGuardianViewDto> _links = new();
+    private Dictionary<Guid, string> _relNames = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (IsEditMode)
+        {
+            _loadingGuardians = true;
+            try
+            {
+                await LoadGuardiansAsync(StudentId!.Value, CancellationToken.None);
+            }
+            finally
+            {
+                _loadingGuardians = false;
+            }
+        }
+    }
+
+    private async Task LoadGuardiansAsync(Guid studentId, CancellationToken ct)
+    {
+        _guardianError = null;
+        try
+        {
+            var links = await Api.ListGuardiansByStudentAsync(studentId, ct) ?? [];
+            _links = links.ToList();
+            _relNames = new Dictionary<Guid, string>();
+            foreach (var link in _links.Where(l => l.RelationshipCodedValueId.HasValue))
+            {
+                var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
+                if (cv is not null) _relNames[cv.Id] = cv.Name;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load guardians for student {StudentId}", studentId);
+            _guardianError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    // ── Inline guardian add panel (replaces the old nested dialogs) ──
+    private enum GuardianPanelMode { List, New, Existing }
+    private enum ExistingTab { Contact, Student }
+
+    private GuardianPanelMode _panelMode = GuardianPanelMode.List;
+    private ExistingTab _existingTab = ExistingTab.Contact;
+
+    private GuardianAssignmentModel _newGuardian = GuardianAssignmentModel.ForAdd();
+
+    private bool _contactLoading;
+    private GuardianPickerRow[] _pickerRows = [];
+    private Dictionary<object, GuardianPickerRow> _selectedRows = new();
+
+    private bool _studentLoading;
+    private StudentDto[] _studentResults = [];
+    private Guid? _selectedStudentId;
+
+    private static readonly LandingGridSettings LinkedGridSettings = new()
+    {
+        GridTemplateColumns = "minmax(140px,1.5fr) minmax(140px,1.5fr) minmax(120px,1fr) 96px 44px"
+    };
+
+    private static readonly LandingGridSettings PickerGridSettings = new()
+    {
+        GridTemplateColumns = "minmax(160px,2fr) minmax(160px,2fr) minmax(160px,2fr)"
+    };
+
+    private static readonly LandingGridSettings StudentGridSettings = new()
+    {
+        GridTemplateColumns = "minmax(120px,1fr) minmax(160px,2fr) minmax(160px,2fr) 80px"
+    };
+
+    /// <summary>Display row for the linked/draft guardian grid.</summary>
+    private sealed record GuardianGridRow(
+        object Key,
+        string FirstName,
+        string LastName,
+        Guid? RelationshipCodedValueId,
+        bool IsEmergencyContact);
+
+    /// <summary>Display row for the "add existing" picker grid.</summary>
+    private sealed record GuardianPickerRow(
+        Guid Id,
+        string FirstName,
+        string LastName,
+        Guid? RelationshipCodedValueId,
+        string? Subtitle);
+
+    // ── Panel navigation ─────────────────────────────────────────────────────
+    private void StartNewGuardian() => _panelMode = GuardianPanelMode.New;
+
+    private void StartAddExisting()
+    {
+        _panelMode = GuardianPanelMode.Existing;
+        _existingTab = ExistingTab.Contact;
+        _pickerRows = [];
+        _selectedRows = new();
+        _selectedStudentId = null;
+    }
+
+    private void CancelPanel()
+    {
+        _panelMode = GuardianPanelMode.List;
+        _newGuardian = GuardianAssignmentModel.ForAdd();
+        _pickerRows = [];
+        _selectedRows = new();
+        _studentResults = [];
+        _selectedStudentId = null;
+    }
+
+    private void SwitchExistingTab(ExistingTab tab)
+    {
+        _existingTab = tab;
+        _pickerRows = [];
+        _selectedRows = new();
+        _selectedStudentId = null;
+    }
+
+    private void OnSelectedRowsChanged(Dictionary<object, GuardianPickerRow> next) => _selectedRows = next;
+
+    private GuardianGridRow[] GuardianGridRows
+        => IsEditMode
+            ? _links.Select(l => new GuardianGridRow(l.GuardianId, l.FirstName, l.LastName, l.RelationshipCodedValueId, l.IsEmergencyContact)).ToArray()
+            : Model.GuardianLinks.Select((g, i) => new GuardianGridRow(i, g.FirstName, g.LastName, g.RelationshipCodedValueId, false)).ToArray();
+
+    private async Task RemoveGuardianRow(object key)
+    {
+        if (IsEditMode && key is Guid gId) await RemoveGuardianAsync(gId);
+        else if (!IsEditMode && key is int idx) await RemoveGuardianAsync(idx);
+    }
+
+    private void BackToStudentSearch()
+    {
+        _selectedStudentId = null;
+        _pickerRows = [];
+    }
+
+    // ── Search: by contact (matches guardian name OR contact value) ───────────
+    private async Task OnContactSearchAsync(string? search)
+    {
+        _selectedRows = new();
+        _contactLoading = true;
+        var ct = CancellationToken.None;
+        try
+        {
+            var guardians = (await Api.ListGuardiansAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search))?.Take(30).ToArray() ?? [];
+            var rows = new List<GuardianPickerRow>();
+            foreach (var g in guardians)
+            {
+                string? contact = null;
+                try
+                {
+                    var contacts = await Api.ListContactsAsync(ContactOwnerType.Guardian, g.Id, ct);
+                    contact = contacts?.FirstOrDefault(c => c.IsPrimary)?.Value
+                           ?? contacts?.FirstOrDefault()?.Value;
+                }
+                catch
+                {
+                    // Non-fatal: contact display is a nicety.
+                }
+                rows.Add(new GuardianPickerRow(g.Id, g.FirstName, g.LastName, null, contact));
+            }
+            _pickerRows = rows.ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Guardian contact search failed");
+            _pickerRows = [];
+        }
+        finally
+        {
+            _contactLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ── Search: by student → list that student's guardians ───────────────────
+    private async Task OnStudentSearchAsync(string? search)
+    {
+        _studentLoading = true;
+        var ct = CancellationToken.None;
+        try
+        {
+            _studentResults = await Api.ListStudentsAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Student search failed");
+            _studentResults = [];
+        }
+        finally
+        {
+            _studentLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task SelectStudentAsync(Guid studentId)
+    {
+        _selectedStudentId = studentId;
+        _selectedRows = new();
+        _studentLoading = true;
+        var ct = CancellationToken.None;
+        try
+        {
+            var links = await Api.ListGuardiansByStudentAsync(studentId, ct) ?? [];
+            var rows = new List<GuardianPickerRow>();
+            foreach (var l in links)
+            {
+                if (l.RelationshipCodedValueId is { } relId)
+                    await EnsureRelNameAsync(relId);
+                rows.Add(new GuardianPickerRow(l.GuardianId, l.FirstName, l.LastName, l.RelationshipCodedValueId, null));
+            }
+            _pickerRows = rows.ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load the student's guardians");
+            _pickerRows = [];
+        }
+        finally
+        {
+            _studentLoading = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ── Add handlers ─────────────────────────────────────────────────────────
+    private async Task SaveNewGuardianAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newGuardian.FirstName) || string.IsNullOrWhiteSpace(_newGuardian.LastName))
+        {
+            _guardianError = "First and last name are required.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        _guardianError = null;
+        try
+        {
+            var assignment = new GuardianAssignment(
+                null,
+                _newGuardian.FirstName!.Trim(),
+                _newGuardian.LastName!.Trim(),
+                _newGuardian.RelationshipCodedValueId,
+                _newGuardian.ContactChannel,
+                string.IsNullOrWhiteSpace(_newGuardian.ContactValue) ? null : _newGuardian.ContactValue.Trim(),
+                _newGuardian.TitleCodedValueId);
+            await AddDraftAsync(assignment);
+            _panelMode = GuardianPanelMode.List;
+            _newGuardian = GuardianAssignmentModel.ForAdd();
+            _pickerRows = [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to add new guardian");
+            _guardianError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task AddSelectedGuardiansAsync()
+    {
+        _guardianError = null;
+        try
+        {
+            foreach (var row in _selectedRows.Values)
+            {
+                var assignment = new GuardianAssignment(row.Id, row.FirstName, row.LastName, row.RelationshipCodedValueId, null, null, null);
+                await AddDraftAsync(assignment);
+            }
+            _panelMode = GuardianPanelMode.List;
+            _pickerRows = [];
+            _selectedRows = new();
+            _studentResults = [];
+            _selectedStudentId = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to add selected guardians");
+            _guardianError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>Create mode: append a draft to the model. Edit mode: create the
+    /// guardian (if new) and link it to the student immediately.</summary>
+    private async Task AddDraftAsync(GuardianAssignment assignment)
+    {
+        if (IsEditMode)
+        {
+            var ct = CancellationToken.None;
+            var guardianId = assignment.ExistingGuardianId
+                ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                    assignment.TitleCodedValueId, assignment.FirstName, assignment.LastName, null, null, null), ct);
+            await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                StudentId!.Value, guardianId, assignment.RelationshipCodedValueId, assignment.Role, false, null), ct);
+            await LoadGuardiansAsync(StudentId.Value, ct);
+        }
+        else
+        {
+            if (assignment.ExistingGuardianId is { } id && Model.GuardianLinks.Any(g => g.ExistingGuardianId == id))
+                return;
+            Model.GuardianLinks.Add(assignment);
+            if (assignment.RelationshipCodedValueId is { } relId)
+                await EnsureRelNameAsync(relId);
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RemoveGuardianAsync(Guid guardianId)
+    {
+        if (!IsEditMode) return;
+        _guardianError = null;
+        try
+        {
+            await Api.UnlinkGuardianAsync(StudentId!.Value, guardianId);
+            await LoadGuardiansAsync(StudentId.Value, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to unlink guardian {GuardianId}", guardianId);
+            _guardianError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RemoveGuardianAsync(int index)
+    {
+        if (IsEditMode) return;
+        if (index < 0 || index >= Model.GuardianLinks.Count) return;
+        Model.GuardianLinks.RemoveAt(index);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task EnsureRelNameAsync(Guid relId)
+    {
+        if (_relNames.ContainsKey(relId)) return;
+        try
+        {
+            var cv = await CodedValuesApi.GetByIdAsync(relId, CancellationToken.None);
+            if (cv is not null) _relNames[cv.Id] = cv.Name;
+        }
+        catch
+        {
+            // Non-fatal: the relationship name is only a display nicety.
+        }
     }
 }

@@ -1,5 +1,52 @@
 .picker-dialog {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 8px;
+    min-width: 0; /* prevents flex overflow */
+}
+
+/* Browse mode: grid + create button */
+.picker-dialog .fluent-stack {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+/* Create mode: StudentFormFields needs room for the guardian section separator */
+.picker-dialog > .student-form-fields {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    max-height: calc(90vh - 200px); /* leave room for dialog chrome + action buttons */
+}
+
+/* Ensure the guardian section divider in StudentFormFields is visible
+   (it uses border-top on .student-section-divider). The flex gap above
+   gives it breathing room. */
+.picker-dialog .student-section-divider {
+    /* inherited from StudentFormFields.razor.css; rule here is a
+       documentation anchor so the separator isn't accidentally removed */
+    margin-top: 1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+}
+
+/* Dialog footer (DialogShellFooter) already draws its own border-top
+   via .button-row. The flex column layout ensures the footer sits
+   below the scrolling form with a clean separator. */
+.picker-dialog > .fluent-stack:last-child {
+    flex-shrink: 0;
+}
+
+/* Browse mode: EntityGrid should scroll within the dialog */
+.picker-dialog entity-grid,
+.picker-dialog fluent-data-grid {
+    min-height: 0;
+}
+
+/* Responsive: limit max height on small screens */
+@media (max-height: 600px) {
+    .picker-dialog > .student-form-fields {
+        max-height: calc(85vh - 200px);
+    }
 }

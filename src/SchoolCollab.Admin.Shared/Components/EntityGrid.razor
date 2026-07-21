@@ -135,7 +135,7 @@
     [Parameter] public bool ShowChips { get; set; } = true;
 
     private string EffectiveTemplate
-        => (Selected is not null ? "44px " : string.Empty) + GridSettings.GridTemplateColumns;
+        => (Selected is not null ? "56px " : string.Empty) + GridSettings.GridTemplateColumns;
 
     private object KeyOf(TItem item) => GetKey is not null ? GetKey(item) : item!;
 
