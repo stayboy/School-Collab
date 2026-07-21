@@ -1,0 +1,56 @@
+@* Reusable guardian detail form (presentational). Renders the Title / name /
+   relationship / contact fields bound to a GuardianAssignmentModel. Used by
+   StudentFormFields (inline, no dialog) and GuardianFormDialog. This component
+   is intentionally NOT an <EditForm> — the owning form supplies validation and
+   the submit/footer, so it can be embedded without nesting <form> elements. *@
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+
+<FluentStack Orientation="Orientation.Vertical" Spacing="3">
+    <FormRow Label="Title">
+        <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                            @bind-SelectedId="Model.TitleCodedValueId"
+                            Placeholder="Optional" />
+    </FormRow>
+
+    <FormRow Label="First name" Required For="guardianFormFirst">
+        <FluentTextField Id="guardianFormFirst"
+                         @bind-Value="Model.FirstName"
+                         Required Placeholder="First name"
+                         class="guardian-field" />
+    </FormRow>
+
+    <FormRow Label="Last name" Required For="guardianFormLast">
+        <FluentTextField Id="guardianFormLast"
+                         @bind-Value="Model.LastName"
+                         Required Placeholder="Last name"
+                         class="guardian-field" />
+    </FormRow>
+
+    <FormRow Label="Relationship">
+        <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                            @bind-SelectedId="Model.RelationshipCodedValueId"
+                            Placeholder="Select relationship" />
+    </FormRow>
+
+    <FormRow Label="Preferred contact">
+        <DropdownForEnum TEnum="ContactChannel"
+                        @bind-SelectedValue="Model.ContactChannel"
+                        Placeholder="Select mode"
+                        Class="guardian-field" />
+    </FormRow>
+
+    <FormRow Label="Contact value">
+        <FluentTextField Id="guardianFormContact"
+                         @bind-Value="Model.ContactValue"
+                         Placeholder="e.g. 0712345678"
+                         class="guardian-field" />
+    </FormRow>
+</FluentStack>
+
+@code {
+    /// <summary>The guardian being edited. Required.</summary>
+    [Parameter, EditorRequired] public GuardianAssignmentModel Model { get; set; } = default!;
+}

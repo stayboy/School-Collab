@@ -70,6 +70,7 @@
     else
     {
         <StudentFormFields Model="_newModel"
+                           ShowGuardians="true"
                            OnValidSubmit="OnCreateSubmitAsync"
                            ErrorMessage="@_newError"
                            SubmitLabel="Create & enrol"
@@ -100,6 +101,9 @@
     private StudentFormModel _newModel = new();
     private string _newError = string.Empty;
     private bool _creating;
+    // Guards against re-creating the student if the user retries after a
+    // guardian-link failure: once the student exists we only (re)link guardians.
+    private Guid? _createdStudentId;
 
     protected override async Task OnInitializedAsync()
     {
@@ -159,6 +163,7 @@
     {
         _newModel = new StudentFormModel();
         _newError = string.Empty;
+        _createdStudentId = null;
         _view = PickerView.Create;
     }
 
@@ -167,6 +172,7 @@
         _view = PickerView.Browse;
         _newModel = new StudentFormModel();
         _newError = string.Empty;
+        _createdStudentId = null;
     }
 
     private async Task OnCreateSubmitAsync()
@@ -178,17 +184,33 @@
             var m = _newModel;
             var request = new CreateStudentRequest(
                 m.StudentNumber!, m.FirstName!, m.LastName!, m.DateOfBirth, m.GenderCodedValueId);
-            var id = await StudentsApi.CreateStudentAsync(request);
+            var id = _createdStudentId ?? await StudentsApi.CreateStudentAsync(request);
+            _createdStudentId = id;
             var created = await StudentsApi.GetStudentByIdAsync(id);
             if (created is null)
             {
                 _newError = "The student was created but could not be loaded. Add them from the list instead.";
                 return;
             }
+
+            // Wire up any guardians captured inline (the form's Create mode drafts
+            // them onto the model). Existing guardians are linked directly; new
+            // guardians are created first, then linked to the new student.
+            var ct = CancellationToken.None;
+            foreach (var g in m.GuardianLinks)
+            {
+                var guardianId = g.ExistingGuardianId
+                    ?? await StudentsApi.CreateGuardianAsync(
+                        new CreateGuardianRequest(g.TitleCodedValueId, g.FirstName, g.LastName, null, null, null), ct);
+                await StudentsApi.LinkGuardianAsync(
+                    new LinkGuardianRequest(id, guardianId, g.RelationshipCodedValueId, g.Role, false, null), ct);
+            }
+
             var core = ToCore(created);
             _selected = new Dictionary<object, SchoolCollab.Students.Core.DTOs.StudentDto>(_selected) { [core.Id] = core };
             _view = PickerView.Browse;
             _newModel = new StudentFormModel();
+            _createdStudentId = null;
         }
         catch (Exception ex)
         {

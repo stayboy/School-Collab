@@ -61,7 +61,7 @@ public class GuardianContactsCqrsTests
 
     private static async Task<Guid> SeedStudentAsync(StudentsTestScope s, string number)
     {
-        var student = Student.Create(number, "Ward", "Pupil", null, null).WithTenant(s.Tenants);
+        var student = Student.Create(number, "Ward", "Pupil", new DateOnly(2015, 1, 1), Guid.NewGuid()).WithTenant(s.Tenants);
         await StudentRepo(s).AddAsync(student, default);
         return student.Id;
     }

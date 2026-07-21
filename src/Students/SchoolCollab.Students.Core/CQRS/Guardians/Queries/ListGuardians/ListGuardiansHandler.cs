@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Core.CQRS.Guardians.Queries.ListGuardians;
@@ -35,7 +36,10 @@ public sealed class ListGuardiansHandler(
                 {
                     q = q.Where(g => g.FirstName.Contains(search)
                                  || g.LastName.Contains(search)
-                                 || (g.DisplayName != null && g.DisplayName.Contains(search)));
+                                 || (g.DisplayName != null && g.DisplayName.Contains(search))
+                                 || db.Contacts.Any(c => c.OwnerType == ContactOwnerType.Guardian
+                                                      && c.OwnerId == g.Id
+                                                      && c.Value.Contains(search)));
                 }
                 var results = await q.OrderBy(g => g.LastName).ThenBy(g => g.FirstName)
                     .ToArrayAsync(ct);

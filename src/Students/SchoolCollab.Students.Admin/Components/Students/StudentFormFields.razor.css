@@ -65,3 +65,45 @@
 .form-actions--right {
     justify-content: flex-end;
 }
+
+/* Horizontal separator between the student fields and the opt-in Guardians
+   section. Wraps a <FluentDivider /> to provide consistent vertical breathing
+   room (margin/padding) that matches the .form-actions separator. */
+.student-section-separator {
+    margin-top: 1rem;
+    padding-top: 1rem;
+}
+
+/* ── Guardians section (opt-in via ShowGuardians) ── */
+.student-guardians {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.guardian-add-buttons {
+    margin-top: 0.25rem;
+}
+.muted {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}
+/* ── Guardian add section (inline panel switch, no nested dialog) ── */
+.guardian-add-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding: 0.75rem;
+    border: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    border-radius: 6px;
+    background: var(--neutral-layer-2, #fafafa);
+}
+.guardian-add-title {
+    margin: 0;
+    font-size: 0.95rem;
+}
+.guardian-tabs {
+    margin: 0.25rem 0;
+}
+.guardian-add-actions {
+    margin-top: 0.25rem;
+}

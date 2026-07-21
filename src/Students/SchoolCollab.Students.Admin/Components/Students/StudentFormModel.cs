@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels;
 
 namespace SchoolCollab.Students.Admin.Components.Students;
 
@@ -23,9 +24,19 @@ public sealed class StudentFormModel
     [Required]
     public string? LastName { get; set; }
 
-    /// <summary>Optional. Bound to a FluentDatePicker in the shared form.</summary>
+    /// <summary>Required. Bound to a FluentDatePicker in the shared form.</summary>
+    [Required(ErrorMessage = "Date of birth is required.")]
     public DateOnly? DateOfBirth { get; set; }
 
-    /// <summary>Optional. Bound to a CodedValueDropdown for parent GENDER.</summary>
+    /// <summary>Required. Bound to a CodedValueDropdown for parent GENDER.</summary>
+    [Required(ErrorMessage = "Gender is required.")]
     public Guid? GenderCodedValueId { get; set; }
+
+    /// <summary>
+    /// Guardians drafted on the create form (create mode only). Populated by the
+    /// shared form's guardian section; the calling page links them after the
+    /// student is created. Ignored in edit mode, where guardians are linked to
+    /// the existing student immediately via the API.
+    /// </summary>
+    public List<GuardianAssignment> GuardianLinks { get; set; } = new();
 }

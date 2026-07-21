@@ -32,9 +32,11 @@ internal sealed class StudentConfiguration : TenantEntityTypeConfigurationBase<S
             .IsRequired()
             .HasMaxLength(200);
 
-        builder.Property(x => x.DateOfBirth);
+        builder.Property(x => x.DateOfBirth)
+            .IsRequired();
 
-        builder.Property(x => x.GenderCodedValueId);
+        builder.Property(x => x.GenderCodedValueId)
+            .IsRequired();
 
         // FR-7: unique per (tenant, student_number) — was globally unique on StudentNumber.
         builder.HasIndex(x => new { x.TenantId, x.StudentNumber })

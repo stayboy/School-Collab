@@ -35,6 +35,17 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         DateOnly? dateOfBirth,
         Guid? genderCodedValueId)
     {
+        if (string.IsNullOrWhiteSpace(studentNumber))
+            throw new ArgumentException("Student number is required.", nameof(studentNumber));
+        if (string.IsNullOrWhiteSpace(firstName))
+            throw new ArgumentException("First name is required.", nameof(firstName));
+        if (string.IsNullOrWhiteSpace(lastName))
+            throw new ArgumentException("Last name is required.", nameof(lastName));
+        if (dateOfBirth is null)
+            throw new ArgumentException("Date of birth is required.", nameof(dateOfBirth));
+        if (genderCodedValueId is null)
+            throw new ArgumentException("Gender is required.", nameof(genderCodedValueId));
+
         var now = DateTimeOffset.UtcNow;
         var student = new Student
         {
@@ -60,6 +71,15 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         DateOnly? dateOfBirth,
         Guid? genderCodedValueId)
     {
+        if (string.IsNullOrWhiteSpace(firstName))
+            throw new ArgumentException("First name is required.", nameof(firstName));
+        if (string.IsNullOrWhiteSpace(lastName))
+            throw new ArgumentException("Last name is required.", nameof(lastName));
+        if (dateOfBirth is null)
+            throw new ArgumentException("Date of birth is required.", nameof(dateOfBirth));
+        if (genderCodedValueId is null)
+            throw new ArgumentException("Gender is required.", nameof(genderCodedValueId));
+
         FirstName = firstName.Trim();
         LastName = lastName.Trim();
         DateOfBirth = dateOfBirth;
