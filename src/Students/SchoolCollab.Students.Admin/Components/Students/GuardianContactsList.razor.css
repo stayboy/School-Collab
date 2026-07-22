@@ -1,0 +1,107 @@
+/* ── Guardian contacts list (read-only) ─────────────────────────────
+   Used in the student detail view's "Contacts" section. Each card
+   represents one linked guardian, with all their contact channels
+   listed inside. Primary contacts are visually anchored; non-primary
+   rows use a quieter style so the eye lands on the primary first. */
+
+.guardian-contacts {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.guardian-contact-card {
+    border: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+    border-radius: 6px;
+    padding: 12px 16px;
+    background: var(--neutral-layer-1, #ffffff);
+}
+
+.guardian-contact-header {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.guardian-contact-name {
+    font-size: 1rem;
+}
+
+.guardian-contact-role {
+    font-size: 0.7rem;
+}
+
+.guardian-contact-emergency {
+    font-size: 0.7rem;
+}
+
+.guardian-contact-relationship {
+    font-size: 0.9rem;
+}
+
+.guardian-contact-empty {
+    margin: 4px 0 0;
+    font-size: 0.9rem;
+}
+
+.guardian-contact-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.guardian-contact-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 4px 0;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+    /* Top border on each row (NOT a <FluentDivider>) so the line aligns
+       with the text baseline and the row's left edge — same convention
+       as the action-button separator in DialogShellFooter. */
+}
+
+.guardian-contact-row:first-child {
+    border-top: none;
+    padding-top: 0;
+}
+
+.guardian-contact-row--primary {
+    font-weight: 500;
+}
+
+.guardian-contact-channel {
+    color: var(--neutral-foreground-hint);
+    min-width: 110px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.guardian-contact-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    word-break: break-word;
+}
+
+.guardian-contact-label {
+    font-size: 0.85rem;
+}
+
+.guardian-contact-badges {
+    display: inline-flex;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.guardian-contact-badge {
+    font-size: 0.7rem;
+}
+
+.muted { color: var(--neutral-foreground-hint); }

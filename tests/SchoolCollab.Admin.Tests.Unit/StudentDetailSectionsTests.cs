@@ -257,16 +257,73 @@ public class StudentDetailSectionsTests
     }
 
     [TestMethod]
-    public void Detail_Embeds_Guardians_And_Contacts_Subcomponents()
+    public void Detail_Embeds_Guardians_Contacts_And_DirectContact()
     {
-        // Both subcomponents must be embedded (not reimplemented). The
-        // component names in the markup confirm this.
+        // The three subcomponents must be embedded (not reimplemented).
+        // Their placement tells the information-architecture story:
+        //   - GuardiansTab  → "Guardians" section (who is linked)
+        //   - ContactsEditor OwnerType=Student  → INSIDE the Profile card
+        //     (the student's own direct contact, as part of the student)
+        //   - GuardianContactsList  → "Contacts" section (how to reach
+        //     each guardian)
+        // The component names in the markup confirm the wiring.
         var source = ReadDetailSource();
         source.Should().Contain("<GuardiansTab", "the Guardians section embeds the shared GuardiansTab");
         source.Should().Contain("StudentId=\"Id\"", "the embedded GuardiansTab binds to the route Id");
-        source.Should().Contain("<ContactsEditor", "the Contacts section embeds the shared ContactsEditor");
+        source.Should().Contain("<ContactsEditor", "the Profile card embeds the shared ContactsEditor for the student's own contact");
         source.Should().Contain("OwnerType=\"ContactOwnerType.Student\"", "the embedded ContactsEditor uses the Student owner type");
-        source.Should().Contain("OwnerId=\"@Id\"", "the embedded ContactsEditor binds to the route Id");
+        source.Should().Contain("<GuardianContactsList", "the Contacts section embeds the new GuardianContactsList");
+        source.Should().Contain("StudentId=\"Id\"", "the embedded GuardianContactsList binds to the route Id");
+    }
+
+    [TestMethod]
+    public void Profile_Card_Contains_Student_Own_Contacts_Editor()
+    {
+        // The student's own contact editor lives INSIDE the Profile card,
+        // not in a separate page section. Asserted by structure: the
+        // <ContactsEditor OwnerType=Student ...> tag must come AFTER the
+        // <FluentCard class="detail-card"> opening tag and BEFORE its
+        // matching </FluentCard> closing tag.
+        var source = ReadDetailSource();
+        var cardOpen = source.IndexOf("<FluentCard class=\"detail-card\">", StringComparison.Ordinal);
+        cardOpen.Should().BeGreaterThan(-1, "the Profile FluentCard exists");
+        var cardClose = source.IndexOf("</FluentCard>", cardOpen, StringComparison.Ordinal);
+        cardClose.Should().BeGreaterThan(-1, "the Profile FluentCard is closed");
+        var cardBody = source.Substring(cardOpen, cardClose - cardOpen);
+
+        cardBody.Should().Contain("OwnerType=\"ContactOwnerType.Student\"",
+            "the student's own ContactsEditor is rendered inside the Profile card");
+        cardBody.Should().Contain("class=\"profile-grid\"",
+            "the Profile stat-cards are still inside the Profile card");
+        cardBody.Should().Contain("profile-section-sep",
+            "a divider separates the identity stat-cards from the direct-contact editor");
+    }
+
+    [TestMethod]
+    public void Contacts_Section_Embeds_GuardianContactsList_Not_StudentContacts()
+    {
+        // The Contacts section is for GUARDIANS' contacts, not the
+        // student's own. Asserted by: the <GuardianContactsList> tag
+        // comes AFTER the <h3>Contacts</h3> heading, AND no
+        // <ContactsEditor OwnerType=Student> tag appears in that
+        // section's body.
+        var source = ReadDetailSource();
+        var headerStart = source.IndexOf("<h3>Contacts</h3>", StringComparison.Ordinal);
+        headerStart.Should().BeGreaterThan(-1, "the Contacts section heading exists");
+
+        // Slice from the header to the next <div class="section-header">
+        // (i.e. the start of whatever section follows Contacts) or the
+        // end of the file if Contacts is the last section.
+        var afterHeader = source.Substring(headerStart);
+        var nextSection = afterHeader.IndexOf("<div class=\"section-header\"", 1, StringComparison.Ordinal);
+        var sectionBody = nextSection > 0
+            ? afterHeader.Substring(0, nextSection)
+            : afterHeader;
+
+        sectionBody.Should().Contain("<GuardianContactsList",
+            "the Contacts section embeds the GuardianContactsList");
+        sectionBody.Should().NotContain("OwnerType=\"ContactOwnerType.Student\"",
+            "the Contacts section does NOT host the student's own ContactsEditor (that lives in the Profile card)");
     }
 
     [TestMethod]

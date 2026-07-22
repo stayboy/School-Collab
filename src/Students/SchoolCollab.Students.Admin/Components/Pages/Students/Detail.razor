@@ -77,6 +77,21 @@
                                     <span class="profile-value">@_student.UpdatedAt.ToLocalTime().ToString("g")</span>
                                 </div>
                             </div>
+
+                            @* ── Direct contact (student's own email/SMS/WhatsApp)
+                               Lives inside the Profile card so the student's own
+                               data stays grouped as "the student" — not split
+                               between two equally-weighted page sections. The
+                               shared <ContactsEditor OwnerType=Student> reuses
+                               the same load/add/remove/verify/primary pattern
+                               used everywhere else in the app. *@
+                            <FluentDivider class="profile-section-sep" Role="DividerRole.Presentation" />
+                            <div class="section-header section-header--sub">
+                                <h4>Direct contact</h4>
+                            </div>
+                            <ContactsEditor OwnerType="ContactOwnerType.Student"
+                                             OwnerId="@Id"
+                                             ShowSubscription="false" />
                         </FluentCard>
 
                         @* ── Enrollments section ──────────────────────────────────
@@ -168,9 +183,15 @@
                         <div class="section-header"><h3>Guardians</h3></div>
                         <GuardiansTab StudentId="Id" />
 
-                        @* ── Contacts (embedded, not in a tab) ───────────────────── *@
+                        @* ── Contacts (embedded, not in a tab) — guardians & their
+                           contacts. The student's own direct contact is inside
+                           the Profile card above. This section answers "how do
+                           I reach this student's guardians?" — one card per
+                           linked guardian, with all their channels (primary
+                           anchored, others de-emphasized). Edits to a
+                           guardian's contact happen on GuardianDetail.razor. *@
                         <div class="section-header"><h3>Contacts</h3></div>
-                        <ContactsEditor OwnerType="ContactOwnerType.Student" OwnerId="@Id" />
+                        <GuardianContactsList StudentId="Id" />
                     }
                 </ChildContent>
                 <Fallback>
