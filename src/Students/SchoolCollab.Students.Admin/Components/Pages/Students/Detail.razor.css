@@ -1,7 +1,63 @@
+/* ── Layout (preserved from prior version) ─────────────────────────── */
 .page-container { height: 100%; gap: 0; }
-.title-row { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-top: 0.25rem; }
+.title-row { flex-shrink: 0; display: flex; align-items: flex-start; gap: 0.75rem; padding-top: 0.25rem; }
+.title-block { display: flex; flex-direction: column; gap: 0.15rem; min-width: 0; }
 .page-title { margin: 0; }
+.page-subtitle { margin: 0; color: var(--neutral-foreground-hint); font-size: 0.9rem; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
+.title-sep { opacity: 0.6; }
 .action-bar { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-bottom: 0.75rem; }
 .spinner-container { flex: 1; display: flex; align-items: center; justify-content: center; }
-.form-container { max-width: 600px; }
-.form-field { margin-bottom: 1rem; }
+
+/* ── Section header (h3 + inline action bar) ───────────────────────── */
+.section-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 1.5rem 0 0.5rem;
+}
+.section-header h3 { margin: 0; flex: 1; min-width: 0; }
+
+/* ── Profile grid (mirrors GuardianDetail.razor.css) ──────────────── */
+.profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 8px 24px; }
+.profile-row { display: flex; gap: 8px; align-items: baseline; }
+.profile-label { font-weight: 600; min-width: 110px; color: var(--neutral-foreground-hint); }
+.profile-value { word-break: break-word; }
+.muted { color: var(--neutral-foreground-hint); }
+
+/* ── Enrollments table ─────────────────────────────────────────────── */
+.enrollments-grid { width: 100%; }
+
+/* ── FluentCard popup / dropdown clipping fix ─────────────────────────
+   This component hosts FluentSelect and CodedValueDropdown controls
+   inside several FluentCard panels. The <fluent-card> host style is
+   `:host{ display:block; contain:content }`. `contain:paint` clips
+   descendants to the card's padding box independent of `overflow`, and
+   `contain:layout` makes the card a containing block for `position:fixed`
+   descendants. That clips the popup lists used by the dropdowns.
+
+   Fixing the card alone is not enough because the layout's `.page-scroll`
+   (`MainLayout.razor.css`, overflow:auto) is the sole scroll region and
+   also clips a `position:absolute` popup that extends past its bottom
+   edge. The pragmatic fix is:
+     1. `contain: none !important` on the card — removes paint clipping and
+        removes the card as a fixed containing block.
+     2. `position: fixed !important` on the popup elements — the anchored
+        region inside FluentSelect / CodedValueDropdown uses delta-based
+        viewport positioning, so fixed placement still positions correctly
+        under the trigger, and it escapes .page-scroll overflow.
+
+   Reference: microsoft/fluentui-blazor#2791 (closed with only a CSS
+   workaround; no library fix as of FluentUI v4.14.2).
+
+   The same workaround is used in GuardianDetail.razor.css,
+   GuardiansTab.razor.css, and GradeLevelWizard.razor.css; keep them in
+   sync. */
+.detail-card {
+    overflow: visible;
+    contain: none !important;
+}
+
+::deep .detail-card .fluent-popup-body,
+::deep .detail-card .fluent-listbox {
+    position: fixed !important;
+}

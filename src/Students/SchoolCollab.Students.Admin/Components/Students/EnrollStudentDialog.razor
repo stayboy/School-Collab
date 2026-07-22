@@ -1,0 +1,141 @@
+@* Enroll a student in a period + grade level. The dialog is a thin shell
+   over StudentsApiClient.EnrollStudentAsync; it presents a three-field
+   form (period, grade, enrolled-on date) and the shared DialogShellFooter
+   handles save/cancel/error/saving state. *@
+@inherits DialogShellBase<EnrollStudentModel, EnrollStudentResult>
+@using SchoolCollab.Students.Admin.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject ILogger<EnrollStudentDialog> Logger
+
+<div class="enroll-dialog">
+    @if (_loading)
+    {
+        <FluentProgressRing />
+    }
+    else if (_error is not null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+    else if (_periods.Length == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">
+            No periods are configured yet — create one before enrolling.
+        </FluentMessageBar>
+    }
+    else if (_gradeLevels.Length == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">
+            No grade levels are configured yet — create one before enrolling.
+        </FluentMessageBar>
+    }
+    else
+    {
+        <EditForm Model="_form" OnValidSubmit="HandleSubmitAsync">
+            <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                <FluentSelect TOption="PeriodDto"
+                              Items="_periods"
+                              @bind-SelectedOption="_selectedPeriod"
+                              OptionText="@(p => $"{p.Name} ({p.StartDate:yyyy-MM-dd} – {p.EndDate:yyyy-MM-dd})")"
+                              OptionValue="@(p => p.Id.ToString())"
+                              Label="Period"
+                              Required="true" />
+
+                <FluentSelect TOption="GradeLevelDto"
+                              Items="_gradeLevels"
+                              @bind-SelectedOption="_selectedGrade"
+                              OptionText="@(g => g.Name)"
+                              OptionValue="@(g => g.Id.ToString())"
+                              Label="Grade level"
+                              Required="true" />
+
+                <FluentDatePicker Value="@EnrolledOnAsDateTime" ValueChanged="@OnEnrolledOnChanged" Label="Enrolled on" Required="true" />
+            </FluentStack>
+
+            <DialogShellFooter Saving="Saving"
+                               Error="Error"
+                               SubmitText="Enroll"
+                               SavingText="Enrolling…"
+                               OnCancel="HandleCancelAsync" />
+        </EditForm>
+    }
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public DateTime? EnrolledOn { get; set; } = DateTime.UtcNow;
+    }
+
+    private readonly FormState _form = new();
+
+    // Bridge: FluentDatePicker binds to DateTime?; the form model keeps the
+    // API contract type (DateOnly?) and we convert on the way out.
+    private DateTime? EnrolledOnAsDateTime => _form.EnrolledOn;
+
+    private async Task OnEnrolledOnChanged(DateTime? value)
+    {
+        _form.EnrolledOn = value;
+        await Task.CompletedTask;
+    }
+
+    private bool _loading = true;
+    private string? _error;
+    private PeriodDto[] _periods = Array.Empty<PeriodDto>();
+    private GradeLevelDto[] _gradeLevels = Array.Empty<GradeLevelDto>();
+    private PeriodDto? _selectedPeriod;
+    private GradeLevelDto? _selectedGrade;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var periodsTask = Api.ListPeriodsAsync(CancellationToken.None);
+            var gradesTask = Api.ListGradeLevelsAsync(CancellationToken.None);
+            await Task.WhenAll(periodsTask, gradesTask);
+
+            _periods = periodsTask.Result ?? Array.Empty<PeriodDto>();
+            _gradeLevels = gradesTask.Result ?? Array.Empty<GradeLevelDto>();
+
+            // Pre-select what the caller suggested, otherwise the first item.
+            _selectedPeriod = _periods.FirstOrDefault(p => p.Id == Model.SuggestedPeriodId)
+                              ?? _periods.FirstOrDefault();
+            _selectedGrade = _gradeLevels.FirstOrDefault(g => g.Id == Model.SuggestedGradeLevelId)
+                             ?? _gradeLevels.FirstOrDefault();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load enroll data for student {StudentId}", Model.StudentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    protected override async Task<EnrollStudentResult?> SubmitAsync(EnrollStudentModel model)
+    {
+        if (_selectedPeriod is null || _selectedGrade is null || _form.EnrolledOn is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var enrolledOn = DateOnly.FromDateTime(_form.EnrolledOn.Value);
+            await Api.EnrollStudentAsync(new EnrollStudentRequest(
+                model.StudentId,
+                _selectedPeriod.Id,
+                _selectedGrade.Id,
+                enrolledOn));
+            return new EnrollStudentResult(true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to enroll student {StudentId}", model.StudentId);
+            Error = ex.Message;
+            return null;
+        }
+    }
+}

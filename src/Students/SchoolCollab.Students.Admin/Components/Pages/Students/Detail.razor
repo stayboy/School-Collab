@@ -1,70 +1,106 @@
 @page "/students/{id:guid}"
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Admin.Components.Students
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Students.Core.Domain
-@using SchoolCollab.Admin.Shared.Services
+@using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
+@inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
 @inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
-<PageTitle>Student — @(_student?.StudentNumber ?? "Loading…")</PageTitle>
+<PageTitle>Student — @(_student?.FirstName ?? "Loading…") @_student?.LastName</PageTitle>
 
 <ErrorBoundary>
     <ChildContent>
         <FluentStack Orientation="Orientation.Vertical" class="page-container">
-            <div class="title-row">
-                <h1 class="page-title">@(_student?.StudentNumber ?? "Loading…")</h1>
-                @if (_student is not null)
-                {
-                    <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo($"/students/{Id}/edit")'>Edit</FluentButton>
-                }
-            </div>
-
             <TenantGate>
                 <ChildContent>
-            @if (_student is null)
-            {
-                <div class="spinner-container">
-                    <FluentProgressRing />
-                </div>
-            }
-            else
-            {
-                <FluentTabs>
-                    <FluentTab Label="Overview">
-                        <div class="form-container">
-                            <div class="form-field">
-                                <FluentTextField Value="@_student.StudentNumber" ReadOnly Label="Student Number" />
+                    @if (_student is null)
+                    {
+                        <div class="spinner-container">
+                            <FluentProgressRing />
+                        </div>
+                    }
+                    else
+                    {
+                        @* ── Title row ─────────────────────────────────────────── *@
+                        <div class="title-row">
+                            <div class="title-block">
+                                <h1 class="page-title">@TitleLine</h1>
+                                <p class="page-subtitle">
+                                    <code>@_student.StudentNumber</code>
+                                    <span class="title-sep">·</span>
+                                    @StatusBadge
+                                    <span class="title-sep">·</span>
+                                    Current: <strong>@(CurrentGradeName ?? "—")</strong>
+                                </p>
                             </div>
-                            <div class="form-field">
-                                <FluentTextField Value="@_student.FirstName" ReadOnly Label="First Name" />
-                            </div>
-                            <div class="form-field">
-                                <FluentTextField Value="@_student.LastName" ReadOnly Label="Last Name" />
-                            </div>
-                            <div class="form-field">
-                                <FluentTextField Value="@(_student.DateOfBirth?.ToString() ?? "—")" ReadOnly Label="Date of Birth" />
-                            </div>
-                            <div class="form-field">
-                                @if (_student.IsDeleted)
-                                {
-                                    <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
-                                }
-                                else
-                                {
-                                    <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                                }
-                            </div>
-                            <div class="form-field">
-                                <FluentTextField Value="@_student.CreatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Created At" />
-                            </div>
-                            <div class="form-field">
-                                <FluentTextField Value="@_student.UpdatedAt.ToLocalTime().ToString("g")" ReadOnly Label="Updated At" />
-                            </div>
+                            <FluentButton Appearance="Appearance.Outline"
+                                          OnClick='() => Nav.NavigateTo($"/students/{Id}/edit")'>
+                                Edit
+                            </FluentButton>
                         </div>
 
-                        <h3>Enrollments</h3>
+                        @* ── Profile (FluentCard, single-page section) ─────────── *@
+                        <FluentCard class="detail-card">
+                            <div class="profile-grid">
+                                <div class="profile-row">
+                                    <span class="profile-label">Student #</span>
+                                    <span class="profile-value">@_student.StudentNumber</span>
+                                </div>
+                                <div class="profile-row">
+                                    <span class="profile-label">Full name</span>
+                                    <span class="profile-value">@_student.FirstName @_student.LastName</span>
+                                </div>
+                                <div class="profile-row">
+                                    <span class="profile-label">Date of birth</span>
+                                    <span class="profile-value">@(_student.DateOfBirth?.ToString("d") ?? "—")</span>
+                                </div>
+                                <div class="profile-row">
+                                    <span class="profile-label">Gender</span>
+                                    <span class="profile-value">@(string.IsNullOrWhiteSpace(_student.GenderName) ? "—" : _student.GenderName)</span>
+                                </div>
+                                <div class="profile-row">
+                                    <span class="profile-label">Status</span>
+                                    <span class="profile-value">@StatusBadge</span>
+                                </div>
+                                <div class="profile-row">
+                                    <span class="profile-label">Created</span>
+                                    <span class="profile-value">@_student.CreatedAt.ToLocalTime().ToString("g")</span>
+                                </div>
+                                <div class="profile-row">
+                                    <span class="profile-label">Updated</span>
+                                    <span class="profile-value">@_student.UpdatedAt.ToLocalTime().ToString("g")</span>
+                                </div>
+                            </div>
+                        </FluentCard>
+
+                        @* ── Enrollments section ────────────────────────────────── *@
+                        <div class="section-header">
+                            <h3>Enrollments</h3>
+                            <FluentStack Orientation="Orientation.Horizontal" Spacing="6">
+                                <FluentButton Appearance="Appearance.Accent"
+                                              OnClick="OnEnrollAsync"
+                                              Disabled="@_savingEnrollment">
+                                    <FluentIcon Icon="@(Icons.Regular.Size16.Add)" Slot="start" />
+                                    Enroll
+                                </FluentButton>
+                                <FluentButton Appearance="Appearance.Outline"
+                                              OnClick="OnTransferAsync"
+                                              Disabled="@(HasNoActiveEnrollment || _savingEnrollment)">
+                                    Transfer
+                                </FluentButton>
+                                <FluentButton Appearance="Appearance.Outline"
+                                              OnClick="OnWithdrawAsync"
+                                              Disabled="@(HasNoActiveEnrollment || _savingEnrollment)">
+                                    Withdraw
+                                </FluentButton>
+                            </FluentStack>
+                        </div>
                         @if (_enrollments is null)
                         {
                             <div class="spinner-container">
@@ -73,35 +109,53 @@
                         }
                         else if (_enrollments.Length == 0)
                         {
-                            <FluentMessageBar Intent="MessageIntent.Info">No enrollments yet.</FluentMessageBar>
+                            <FluentMessageBar Intent="MessageIntent.Info">
+                                No enrollments yet — use Enroll to add the first one.
+                            </FluentMessageBar>
                         }
                         else
                         {
                             <FluentDataGrid Items="@_enrollments.AsQueryable()"
                                             TGridItem="StudentEnrollmentDto"
-                                            MultiLine="true">
-                                <PropertyColumn Property="@(e => e.PeriodId)" Title="Period ID" />
-                                <PropertyColumn Property="@(e => e.GradeLevelId)" Title="Grade Level ID" />
-                                <TemplateColumn Title="Enrolled On">
-                                    @context.EnrolledOn.ToString("d")
+                                            MultiLine="true"
+                                            Class="enrollments-grid">
+                                <TemplateColumn Title="Period">
+                                    @(_periodNames.TryGetValue(context.PeriodId, out var pn)
+                                        ? pn
+                                        : context.PeriodId.ToString()[..8])
                                 </TemplateColumn>
-                                <TemplateColumn Title="Exit Date">
-                                    @(context.ExitDate?.ToString("d") ?? "—")
+                                <TemplateColumn Title="Grade">
+                                    @(_gradeLevelNames.TryGetValue(context.GradeLevelId, out var gn)
+                                        ? gn
+                                        : context.GradeLevelId.ToString()[..8])
                                 </TemplateColumn>
-                                <PropertyColumn Property="@(e => e.Status)" />
+                                <TemplateColumn Title="Enrolled on">@context.EnrolledOn.ToString("d")</TemplateColumn>
+                                <TemplateColumn Title="Exit date">@(context.ExitDate?.ToString("d") ?? "—")</TemplateColumn>
+                                <TemplateColumn Title="Status">
+                                    @{
+                                        var isActive = context.ExitDate is null
+                                            && string.Equals(context.Status, "Active", StringComparison.OrdinalIgnoreCase);
+                                        if (isActive)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                                        }
+                                        else
+                                        {
+                                            <FluentBadge Appearance="Appearance.Neutral">@context.Status</FluentBadge>
+                                        }
+                                    }
+                                </TemplateColumn>
                             </FluentDataGrid>
                         }
-                    </FluentTab>
 
-                    <FluentTab Label="Guardians">
+                        @* ── Guardians (embedded, not in a tab) ─────────────────── *@
+                        <div class="section-header"><h3>Guardians</h3></div>
                         <GuardiansTab StudentId="Id" />
-                    </FluentTab>
 
-                    <FluentTab Label="Contacts">
+                        @* ── Contacts (embedded, not in a tab) ───────────────────── *@
+                        <div class="section-header"><h3>Contacts</h3></div>
                         <ContactsEditor OwnerType="ContactOwnerType.Student" OwnerId="@Id" />
-                    </FluentTab>
-                </FluentTabs>
-            }
+                    }
                 </ChildContent>
                 <Fallback>
                     <FluentMessageBar Intent="MessageIntent.Warning">
@@ -111,7 +165,7 @@
             </TenantGate>
 
             <div class="action-bar">
-                <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo("/students")'>Back</FluentButton>
+                <FluentButton Appearance="Appearance.Outline" OnClick='() => Nav.NavigateTo("/students")'>Back to Students</FluentButton>
             </div>
 
             @if (!string.IsNullOrEmpty(_error))
@@ -130,10 +184,73 @@
 
     private StudentDto? _student;
     private StudentEnrollmentDto[]? _enrollments;
+    private Dictionary<Guid, string> _gradeLevelNames = new();
+    private Dictionary<Guid, string> _periodNames = new();
     private string? _error;
+    private bool _savingEnrollment;
+    private bool _isRealTenant;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
-    private bool _isRealTenant;
+
+    /// <summary>
+    /// The student's currently-active enrollment. Active = no exit date AND
+    /// status == "Active". Falls back to the most recent enrollment that
+    /// has no exit date when none is strictly "Active" (e.g. mid-transfer
+    /// transient states).
+    /// </summary>
+    private StudentEnrollmentDto? ActiveEnrollment =>
+        _enrollments?.FirstOrDefault(e => e.ExitDate is null
+            && string.Equals(e.Status, "Active", StringComparison.OrdinalIgnoreCase))
+        ?? _enrollments?.FirstOrDefault(e => e.ExitDate is null);
+
+    private bool HasNoActiveEnrollment => ActiveEnrollment is null;
+
+    private string? CurrentGradeName =>
+        ActiveEnrollment is { } e && _gradeLevelNames.TryGetValue(e.GradeLevelId, out var n)
+            ? n
+            : null;
+
+    /// <summary>
+    /// Enriched title line: "First Last (Gender, Age)". Uses em-dash for
+    /// missing demographics so the visual shape is stable. Age is computed
+    /// from DateOfBirth against today.
+    /// </summary>
+    private string TitleLine
+    {
+        get
+        {
+            if (_student is null) return "Loading…";
+            var name = $"{_student.FirstName} {_student.LastName}".Trim();
+            var gender = string.IsNullOrWhiteSpace(_student.GenderName) ? "—" : _student.GenderName;
+            var age = AgeFromDob(_student.DateOfBirth);
+            var ageText = age.HasValue ? age.Value.ToString() : "—";
+            return string.IsNullOrEmpty(name) ? _student.StudentNumber : $"{name} ({gender}, {ageText})";
+        }
+    }
+
+    private static int? AgeFromDob(DateOnly? dob)
+    {
+        if (dob is null) return null;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var age = today.Year - dob.Value.Year;
+        if (today < dob.Value.AddYears(age)) age--;
+        return age < 0 ? null : age;
+    }
+
+    private RenderFragment StatusBadge => __builder =>
+    {
+        if (_student is null) return;
+        if (_student.IsDeleted)
+        {
+            <FluentBadge Appearance="Appearance.Neutral">Deleted</FluentBadge>
+            ;
+        }
+        else
+        {
+            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+            ;
+        }
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -147,11 +264,11 @@
         Logger.LogInformation("Loading student {StudentId}", Id);
         try
         {
+            // 1. Student + enrollments in parallel (unchanged from the prior
+            //    behavior).
             var studentTask = Api.GetStudentByIdAsync(Id, ct);
             var enrollmentsTask = Api.ListEnrollmentsByStudentAsync(Id, ct);
-
             await Task.WhenAll(studentTask, enrollmentsTask);
-
             if (_disposed) return;
 
             _student = studentTask.Result;
@@ -164,9 +281,34 @@
             }
             else
             {
-                Logger.LogInformation("Loaded student {StudentNumber} with {Count} enrollments",
-                    _student.StudentNumber, _enrollments?.Length ?? 0);
+                Logger.LogInformation(
+                    "Loaded student {StudentNumber} with {Count} enrollments",
+                    _student.StudentNumber,
+                    _enrollments?.Length ?? 0);
             }
+
+            // 2. Build the period + grade name lookups the new single-page
+            //    sections need. The collections are bounded (≤ number of
+            //    periods the student has been in, typically < 12) so a
+            //    single round-trip per list is fine.
+            var gradeIds = (_enrollments ?? Array.Empty<StudentEnrollmentDto>())
+                .Select(e => e.GradeLevelId).Distinct().ToArray();
+            var periodIds = (_enrollments ?? Array.Empty<StudentEnrollmentDto>())
+                .Select(e => e.PeriodId).Distinct().ToArray();
+
+            var gradesTask = gradeIds.Length > 0
+                ? Api.ListGradeLevelsAsync(ct)
+                : Task.FromResult<GradeLevelDto[]?>(Array.Empty<GradeLevelDto>());
+            var periodsTask = periodIds.Length > 0
+                ? Api.ListPeriodsAsync(ct)
+                : Task.FromResult<PeriodDto[]?>(Array.Empty<PeriodDto>());
+            await Task.WhenAll(gradesTask, periodsTask);
+            if (_disposed) return;
+
+            _gradeLevelNames = (gradesTask.Result ?? Array.Empty<GradeLevelDto>())
+                .ToDictionary(g => g.Id, g => g.Name);
+            _periodNames = (periodsTask.Result ?? Array.Empty<PeriodDto>())
+                .ToDictionary(p => p.Id, p => p.Name);
         }
         catch (OperationCanceledException)
         {
@@ -177,6 +319,92 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load student {StudentId}", Id);
             _error = ex.Message;
+        }
+    }
+
+    // ── Enrollment / transfer / withdraw actions ────────────────────────
+
+    private async Task OnEnrollAsync()
+    {
+        if (_disposed || _student is null) return;
+        var model = new EnrollStudentModel(
+            StudentId: Id,
+            SuggestedPeriodId: ActiveEnrollment?.PeriodId,
+            SuggestedGradeLevelId: ActiveEnrollment?.GradeLevelId);
+        var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
+            model, "Enroll student", DialogSize.Medium);
+        if (result is { Success: true })
+        {
+            await ReloadEnrollmentsAsync();
+        }
+    }
+
+    private async Task OnTransferAsync()
+    {
+        if (_disposed) return;
+        var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
+            new StudentTransferModel(Id), "Transfer student", DialogSize.Medium);
+        if (result is { Success: true })
+        {
+            await ReloadEnrollmentsAsync();
+        }
+    }
+
+    private async Task OnWithdrawAsync()
+    {
+        if (_disposed || ActiveEnrollment is not { } active) return;
+        var result = await DialogService.ShowShellDialogAsync<WithdrawEnrollmentDialog, WithdrawEnrollmentModel, WithdrawEnrollmentResult>(
+            new WithdrawEnrollmentModel(
+                EnrollmentId: active.Id,
+                StudentName: $"{_student?.FirstName} {_student?.LastName}".Trim(),
+                GradeName: _gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : null,
+                DefaultExitDate: DateOnly.FromDateTime(DateTime.UtcNow)),
+            "Withdraw student",
+            DialogSize.Medium);
+        if (result is { Success: true })
+        {
+            await ReloadEnrollmentsAsync();
+        }
+    }
+
+    private async Task ReloadEnrollmentsAsync()
+    {
+        if (_disposed) return;
+        _savingEnrollment = true;
+        try
+        {
+            _enrollments = await Api.ListEnrollmentsByStudentAsync(Id) ?? Array.Empty<StudentEnrollmentDto>();
+
+            // Rebuild lookup dicts if the mutation introduced a fresh
+            // period or grade we hadn't seen.
+            var gradeIds = _enrollments.Select(e => e.GradeLevelId).Distinct().ToArray();
+            var periodIds = _enrollments.Select(e => e.PeriodId).Distinct().ToArray();
+
+            if (gradeIds.Except(_gradeLevelNames.Keys).Any())
+            {
+                foreach (var g in await Api.ListGradeLevelsAsync() ?? Array.Empty<GradeLevelDto>())
+                {
+                    _gradeLevelNames[g.Id] = g.Name;
+                }
+            }
+            if (periodIds.Except(_periodNames.Keys).Any())
+            {
+                foreach (var p in await Api.ListPeriodsAsync() ?? Array.Empty<PeriodDto>())
+                {
+                    _periodNames[p.Id] = p.Name;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reload enrollments for student {StudentId}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _savingEnrollment = false;
+            await InvokeAsync(StateHasChanged);
         }
     }
 
