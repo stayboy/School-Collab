@@ -22,7 +22,9 @@ public sealed record StudentDto(
     DateTimeOffset UpdatedAt,
     // Enriched client-side (see EnrichStudentsAsync). Left null by the API.
     int? Age = null,
-    string? GenderName = null);
+    string? GenderName = null,
+    // Current grade enrollment info, populated client-side from enrollments
+    GradeLevelDto? CurrentGrade = null);
 
 public sealed record GradeLevelDto(
     Guid Id,
@@ -319,10 +321,71 @@ public sealed class StudentsApiClient : IContactsClient
 
         var names = await _codedValues.GetByIdsAsync(genderIds, ct);
         var map = names.ToDictionary(x => x.Id, x => x.Name);
+        
+        // Enrich with grade level info
+        var studentIds = withAge.Select(s => s.Id).ToArray();
+        var enrollmentsByStudent = new Dictionary<Guid, StudentEnrollmentDto[]>();
+        
+        // Get enrollments for each student
+        foreach (var studentId in studentIds)
+        {
+            try
+            {
+                var enrollments = await ListEnrollmentsByStudentAsync(studentId, ct);
+                if (enrollments != null)
+                {
+                    enrollmentsByStudent[studentId] = enrollments;
+                }
+            }
+            catch (Exception)
+            {
+                // Continue with other students if one fails
+            }
+        }
+
+        // Get all grade level IDs needed from enrollments
+        var gradeIds = enrollmentsByStudent
+            .SelectMany(kvp => kvp.Value)
+            .Select(e => e.GradeLevelId)
+            .Distinct()
+            .ToArray();
+
+        var gradeDict = new Dictionary<Guid, GradeLevelDto?>();
+        if (gradeIds.Length > 0)
+        {
+            var grades = await ListGradeLevelsAsync(ct);
+            if (grades != null)
+            {
+                gradeDict = grades.ToDictionary(g => g.Id, g => (GradeLevelDto?)g);
+            }
+        }
+
         return withAge.Select(s => s with
         {
-            GenderName = s.GenderCodedValueId is { } id && map.TryGetValue(id, out var name) ? name : null
+            Age = ComputeAge(s.DateOfBirth),
+            GenderName = s.GenderCodedValueId is { } id && map.TryGetValue(id, out var name) ? name : null,
+            CurrentGrade = GetCurrentGrade(s.Id, enrollmentsByStudent, gradeDict)
         }).ToArray();
+    }
+
+    private static GradeLevelDto? GetCurrentGrade(Guid studentId,
+        Dictionary<Guid, StudentEnrollmentDto[]> enrollmentsByStudent,
+        Dictionary<Guid, GradeLevelDto?> gradeDict)
+    {
+        if (!enrollmentsByStudent.TryGetValue(studentId, out var enrollments) || enrollments.Length == 0)
+            return null;
+
+        // Get the most recent active enrollment
+        var currentEnrollment = enrollments
+            .Where(e => e.Status == "Active" || e.ExitDate == null)
+            .OrderByDescending(e => e.EnrolledOn)
+            .FirstOrDefault();
+            
+        if (currentEnrollment == null)
+            return null;
+
+        gradeDict.TryGetValue(currentEnrollment.GradeLevelId, out var grade);
+        return grade;
     }
 
     private async Task<StudentDto?> EnrichSingleAsync(StudentDto? item, CancellationToken ct = default)
