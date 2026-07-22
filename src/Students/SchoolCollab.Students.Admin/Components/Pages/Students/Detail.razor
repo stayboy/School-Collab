@@ -79,27 +79,22 @@
                             </div>
                         </FluentCard>
 
-                        @* ── Enrollments section ────────────────────────────────── *@
+                        @* ── Enrollments section ──────────────────────────────────
+                           Enroll lives in the section header (always available,
+                           the only action that creates a new row). Transfer and
+                           Withdraw are row-level actions on the active
+                           enrollment (the Actions column) — they only make
+                           sense for the row they affect, and the "no active
+                           enrollment" case is naturally expressed by the row
+                           not having the Actions cell. *@
                         <div class="section-header">
                             <h3>Enrollments</h3>
-                            <FluentStack Orientation="Orientation.Horizontal" Spacing="6">
-                                <FluentButton Appearance="Appearance.Accent"
-                                              OnClick="OnEnrollAsync"
-                                              Disabled="@_savingEnrollment">
-                                    <FluentIcon Icon="@(Icons.Regular.Size16.Add)" Slot="start" />
-                                    Enroll
-                                </FluentButton>
-                                <FluentButton Appearance="Appearance.Outline"
-                                              OnClick="OnTransferAsync"
-                                              Disabled="@(HasNoActiveEnrollment || _savingEnrollment)">
-                                    Transfer
-                                </FluentButton>
-                                <FluentButton Appearance="Appearance.Outline"
-                                              OnClick="OnWithdrawAsync"
-                                              Disabled="@(HasNoActiveEnrollment || _savingEnrollment)">
-                                    Withdraw
-                                </FluentButton>
-                            </FluentStack>
+                            <FluentButton Appearance="Appearance.Accent"
+                                          OnClick="OnEnrollAsync"
+                                          Disabled="@_savingEnrollment">
+                                <FluentIcon Icon="@(Icons.Regular.Size16.Add)" Slot="start" />
+                                Enroll
+                            </FluentButton>
                         </div>
                         @if (_enrollments is null)
                         {
@@ -132,17 +127,38 @@
                                 <TemplateColumn Title="Enrolled on">@context.EnrolledOn.ToString("d")</TemplateColumn>
                                 <TemplateColumn Title="Exit date">@(context.ExitDate?.ToString("d") ?? "—")</TemplateColumn>
                                 <TemplateColumn Title="Status">
-                                    @{
-                                        var isActive = context.ExitDate is null
-                                            && string.Equals(context.Status, "Active", StringComparison.OrdinalIgnoreCase);
-                                        if (isActive)
-                                        {
-                                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
-                                        }
-                                        else
-                                        {
-                                            <FluentBadge Appearance="Appearance.Neutral">@context.Status</FluentBadge>
-                                        }
+                                    @{ var isActive = IsActiveEnrollment(context); }
+                                    @if (isActive)
+                                    {
+                                        <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                                    }
+                                    else
+                                    {
+                                        <FluentBadge Appearance="Appearance.Neutral">@context.Status</FluentBadge>
+                                    }
+                                </TemplateColumn>
+                                <TemplateColumn Title="Actions" Class="enrollment-actions-col">
+                                    @{ var rowActive = IsActiveEnrollment(context); }
+                                    @if (rowActive)
+                                    {
+                                        <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
+                                            <FluentButton Appearance="Appearance.Lightweight"
+                                                          Size="ButtonSize.Small"
+                                                          OnClick="OnTransferAsync"
+                                                          Title="Transfer to a different grade level"
+                                                          Disabled="@_savingEnrollment">
+                                                <FluentIcon Icon="@(Icons.Regular.Size16.ArrowSwap)" />
+                                                Transfer
+                                            </FluentButton>
+                                            <FluentButton Appearance="Appearance.Lightweight"
+                                                          Size="ButtonSize.Small"
+                                                          OnClick="OnWithdrawAsync"
+                                                          Title="Set an exit date on this enrollment"
+                                                          Disabled="@_savingEnrollment">
+                                                <FluentIcon Icon="@(Icons.Regular.Size16.ArrowExit)" />
+                                                Withdraw
+                                            </FluentButton>
+                                        </FluentStack>
                                     }
                                 </TemplateColumn>
                             </FluentDataGrid>
@@ -203,7 +219,14 @@
             && string.Equals(e.Status, "Active", StringComparison.OrdinalIgnoreCase))
         ?? _enrollments?.FirstOrDefault(e => e.ExitDate is null);
 
-    private bool HasNoActiveEnrollment => ActiveEnrollment is null;
+    /// <summary>
+    /// Predicate form of <see cref="ActiveEnrollment"/> for use in grid row
+    /// templates, where we have a specific row's enrollment in scope rather
+    /// than the whole list. Same criteria (no exit date AND status == "Active").
+    /// </summary>
+    private static bool IsActiveEnrollment(StudentEnrollmentDto e) =>
+        e.ExitDate is null
+        && string.Equals(e.Status, "Active", StringComparison.OrdinalIgnoreCase);
 
     private string? CurrentGradeName =>
         ActiveEnrollment is { } e && _gradeLevelNames.TryGetValue(e.GradeLevelId, out var n)
