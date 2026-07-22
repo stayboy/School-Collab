@@ -8,9 +8,15 @@
     <link rel="stylesheet" href="@Assets["css/app.css"]" />
     <link rel="stylesheet" href="@Assets["_content/SchoolCollab.Admin.Shared/app.css"]" />
     <link rel="stylesheet" href="@Assets["_content/SchoolCollab.Admin.Shared/nav.css"]" />
-    <link rel="stylesheet" href="@Assets["SchoolCollab.Admin.styles.css"]" />
-    <link rel="stylesheet" href="@Assets["SchoolCollab.Settings.Admin.styles.css"]" />
-    <link rel="stylesheet" href="@Assets["SchoolCollab.Assignments.Admin.styles.css"]" />
+    @* Scoped CSS bundles for this host and the Settings / Assignments
+       RCLs are loaded by the Blazor framework on a per-component basis
+       (the *.razor.css files are emitted as {Project}.bundle.scp.css
+       under _content/{Project}/ and wired up by component rendering,
+       not by App.razor <link> tags). The previous flat-name links
+       (SchoolCollab.Admin.styles.css, SchoolCollab.Settings.Admin.
+       styles.css, SchoolCollab.Assignments.Admin.styles.css) 404'd:
+       that convention was the pre-.NET 8 "first global CSS" path and
+       is no longer produced by the SDK. *@
     <ImportMap />
     <link rel="icon" type="image/png" href="favicon.png" />
     <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
