@@ -10,7 +10,7 @@ public static class AssignmentEndpoints
         // All assignment endpoints require an authenticated user and a resolved TenantContext
         var group = app.MapGroup("/assignments");
 
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
             group.RequireAuthorization();
         }

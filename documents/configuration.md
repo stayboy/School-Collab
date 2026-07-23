@@ -365,7 +365,7 @@ public class MyService(IFeatureFlagService featureFlags)
 var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
 var group = app.MapGroup("/api/my-feature");
 
-if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
 {
     group.RequireAuthorization();
 }
@@ -373,15 +373,20 @@ if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
 
 ### Adding a new flag
 
-1. Add a `Parameters:feature-flag-<name>` entry to
+1. Add a constant to `src/SchoolCollab.Core/Features/FeatureFlagKeys.cs`
+   using the form `FEATURE:<FlagName>`.
+2. Add a `Parameters:feature-flag-<name>` entry to
    `src/AppHost/SchoolCollab.AppHost/appsettings.json` (with the default
    value).
-2. In `src/AppHost/SchoolCollab.AppHost/Program.cs`, declare the
+3. In `src/AppHost/SchoolCollab.AppHost/Program.cs`, declare the
    parameter with `builder.AddParameter("feature-flag-<name>")` and
    wire it onto every consumer with
    `.WithEnvironment("FeatureFlags__FEATURE__<FlagName>", param)`.
-3. Add the flag to the **Introduced flags** table in this section.
-4. Update §2 (parameters table), §11 (env-var reference), and §12
+4. Reference the new constant (`FeatureFlagKeys.<FlagName>`) in consumers,
+   endpoint authorization gating, `FeatureFlagGate` markup, and migration
+   seeds instead of duplicating the raw string.
+5. Add the flag to the **Introduced flags** table in this section.
+6. Update §2 (parameters table), §11 (env-var reference), and §12
    (production checklist) in the same PR.
 
 ### Why no `SchoolCollab.Config` service?

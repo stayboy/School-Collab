@@ -3,6 +3,7 @@
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Auth
+@using SchoolCollab.Core.Features
 @inject TenantsApiClient TenantsApi
 @inject IDevTenantSelection DevTenant
 @inject NavigationManager Nav
@@ -73,7 +74,7 @@
     protected override async Task OnInitializedAsync()
     {
         var disabled = bool.TryParse(
-            Config["FeatureFlags:FEATURE:DisableOIDCAuth"], out var d) && d;
+            Config[$"FeatureFlags:{FeatureFlagKeys.DisableOIDCAuth}"], out var d) && d;
         _show = disabled;
 
         if (!_show)

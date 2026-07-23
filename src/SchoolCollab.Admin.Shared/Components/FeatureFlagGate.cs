@@ -12,7 +12,8 @@ namespace SchoolCollab.Admin.Shared.Components;
 /// </summary>
 public class FeatureFlagGate : GateBase
 {
-    /// <summary>The feature-flag key, e.g. <c>"FEATURE:EnableCodedValuesAiChat"</c>.</summary>
+    /// <summary>The feature-flag key, e.g. <c>"FEATURE:EnableCodedValuesAiChat"</c>.
+    /// Prefer <see cref="FeatureFlagKeys"/u003e constants over raw strings.</summary>
     [Parameter] public string? Key { get; set; }
 
     /// <summary>Hide (default) or disable the gated content when the flag is off.</summary>

@@ -7,6 +7,7 @@ using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Core.Data.Outbox;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Students.Core.Data;
@@ -189,7 +190,7 @@ static async Task SeedEnableCodedValuesAiChatAsync(SettingsDbContext db, Microso
     // Postgres text comparison and would MISS an existing row stored as
     // "FEATURE:ENABLECODEDVALUESAICHAT", causing SaveChangesAsync to violate the
     // partial unique index ix_feature_flags_key_unique on a re-run.
-    var key = FeatureFlag.NormalizeKey("FEATURE:EnableCodedValuesAiChat");
+    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableCodedValuesAiChat);
 
     var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
     if (exists)
@@ -232,7 +233,7 @@ static async Task SeedEnableGradeLevelSetupOnEnrollDialogAsync(SettingsDbContext
 
     // Same canonicalization caveat as the AI-chat seed — compare against the
     // normalized form so a re-run does not violate ix_feature_flags_key_unique.
-    var key = FeatureFlag.NormalizeKey("FEATURE:EnableGradeLevelSetupOnEnrollDialog");
+    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog);
 
     var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
     if (exists)

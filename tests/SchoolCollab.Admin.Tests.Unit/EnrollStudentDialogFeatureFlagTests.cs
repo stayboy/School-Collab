@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text.RegularExpressions;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -106,7 +107,7 @@ public class EnrollStudentDialogFeatureFlagTests
     private const string MigrationServicePath = "src/SchoolCollab.MigrationService/Program.cs";
     private const string ApiClientPath = "src/Students/SchoolCollab.Students.Admin/Services/StudentsApiClient.cs";
     private const string EnrollmentRoutesPath = "src/Students/SchoolCollab.Students.Api/Endpoints/EnrollmentRoutes.cs";
-    private const string ExpectedFlagKey = "FEATURE:EnableGradeLevelSetupOnEnrollDialog";
+    private const string ExpectedFlagKey = FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog;
 
     /// <summary>
     /// Reads a source file from the repo root. The path constants above
@@ -133,7 +134,7 @@ public class EnrollStudentDialogFeatureFlagTests
         var src = Load(DialogPath);
         src.Should().Contain("<FeatureFlagGate",
             "the inline-create-grade UI on EnrollStudentDialog MUST be wrapped in <FeatureFlagGate> so the ConfigFlags landing page can toggle it");
-        src.Should().Contain($"Key=\"{ExpectedFlagKey}\"",
+        src.Should().Contain($"Key=\"@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog\"",
             $"the <FeatureFlagGate> on EnrollStudentDialog MUST key off '{ExpectedFlagKey}' so it ties to the runtime flag seeded by the migration service");
         src.Should().Contain("OnAddNewGradeAsync",
             "the OnAddNewGradeAsync handler (which opens the CodedValueDialog + materializes a GradeLevel) must be wired up — confirms the gated button is the actual create-grade entry point, not an orphan");
@@ -162,7 +163,7 @@ public class EnrollStudentDialogFeatureFlagTests
         // gate, and the closing brace of the @if comes after the
         // gate's closing tag.
         var ifIdx = src.IndexOf("@if (IsNewEnrollment)", StringComparison.Ordinal);
-        var gateIdx = src.IndexOf($"<FeatureFlagGate Key=\"{ExpectedFlagKey}\"", StringComparison.Ordinal);
+        var gateIdx = src.IndexOf($"<FeatureFlagGate Key=\"@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog\"", StringComparison.Ordinal);
         ifIdx.Should().BeGreaterThan(0,
             "the dialog MUST wrap the + button in `@if (IsNewEnrollment)` so the inline grade-setup path is only offered for the new-enrollment case");
         gateIdx.Should().BeGreaterThan(ifIdx,
@@ -189,7 +190,7 @@ public class EnrollStudentDialogFeatureFlagTests
         // Look for the gate opening tag, then the immediate next element
         // (a <FluentButton>), then the gate closing tag. This is a loose
         // shape check — tolerant of whitespace/blank lines.
-        var gateOpenIdx = src.IndexOf($"<FeatureFlagGate Key=\"{ExpectedFlagKey}\"", StringComparison.Ordinal);
+        var gateOpenIdx = src.IndexOf($"<FeatureFlagGate Key=\"@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog\"", StringComparison.Ordinal);
         gateOpenIdx.Should().BeGreaterThan(0, "the FeatureFlagGate opening tag must exist on the dialog");
         var buttonIdx = src.IndexOf("<FluentButton", gateOpenIdx, StringComparison.Ordinal);
         buttonIdx.Should().BeGreaterThan(gateOpenIdx, "the next <FluentButton> after the gate opening must be the + button");
@@ -260,12 +261,11 @@ public class EnrollStudentDialogFeatureFlagTests
         // nests under "FEATURE": { "<Area>": { "...": "true" } }).
         var area = ExpectedFlagKey["FEATURE:".Length..];
 
-        dialog.Should().Contain(ExpectedFlagKey,
-            $"the <FeatureFlagGate Key=\"{ExpectedFlagKey}\"> in the dialog must match the constant");
+        dialog.Should().Contain("@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog", "the <FeatureFlagGate> in the dialog must bind to the FeatureFlagKeys constant");
         settings.Should().Contain($"\"{area}\"",
             $"appsettings.json must register the flag under FeatureFlags.FEATURE.{area}");
-        migration.Should().Contain($"FeatureFlag.NormalizeKey(\"{ExpectedFlagKey}\")",
-            $"the migration seed must call FeatureFlag.NormalizeKey(\"{ExpectedFlagKey}\") so the canonical key matches what the UI + ConfigFlags landing page resolve");
+        migration.Should().Contain("FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog)",
+            "the migration seed must call FeatureFlag.NormalizeKey with the FeatureFlagKeys constant so the canonical key matches what the UI + ConfigFlags landing page resolve");
     }
 
     // ── No empty-list check logic (the "we don't need the check" fix) ──────

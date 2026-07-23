@@ -50,7 +50,47 @@ Always reference the constant/enum from the shared namespace rather than redefin
 <CodedValueDropdown Parent="CodedValueParent.Grade" ... />
 ```
 
+## Feature Flags
+
+All runtime feature-flag keys must be declared as constants in
+`SchoolCollab.Core.Features.FeatureFlagKeys`.
+
+- **Do not** pass raw strings like `"FEATURE:EnableFoo"` to
+  `IFeatureFlagService.IsEnabled`, `FeatureFlagGate.Key`, or
+  `FeatureFlag.NormalizeKey`.
+- **Do** use `FeatureFlagKeys.EnableFoo` everywhere in C# and
+  `@FeatureFlagKeys.EnableFoo` in `.razor` markup.
+- When adding a new flag, add its constant to `FeatureFlagKeys` first, then
+  reference the constant in `appsettings.json` defaults, migration seeds,
+  `FeatureFlagGate` usage, and API authorization gating.
+- `appsettings*.json` files cannot import C# constants, so they must stay
+  manually aligned. Any PR that adds or changes a flag must update both
+  `FeatureFlagKeys` and the matching configuration entries.
+
+### Example
+
+```csharp
+// SchoolCollab.Core.Features.FeatureFlagKeys
+public const string EnableFoo = "FEATURE:EnableFoo";
+```
+
+```razor
+@using SchoolCollab.Core.Features
+
+<FeatureFlagGate Key="@FeatureFlagKeys.EnableFoo">
+    ...
+</FeatureFlagGate>
+```
+
+```csharp
+if (!featureFlags.IsEnabled(FeatureFlagKeys.EnableFoo))
+{
+    group.RequireAuthorization();
+}
+```
+
 ## Prohibited Patterns
 - ❌ Defining enums inside `.razor` components.
 - ❌ Using "magic strings" for category keys in API calls or component parameters.
 - ❌ Duplicating the same enum in both a `.Core` and an `.Admin` project (use a shared project or a contract project instead).
+- ❌ Passing raw `"FEATURE:..."` strings for feature-flag keys.

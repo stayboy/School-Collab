@@ -15,7 +15,7 @@ public static class TenantEndpoints
     {
         var group = app.MapGroup("/api/tenants");
 
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
             group.RequireAuthorization();
         }

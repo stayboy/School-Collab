@@ -136,6 +136,7 @@
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Core.Features
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
@@ -249,7 +250,7 @@
                            Either gate being false hides the button. *@
                         @if (IsNewEnrollment)
                         {
-                            <FeatureFlagGate Key="FEATURE:EnableGradeLevelSetupOnEnrollDialog">
+                            <FeatureFlagGate Key="@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog">
                                 <FluentButton Appearance="Appearance.Neutral"
                                               Title="Create a new grade level for this tenant"
                                               OnClick="OnAddNewGradeAsync"
@@ -291,8 +292,8 @@
                 </FormRow>
             </FluentStack>
 
-            <DialogShellFooter Saving="Saving"
-                               Error="Error"
+            <DialogShellFooter Saving="@Saving"
+                               Error="@Error"
                                SubmitText="Enroll"
                                SavingText="Enrolling…"
                                OnCancel="HandleCancelAsync" />
@@ -448,8 +449,17 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to load enroll data for student {StudentId}", Model.StudentId);
-            Error = ex.Message;
+            // Task.WhenAll wraps failures in AggregateException. The
+            // useful HTTP detail (status code + response body from
+            // the manual error handling in StudentsApiClient) lives on
+            // the INNER exception, so unwrap it before logging and
+            // surfacing. Without this, the dialog shows only the
+            // generic "One or more errors occurred." text.
+            var root = ex is AggregateException agg
+                ? agg.Flatten().InnerExceptions.FirstOrDefault() ?? ex
+                : ex;
+            Logger.LogError(root, "Failed to load enroll data for student {StudentId}", Model.StudentId);
+            Error = root.Message;
         }
         finally
         {

@@ -23,8 +23,8 @@
             <FluentDatePicker Value="@ExitDateAsDateTime" ValueChanged="@OnExitDateChanged" Label="Exit date" Required="true" />
         </FluentStack>
 
-        <DialogShellFooter Saving="Saving"
-                           Error="Error"
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
                            SubmitText="Withdraw"
                            SavingText="Withdrawing…"
                            OnCancel="HandleCancelAsync" />
