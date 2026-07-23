@@ -43,18 +43,8 @@
 @using SchoolCollab.Students.Core.Domain
 @using StudentDto = SchoolCollab.Students.Admin.Services.StudentDto
 
-<EditForm Model="@Model" OnValidSubmit="@OnValidSubmit" class="@FormClass">
+<EditForm Model="@Model" OnValidSubmit="@OnValidSubmit" @ref="_editForm" class="student-form-fields">
     <DataAnnotationsValidator />
-
-    @* Layout wrapper. Always rendered (even in Bottom mode) so the markup
-       is a single shape — the Bottom vs Right difference is purely a
-       CSS-Grid-vs-vertical-stack toggle via the .student-form-fields
-       (or .student-form-fields--sidebar) class on the EditForm. The
-       wrapper itself is display:contents by default in Bottom mode, so
-       it doesn't add an extra DOM layer; in Sidebar mode it's
-       display:grid with two columns. *@
-    <div class="student-form-fields__layout">
-        <div class="student-form-fields__fields">
 
     @* The parent vertical stack controls the row rhythm. Spacing="3" gives
        a comfortable 12px gap between rows — modern forms have generous
@@ -287,9 +277,6 @@
         <FluentMessageBar Intent="MessageIntent.Error" class="student-form-error">@ErrorMessage</FluentMessageBar>
     }
 
-        </div>
-        <div class="student-form-fields__sidebar">
-
     @* Action row. The .form-actions CSS class draws the horizontal line
        (border-top) that separates the field block above from the action
        buttons below, and adds comfortable margin/padding so the line
@@ -300,69 +287,53 @@
        buttons hug the left edge (default) or the right / trailing edge
        (via the .form-actions--right modifier). A calling page may still
        override the whole row via the optional <Actions> RenderFragment
-       (e.g. a dialog that supplies its own DialogShellFooter). *@
-    <div class="form-actions @FormActionsClass">
-        @if (Actions is not null)
-        {
-            @Actions
-        }
-        else
-        {
-            <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
-                @if (ShowCancel)
-                {
-                    <FluentButton Appearance="Appearance.Outline"
-                                  OnClick="@OnCancel"
+       (e.g. a dialog that supplies its own DialogShellFooter), or
+       suppress the built-in row entirely via RenderActions="false" and
+       drive validation+submit externally via @ref.SubmitAsync() (used
+       by the long-form /students/{id}/edit page where the buttons sit
+       in a page-level right-column stack alongside the Direct contact
+       editor). *@
+    @if (RenderActions)
+    {
+        <div class="form-actions @FormActionsClass">
+            @if (Actions is not null)
+            {
+                @Actions
+            }
+            else
+            {
+                <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
+                    @if (ShowCancel)
+                    {
+                        <FluentButton Appearance="Appearance.Outline"
+                                      OnClick="@OnCancel"
+                                      Disabled="@Submitting"
+                                      class="form-actions__button">
+                            @CancelLabel
+                        </FluentButton>
+                    }
+                    <FluentButton Type="ButtonType.Submit"
+                                  Appearance="Appearance.Accent"
                                   Disabled="@Submitting"
                                   class="form-actions__button">
-                        @CancelLabel
+                        @(Submitting ? SubmittingLabel : SubmitLabel)
                     </FluentButton>
-                }
-                <FluentButton Type="ButtonType.Submit"
-                              Appearance="Appearance.Accent"
-                              Disabled="@Submitting"
-                              class="form-actions__button">
-                    @(Submitting ? SubmittingLabel : SubmitLabel)
-                </FluentButton>
-            </FluentStack>
-        }
-    </div>
-
+                </FluentStack>
+            }
         </div>
-    </div>
+    }
 </EditForm>
 
 @code {
-    /// <summary>The class attribute on the rendered <c>&lt;EditForm&gt;</c>.
-    /// Composed from the static <c>student-form-fields</c> base plus the
-    /// optional <c>student-form-fields--sidebar</c> modifier. Computed in
-    /// C# rather than inlined in the attribute value because the EditForm
-    /// component's tag-helper parser doesn't tolerate the
-    /// <c>class="... @(cond ? ... : null)"</c> pattern (it tries to parse
-    /// the whole attribute as a literal string and emits RZ9986).</summary>
-    private string FormClass => ActionsPlacement == StudentFormActionsPlacement.Right
-        ? "student-form-fields student-form-fields--sidebar"
-        : "student-form-fields";
-
     /// <summary>The class attribute on the rendered <c>.form-actions</c>
     /// div. Composed from the static <c>form-actions</c> base plus the
-    /// optional <c>form-actions--right</c> (horizontal alignment) and
-    /// <c>form-actions--sidebar</c> (vertical sidebar stack) modifiers.
-    /// Computed in C# for the same reason as <see cref="FormClass"/>:
-    /// the tag-helper parser doesn't tolerate the
-    /// <c>class="... @(cond ? ... : null)"</c> pattern.</summary>
-    private string FormActionsClass
-    {
-        get
-        {
-            var parts = new List<string> { "form-actions" };
-            if (ActionsAlignment == StudentFormActionsAlignment.Right)
-                parts.Add("form-actions--right");
-            if (ActionsPlacement == StudentFormActionsPlacement.Right)
-                parts.Add("form-actions--sidebar");
-            return string.Join(" ", parts);
-        }
-    }
+    /// optional <c>form-actions--right</c> (horizontal alignment)
+    /// modifier. Computed in C# rather than inlined in the attribute
+    /// value because the EditForm component's tag-helper parser doesn't
+    /// tolerate the <c>class="... @(cond ? ... : null)"</c> pattern.</summary>
+    private string FormActionsClass => ActionsAlignment == StudentFormActionsAlignment.Right
+        ? "form-actions form-actions--right"
+        : "form-actions";
 
     /// <summary>The form model. Required — the EditForm binds to it.</summary>
     [Parameter, EditorRequired] public StudentFormModel Model { get; set; } = default!;
@@ -405,34 +376,42 @@
     /// <summary>Horizontal alignment of the action buttons.</summary>
     public enum StudentFormActionsAlignment { Left, Right }
 
-    /// <summary>Where the Save / Cancel action buttons are placed. Defaults
-    /// to <see cref="StudentFormActionsPlacement.Bottom"/> so the buttons
-    /// sit in a horizontal row below the form fields, separated by a
-    /// CSS <c>border-top</c>. Set to <see cref="StudentFormActionsPlacement.Right"/>
-    /// on long forms (e.g. <c>Edit.razor</c>) so the buttons render in a
-    /// sticky vertical sidebar to the right of the fields and stay visible
-    /// as the user scrolls.</summary>
-    [Parameter] public StudentFormActionsPlacement ActionsPlacement { get; set; } = StudentFormActionsPlacement.Bottom;
+    /// <summary>Whether the built-in bottom-horizontal action row is
+    /// rendered. Default <c>true</c> — the form renders its own Submit
+    /// and Cancel pair below the fields, separated by a border-top, which
+    /// matches the established dialog-ui pattern (e.g. the inline
+    /// GradeLevelWizard "new student" form, the StudentPickerDialog
+    /// "create" view, and /students/create). Set to <c>false</c> on
+    /// long forms (e.g. /students/{id}/edit) where the page hosts the
+    /// action buttons in a right-column page-level sidebar that also
+    /// spans the Direct contact editor below the form. The caller
+    /// captures the form via <c>@ref</c> and drives validation+submit
+    /// through <see cref="SubmitAsync"/>, which mimics the EditForm's
+    /// private HandleSubmitAsync: validates, then fires
+    /// <see cref="OnValidSubmit"/> on success.</summary>
+    [Parameter] public bool RenderActions { get; set; } = true;
 
-    /// <summary>Where the action buttons are placed relative to the form
-    /// fields. See <see cref="ActionsPlacement"/>.</summary>
-    public enum StudentFormActionsPlacement
+    /// <summary>Validate the form and fire <see cref="OnValidSubmit"/>
+    /// when valid. Mirrors the standard Blazor pattern for triggering
+    /// an EditForm submit from a button that sits OUTSIDE the form
+    /// (e.g. a sidebar action stack). Returns <c>true</c> when the
+    /// validation passed and the submit handler ran; <c>false</c>
+    /// when validation failed (DataAnnotations errors are shown next
+    /// to the offending fields and the submit handler is NOT called).
+    /// Idempotent under repeated calls while a submit is in flight
+    /// (the guard <c>if (Submitting) return false</c> prevents
+    /// double-submit when the caller also disables the button).</summary>
+    public async Task<bool> SubmitAsync()
     {
-        /// <summary>Save / Cancel render in a horizontal row BELOW the
-        /// form fields, separated by a border-top on .form-actions. The
-        /// original behavior. Use for short forms where a bottom-anchored
-        /// action bar makes sense (e.g. Create.razor, the inline
-        /// GradeLevelWizard "new student" form).</summary>
-        Bottom,
-
-        /// <summary>Save / Cancel render in a vertical column to the RIGHT
-        /// of the form fields, inside a CSS Grid two-column layout. The
-        /// column is position:sticky so the buttons stay visible as the
-        /// user scrolls. Use for long forms where a bottom action bar
-        /// can scroll off-screen (e.g. Edit.razor with its identity,
-        /// guardians, and direct-contact sub-sections).</summary>
-        Right
+        if (Submitting) return false;
+        var ctx = _editForm?.EditContext;
+        if (ctx is null) return false;
+        if (!ctx.Validate()) return false;
+        await OnValidSubmit.InvokeAsync();
+        return true;
     }
+
+    private EditForm? _editForm;
 
     /// <summary>When true, the student number field is read-only (used by Edit.razor).</summary>
     [Parameter] public bool ReadOnlyStudentNumber { get; set; }

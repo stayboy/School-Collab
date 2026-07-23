@@ -91,6 +91,7 @@ try
             var seeder = scope.ServiceProvider.GetRequiredService<CodedValueSeeder>();
             await seeder.SeedAsync();
             await SeedEnableCodedValuesAiChatAsync(settingsDb, logger);
+            await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);
 
             // Seed the real Tenant registry ('Hydeson School' + 'Little Legends') so
             // tenancy overrides have a target tenant. Idempotent by Name. See
@@ -198,6 +199,53 @@ static async Task SeedEnableCodedValuesAiChatAsync(SettingsDbContext db, Microso
     }
 
     var flag = FeatureFlag.Create(key, "Enable AI chat on Coded Values landing page", null, isEnabled: true);
+    db.FeatureFlags.Add(flag);
+    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
+        tenantId: null,
+        featureFlagId: flag.Id,
+        featureFlagKey: flag.Key,
+        changeKind: FlagChangeKind.Created,
+        previousIsEnabled: null,
+        newIsEnabled: flag.IsEnabled,
+        reason: "Initial seed by migration service",
+        actorId: actorId,
+        actorDisplayName: actorName));
+
+    await db.SaveChangesAsync();
+    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
+}
+
+// ── Settings seed: FEATURE:EnableGradeLevelSetupOnEnrollDialog ──
+// Seeds the runtime feature flag that gates the "+" inline-grade-create
+// button on the EnrollStudentDialog. Default false (opt-in) so the
+// global side-effect (creating a new GRADE coded value + GradeLevel row,
+// shared across all tenants) requires an explicit ConfigFlags toggle
+// before it becomes available. Idempotent — re-runs no-op on a
+// pre-existing row. Records an audit row with a system actor so the
+// seed is traceable. The flag is consumed in
+// <EnrollStudentDialog> via <FeatureFlagGate Key="FEATURE:EnableGradeLevelSetupOnEnrollDialog">.
+// See documents/specs/grade-level-setup.md §3.
+static async Task SeedEnableGradeLevelSetupOnEnrollDialogAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
+{
+    const string actorId = "system:migrator";
+    const string actorName = "Migration Service";
+
+    // Same canonicalization caveat as the AI-chat seed — compare against the
+    // normalized form so a re-run does not violate ix_feature_flags_key_unique.
+    var key = FeatureFlag.NormalizeKey("FEATURE:EnableGradeLevelSetupOnEnrollDialog");
+
+    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
+    if (exists)
+    {
+        logger.LogInformation("Seed flag {Key} already present; skipping", key);
+        return;
+    }
+
+    var flag = FeatureFlag.Create(
+        key,
+        "Enable inline grade-level setup (\"+\" button) on the Enroll Student dialog",
+        null,
+        isEnabled: false);
     db.FeatureFlags.Add(flag);
     db.FlagAuditEntries.Add(FlagAuditEntry.Create(
         tenantId: null,

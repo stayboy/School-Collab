@@ -15,3 +15,85 @@
 .student-edit-divider { margin: 24px 0 12px; }
 .student-edit-direct-contact { display: flex; flex-direction: column; gap: 12px; }
 .student-edit-section-title { margin: 0; font-size: 1rem; font-weight: 600; }
+
+/* Active enrollment sub-section. Sits BELOW the Direct contact
+   editor in the same column. The student's primary active enrollment
+   is READ-ONLY (display only); the Enroll / Transfer / Withdraw
+   buttons above the card open dialogs that mutate the enrollment
+   list. Visual treatment mirrors the Direct contact section: same
+   .student-edit-divider above, same .student-edit-section-title
+   heading, and a card with the read-only facts. */
+.student-edit-enrollment { display: flex; flex-direction: column; gap: 12px; }
+.enrollment-display-card { padding: 12px 16px; }
+.enrollment-display-grade,
+.enrollment-display-period { font-size: 0.95rem; }
+.enrollment-display-meta { font-size: 0.85rem; }
+.muted { color: var(--neutral-foreground-hint, #6b6b6b); }
+
+/* ── Page-level 2-column layout ────────────────────────────────
+   The edit page is a long form (identity + guardians + Direct
+   contact). Save and Cancel live in a sticky right-column sidebar
+   so they stay visible as the user scrolls through every section.
+   This is a PAGE-LEVEL grid, NOT a wrapper inside <StudentFormFields>,
+   so the same component can be embedded in dialogs
+   (Create.razor / GradeLevelWizard.razor / StudentPickerDialog.razor)
+   with the dialog-ui convention of bottom-horizontal Cancel/Save
+   separated by a border-top. Only this page opts into the sidebar.
+
+   Column 1 holds the form fields + the Direct contact editor
+   (wrapped in a vertical FluentStack so the divider and the
+   h3 heading stack naturally with the form above).
+   Column 2 is a 200px sticky stack holding the Save (top) + Cancel
+   (bottom) buttons. The buttons fill the column width
+   (.student-edit-action-stack__button) so they have equal size
+   and the save/cancel decision sits in the same visual block.
+
+   On viewports < 900px the grid collapses to a single column and
+   the sidebar moves to the bottom in a horizontal row (matches the
+   original behavior on phones — the right-column sidebar would
+   leave no room for the form fields at 360-600px widths). */
+.student-edit-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 200px;
+    gap: 24px;
+    align-items: start;
+}
+
+.student-edit-grid__fields {
+    min-width: 0;             /* let the grid track shrink below the
+                                 content's intrinsic width */
+    display: flex;
+    flex-direction: column;
+    gap: 0;                   /* the form's own FluentStack Spacing="3"
+                                 provides row rhythm; the divider
+                                 between the form and the contact
+                                 editor handles section separation */
+}
+
+.student-edit-grid__sidebar {
+    position: sticky;
+    top: 16px;                /* sits below the page header on a typical viewport */
+    display: flex;
+    flex-direction: column;
+}
+
+.student-edit-action-stack {
+    width: 100%;
+}
+
+.student-edit-action-stack__button {
+    width: 100%;              /* equal-width buttons filling the 200px column */
+    justify-content: center;
+}
+
+@media (max-width: 900px) {
+    .student-edit-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .student-edit-grid__sidebar {
+        position: static;     /* sticky doesn't make sense at the bottom */
+    }
+    .student-edit-action-stack {
+        flex-direction: row;  /* back to a horizontal row on narrow viewports */
+    }
+}

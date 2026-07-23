@@ -440,3 +440,28 @@
     color: var(--error, #c50f1f);
     background: transparent;
 }
+
+/* ── Wizard step context card ────────────────────────────────
+   Step 2 ("Enrol students") shows a read-only card above the
+   picker that surfaces the grade + period binding the new
+   enrollments will land in. Matches the visual weight of the
+   selected-grade confirmation card on step 1 so the user can
+   see at a glance which grade they are enrolling into, with no
+   re-pick UX. The card has a left accent border (no fill change)
+   so it reads as informational rather than actionable. */
+.wizard-step-context-card {
+    margin-bottom: 1rem;
+    padding: 10px 16px;
+    border-left: 3px solid var(--accent-color, #e65100);
+    background: var(--neutral-fill-secondary-rest);
+}
+
+.wizard-step-context-grade,
+.wizard-step-context-period {
+    font-size: 0.95rem;
+}
+
+.wizard-step-context-meta {
+    margin-left: auto;
+    font-size: 0.8rem;
+}

@@ -410,8 +410,19 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Grade Levels ─────────────────────────────────────────────────────────
 
-    public async Task<GradeLevelDto[]?> ListGradeLevelsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GradeLevelDto[]>("/students/grade-levels", ct);
+    public async Task<GradeLevelDto[]?> ListGradeLevelsAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/students/grade-levels", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ListGradeLevels failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        return await response.Content.ReadFromJsonAsync<GradeLevelDto[]>(ct);
+    }
 
     public async Task<GradeLevelLandingDto[]?> ListGradeLevelsForLandingAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<GradeLevelLandingDto[]>("/students/grade-levels/landing", ct);
@@ -512,8 +523,19 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Periods ──────────────────────────────────────────────────────────────
 
-    public async Task<PeriodDto[]?> ListPeriodsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<PeriodDto[]>("/students/periods", ct);
+    public async Task<PeriodDto[]?> ListPeriodsAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/students/periods", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ListPeriods failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        return await response.Content.ReadFromJsonAsync<PeriodDto[]>(ct);
+    }
 
     public async Task<PeriodDto?> GetPeriodByIdAsync(Guid id, CancellationToken ct = default)
     {
@@ -551,7 +573,28 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<Guid> EnrollStudentAsync(EnrollStudentRequest req, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/students/enrollments", req, ct);
-        response.EnsureSuccessStatusCode();
+        // IMPORTANT: do NOT use EnsureSuccessStatusCode here. The
+        // default HttpRequestException it throws only carries the
+        // status code text ("Response status code does not indicate
+        // success: 400 (Bad Request).") and DROPS the response body.
+        // The server's body is where the actual tracing detail lives
+        // (e.g. "Cannot enrol students: no active period is open
+        // for this tenant. Open a period before enrolling." for
+        // PeriodNotOpenException). Without the body, the dialog's
+        // per-field error MessageBar shows just the generic status
+        // text — useless for tracing WHAT went wrong. We therefore
+        // check the status manually, read the body on failure, and
+        // rethrow an HttpRequestException whose Message includes
+        // BOTH the status code AND the body. The dialog's
+        // `Error = ex.Message` then surfaces the full detail.
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"EnrollStudent failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
