@@ -8,15 +8,22 @@
     <link rel="stylesheet" href="@Assets["css/app.css"]" />
     <link rel="stylesheet" href="@Assets["_content/SchoolCollab.Admin.Shared/app.css"]" />
     <link rel="stylesheet" href="@Assets["_content/SchoolCollab.Admin.Shared/nav.css"]" />
-    @* Scoped CSS bundles for this host and the Settings / Assignments
-       RCLs are loaded by the Blazor framework on a per-component basis
-       (the *.razor.css files are emitted as {Project}.bundle.scp.css
-       under _content/{Project}/ and wired up by component rendering,
-       not by App.razor <link> tags). The previous flat-name links
-       (SchoolCollab.Admin.styles.css, SchoolCollab.Settings.Admin.
-       styles.css, SchoolCollab.Assignments.Admin.styles.css) 404'd:
-       that convention was the pre-.NET 8 "first global CSS" path and
-       is no longer produced by the SDK. *@
+    @* Host (SchoolCollab.Admin) scoped-CSS bundle. Contains the compiled
+       CSS for the host's own *.razor.css files (MainLayout.razor.css,
+       DevTenantSwitcher.razor.css). Unlike the RCLs (Settings / Students
+       / Assignments) which emit their bundles as
+       {Project}.bundle.scp.css under _content/{Project}/ and are
+       auto-injected by the Blazor framework per-component, the host
+       project's bundle is served as the flat-name
+       SchoolCollab.Admin.styles.css and must be linked here.
+
+       The RCLs do NOT need equivalent <link> tags — their
+       Settings.styles.css / Assignments.styles.css / Students.styles.css
+       flat-name paths are no longer produced (RCLs use the
+       _content/{Project}/.../bundle.scp.css modern path). The Blazor
+       framework injects them per-component via the static web assets
+       manifest when the relevant component renders. *@
+    <link rel="stylesheet" href="@Assets["SchoolCollab.Admin.styles.css"]" />
     <ImportMap />
     <link rel="icon" type="image/png" href="favicon.png" />
     <HeadOutlet @rendermode="new InteractiveServerRenderMode(prerender: false)" />
