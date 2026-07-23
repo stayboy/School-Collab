@@ -41,7 +41,8 @@
                                    SubmitLabel="Save"
                                    SubmittingLabel="Saving…"
                                    Submitting="@_saving"
-                                   OnCancel='@(() => Nav.NavigateTo($"/students/{Id}"))' />
+                                   OnCancel='@(() => Nav.NavigateTo($"/students/{Id}"))'
+                                   ActionsPlacement="StudentFormFields.StudentFormActionsPlacement.Right" />
 
                 @* ── Direct contact (email / SMS / WhatsApp).
                    Lives in the edit form, NOT on the view page, so

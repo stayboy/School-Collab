@@ -66,6 +66,112 @@
     justify-content: flex-end;
 }
 
+/* ── Sidebar placement ────────────────────────────────────────────
+   When ActionsPlacement=Right is passed, the form switches from a
+   single-column layout (fields then a bottom action bar) to a
+   2-column CSS Grid layout. Column 1 holds the form fields; column
+   2 holds the Save/Cancel stack as a sticky vertical sidebar.
+
+   The layout wrapper (.student-form-fields__layout) is ALWAYS
+   rendered in the markup (so the Razor markup is a single shape),
+   but the bottom placement uses display:contents so the wrapper
+   itself contributes nothing to the visual layout — the fields
+   and the action row sit in the document flow exactly as they did
+   before. The sidebar placement flips the wrapper to
+   display:grid with a 1fr / 200px column split.
+
+   The form max-width (600px) applies to the FIELDS column in
+   sidebar mode, not the whole component, so the form doesn't
+   stretch uncomfortably wide on big screens. The sidebar sits at
+   200px wide, which is wide enough for full-width buttons with a
+   comfortable touch target (~36px tall). On viewports < 900px the
+   grid collapses to a single column and the sidebar goes back to
+   a horizontal row at the bottom (matching the original behavior
+   on small screens). */
+.student-form-fields__layout {
+    display: contents;        /* default: no extra DOM layer; the fields
+                                 and the action row sit in the document
+                                 flow exactly as before */
+}
+
+.student-form-fields--sidebar > .student-form-fields__layout {
+    display: grid;            /* override the contents default when the
+                                 form is in sidebar mode */
+    grid-template-columns: minmax(0, 1fr) 200px;
+    gap: 24px;
+    align-items: start;
+}
+
+.student-form-fields__layout .student-form-fields__fields {
+    min-width: 0;             /* let the grid track shrink below the
+                                 content's intrinsic width (defensive
+                                 against long unbreakable values like
+                                 UUIDs or very long names) */
+    display: flex;
+    flex-direction: column;
+    gap: 12px;                /* match the original FluentStack Spacing="3" */
+}
+
+/* In sidebar mode, also cap the fields column to the original
+   600px max so the form doesn't stretch. Outside sidebar mode the
+   max-width rule from .student-form-fields applies. */
+.student-form-fields--sidebar .student-form-fields__fields {
+    max-width: 600px;
+}
+
+.student-form-fields__layout .student-form-fields__sidebar {
+    display: contents;        /* default: in Bottom mode the sidebar
+                                 wrapper adds nothing to the layout
+                                 (the .form-actions inside still gets
+                                 its normal bottom-bar treatment) */
+}
+
+.student-form-fields--sidebar > .student-form-fields__layout .student-form-fields__sidebar {
+    position: sticky;
+    top: 16px;                /* sits below the page header on a typical viewport */
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+/* Sidebar variant of the action row. Replaces the horizontal
+   border-top separator with a vertical column. The buttons fill
+   the full sidebar width via .form-actions__button below. */
+.form-actions--sidebar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    margin-top: 0;            /* no top margin needed — the grid gap separates */
+    padding-top: 0;
+    border-top: none;         /* no separator in the sidebar */
+    display: flex;
+}
+
+.form-actions--sidebar .form-actions__button {
+    width: 100%;
+    justify-content: center;
+}
+
+/* On narrow viewports, drop the sidebar and put the actions back at
+   the bottom in a horizontal row (the original behavior). sticky
+   doesn't make sense at the bottom. */
+@media (max-width: 900px) {
+    .student-form-fields--sidebar > .student-form-fields__layout {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .student-form-fields--sidebar > .student-form-fields__layout .student-form-fields__sidebar {
+        position: static;
+    }
+    .form-actions--sidebar {
+        flex-direction: row;
+        justify-content: flex-end;
+        border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+        margin-top: 1.25rem;
+        padding-top: 1rem;
+    }
+}
+
 /* Horizontal separator between the student fields and the opt-in Guardians
    section. Wraps a <FluentDivider /> to provide consistent vertical breathing
    room (margin/padding) that matches the .form-actions separator. */
