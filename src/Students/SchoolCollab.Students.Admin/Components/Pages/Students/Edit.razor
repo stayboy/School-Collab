@@ -1,5 +1,7 @@
 @page "/students/{id:guid}/edit"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
@@ -40,6 +42,24 @@
                                    SubmittingLabel="Saving…"
                                    Submitting="@_saving"
                                    OnCancel='@(() => Nav.NavigateTo($"/students/{Id}"))' />
+
+                @* ── Direct contact (email / SMS / WhatsApp).
+                   Lives in the edit form, NOT on the view page, so
+                   adding/verifying/setting primary on a contact is a
+                   write action that belongs with the rest of the
+                   student's editable data. Hosted by the shared
+                   <ContactsEditor OwnerType=Student> — same component
+                   used on GuardianDetail.razor for guardians' contacts.
+                   ShowSubscription=false: students don't subscribe to
+                   their own contact info (that's a guardian/teacher
+                   feature). *@
+                <FluentDivider class="student-edit-divider" Role="DividerRole.Presentation" />
+                <div class="student-edit-direct-contact">
+                    <h3 class="student-edit-section-title">Direct contact</h3>
+                    <ContactsEditor OwnerType="ContactOwnerType.Student"
+                                     OwnerId="@Id"
+                                     ShowSubscription="false" />
+                </div>
             }
                 </ChildContent>
                 <Fallback>

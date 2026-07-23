@@ -257,33 +257,38 @@ public class StudentDetailSectionsTests
     }
 
     [TestMethod]
-    public void Detail_Embeds_Guardians_Contacts_And_DirectContact()
+    public void Detail_Embeds_Guardians_And_Contacts_Subcomponents()
     {
-        // The three subcomponents must be embedded (not reimplemented).
+        // The two subcomponents must be embedded (not reimplemented).
         // Their placement tells the information-architecture story:
         //   - GuardiansTab  → "Guardians" section (who is linked)
-        //   - ContactsEditor OwnerType=Student  → INSIDE the Profile card
-        //     (the student's own direct contact, as part of the student)
         //   - GuardianContactsList  → "Contacts" section (how to reach
         //     each guardian)
+        // The student's own contact edit surface was MOVED to the Edit
+        // form (Edit.razor) — see EditContactEditorTests. The view page
+        // is read-only and the contact editor's write actions (Add,
+        // Verify, Set primary, Remove) don't belong on it.
         // The component names in the markup confirm the wiring.
         var source = ReadDetailSource();
         source.Should().Contain("<GuardiansTab", "the Guardians section embeds the shared GuardiansTab");
         source.Should().Contain("StudentId=\"Id\"", "the embedded GuardiansTab binds to the route Id");
-        source.Should().Contain("<ContactsEditor", "the Profile card embeds the shared ContactsEditor for the student's own contact");
-        source.Should().Contain("OwnerType=\"ContactOwnerType.Student\"", "the embedded ContactsEditor uses the Student owner type");
+        source.Should().NotContain("<ContactsEditor",
+            "the view page does NOT embed <ContactsEditor> — contact editing is on the Edit page");
         source.Should().Contain("<GuardianContactsList", "the Contacts section embeds the new GuardianContactsList");
         source.Should().Contain("StudentId=\"Id\"", "the embedded GuardianContactsList binds to the route Id");
     }
 
     [TestMethod]
-    public void Profile_Card_Contains_Student_Own_Contacts_Editor()
+    public void Profile_Card_Has_No_Direct_Contact_Subheader_Or_Divider()
     {
-        // The student's own contact editor lives INSIDE the Profile card,
-        // not in a separate page section. Asserted by structure: the
-        // <ContactsEditor OwnerType=Student ...> tag must come AFTER the
-        // <FluentCard class="detail-card"> opening tag and BEFORE its
-        // matching </FluentCard> closing tag.
+        // The view-page Profile card used to host a Direct contact
+        // sub-section (a <FluentDivider class="profile-section-sep"> +
+        // a <h4>Direct contact</h4> sub-header + a <ContactsEditor
+        // OwnerType=Student>). That whole block has been MOVED to the
+        // Edit form. The view page is read-only.
+        // Asserted by structure: between the Profile <FluentCard> opening
+        // tag and its matching </FluentCard> closing tag, none of those
+        // markers appear.
         var source = ReadDetailSource();
         var cardOpen = source.IndexOf("<FluentCard class=\"detail-card\">", StringComparison.Ordinal);
         cardOpen.Should().BeGreaterThan(-1, "the Profile FluentCard exists");
@@ -291,12 +296,14 @@ public class StudentDetailSectionsTests
         cardClose.Should().BeGreaterThan(-1, "the Profile FluentCard is closed");
         var cardBody = source.Substring(cardOpen, cardClose - cardOpen);
 
-        cardBody.Should().Contain("OwnerType=\"ContactOwnerType.Student\"",
-            "the student's own ContactsEditor is rendered inside the Profile card");
+        cardBody.Should().NotContain("OwnerType=\"ContactOwnerType.Student\"",
+            "the student's own ContactsEditor is NOT rendered in the Profile card anymore (moved to the Edit form)");
+        cardBody.Should().NotContain("profile-section-sep",
+            "the .profile-section-sep divider was only used to separate the Direct contact sub-section — it is gone");
+        cardBody.Should().NotContain("section-header--sub",
+            "the .section-header--sub h4 was only used for the Direct contact sub-section — it is gone");
         cardBody.Should().Contain("class=\"profile-grid\"",
             "the Profile stat-cards are still inside the Profile card");
-        cardBody.Should().Contain("profile-section-sep",
-            "a divider separates the identity stat-cards from the direct-contact editor");
     }
 
     [TestMethod]

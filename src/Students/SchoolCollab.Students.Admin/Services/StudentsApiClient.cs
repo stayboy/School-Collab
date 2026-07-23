@@ -700,37 +700,49 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<GradeLevelDto[]?> ListGradeLevelsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<GradeLevelDto[]>($"/teachers/{teacherId}/grade-levels", ct);
 
-    // ── Contacts ─────────────────────────────────────────────────────────────
+    // ── Contacts ──────────────────────────────────────────────────────────────
+    // The contacts API is registered as a sibling top-level group in
+    // SchoolCollab.Students.Api/StudentEndpoints.cs:
+    //
+    //     var contactsGroup = app.MapGroup("/contacts");
+    //     contactsGroup.MapContactRoutes();
+    //     contactsGroup.MapSubscriptionRoutes();
+    //
+    // The previous client prefixed these paths with `/students` and the
+    // resulting 404 surfaced in the <ContactsEditor> messagebar. Routes
+    // are the root-level /contacts group, NOT a /students/contacts
+    // sub-resource — contacts are a cross-cutting concern (they can
+    // belong to a student OR a guardian), not a child of /students.
 
     public async Task<ContactDto[]?> ListContactsAsync(ContactOwnerType ownerType, Guid ownerId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<ContactDto[]>($"/students/contacts?ownerType={ownerType}&ownerId={ownerId}", ct);
+        await _http.GetFromJsonAsync<ContactDto[]>($"/contacts?ownerType={ownerType}&ownerId={ownerId}", ct);
 
     public async Task<Guid> AddContactAsync(AddContactRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/students/contacts", req, ct);
+        var response = await _http.PostAsJsonAsync("/contacts", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/students/contacts/{id}", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PutAsJsonAsync($"/contacts/{id}", req, ct)).EnsureSuccessStatusCode();
 
     public async Task DeleteContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/students/contacts/{id}", ct)).EnsureSuccessStatusCode();
+        (await _http.DeleteAsync($"/contacts/{id}", ct)).EnsureSuccessStatusCode();
 
     public async Task VerifyContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/students/contacts/{id}/verify", null, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsync($"/contacts/{id}/verify", null, ct)).EnsureSuccessStatusCode();
 
     public async Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/students/contacts/{id}/set-primary", null, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsync($"/contacts/{id}/set-primary", null, ct)).EnsureSuccessStatusCode();
 
     public async Task<SubscribedContactDto[]?> ListSubscribedContactsAsync(
         ContactOwnerType ownerType, Guid? ownerId = null, SubscriptionScope? scope = null, CancellationToken ct = default)
     {
         var url = scope.HasValue
-            ? $"/students/contacts/subscribed?ownerType={ownerType}&scope={scope}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}"
-            : $"/students/contacts/subscribed?ownerType={ownerType}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}";
+            ? $"/contacts/subscribed?ownerType={ownerType}&scope={scope}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}"
+            : $"/contacts/subscribed?ownerType={ownerType}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}";
         return await _http.GetFromJsonAsync<SubscribedContactDto[]>(url, ct);
     }
 
@@ -738,13 +750,13 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task SubscribeAsync(
         Guid contactId, SubscriptionScope scope = SubscriptionScope.AllAssignments, Guid? scopeRefId = null, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/students/contacts/{contactId}/subscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/contacts/{contactId}/subscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
 
     public async Task UnsubscribeAsync(
         Guid contactId, SubscriptionScope scope = SubscriptionScope.AllAssignments, Guid? scopeRefId = null, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/students/contacts/{contactId}/unsubscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/contacts/{contactId}/unsubscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
 
-    // ── Helper ───────────────────────────────────────────────────────────────
+    // ── Helper ──────────────────────────────────────────────────────────────
 
     private sealed record IdResponse(Guid Id);
 }

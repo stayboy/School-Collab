@@ -5,3 +5,13 @@
 .title-row { flex-shrink: 0; display: flex; align-items: center; gap: 0.75rem; padding-top: 0.25rem; }
 .page-title { margin: 0; }
 .spinner-container { flex: 1; display: flex; align-items: center; justify-content: center; }
+
+/* Direct contact sub-section. Sits BELOW <StudentFormFields> (outside
+   the EditForm / DataAnnotationsValidator scope) so add/remove/verify
+   on a contact is a standalone API call rather than a property of the
+   student form model. Visual treatment: a divider above, an h3 heading
+   to match the page-level .section-header pattern used on Detail.razor,
+   then the shared <ContactsEditor> just like on GuardianDetail.razor. */
+.student-edit-divider { margin: 24px 0 12px; }
+.student-edit-direct-contact { display: flex; flex-direction: column; gap: 12px; }
+.student-edit-section-title { margin: 0; font-size: 1rem; font-weight: 600; }
