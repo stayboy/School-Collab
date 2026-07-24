@@ -17,7 +17,7 @@ public static class CodedValueEndpoints
     {
         var group = app.MapGroup("/api/coded-values");
 
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
             group.RequireAuthorization();
         }

@@ -31,7 +31,7 @@
            prompt opens the drawer via OnPromptSubmittedAsync instead.) Gated by
            the runtime, tenant-overridable FEATURE:EnableCodedValuesAiChat flag
            via the <FeatureFlagGate> component (reactive to live flag changes). *@
-        <FeatureFlagGate Key="FEATURE:EnableCodedValuesAiChat">
+        <FeatureFlagGate Key="@FeatureFlagKeys.EnableCodedValuesAiChat">
             <FluentButton Appearance="Appearance.Neutral"
                           Title="Open AI assistant"
                           OnClick="OpenChatDrawerAsync">
@@ -102,7 +102,7 @@
            feeds the text to the drawer's Full-mode chat via the Prompt
            parameter. The drawer is the single AI-calling surface and owns
            the conversation history. Gated by FEATURE:EnableCodedValuesAiChat. -- *@
-        <FeatureFlagGate Key="FEATURE:EnableCodedValuesAiChat">
+        <FeatureFlagGate Key="@FeatureFlagKeys.EnableCodedValuesAiChat">
             <AiChat Mode="AiChatMode.InputOnly"
                      ShowIntro="true"
                      Placeholder="Ask me to create coded values..."
@@ -111,7 +111,7 @@
         </FeatureFlagGate>
     </Footer>
     <ChildContent>
-        <FeatureFlagGate Key="FEATURE:EnableCodedValuesAiChat">
+        <FeatureFlagGate Key="@FeatureFlagKeys.EnableCodedValuesAiChat">
             <AiChatPanel Open="_chatDrawerOpen"
                              OpenChanged="@OnDrawerOpenChangedAsync"
                              Prompt="@_pendingPrompt"

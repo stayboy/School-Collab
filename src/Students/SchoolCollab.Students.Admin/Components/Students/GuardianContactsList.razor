@@ -1,0 +1,253 @@
+@* Guardian contacts list — read-only display of every contact channel
+   belonging to the guardians linked to a student. Used in the student
+   detail view's "Contacts" section (Detail.razor).
+
+   The student's OWN direct contact (email / SMS / WhatsApp) lives in
+   the Profile card via the shared <ContactsEditor OwnerType=Student />.
+   This component is the *other half* of the contact story: "how do I
+   reach this student's guardians?". Edits happen on GuardianDetail.razor
+   via the same shared <ContactsEditor OwnerType=Guardian />.
+
+   Data shape:
+     - One card per linked guardian (ordered: Primary role first, then CC;
+       within a role, by last name then first name for stability)
+     - Each card shows: guardian name + role (Primary/CC) + relationship
+       name (e.g. "Mother") when present
+     - Each contact renders as a row: channel glyph + channel name,
+       value, then Primary/Verified badges. All contacts are shown
+       (per the user's "show all guardian contacts with roles" decision);
+       non-primary rows are de-emphasized so the primary is the visual
+       anchor of the card.
+
+   Cancellation: a single CTS guarded by a disposed flag, mirroring
+   the pattern in ContactsEditor.razor and GuardiansTab.razor. The
+   load is re-issued whenever StudentId changes (e.g. navigating
+   between students that reuse the same component instance). *@
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Core.Contracts
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject IContactsClient ContactsApi
+@inject CodedValuesApiClient CodedValuesApi
+@inject ILogger<GuardianContactsList> Logger
+
+<div class="guardian-contacts">
+    @if (_loading)
+    {
+        <div class="spinner-container">
+            <FluentProgressRing />
+        </div>
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+    else if (_items.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">
+            No guardians linked — add a guardian in the Guardians section above, then come back here to see their contact info.
+        </FluentMessageBar>
+    }
+    else
+    {
+        @foreach (var item in _items)
+        {
+            <div class="guardian-contact-card">
+                <div class="guardian-contact-header">
+                    <span class="guardian-contact-name">
+                        <strong>@item.FirstName @item.LastName</strong>
+                    </span>
+                    <FluentBadge Appearance="@(item.Role == GuardianRole.Primary ? Appearance.Accent : Appearance.Neutral)"
+                                 Class="guardian-contact-role">
+                        @item.Role
+                    </FluentBadge>
+                    @if (!string.IsNullOrWhiteSpace(item.RelationshipName))
+                    {
+                        <span class="muted guardian-contact-relationship">· @item.RelationshipName</span>
+                    }
+                    @if (item.IsEmergencyContact)
+                    {
+                        <FluentBadge Appearance="Appearance.Accent" Class="guardian-contact-emergency">Emergency</FluentBadge>
+                    }
+                </div>
+
+                @if (item.Contacts.Count == 0)
+                {
+                    <p class="muted guardian-contact-empty">No contact info on file. Add one on the guardian's detail page.</p>
+                }
+                else
+                {
+                    <ul class="guardian-contact-list">
+                        @foreach (var c in item.Contacts)
+                        {
+                            <li class="@(c.IsPrimary ? "guardian-contact-row guardian-contact-row--primary" : "guardian-contact-row")">
+                                <span class="guardian-contact-channel" title="@c.Channel">@ChannelGlyph(c.Channel) @c.Channel</span>
+                                <span class="guardian-contact-value">@c.Value</span>
+                                @if (!string.IsNullOrWhiteSpace(c.Label))
+                                {
+                                    <span class="muted guardian-contact-label">(@c.Label)</span>
+                                }
+                                <span class="guardian-contact-badges">
+                                    @if (c.IsPrimary)
+                                    {
+                                        <FluentBadge Appearance="Appearance.Accent" Class="guardian-contact-badge">Primary</FluentBadge>
+                                    }
+                                    @if (c.IsVerified)
+                                    {
+                                        <FluentBadge Appearance="Appearance.Accent" Class="guardian-contact-badge">Verified</FluentBadge>
+                                    }
+                                    else
+                                    {
+                                        <FluentBadge Appearance="Appearance.Neutral" Class="guardian-contact-badge">Unverified</FluentBadge>
+                                    }
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The student whose guardians' contacts to display.</summary>
+    [Parameter, EditorRequired] public Guid StudentId { get; set; }
+
+    private List<GuardianContactsItem> _items = new();
+    private bool _loading;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private Guid? _loadedStudentId;
+
+    /// <summary>
+    /// One row in the rendered list — a guardian plus the contacts
+    /// that belong to them, pre-sorted (primary first, then by channel).
+    /// </summary>
+    private sealed record GuardianContactsItem(
+        Guid GuardianId,
+        string FirstName,
+        string LastName,
+        GuardianRole Role,
+        bool IsEmergencyContact,
+        string? RelationshipName,
+        IReadOnlyList<ContactDto> Contacts);
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedStudentId != StudentId)
+        {
+            _loadedStudentId = StudentId;
+            await LoadAsync();
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        // Cancellation pattern: each load gets its own CTS so a stale
+        // load doesn't tear down a newer one. A disposed flag guards
+        // post-await StateHasChanged so we don't touch torn-down state.
+        var previousCts = _loadCts;
+        var cts = new CancellationTokenSource();
+        _loadCts = cts;
+        var ct = cts.Token;
+        var superseded = false;
+
+        _loading = true;
+        _error = null;
+        try
+        {
+            // 1. Guardian links for this student.
+            var links = await Api.ListGuardiansByStudentAsync(StudentId, ct) ?? Array.Empty<StudentGuardianViewDto>();
+            ct.ThrowIfCancellationRequested();
+
+            // 2. Batch-load relationship coded-value names (one call).
+            var relIds = links
+                .Where(l => l.RelationshipCodedValueId.HasValue)
+                .Select(l => l.RelationshipCodedValueId!.Value)
+                .Distinct()
+                .ToArray();
+            var relNames = relIds.Length > 0
+                ? (await CodedValuesApi.GetByIdsAsync(relIds, ct) ?? Array.Empty<CodedValueDto>())
+                    .ToDictionary(c => c.Id, c => c.Name)
+                : new Dictionary<Guid, string>();
+
+            // 3. Per-guardian contact fetch (bounded N — typical 1-4 guardians).
+            var items = new List<GuardianContactsItem>(links.Length);
+            foreach (var link in links)
+            {
+                ct.ThrowIfCancellationRequested();
+                var contacts = await ContactsApi.ListContactsAsync(
+                    ContactOwnerType.Guardian, link.GuardianId, ct)
+                    ?? Array.Empty<ContactDto>();
+
+                // Sort: primary first, then verified, then by channel order
+                // (Email, SMS, WhatsApp) for stable display.
+                var sorted = contacts
+                    .OrderByDescending(c => c.IsPrimary)
+                    .ThenByDescending(c => c.IsVerified)
+                    .ThenBy(c => c.Channel)
+                    .ToList();
+
+                items.Add(new GuardianContactsItem(
+                    GuardianId: link.GuardianId,
+                    FirstName: link.FirstName,
+                    LastName: link.LastName,
+                    Role: link.Role,
+                    IsEmergencyContact: link.IsEmergencyContact,
+                    RelationshipName: link.RelationshipCodedValueId.HasValue
+                        && relNames.TryGetValue(link.RelationshipCodedValueId.Value, out var rn)
+                            ? rn
+                            : null,
+                    Contacts: sorted));
+            }
+
+            // 4. Order items: Primary role first, then by name.
+            _items = items
+                .OrderBy(i => i.Role == GuardianRole.Primary ? 0 : 1)
+                .ThenBy(i => i.LastName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(i => i.FirstName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            // Load was superseded or component disposed; leave state alone.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load guardian contacts for student {StudentId}", StudentId);
+            _error = ex.Message;
+            _items = new List<GuardianContactsItem>();
+        }
+        finally
+        {
+            superseded = !ReferenceEquals(_loadCts, cts);
+            cts.Dispose();
+            previousCts?.Dispose();
+        }
+
+        if (superseded || _disposed) return;
+        _loading = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static string ChannelGlyph(ContactChannel channel) => channel switch
+    {
+        ContactChannel.Email => "✉",
+        ContactChannel.SMS => "📱",
+        ContactChannel.WhatsApp => "💬",
+        _ => "•"
+    };
+}

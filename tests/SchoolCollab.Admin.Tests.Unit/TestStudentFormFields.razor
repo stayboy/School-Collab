@@ -1,0 +1,24 @@
+@* Test fixture for StudentFormFieldsRenderActionsBunitTests. Hosts
+   the shared <StudentFormFields> component with a minimal model + a
+   no-op submit handler so the form can render in the bUnit DOM. The
+   test class toggles the RenderActions parameter and asserts on
+   the rendered .form-actions div (present when RenderActions=true,
+   absent when RenderActions=false). The fixture has no business
+   logic — the real StudentFormFields is the system under test. *@
+@using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Students.Core.DTOs
+
+<StudentFormFields Model="@_model"
+                   OnValidSubmit="@_onSubmit"
+                   SubmitLabel="Save"
+                   SubmittingLabel="Saving…"
+                   ActionsAlignment="ActionsAlignment"
+                   RenderActions="RenderActions" />
+
+@code {
+    [Parameter] public StudentFormFields.StudentFormActionsAlignment ActionsAlignment { get; set; } = StudentFormFields.StudentFormActionsAlignment.Right;
+    [Parameter] public bool RenderActions { get; set; } = true;
+
+    private readonly StudentFormModel _model = new();
+    private static readonly EventCallback _onSubmit = EventCallback.Empty;
+}

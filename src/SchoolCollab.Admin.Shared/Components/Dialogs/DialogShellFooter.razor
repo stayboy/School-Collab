@@ -19,7 +19,7 @@
      OnCancel    — invoked when the Cancel button is clicked (typically
                    bound to DialogShellBase.HandleCancelAsync). *@
 
-@if (!string.IsNullOrEmpty(Error))
+@if (!string.IsNullOrWhiteSpace(Error))
 {
     <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@Error</FluentMessageBar>
 }

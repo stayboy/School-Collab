@@ -35,3 +35,24 @@
 ::deep .detail-card .fluent-listbox {
     position: fixed !important;
 }
+
+/* Collapsible "Link a guardian" wrapper. On the new single-page student
+   view (Detail.razor) the always-visible add form pushes the Contacts
+   section below the fold. Wrap the form in a <details>/<summary>
+   disclosure that the user can open only when needed. The summary
+   inherits the design-system colors; the inner card sits inside the
+   open <details> body. */
+.guardians-link-disclosure {
+    margin-top: 12px;
+}
+
+    .guardians-link-disclosure > summary {
+        cursor: pointer;
+        font-weight: 600;
+        padding: 6px 0;
+        list-style: revert;
+    }
+
+    .guardians-link-disclosure[open] > summary {
+        margin-bottom: 8px;
+    }

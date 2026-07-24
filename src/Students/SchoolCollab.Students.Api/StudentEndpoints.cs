@@ -8,7 +8,7 @@ public static class StudentEndpoints
     public static WebApplication MapStudentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)
     {
         var studentsGroup = app.MapGroup("/students");
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
             studentsGroup.RequireAuthorization();
         }
@@ -30,14 +30,14 @@ public static class StudentEndpoints
         // they require authorization. Role-based gating (Primary vs CC) is a later
         // refinement once role claims are issued by the IdP.
         var guardiansGroup = app.MapGroup("/guardians");
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
             guardiansGroup.RequireAuthorization();
         }
         guardiansGroup.MapGuardianRoutes();
 
         var contactsGroup = app.MapGroup("/contacts");
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
             contactsGroup.RequireAuthorization();
         }
@@ -47,7 +47,7 @@ public static class StudentEndpoints
         // Phase 8 (spec §4.12): teacher onboarding + subject/grade links.
         // G2: admin/teacher-only (RequireAuthorization inherited from the group).
         var teachersGroup = app.MapGroup("/teachers");
-        if (!featureFlags.IsEnabled("FEATURE:DisableOIDCAuth"))
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
         {
             teachersGroup.RequireAuthorization();
         }

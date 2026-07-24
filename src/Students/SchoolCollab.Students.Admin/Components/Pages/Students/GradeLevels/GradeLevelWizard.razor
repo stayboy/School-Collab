@@ -272,6 +272,38 @@
                                 </div>
                             </div>
 
+                            @* "Students will be enrolled in" banner. The wizard
+                               already knows the grade (selected in step 1) and the
+                               active period — both are READ-ONLY on this step.
+                               The grade cannot be re-picked here (changing the
+                               grade would change the meaning of step 1); the
+                               period is tenant-scoped and tied to the global
+                               ActiveTermToolbar. The banner surfaces the
+                               binding at a glance so the user is never in
+                               doubt about which grade / period the new
+                               enrollments will land in. The picker dialog
+                               inherits this binding (StudentPickerModel.PeriodId
+                               is set to _activePeriod?.Id) so its inline
+                               "create new student" form also gets the period
+                               pre-selected. *@
+                            <FluentCard class="wizard-step-context-card" AreaRestricted="false">
+                                <FluentStack Orientation="Orientation.Horizontal"
+                                             HorizontalAlignment="HorizontalAlignment.Start"
+                                             VerticalAlignment="VerticalAlignment.Center"
+                                             HorizontalGap="16">
+                                    <FluentBadge Appearance="Appearance.Accent">Enrolment target</FluentBadge>
+                                    <span class="wizard-step-context-grade">
+                                        <strong>Grade:</strong> @(_selectedCodedValue?.Name ?? "—")
+                                    </span>
+                                    <span class="wizard-step-context-period">
+                                        <strong>Period:</strong> @_activePeriod.Name
+                                    </span>
+                                    <span class="wizard-step-context-meta muted">
+                                        Read-only — to change the grade, go back to step 1.
+                                    </span>
+                                </FluentStack>
+                            </FluentCard>
+
                             @* “Add students” opens the <StudentPickerDialog>, a reusable
                                server-filtered multi-select grid (the same EntityGrid
                                the landing pages use) that can also create a brand-new

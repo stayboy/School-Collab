@@ -15,4 +15,5 @@ public sealed record StudentDto(
     // Students module stays decoupled from coded values. Defaults keep the 7
     // server projection sites source-compatible.
     int? Age = null,
-    string? GenderName = null);
+    string? GenderName = null,
+    GradeLevelDto? CurrentGrade = null);

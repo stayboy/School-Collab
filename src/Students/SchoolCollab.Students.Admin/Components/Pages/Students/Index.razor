@@ -45,8 +45,17 @@
         <TemplateColumn TGridItem="StudentDto" Title="Student #" SortBy="@_sortByStudentNumber" Sortable="true">
             <code>@context.StudentNumber</code>
         </TemplateColumn>
-        <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.FirstName)" Sortable="true" />
-        <PropertyColumn TGridItem="StudentDto" TProp="string" Property="@(x => x.LastName)" Sortable="true" />
+        <TemplateColumn TGridItem="StudentDto" Title="Full Name" SortBy="@_sortByFullName" Sortable="true">
+            <HeaderCellTitleTemplate>
+                <span class="grid-header-wrap" title="Full Name">Full Name (Gender, Age)</span>
+            </HeaderCellTitleTemplate>
+            <ChildContent>
+                <div class="student-full-name">
+                    <span class="student-full-name__name">@context.FirstName @context.LastName</span>
+                    <span class="student-full-name__demographics">(@GetDemographics(context))</span>
+                </div>
+            </ChildContent>
+        </TemplateColumn>
         <TemplateColumn TGridItem="StudentDto" Title="Date of Birth">
             @(context.DateOfBirth?.ToShortDateString() ?? "—")
         </TemplateColumn>
@@ -60,17 +69,28 @@
                 <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
             }
         </TemplateColumn>
+        <TemplateColumn TGridItem="StudentDto" Title="Current Grade" Class="student-current-grade-col">
+            <HeaderCellTitleTemplate>
+                <span class="grid-header-wrap" title="Current Grade">Current Grade</span>
+            </HeaderCellTitleTemplate>
+            <ChildContent>
+                <FluentBadge Value="@(context.CurrentGrade?.Name ?? "—")" Appearance="Appearance.Neutral" Primary="true" />
+            </ChildContent>
+        </TemplateColumn>
+
         <TemplateColumn TGridItem="StudentDto" Title="Actions">
-            <FluentAnchor Href="@($"/students/{context.Id}")">View</FluentAnchor>
-            @if (!context.IsDeleted)
-            {
-                <FluentAnchor Href="#" OnClick="@(() => OnTransferAsync(context.Id))" class="ms-2">Transfer</FluentAnchor>
-                <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="ms-2">Delete</FluentAnchor>
-            }
-            else
-            {
-                <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="ms-2">Recover</FluentAnchor>
-            }
+            <div class="MS-FluentGainLayout-1">
+                <FluentAnchor Href="@($"/students/{context.Id}")">View</FluentAnchor>
+                @if (!context.IsDeleted)
+                {
+                    <FluentAnchor Href="#" OnClick="@(() => OnTransferAsync(context.Id))" class="ms-3 ms-BackgroundColor-Primary">Transfer</FluentAnchor>
+                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="ms-3">Delete</FluentAnchor>
+                }
+                else
+                {
+                    <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="ms-3 ms-BackgroundColor-Primary">Recover</FluentAnchor>
+                }
+            </div>
         </TemplateColumn>
     </Columns>
 </LandingPage>
@@ -95,7 +115,7 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "120px minmax(180px,2fr) minmax(180px,2fr) minmax(200px,2fr) 120px 100px auto"
+        GridTemplateColumns = "120px minmax(260px,3fr) minmax(180px,2fr) 110px 200px auto"
     };
 
     private StudentDto[] _filteredItems
@@ -132,6 +152,23 @@
     private static readonly GridSort<StudentDto> _sortByStudentNumber =
         GridSort<StudentDto>.ByAscending(x => x.StudentNumber);
 
+    private static readonly GridSort<StudentDto> _sortByFullName =
+        GridSort<StudentDto>.ByAscending(x => x.LastName).ThenAscending(x => x.FirstName);
+
+    /// <summary>
+    /// Renders the parenthetical "Gender, Age" suffix for the Full Name column.
+    /// Returns a non-empty string only when at least one of Gender/Age is
+    /// known, so the column never shows a stray empty "()" when both are null.
+    /// Em-dash fills the missing slot so the format stays consistent.
+    /// </summary>
+    private static string GetDemographics(StudentDto s)
+    {
+        var gender = string.IsNullOrWhiteSpace(s.GenderName) ? "—" : s.GenderName;
+        var age = s.Age.HasValue ? s.Age.Value.ToString() : "—";
+        // Always show both slots (with em-dashes) so the column shape is stable.
+        return $"{gender}, {age}";
+    }
+
     private bool MatchesSearch(StudentDto s)
     {
         var search = _searchText.Trim();
@@ -165,7 +202,7 @@
             _gradeLevels = await Api.ListGradeLevelsAsync(token);
             if (_disposed) return;
 
-            // Apply query params if present
+            // Load students filtered by grade
             if (GradeLevelId.HasValue)
             {
                 _filterGradeLevelId = GradeLevelId;

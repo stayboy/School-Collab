@@ -4,6 +4,7 @@ using SchoolCollab.Assignments.Admin;
 using SchoolCollab.Settings.Admin;
 using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Admin;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -57,7 +58,7 @@ var app = builder.Build();
 // (NOT via IFeatureFlagService, which is now the cached Config client that does not
 // carry this startup-only flag).
 var disableOIDC = bool.TryParse(
-    builder.Configuration["FeatureFlags:FEATURE:DisableOIDCAuth"], out var d) && d;
+    builder.Configuration[$"FeatureFlags:{FeatureFlagKeys.DisableOIDCAuth}"], out var d) && d;
 
 if (!app.Environment.IsDevelopment())
 {

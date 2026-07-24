@@ -41,6 +41,22 @@ public static class EnrollmentRoutes
             {
                 return Results.NotFound();
             }
+            catch (PeriodNotOpenException ex)
+            {
+                // The enroll handler throws PeriodNotOpenException when
+                // the tenant has no active period or when the request's
+                // PeriodId does not match the active one (FR-A3 in
+                // active-period-per-tenancy.md). Surface the full
+                // exception message in a 400 response body so the
+                // client's <EnrollStudentAsync> can include it in
+                // the tracing detail the user sees in the dialog's
+                // per-field error MessageBar. Without this catch the
+                // exception bubbles up as a 500 with no body, and the
+                // client only sees the generic "Response status code
+                // does not indicate success: 500" text — useless for
+                // tracing WHAT went wrong.
+                return Results.BadRequest(new { ex.Message });
+            }
             catch (ConcurrencyException ex)
             {
                 return Results.Conflict(new { ex.Message });

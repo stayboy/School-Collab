@@ -1,0 +1,54 @@
+@* Test fixture for StudentLandingColumnsTests. Mirrors the new Full Name
+   (Gender, Age) column + Current Grade column shape used by
+   Students/Index.razor so we can assert on the new header-wrapping template
+   and the combined name+demographics body without spinning up the full
+   LandingPage wrapper. The test class toggles the bool flags and asserts on
+   the rendered markup. *@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Students.Admin.Services
+
+<EntityGrid TItem="StudentDto"
+            Items="@Items"
+            GridSettings="@_gridSettings">
+    <Columns>
+        <TemplateColumn TGridItem="StudentDto" Title="Student #" SortBy="@_sortByStudentNumber" Sortable="true">
+            <code>@context.StudentNumber</code>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="StudentDto" Title="Full Name" SortBy="@_sortByFullName" Sortable="true">
+            <HeaderCellTitleTemplate>
+                <span class="grid-header-wrap" title="Full Name">Full Name (Gender, Age)</span>
+            </HeaderCellTitleTemplate>
+            <ChildContent>
+                <div class="student-full-name">
+                    <span class="student-full-name__name">@context.FirstName @context.LastName</span>
+                    <span class="student-full-name__demographics">(@context.GenderName, @context.Age)</span>
+                </div>
+            </ChildContent>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="StudentDto" Title="Current Grade" Class="student-current-grade-col">
+            <HeaderCellTitleTemplate>
+                <span class="grid-header-wrap" title="Current Grade">Current Grade</span>
+            </HeaderCellTitleTemplate>
+            <ChildContent>
+                <FluentBadge Value="@(context.CurrentGrade?.Name ?? "—")" Appearance="Appearance.Neutral" Primary="true" />
+            </ChildContent>
+        </TemplateColumn>
+    </Columns>
+</EntityGrid>
+
+@code {
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "120px minmax(260px,3fr) 200px"
+    };
+
+    private static readonly GridSort<StudentDto> _sortByStudentNumber =
+        GridSort<StudentDto>.ByAscending(x => x.StudentNumber);
+
+    private static readonly GridSort<StudentDto> _sortByFullName =
+        GridSort<StudentDto>.ByAscending(x => x.LastName).ThenAscending(x => x.FirstName);
+
+    [Parameter] public StudentDto[]? Items { get; set; }
+}

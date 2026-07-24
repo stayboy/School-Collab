@@ -46,27 +46,35 @@
             <FluentMessageBar Intent="MessageIntent.Info">No guardians linked yet.</FluentMessageBar>
         }
 
-        <FluentCard class="detail-card" AreaRestricted="false">
-            <div class="wizard-section-header">
-                <div>
-                    <h4>Link a guardian</h4>
-                    <p class="wizard-hint">Pick an existing guardian and set the role.</p>
+        @* Collapsible wrapper: hides the link form by default so the
+           Contacts section below stays above the fold on the new single-page
+           student view. *@
+        <details class="guardians-link-disclosure">
+            <summary>Add a guardian link</summary>
+
+            <FluentCard class="detail-card" AreaRestricted="false">
+                <div class="wizard-section-header">
+                    <div>
+                        <h4>Link a guardian</h4>
+                        <p class="wizard-hint">Pick an existing guardian and set the role.</p>
+                    </div>
                 </div>
-            </div>
-            <div class="link-guardian-row">
-                <FluentSelect TOption="GuardianDto" Items="_availableGuardians" @bind-SelectedOption="_newGuardian" OptionText="@(g => $"{g.FirstName} {g.LastName}")" OptionValue="@(g => g.Id.ToString())" Placeholder="Guardian" class="link-guardian-select" />
-                <DropdownForEnum TEnum="GuardianRole"
-                                  @bind-SelectedValue="_newRole"
-                                  Placeholder="Role"
-                                  Class="link-guardian-role" />
-                <CodedValueDropdown Parent="CodedValueParent.Relationships" @bind-SelectedId="_newRelationship" Placeholder="Relationship" class="link-guardian-rel" />
-                <FluentButton Appearance="Appearance.Accent" OnClick="AddAsync" Disabled="@(_newGuardian is null || _saving)">Link</FluentButton>
-            </div>
-            @if (!string.IsNullOrEmpty(_error))
-            {
-                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
-            }
-        </FluentCard>
+                <div class="link-guardian-row">
+                    <FluentSelect TOption="GuardianDto" Items="_availableGuardians" @bind-SelectedOption="_newGuardian" OptionText="@(g => $"{g.FirstName} {g.LastName}")" OptionValue="@(g => g.Id.ToString())" Placeholder="Guardian" class="link-guardian-select" />
+                    <DropdownForEnum TEnum="GuardianRole"
+                                      @bind-SelectedValue="_newRole"
+                                      Placeholder="Role"
+                                      Class="link-guardian-role" />
+                    <CodedValueDropdown Parent="CodedValueParent.Relationships" @bind-SelectedId="_newRelationship" Placeholder="Relationship" class="link-guardian-rel" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="AddAsync" Disabled="@(_newGuardian is null || _saving)">Link</FluentButton>
+                </div>
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                }
+            </FluentCard>
+
+        </details>
     }
 </div>
 

@@ -66,6 +66,18 @@
     justify-content: flex-end;
 }
 
+/* Buttons used inside .form-actions can opt into full-width stretching
+   via the .form-actions__button class. Used by the Edit page's
+   right-column page-level sidebar (where the two buttons stack
+   vertically and must fill the sidebar's width). The default
+   bottom-horizontal row leaves the button width to its intrinsic
+   size, so the class has no effect there. */
+.form-actions__button {
+    /* width: 100% is applied via the sidebar CSS rule below, not
+       here, so the class stays a no-op in the default bottom-horizontal
+       row (where the original buttons sized to their text). */
+}
+
 /* Horizontal separator between the student fields and the opt-in Guardians
    section. Wraps a <FluentDivider /> to provide consistent vertical breathing
    room (margin/padding) that matches the .form-actions separator. */

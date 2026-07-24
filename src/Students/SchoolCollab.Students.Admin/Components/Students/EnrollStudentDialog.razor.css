@@ -1,0 +1,93 @@
+/* ── Enroll dialog layout ──────────────────────────────────────
+   The form follows the canonical school-collab FormRow pattern
+   (label cell 180px + input cell flex:1 + gap 12px; see FormRow.razor
+   for the full pattern description). The only dialog-specific bits
+   are:
+     - the form max-width (so the input cells don't stretch too wide)
+     - the grade row, which composes the CodedValueDropdown (left)
+       and the + button (right) inside a single FormRow input cell
+     - per-input widths for the read-only / date inputs so they
+       look proportional to the value they hold
+     - the per-field error display (sized to sit just below the
+       Enrolled on date picker without disrupting the form rhythm)
+   The FormRow primitive's own rules (label width, alignment, mobile
+   fallback) live in src/SchoolCollab.Admin.Shared/Components/FormRow.razor.css. */
+
+/* Cap the form width so the input cells don't stretch uncomfortably
+   wide on big screens. The 720px cap (wider than the StudentFormFields
+   600px) accommodates the FULL active-period text on one line even
+   when the period's name is long (e.g. "Fall 2025 / Spring 2026" is
+   still shown in the read-only input cell without truncation). The
+   period row's display is the short academic-year token
+   (e.g. "2025/2026") so this cap is well above the actual content
+   width; the wider cap simply gives the input cells more room to
+   breathe. */
+.enroll-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    max-width: 720px;
+}
+
+/* ── Grade row: CodedValueDropdown (flex:1) + + button (auto) ──
+   Sits inside a FormRow's input cell. align-items: end so the +
+   button aligns with the bottom of the dropdown's input cell
+   (FluentUI adds a label-height above the input which would
+   otherwise push the + button down a row). */
+.enroll-grade-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    width: 100%;
+    min-width: 0;
+}
+
+/* Let the dropdown take all remaining space; min-width: 0 is the
+   standard flex gotcha fix that lets the dropdown shrink below its
+   intrinsic content width (so a long Grade name can scroll instead
+   of pushing the + button out of view). */
+.enroll-grade-select {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.enroll-grade-add {
+    flex: 0 0 auto;
+    /* Lift the + button up by half a line so it visually aligns with
+       the dropdown's input cell rather than sitting below it
+       (FluentUI labels add 24px above the input which is a little
+       much for an icon-only button). */
+    margin-bottom: 4px;
+}
+
+/* ── Per-input widths ──
+   The read-only Period row takes the full input cell so the
+   resolved value (the academic-year token + tooltip) is easy to
+   scan. The Enrolled-on date picker is narrow (~150px is enough)
+   so it sits with comfortable whitespace in the input cell. */
+.enroll-form-input--readonly {
+    width: 100%;
+    background: var(--neutral-layer-1, #fafafa);
+}
+
+.enroll-form-input--enrolled-on {
+    width: 160px;
+    max-width: 100%;
+}
+
+/* ── Per-field error display ──
+   Sits inside the Enrolled on FormRow's input cell, directly below
+   the date picker. Sized to fit the input cell (full width of the
+   cell, NOT the full dialog) so it visually associates with the
+   field that triggered the error. The .enroll-form-field-error
+   class wraps the FluentMessageBar; we use the standard .mb-3
+   margin-bottom for the same vertical rhythm as other dialog
+   error bars. */
+.enroll-form-field-error {
+    margin-top: 8px;
+    /* Span the full input cell width so long error messages wrap
+       cleanly within the cell rather than overflowing into the
+       dialog's right gutter. */
+    width: 100%;
+}

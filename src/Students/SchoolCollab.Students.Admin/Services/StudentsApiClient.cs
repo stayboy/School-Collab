@@ -22,7 +22,9 @@ public sealed record StudentDto(
     DateTimeOffset UpdatedAt,
     // Enriched client-side (see EnrichStudentsAsync). Left null by the API.
     int? Age = null,
-    string? GenderName = null);
+    string? GenderName = null,
+    // Current grade enrollment info, populated client-side from enrollments
+    GradeLevelDto? CurrentGrade = null);
 
 public sealed record GradeLevelDto(
     Guid Id,
@@ -319,10 +321,71 @@ public sealed class StudentsApiClient : IContactsClient
 
         var names = await _codedValues.GetByIdsAsync(genderIds, ct);
         var map = names.ToDictionary(x => x.Id, x => x.Name);
+        
+        // Enrich with grade level info
+        var studentIds = withAge.Select(s => s.Id).ToArray();
+        var enrollmentsByStudent = new Dictionary<Guid, StudentEnrollmentDto[]>();
+        
+        // Get enrollments for each student
+        foreach (var studentId in studentIds)
+        {
+            try
+            {
+                var enrollments = await ListEnrollmentsByStudentAsync(studentId, ct);
+                if (enrollments != null)
+                {
+                    enrollmentsByStudent[studentId] = enrollments;
+                }
+            }
+            catch (Exception)
+            {
+                // Continue with other students if one fails
+            }
+        }
+
+        // Get all grade level IDs needed from enrollments
+        var gradeIds = enrollmentsByStudent
+            .SelectMany(kvp => kvp.Value)
+            .Select(e => e.GradeLevelId)
+            .Distinct()
+            .ToArray();
+
+        var gradeDict = new Dictionary<Guid, GradeLevelDto?>();
+        if (gradeIds.Length > 0)
+        {
+            var grades = await ListGradeLevelsAsync(ct);
+            if (grades != null)
+            {
+                gradeDict = grades.ToDictionary(g => g.Id, g => (GradeLevelDto?)g);
+            }
+        }
+
         return withAge.Select(s => s with
         {
-            GenderName = s.GenderCodedValueId is { } id && map.TryGetValue(id, out var name) ? name : null
+            Age = ComputeAge(s.DateOfBirth),
+            GenderName = s.GenderCodedValueId is { } id && map.TryGetValue(id, out var name) ? name : null,
+            CurrentGrade = GetCurrentGrade(s.Id, enrollmentsByStudent, gradeDict)
         }).ToArray();
+    }
+
+    private static GradeLevelDto? GetCurrentGrade(Guid studentId,
+        Dictionary<Guid, StudentEnrollmentDto[]> enrollmentsByStudent,
+        Dictionary<Guid, GradeLevelDto?> gradeDict)
+    {
+        if (!enrollmentsByStudent.TryGetValue(studentId, out var enrollments) || enrollments.Length == 0)
+            return null;
+
+        // Get the most recent active enrollment
+        var currentEnrollment = enrollments
+            .Where(e => e.Status == "Active" || e.ExitDate == null)
+            .OrderByDescending(e => e.EnrolledOn)
+            .FirstOrDefault();
+            
+        if (currentEnrollment == null)
+            return null;
+
+        gradeDict.TryGetValue(currentEnrollment.GradeLevelId, out var grade);
+        return grade;
     }
 
     private async Task<StudentDto?> EnrichSingleAsync(StudentDto? item, CancellationToken ct = default)
@@ -347,8 +410,19 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Grade Levels ─────────────────────────────────────────────────────────
 
-    public async Task<GradeLevelDto[]?> ListGradeLevelsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GradeLevelDto[]>("/students/grade-levels", ct);
+    public async Task<GradeLevelDto[]?> ListGradeLevelsAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/students/grade-levels", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ListGradeLevels failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        return await response.Content.ReadFromJsonAsync<GradeLevelDto[]>(ct);
+    }
 
     public async Task<GradeLevelLandingDto[]?> ListGradeLevelsForLandingAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<GradeLevelLandingDto[]>("/students/grade-levels/landing", ct);
@@ -449,8 +523,19 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Periods ──────────────────────────────────────────────────────────────
 
-    public async Task<PeriodDto[]?> ListPeriodsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<PeriodDto[]>("/students/periods", ct);
+    public async Task<PeriodDto[]?> ListPeriodsAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/students/periods", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ListPeriods failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        return await response.Content.ReadFromJsonAsync<PeriodDto[]>(ct);
+    }
 
     public async Task<PeriodDto?> GetPeriodByIdAsync(Guid id, CancellationToken ct = default)
     {
@@ -488,7 +573,28 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<Guid> EnrollStudentAsync(EnrollStudentRequest req, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/students/enrollments", req, ct);
-        response.EnsureSuccessStatusCode();
+        // IMPORTANT: do NOT use EnsureSuccessStatusCode here. The
+        // default HttpRequestException it throws only carries the
+        // status code text ("Response status code does not indicate
+        // success: 400 (Bad Request).") and DROPS the response body.
+        // The server's body is where the actual tracing detail lives
+        // (e.g. "Cannot enrol students: no active period is open
+        // for this tenant. Open a period before enrolling." for
+        // PeriodNotOpenException). Without the body, the dialog's
+        // per-field error MessageBar shows just the generic status
+        // text — useless for tracing WHAT went wrong. We therefore
+        // check the status manually, read the body on failure, and
+        // rethrow an HttpRequestException whose Message includes
+        // BOTH the status code AND the body. The dialog's
+        // `Error = ex.Message` then surfaces the full detail.
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"EnrollStudent failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
@@ -637,37 +743,49 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<GradeLevelDto[]?> ListGradeLevelsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<GradeLevelDto[]>($"/teachers/{teacherId}/grade-levels", ct);
 
-    // ── Contacts ─────────────────────────────────────────────────────────────
+    // ── Contacts ──────────────────────────────────────────────────────────────
+    // The contacts API is registered as a sibling top-level group in
+    // SchoolCollab.Students.Api/StudentEndpoints.cs:
+    //
+    //     var contactsGroup = app.MapGroup("/contacts");
+    //     contactsGroup.MapContactRoutes();
+    //     contactsGroup.MapSubscriptionRoutes();
+    //
+    // The previous client prefixed these paths with `/students` and the
+    // resulting 404 surfaced in the <ContactsEditor> messagebar. Routes
+    // are the root-level /contacts group, NOT a /students/contacts
+    // sub-resource — contacts are a cross-cutting concern (they can
+    // belong to a student OR a guardian), not a child of /students.
 
     public async Task<ContactDto[]?> ListContactsAsync(ContactOwnerType ownerType, Guid ownerId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<ContactDto[]>($"/students/contacts?ownerType={ownerType}&ownerId={ownerId}", ct);
+        await _http.GetFromJsonAsync<ContactDto[]>($"/contacts?ownerType={ownerType}&ownerId={ownerId}", ct);
 
     public async Task<Guid> AddContactAsync(AddContactRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/students/contacts", req, ct);
+        var response = await _http.PostAsJsonAsync("/contacts", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/students/contacts/{id}", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PutAsJsonAsync($"/contacts/{id}", req, ct)).EnsureSuccessStatusCode();
 
     public async Task DeleteContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/students/contacts/{id}", ct)).EnsureSuccessStatusCode();
+        (await _http.DeleteAsync($"/contacts/{id}", ct)).EnsureSuccessStatusCode();
 
     public async Task VerifyContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/students/contacts/{id}/verify", null, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsync($"/contacts/{id}/verify", null, ct)).EnsureSuccessStatusCode();
 
     public async Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/students/contacts/{id}/set-primary", null, ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsync($"/contacts/{id}/set-primary", null, ct)).EnsureSuccessStatusCode();
 
     public async Task<SubscribedContactDto[]?> ListSubscribedContactsAsync(
         ContactOwnerType ownerType, Guid? ownerId = null, SubscriptionScope? scope = null, CancellationToken ct = default)
     {
         var url = scope.HasValue
-            ? $"/students/contacts/subscribed?ownerType={ownerType}&scope={scope}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}"
-            : $"/students/contacts/subscribed?ownerType={ownerType}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}";
+            ? $"/contacts/subscribed?ownerType={ownerType}&scope={scope}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}"
+            : $"/contacts/subscribed?ownerType={ownerType}{(ownerId.HasValue ? $"&ownerId={ownerId}" : "")}";
         return await _http.GetFromJsonAsync<SubscribedContactDto[]>(url, ct);
     }
 
@@ -675,13 +793,13 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task SubscribeAsync(
         Guid contactId, SubscriptionScope scope = SubscriptionScope.AllAssignments, Guid? scopeRefId = null, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/students/contacts/{contactId}/subscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/contacts/{contactId}/subscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
 
     public async Task UnsubscribeAsync(
         Guid contactId, SubscriptionScope scope = SubscriptionScope.AllAssignments, Guid? scopeRefId = null, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/students/contacts/{contactId}/unsubscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
+        (await _http.PostAsJsonAsync($"/contacts/{contactId}/unsubscribe", new SubscriptionRequest(scope, scopeRefId), ct)).EnsureSuccessStatusCode();
 
-    // ── Helper ───────────────────────────────────────────────────────────────
+    // ── Helper ──────────────────────────────────────────────────────────────
 
     private sealed record IdResponse(Guid Id);
 }
