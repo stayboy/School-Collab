@@ -12,7 +12,7 @@
    student form model. Visual treatment: a divider above, an h3 heading
    to match the page-level .section-header pattern used on Detail.razor,
    then the shared <ContactsEditor> just like on GuardianDetail.razor. */
-.student-edit-divider { margin: 32px 0 24px; }
+.student-edit-divider { margin: 48px 0 24px; }
 .student-edit-direct-contact { display: flex; flex-direction: column; gap: 12px; padding: 8px 0; }
 .student-edit-section-title { margin: 0; font-size: 1rem; font-weight: 600; }
 
