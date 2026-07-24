@@ -15,8 +15,8 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// The "+" inline-create-grade button on the Enroll Student dialog has a
 /// global side-effect: it creates a new GRADE coded value + a matching
 /// <c>GradeLevel</c> row, both of which are shared across tenants. The
-/// flag is therefore <b>opt-in</b> (default false) and only flips on
-/// after an explicit ConfigFlags toggle. These tests pin the
+/// flag is therefore <b>enabled by default</b> as of the feature rollout,
+/// but tenants can still opt out via the ConfigFlags page. These tests pin the
 /// registration + gating contract so a future regression (e.g.
 /// accidentally re-introducing the button as always-on, or renaming
 /// the flag and breaking the ConfigFlags landing page link) is caught
@@ -145,87 +145,99 @@ public class EnrollStudentDialogFeatureFlagTests
     {
         // The "+" inline-create-grade button is gated by BOTH the
         // new-enrollment check (UX correctness) AND the feature flag
-        // (governance), ANDed together. The markup must wrap the
-        // <FeatureFlagGate> in an `@if (IsNewEnrollment)` block so the
-        // button is hidden for re-enrollments even if the tenant has
-        // opted in to the flag.
-        //
-        // The new-enrollment check is the validation that "setting up
-        // a grade level inside the enrollment dialog" is appropriate
-        // for the current scenario — for a re-enrollment (the student
-        // is already enrolled in a grade) the button is hidden because
-        // standing up a brand-new grade mid-flow is the wrong action
-        // (the user should pick a different existing grade instead).
+        // (governance), ANDed together. The new-enrollment check is the
+        // INNER gate (an `@if (IsNewEnrollment)` block INSIDE the
+        // <FeatureFlagGate>'s <ChildContent>, wrapping the + button). The
+        // <FeatureFlagGate> is the OUTER gate (wrapping the whole flag-ON
+        // grade-picker branch). The two gates cover different concerns:
+        // IsNewEnrollment is UX correctness (re-enrollments shouldn't
+        // offer grade setup mid-flow); the feature flag is governance
+        // (only tenants opted in to inline grade setup see the + button).
+        // Either gate being false hides the button. For a re-enrollment
+        // the button is hidden even if the tenant has opted in to the
+        // flag — the `@if (IsNewEnrollment)` short-circuits before the
+        // button renders.
         var src = Load(DialogPath);
-        // The @if (IsNewEnrollment) must wrap the FeatureFlagGate
-        // containing the + button. We assert both via substring
-        // presence + a positional check: the @if opens before the
-        // gate, and the closing brace of the @if comes after the
-        // gate's closing tag.
-        var ifIdx = src.IndexOf("@if (IsNewEnrollment)", StringComparison.Ordinal);
+        // The <FeatureFlagGate> + <ChildContent> + <Fallback> structure
+        // must exist (the two-dropdown design).
         var gateIdx = src.IndexOf($"<FeatureFlagGate Key=\"@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog\"", StringComparison.Ordinal);
+        var childContentIdx = src.IndexOf("<ChildContent>", gateIdx, StringComparison.Ordinal);
+        var fallbackIdx = src.IndexOf("<Fallback>", gateIdx, StringComparison.Ordinal);
+        gateIdx.Should().BeGreaterThan(0,
+            "the dialog MUST have a <FeatureFlagGate Key=\"FEATURE:EnableGradeLevelSetupOnEnrollDialog\"> wrapping the flag-ON grade-picker branch");
+        childContentIdx.Should().BeGreaterThan(gateIdx,
+            "the <FeatureFlagGate> MUST have a <ChildContent> for the flag-ON branch (CodedValueDropdown + + button + Override button)");
+        fallbackIdx.Should().BeGreaterThan(childContentIdx,
+            "the <FeatureFlagGate> MUST have a <Fallback> AFTER <ChildContent> for the flag-OFF branch (generic <DropdownComponent TItem=\"GradeLevelDto\"> of _gradeLevels)");
+        // The @if (IsNewEnrollment) must be INSIDE the gate's ChildContent,
+        // wrapping the + button. We assert via substring presence + a
+        // positional check: the @if appears after the ChildContent opens
+        // and before the </ChildContent> closes.
+        var ifIdx = src.IndexOf("@if (IsNewEnrollment)", childContentIdx, StringComparison.Ordinal);
         ifIdx.Should().BeGreaterThan(0,
-            "the dialog MUST wrap the + button in `@if (IsNewEnrollment)` so the inline grade-setup path is only offered for the new-enrollment case");
-        gateIdx.Should().BeGreaterThan(ifIdx,
-            "the @if (IsNewEnrollment) MUST appear BEFORE the <FeatureFlagGate> so the new-enrollment check is the outer gate (the FeatureFlagGate is the inner one)");
-        var gateCloseIdx = src.IndexOf("</FeatureFlagGate>", gateIdx, StringComparison.Ordinal);
-        // After the gate's closing tag, the @if block must eventually
-        // close. Walk forward looking for the next `}` at column 0
-        // (start of line) — a loose but adequate signal that the @if
-        // body has ended.
-        var afterGate = src.Substring(gateCloseIdx);
-        var nextCloseBrace = afterGate.IndexOf("\n}", StringComparison.Ordinal);
-        nextCloseBrace.Should().BeGreaterThan(0,
-            "the @if (IsNewEnrollment) block must close AFTER the </FeatureFlagGate> so the new-enrollment check wraps the feature flag");
+            "the dialog MUST have an `@if (IsNewEnrollment)` block INSIDE the gate's <ChildContent> so the + button is hidden for re-enrollments even when the tenant has opted in to the flag");
+        var childContentCloseIdx = src.IndexOf("</ChildContent>", ifIdx, StringComparison.Ordinal);
+        childContentCloseIdx.Should().BeGreaterThan(ifIdx,
+            "the `@if (IsNewEnrollment)` MUST be closed by </ChildContent> — it lives inside the gate's ChildContent branch");
     }
 
     [TestMethod]
-    public void EnrollDialog_Plus_Button_Is_The_Only_Child_Of_The_Gate()
+    public void EnrollDialog_Gate_Wraps_The_Whole_FlagOn_GradePicker_Branch()
     {
-        // Pin the markup shape: the gate wraps exactly the + button, not
-        // the whole grade-level row. A regression that accidentally gates
-        // the dropdown too (or the entire dialog) would break the common
-        // case (picking an existing grade).
+        // Pin the markup shape for the two-dropdown design: the
+        // <FeatureFlagGate> wraps the WHOLE flag-ON grade-picker branch
+        // (CodedValueDropdown + "+" button + "Override name" button), NOT
+        // just the + button. A regression that wrapped only the + button
+        // would leave the CodedValueDropdown visible when the flag is off
+        // (a UX regression: flag-OFF tenants would see the full GRADE list
+        // and get "not set up as a grade level" errors on submit). The
+        // <FeatureFlagGate> is the single switch between the flag-ON
+        // CodedValueDropdown branch and the flag-OFF <FluentSelect> branch.
         var src = Load(DialogPath);
-        // Look for the gate opening tag, then the immediate next element
-        // (a <FluentButton>), then the gate closing tag. This is a loose
-        // shape check — tolerant of whitespace/blank lines.
         var gateOpenIdx = src.IndexOf($"<FeatureFlagGate Key=\"@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog\"", StringComparison.Ordinal);
         gateOpenIdx.Should().BeGreaterThan(0, "the FeatureFlagGate opening tag must exist on the dialog");
-        var buttonIdx = src.IndexOf("<FluentButton", gateOpenIdx, StringComparison.Ordinal);
-        buttonIdx.Should().BeGreaterThan(gateOpenIdx, "the next <FluentButton> after the gate opening must be the + button");
-        var gateCloseIdx = src.IndexOf("</FeatureFlagGate>", buttonIdx, StringComparison.Ordinal);
-        gateCloseIdx.Should().BeGreaterThan(buttonIdx, "the </FeatureFlagGate> closing tag must come after the + button");
+        // Inside the gate's ChildContent, the CodedValueDropdown must appear
+        // BEFORE the first <FluentButton> (the gate's ChildContent opens
+        // with the dropdown, then the buttons). This proves the dropdown
+        // is inside the gate, not outside it.
+        var childContentIdx = src.IndexOf("<ChildContent>", gateOpenIdx, StringComparison.Ordinal);
+        var dropdownIdx = src.IndexOf("CodedValueDropdown", childContentIdx, StringComparison.Ordinal);
+        var firstButtonIdx = src.IndexOf("<FluentButton", childContentIdx, StringComparison.Ordinal);
+        dropdownIdx.Should().BeGreaterThan(childContentIdx,
+            "the CodedValueDropdown MUST be inside the gate's <ChildContent> — the gate is the switch between flag-ON (CodedValueDropdown) and flag-OFF (<FluentSelect>) branches");
+        firstButtonIdx.Should().BeGreaterThan(dropdownIdx,
+            "the + button MUST come after the CodedValueDropdown inside the gate's <ChildContent> — the gate wraps the whole flag-ON grade-picker branch, not just the buttons");
+        // The gate must close AFTER both the dropdown and the buttons.
+        var gateCloseIdx = src.IndexOf("</FeatureFlagGate>", firstButtonIdx, StringComparison.Ordinal);
+        gateCloseIdx.Should().BeGreaterThan(firstButtonIdx, "the </FeatureFlagGate> closing tag must come after the + button");
     }
 
     [TestMethod]
-    public void FeatureFlag_Is_Registered_In_AppSettings_With_Default_Off()
+    public void FeatureFlag_Is_Registered_In_AppSettings_With_Default_On()
     {
-        // The flag must be in appsettings.json with a default of "false"
-        // (opt-in). If a future change flips the default to "true" by
-        // accident, every tenant would see the + button immediately on
-        // startup without an explicit ConfigFlags toggle — a noisy
-        // regression for an inline-create-grade action that creates
-        // global state.
+        // The flag must be in appsettings.json with a default of "true"
+        // (enabled by default as of the feature rollout). If a future
+        // change flips the default back to "false", the + button would
+        // be hidden for tenants that have not explicitly toggled it —
+        // a regression for the now-standard inline-create-grade flow.
         var settings = Load(AppSettingsPath);
         settings.Should().Contain("\"EnableGradeLevelSetupOnEnrollDialog\"",
             "the feature flag MUST be registered in appsettings.json so the Admin host can resolve it via IConfiguration (the ConfigFeatureFlagService reads it from here on cold-start before the cached Settings client warms up)");
-        // The default must be "false" — the flag is opt-in. A "true"
-        // default would surprise tenants by surfacing inline-grade-
-        // creation on first run.
+        // The default is now "true" — inline-grade-create is enabled out
+        // of the box. Tenants can still opt out via the ConfigFlags page.
         var flagLine = settings
             .Split('\n')
             .FirstOrDefault(line => line.Contains("EnableGradeLevelSetupOnEnrollDialog"));
         flagLine.Should().NotBeNull("the flag must be present in appsettings.json");
-        flagLine!.Should().Contain("\"false\"",
-            "the flag default MUST be \"false\" — inline-grade-create is opt-in to prevent surprise global side-effects on tenants that have not configured grade levels yet");
+        flagLine!.Should().Contain("\"true\"",
+            "the flag default MUST be \"true\" — inline-grade-create is now enabled by default; tenants can opt out via ConfigFlags if they do not want the global side-effect");
     }
 
     [TestMethod]
-    public void FeatureFlag_Is_Seeded_By_MigrationService_As_Default_Off()
+    public void FeatureFlag_Is_Seeded_By_MigrationService_As_Default_On()
     {
-        // The migration service must seed the flag with IsEnabled=false
-        // so a fresh deployment starts with the button hidden. The seed
+        // The migration service must seed the flag with IsEnabled=true
+        // so a fresh deployment starts with the button visible. The seed
         // must be idempotent (skip-if-exists) so re-running the
         // migrator does not violate ix_feature_flags_key_unique.
         var src = Load(MigrationServicePath);
@@ -233,14 +245,15 @@ public class EnrollStudentDialogFeatureFlagTests
             "the migration service MUST define a SeedEnableGradeLevelSetupOnEnrollDialogAsync method to idempotently seed the flag on first deploy");
         src.Should().Contain("await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);",
             "the seed call MUST be invoked from the Settings migration block alongside the other runtime flag seeds so a fresh deploy actually persists the row");
-        // The seed body must create the flag with IsEnabled=false (opt-in).
+        // The seed body must create the flag with IsEnabled=true (enabled
+        // by default as of the feature rollout).
         var seedBodyIdx = src.IndexOf("SeedEnableGradeLevelSetupOnEnrollDialogAsync", StringComparison.Ordinal);
         seedBodyIdx.Should().BeGreaterThan(0);
         var afterSeedHeader = src.Substring(seedBodyIdx);
-        // Look for the IsEnabled: false argument on the FeatureFlag.Create call
+        // Look for the IsEnabled: true argument on the FeatureFlag.Create call
         // in the seed body. Tolerant of line wrapping / whitespace.
-        afterSeedHeader.Should().Contain("isEnabled: false",
-            "the seed MUST create the flag with isEnabled: false (opt-in) — flipping the default would surprise tenants on first deploy");
+        afterSeedHeader.Should().Contain("isEnabled: true",
+            "the seed MUST create the flag with isEnabled: true (enabled by default) — hiding the button by default would regress the now-standard inline-create-grade flow");
     }
 
     [TestMethod]
@@ -303,47 +316,90 @@ public class EnrollStudentDialogFeatureFlagTests
         // empty-grade warning branches).
         src.Should().NotContain("No grade levels are configured yet — create one before enrolling.",
             "the dialog MUST NOT have a 'No grade levels are configured yet' warning copy — that is the empty-list warning wording that was removed");
-        // The dialog DOES inject IFeatureFlagService and keep a _gradeSetupEnabled
-        // field — but ONLY to drive the SubmitAsync auto-materialize decision
-        // (when the flag is ON and the picked coded value has no GradeLevel row,
-        // the dialog sets the grade level up by itself via GetOrCreateGradeLevelAsync
-        // instead of erroring). The FeatureFlagGate still owns the reactive
-        // +/Override button rendering; this code-path resolution is the supported
-        // way to branch a submit-time path on the flag (the gate can't).
-        src.Should().Contain("_gradeSetupEnabled",
-            "the dialog MUST keep a _gradeSetupEnabled field resolved in OnInitializedAsync — SubmitAsync's auto-materialize-vs-error branch is driven by the flag state in code");
-        src.Should().Contain("IFeatureFlagService",
-            "the dialog MUST inject IFeatureFlagService to resolve the flag for the SubmitAsync auto-materialize decision (the FeatureFlagGate can't branch a submit-time path)");
-        src.Should().Contain("FeatureFlags.IsEnabledAsync",
-            "the dialog MUST resolve the flag via IFeatureFlagService.IsEnabledAsync in OnInitializedAsync so SubmitAsync can branch on _gradeSetupEnabled");
+        // The dialog does NOT inject IFeatureFlagService — the
+        // <FeatureFlagGate> owns the flag entirely. With the two-dropdown
+        // design (flag-ON CodedValueDropdown branch + flag-OFF raw
+        // <FluentSelect> branch, chosen via the gate's <Fallback>), the
+        // dialog has no need to read the flag in code — the gate handles
+        // the rendering switch and the submit uses _selectedGrade as the
+        // single source of truth (the flag-ON pick handler resolves from
+        // _gradeLevels; the flag-OFF pick handler sets it directly).
+        src.Should().NotContain("@inject IFeatureFlagService",
+            "the dialog MUST NOT have an `@inject IFeatureFlagService` line — the <FeatureFlagGate> injects the flag service itself; injecting it in the dialog too would be a redundant resolution path");
+        src.Should().NotContain("_gradeSetupEnabled",
+            "the dialog MUST NOT keep a _gradeSetupEnabled field — the gate owns the flag, the dialog has no need to read it in code");
+        src.Should().NotContain("FeatureFlags.IsEnabledAsync",
+            "the dialog MUST NOT call FeatureFlags.IsEnabledAsync directly — the gate handles the flag entirely via its own resolution path");
     }
 
     [TestMethod]
-    public void EnrollDialog_AutoMaterializesGradeLevel_WhenFlagOn_Errors_WhenFlagOff()
+    public void EnrollDialog_AlwaysAutoMaterializesGradeLevel_WhenCodedValueHasNoGradeLevelRow()
     {
-        // When the picked coded value has no matching GradeLevel row, SubmitAsync
-        // MUST branch on the flag:
-        //   - Flag ON (_gradeSetupEnabled): auto-materialize the GradeLevel via
-        //     GetOrCreateGradeLevelAsync (the dialog sets the grade level up BY
-        //     ITSELF) and proceed — NO error.
-        //   - Flag OFF (!_gradeSetupEnabled): surface an actionable error telling
-        //     the user to enable the feature flag (so the dialog can set the grade
-        //     up inline) or set it up on the Grade Levels page.
-        // The "not set up as a grade level" error MUST be inside the
-        // !_gradeSetupEnabled branch (shows ONLY when the flag blocks inline
-        // setup); the GetOrCreateGradeLevelAsync call MUST be inside the
-        // _gradeSetupEnabled branch.
+        // SubmitAsync MUST auto-materialize a GradeLevel whenever the user has
+        // picked a coded value that has no matching GradeLevel row. This is
+        // only reachable in the flag-ON path (the flag-OFF branch is a raw
+        // <FluentSelect> of the already-materialized _gradeLevels list, so
+        // every item there IS a GradeLevelDto by construction — no
+        // auto-materialize needed, no auto-materialize possible). The submit
+        // NEVER shows a "not set up as a grade level" error — the principle
+        // of least surprise is that a valid pick leads to a successful
+        // enrollment.
         var src = Load(DialogPath);
 
-        // The flag-off error is gated by !_gradeSetupEnabled.
-        src.Should().Contain("if (!_gradeSetupEnabled)",
-            "the 'not set up as a grade level' error MUST be gated by !_gradeSetupEnabled — it shows ONLY when the flag blocks inline grade-level setup");
-        src.Should().Contain("Enable the grade-level setup feature flag",
-            "the flag-off error MUST tell the user to enable the feature flag (so the dialog can set the grade up inline) or use the Grade Levels page");
-
-        // The flag-on auto-materialize path calls GetOrCreateGradeLevelAsync.
+        // The auto-materialize calls GetOrCreateGradeLevelAsync.
         src.Should().Contain("GetOrCreateGradeLevelAsync",
-            "the flag-on branch MUST auto-materialize the GradeLevel via GetOrCreateGradeLevelAsync so the dialog sets the grade level up by itself instead of erroring");
+            "the dialog MUST auto-materialize a GradeLevel via GetOrCreateGradeLevelAsync whenever the picked coded value has no matching GradeLevel row — the submit never errors with 'not set up as a grade level'");
+        // The "not set up as a grade level" error MUST be GONE. The original
+        // design had a !_gradeSetupEnabled error branch; the two-dropdown
+        // design replaces it with a structural guarantee (the flag-OFF
+        // dropdown only contains items that have a GradeLevel row by
+        // construction, and the flag-ON path auto-materializes).
+        src.Should().NotContain("Enable the grade-level setup feature flag",
+            "the dialog MUST NOT show the 'enable the grade-level setup feature flag' error on submit — the two-dropdown design makes the impossible state unreachable via the UI in the first place");
+    }
+
+    [TestMethod]
+    public void EnrollDialog_Has_TwoGradeDropdowns_GatedByFeatureFlag()
+    {
+        // The dialog has TWO different grade pickers, chosen by the
+        // FEATURE:EnableGradeLevelSetupOnEnrollDialog flag via a single
+        // <FeatureFlagGate> with a <Fallback>:
+        //   - Flag ON (gate renders <ChildContent>): a <CodedValueDropdown>
+        //     showing all GRADE coded values (with per-tenant override names)
+        //     PLUS the "+" inline-create-grade button PLUS the "Override name"
+        //     button (all inside the gate's ChildContent, governed by the flag).
+        //     The submit auto-materializes a GradeLevel for coded values that
+        //     don't yet have one.
+        //   - Flag OFF (gate renders <Fallback>): a raw <FluentSelect
+        //     TOption="GradeLevelDto"> of the already-loaded _gradeLevels list.
+        //     Every item IS a GradeLevelDto, so the submit uses the picked id
+        //     directly with no resolution + no auto-materialize. No coded-value
+        //     API call (avoids the double-loading that a filter-on-CodedValueDropdown
+        //     approach would have). The "+" and "Override" buttons are NOT
+        //     rendered in this branch.
+        // The <FeatureFlagGate> owns the flag entirely — the dialog does NOT
+        // inject IFeatureFlagService itself.
+        var src = Load(DialogPath);
+
+        // The gate uses a <Fallback> (not just a ChildContent + default banner).
+        src.Should().Contain("<Fallback>",
+            "the FeatureFlagGate MUST have a <Fallback> so the flag-OFF branch can render a different grade picker (a generic <DropdownComponent TItem=\"GradeLevelDto\"> of _gradeLevels) instead of a banner");
+        // The flag-ON branch uses CodedValueDropdown for the grade picker.
+        src.Should().Contain("CodedValueDropdown",
+            "the flag-ON branch MUST use <CodedValueDropdown Parent=\"CodedValueParent.Grades\"> so the user picks from the GRADE coded-value list (with per-tenant override names)");
+        src.Should().Contain("CodedValueParent.Grades",
+            "the <CodedValueDropdown> MUST key off CodedValueParent.Grades so it loads the GRADE coded values, not some other category");
+        // The flag-OFF branch uses the generic <DropdownComponent TItem="GradeLevelDto">.
+        src.Should().Contain("DropdownComponent TItem=\"GradeLevelDto\"",
+            "the flag-OFF <Fallback> branch MUST use a generic <DropdownComponent TItem=\"GradeLevelDto\"> of the already-loaded _gradeLevels list — this avoids the double-loading that a filter-on-CodedValueDropdown approach would have; <DropdownComponent> is the simple, parent-owns-data sibling of <CodedValueDropdown>");
+        // The dialog does NOT inject IFeatureFlagService — the gate owns the flag.
+        src.Should().NotContain("@inject IFeatureFlagService",
+            "the dialog MUST NOT inject IFeatureFlagService — the <FeatureFlagGate> injects the flag service itself; injecting it in the dialog too would be a redundant resolution path");
+        // The dialog does NOT keep a _gradeSetupEnabled or _gradeFilter field.
+        src.Should().NotContain("_gradeSetupEnabled",
+            "the dialog MUST NOT keep a _gradeSetupEnabled field — the <FeatureFlagGate> owns the flag, the dialog has no need to read it in code");
+        src.Should().NotContain("_gradeFilter =",
+            "the dialog MUST NOT compute a _gradeFilter field — the two-dropdown design replaces the filter-on-single-dropdown design; the flag-OFF branch is a separate <FluentSelect>, not a filter on the CodedValueDropdown");
     }
 
     [TestMethod]
@@ -398,16 +454,53 @@ public class EnrollStudentDialogFeatureFlagTests
     [TestMethod]
     public void EnrollDialog_Grade_Select_Has_No_Disabled_Or_Placeholder_When_Empty()
     {
-        // The grade <CodedValueDropdown> must not be disabled or show a
-        // "No grades yet" placeholder when the list is empty — the
-        // dialog intentionally does not special-case the empty-grade
-        // list. A disabled-with-placeholder state would be a regression
-        // of the empty-list check.
+        // The flag-ON <CodedValueDropdown> handles the empty-list state
+        // internally (it shows "No options available" via its own
+        // EffectivePlaceholder and disables itself when _error is set or
+        // _items is null — NOT when the list is empty). The flag-OFF raw
+        // <FluentSelect> IS disabled when _gradeLevels is empty AND shows
+        // a static "Select a grade" placeholder — that's the correct UX
+        // for a dropdown of pre-existing GradeLevels (nothing to pick, so
+        // it's disabled, with a placeholder that doesn't pretend there's
+        // a setup action available — the setup action is the flag-ON
+        // branch's + button, which isn't shown here).
+        //
+        // The previous test asserted that the grade dropdown has no
+        // `Disabled="@(_gradeLevels.Length == 0)"` and no
+        // `Placeholder="@(_gradeLevels.Length == 0"` — that was correct
+        // for the single-CodedValueDropdown design. The two-dropdown
+        // design intentionally has those on the flag-OFF <FluentSelect>
+        // (disabled-when-empty is the right UX for a list of pre-existing
+        // GradeLevels; the "No options available" placeholder would be
+        // misleading because the setup action isn't available in this
+        // branch). The flag-ON CodedValueDropdown still does NOT have
+        // those attributes (it handles empty state via its own internal
+        // EffectivePlaceholder / IsDisabled logic).
         var src = Load(DialogPath);
-        src.Should().NotContain("Disabled=\"@(_gradeLevels.Length == 0)\"",
-            "the grade dropdown MUST NOT be disabled when the list is empty — the dialog does not special-case the empty-grade list; a disabled dropdown is a regression of the empty-list check");
-        src.Should().NotContain("Placeholder=\"@(_gradeLevels.Length == 0",
-            "the grade dropdown MUST NOT have an empty-list placeholder — the dialog does not special-case the empty-grade list; the placeholder would be a regression of the empty-list check");
+        // The flag-OFF <DropdownComponent> MUST be disabled when the grade
+        // list is empty (nothing to pick) and MUST have a "Select a grade"
+        // placeholder.
+        src.Should().Contain("Disabled=\"@(_gradeLevels.Length == 0)\"",
+            "the flag-OFF grade <DropdownComponent> MUST be disabled when _gradeLevels is empty — there's nothing to pick, and a disabled state is the correct UX (the setup action is in the flag-ON branch, not here)");
+        src.Should().Contain("Placeholder=\"Select a grade\"",
+            "the flag-OFF grade <DropdownComponent> MUST have a static \"Select a grade\" placeholder (not the misleading \"No options available\" — the setup action isn't available in this branch)");
+        // The flag-ON CodedValueDropdown MUST NOT have the same disabled
+        // / empty-list-placeholder attributes (it handles empty state
+        // internally via EffectivePlaceholder / IsDisabled).
+        // Find the actual <ChildContent> / <Fallback> markup tags (not the
+        // mentions in the doc comment above the gate). The doc comment
+        // mentions both tags in prose, so a naive IndexOf would hit those
+        // first and produce a negative substring length. Search for the
+        // tags preceded by a newline + indentation (the actual markup).
+        var childContentIdx = src.IndexOf("\n                            <ChildContent>", StringComparison.Ordinal);
+        var fallbackIdx = src.IndexOf("\n                            <Fallback>", StringComparison.Ordinal);
+        childContentIdx.Should().BeGreaterThan(0, "the <ChildContent> markup tag must exist inside the gate");
+        fallbackIdx.Should().BeGreaterThan(childContentIdx, "the <Fallback> markup tag must come after <ChildContent>");
+        var flagOnBranch = src.Substring(childContentIdx, fallbackIdx - childContentIdx);
+        flagOnBranch.Should().NotContain("Disabled=\"@(_gradeLevels.Length == 0)\"",
+            "the flag-ON CodedValueDropdown MUST NOT use Disabled=\"@(_gradeLevels.Length == 0)\" — it handles empty state internally via its own IsDisabled / EffectivePlaceholder logic");
+        flagOnBranch.Should().NotContain("Placeholder=\"@(_gradeLevels.Length == 0",
+            "the flag-ON CodedValueDropdown MUST NOT use a dynamic empty-list placeholder — its own EffectivePlaceholder handles the empty case");
     }
 
     // ── New-enrollment check (the validation for "set up gradelevel in
@@ -564,22 +657,35 @@ public class EnrollStudentDialogFeatureFlagTests
     // GradeLevelDto.Name mirror and ignored any tenant override.
 
     [TestMethod]
-    public void EnrollDialog_Grade_Uses_CodedValueDropdown_Not_FluentSelect()
+    public void EnrollDialog_Grade_Uses_CodedValueDropdown_In_FlagOn_Branch_And_FluentSelect_In_FlagOff()
     {
-        // The grade picker MUST be a <CodedValueDropdown
-        // Parent="CodedValueParent.Grades">, NOT a <FluentSelect> with
-        // GradeLevelDto items. The CodedValueDropdown loads the
-        // tenant-resolved CodedValue list (with per-tenant override
-        // name) from the Settings service; the FluentSelect + GradeLevelDto
-        // approach displayed a stale mirror and ignored overrides.
+        // The dialog has TWO grade pickers, chosen by the flag via a
+        // <FeatureFlagGate> with a <Fallback>:
+        //   - Flag ON (<ChildContent>): <CodedValueDropdown
+        //     Parent="CodedValueParent.Grades">. The CodedValueDropdown
+        //     loads the tenant-resolved CodedValue list (with per-tenant
+        //     override names) from the Settings service. The submit
+        //     auto-materializes a GradeLevel for coded values that don't
+        //     yet have one. The dialog holds a @ref so the "+" button
+        //     can call RefreshAsync() after creating a new grade.
+        //   - Flag OFF (<Fallback>): generic <DropdownComponent TItem="GradeLevelDto">
+        //     of the already-loaded _gradeLevels list. Every item here IS
+        //     a GradeLevelDto (the per-tenant override name is already
+        //     baked into GradeLevelDto.Name because GetOrCreateGradeLevelAsync
+        //     writes the coded value's per-tenant Name through to the
+        //     GradeLevel row), so the submit uses the picked id directly
+        //     with no resolution + no auto-materialize. No coded-value API
+        //     call (avoids the double-loading that a filter-on-
+        //     CodedValueDropdown approach would have).
         var src = Load(DialogPath);
+        // The flag-ON branch uses CodedValueDropdown.
         src.Should().Contain("CodedValueDropdown",
-            "the grade picker MUST be a <CodedValueDropdown> — the FluentSelect + GradeLevelDto approach displayed the stale mirrored name and ignored tenant overrides");
+            "the flag-ON grade picker MUST be a <CodedValueDropdown> so the user picks from the GRADE coded-value list (with per-tenant override names)");
         src.Should().Contain("CodedValueParent.Grades",
             "the <CodedValueDropdown> MUST key off CodedValueParent.Grades so it loads the GRADE coded values, not some other category");
-        // The old FluentSelect with GradeLevelDto must be gone.
-        src.Should().NotContain("TOption=\"GradeLevelDto\"",
-            "the dialog MUST NOT have a <FluentSelect TOption=\"GradeLevelDto\"> — the grade is now picked from the CodedValue list, not the GradeLevelDto list; a FluentSelect with GradeLevelDto would display the stale mirrored name");
+        // The flag-OFF branch uses the generic <DropdownComponent TItem="GradeLevelDto">.
+        src.Should().Contain("DropdownComponent TItem=\"GradeLevelDto\"",
+            "the flag-OFF grade picker MUST be a generic <DropdownComponent TItem=\"GradeLevelDto\"> so the parent owns the data lifecycle (no internal load) — the flag-ON CodedValueDropdown branch handles its own coded-value load, but the flag-OFF branch is just a render of the already-loaded _gradeLevels list");
         // The CodedValueDropdown must be refreshable from the + button
         // (it has a @ref we can call RefreshAsync on).
         src.Should().Contain("_gradeCodedValueDropdown",

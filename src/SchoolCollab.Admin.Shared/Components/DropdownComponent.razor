@@ -1,0 +1,221 @@
+@typeparam TItem where TItem : notnull
+@typeparam TValue
+@*
+    Generic dropdown component bound to a PRIMITIVE KEY VALUE (Guid, int, string,
+    etc.) — NOT to the full option object. The parent stores just the selected
+    key (e.g. <c>Guid? _selectedGradeLevelId</c>), and the component resolves the
+    full <typeparamref name="TItem"/> internally for display + <see cref="FluentSelect"/>
+    binding. This is the standard "key-value dropdown" pattern: the parent's
+    domain code reads the key directly (e.g. <c>_selectedGradeLevelId.Value</c>)
+    and looks up the full object from its own data if needed — no need to keep
+    a separate <c>_selectedXxx</c> field that mirrors the dropdown's selection.
+
+    Mirrors the <see cref="CodedValueDropdown"/> pattern (which binds to
+    <c>SelectedId</c>, a <see cref="Guid"/>?) but generic over both the item
+    type AND the key type. Like <see cref="CodedValueDropdown"/>, it wraps
+    <see cref="FluentSelect"/> and translates between the primitive-key binding
+    (parent-facing) and the full-option binding (<see cref="FluentSelect"/>-facing).
+
+    Usage
+    ─────
+    One-way binding with a side-effect:
+        <DropdownComponent TItem="GradeLevelDto" TValue="Guid?"
+                           Items="@_gradeLevels"
+                           SelectedValue="@_selectedGradeLevelId"
+                           SelectedValueChanged="@OnGradeLevelSelectedValueChanged"
+                           OptionText="@(g => g.Name)"
+                           OptionValue="@(g => g.Id)" />
+
+    Two-way binding (the common case):
+        <DropdownComponent TItem="GradeLevelDto" TValue="Guid?"
+                           Items="@_gradeLevels"
+                           @bind-SelectedValue="_selectedGradeLevelId"
+                           OptionText="@(g => g.Name)"
+                           OptionValue="@(g => g.Id)" />
+
+    Difference from <CodedValueDropdown>
+    ─────────────────────────────────────
+    <CodedValueDropdown> loads its own items from the Settings service via
+    <c>CodedValuesApiClient.GetChildrenByParentCodeAsync(parentCode)</c>, handles
+    the async load + error states, and applies the FluentUI #1533 pre-selection
+    workaround for async-loaded options. <DropdownComponent> does NONE of that
+    — the parent passes the items in already loaded, the component just renders
+    them. This makes it the right choice when:
+      - The parent already has the list in memory (e.g. loaded in parallel
+        with other dialog data in <c>OnInitializedAsync</c>).
+      - The items are domain DTOs (not coded values) and don't need the
+        tenant-resolved-name pipeline.
+      - The parent wants the primitive-key binding pattern (not the
+        full-object binding) so domain code can read the key directly.
+
+    Refresh
+    ───────
+    Blazor detects parameter changes by reference comparison, so reassigning
+    the <see cref="Items"/> field (e.g. <c>_items = _items.Append(x).ToArray()</c>)
+    triggers a re-render automatically. If the parent mutates the list IN PLACE
+    (e.g. <c>_itemsList.Add(x)</c> on a <c>List&lt;T&gt;</c>) the field reference
+    doesn't change and Blazor won't re-render. Call <see cref="Refresh"/> after
+    such mutations to force a re-render and push the new items into the dropdown.
+    <see cref="Refresh"/> is optional — for the common case of reassignment,
+    Blazor's natural parameter-change detection is sufficient.
+
+    TryFindItem
+    ───────────
+    Resolves the full <typeparamref name="TItem"/> for a given key without a
+    re-render or API call. Mirrors <see cref="CodedValueDropdown.TryFindItem"/>
+    so consumers that need the full object for a known key (e.g. to read
+    extra fields beyond the key) can do so cheaply.
+*@
+
+<FluentSelect TOption="TItem"
+              Items="@Items"
+              SelectedOption="@_selectedOption"
+              SelectedOptionChanged="@OnSelectedOptionChangedInternal"
+              OptionText="@OptionText"
+              OptionValue="@(o => OptionValue(o)?.ToString() ?? string.Empty)"
+              Label="@Label"
+              Placeholder="@(Placeholder ?? "Select…")"
+              Disabled="@Disabled"
+              class="@EffectiveClass" />
+
+@code {
+    /// <summary>
+    /// The items to render in the dropdown. The parent owns the data lifecycle
+    /// — the component just renders whatever is passed in. <see cref="IReadOnlyList{T}"/>
+    /// (rather than <see cref="IList{T}"/>) signals the "render-only" contract:
+    /// the component never mutates this collection.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<TItem> Items { get; set; } = Array.Empty<TItem>();
+
+    /// <summary>Label shown above the dropdown.</summary>
+    [Parameter] public string? Label { get; set; }
+
+    /// <summary>Placeholder text when no value is selected.</summary>
+    [Parameter] public string? Placeholder { get; set; }
+
+    /// <summary>CSS class to apply to the dropdown component.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>Disables the dropdown independently of any other state.</summary>
+    [Parameter] public bool Disabled { get; set; }
+
+    /// <summary>
+    /// Selector for the display text of each option. Required — the dropdown
+    /// has no way to know how to render a domain DTO without an explicit
+    /// text selector.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Func<TItem, string> OptionText { get; set; } = default!;
+
+    /// <summary>
+    /// Selector for the KEY value of each option (e.g. <c>g =&gt; g.Id</c> for
+    /// a <see cref="Guid"/> key, <c>g =&gt; g.Code</c> for a <see cref="string"/>
+    /// key). The component converts the result to a string for
+    /// <see cref="FluentSelect.OptionValue"/> internally. The return type
+    /// <typeparamref name="TValue"/> MUST match the type of
+    /// <see cref="SelectedValue"/> so the parent can store just the key.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public Func<TItem, TValue> OptionValue { get; set; } = default!;
+
+    /// <summary>
+    /// The currently selected KEY (two-way bindable). The parent stores just
+    /// the key (e.g. <c>Guid? _selectedGradeLevelId</c>), not the full option
+    /// object. The component resolves the full <typeparamref name="TItem"/>
+    /// from <see cref="Items"/> by matching <see cref="OptionValue"/>(item)
+    /// against this value, and passes the resolved object to
+    /// <see cref="FluentSelect.SelectedOption"/> for display. A null
+    /// <see cref="SelectedValue"/> means "no selection".
+    /// </summary>
+    [Parameter] public TValue? SelectedValue { get; set; }
+
+    /// <summary>Callback invoked when the selected key changes.</summary>
+    [Parameter] public EventCallback<TValue?> SelectedValueChanged { get; set; }
+
+    private TItem? _selectedOption;
+
+    private string EffectiveClass => string.IsNullOrWhiteSpace(Class)
+        ? "dropdown-component"
+        : $"{Class} dropdown-component";
+
+    protected override void OnParametersSet()
+    {
+        // Resolve the full option from the selected key. Runs synchronously
+        // during the normal lifecycle so a re-render triggered by a sibling
+        // control does not defer the dropdown update or re-open the list.
+        // If the key is null (parent cleared the selection) or doesn't match
+        // any current item (e.g. the items were just reloaded and the key
+        // is no longer present), clear the internal selection so FluentSelect
+        // doesn't show a stale option. The parent can detect the mismatch
+        // (SelectedValue is set but the dropdown shows nothing) and react.
+        var resolved = ResolveOption(SelectedValue);
+        if (!EqualityComparer<TItem?>.Default.Equals(resolved, _selectedOption))
+        {
+            _selectedOption = resolved;
+        }
+    }
+
+    private TItem? ResolveOption(TValue? value)
+    {
+        if (value is null) return default;
+        var comparer = EqualityComparer<TValue>.Default;
+        foreach (var item in Items)
+        {
+            if (comparer.Equals(OptionValue(item), value))
+            {
+                return item;
+            }
+        }
+        return default;
+    }
+
+    private async Task OnSelectedOptionChangedInternal(TItem? value)
+    {
+        // Update the internal selection first so the dropdown reflects the
+        // new pick immediately on re-render, then extract the key and notify
+        // the binder (which drives the @bind-SelectedValue target + any :after
+        // handler). When the consumer also supplies a
+        // @bind-SelectedValue:after handler, Blazor's binder wires that handler
+        // into its internal callback chain and invokes it after the bound
+        // field is updated. Consumers should NOT pass SelectedValueChanged=
+        // directly — that overrides the binder and the bound field stops
+        // updating. Use @bind-SelectedValue:after for side-effects; the binder
+        // owns SelectedValueChanged.
+        //
+        // Returning the EventCallback task directly (instead of awaiting it)
+        // keeps this event handler synchronous and avoids the Blazor renderer
+        // having to schedule an async continuation before FluentSelect can
+        // close the dropdown and refresh the UI.
+        _selectedOption = value;
+        TValue? newValue = value is null ? default : OptionValue(value);
+        await SelectedValueChanged.InvokeAsync(newValue);
+    }
+
+    /// <summary>
+    /// Forces a re-render of the dropdown. Use this when the parent mutates
+    /// the <see cref="Items"/> list in place (e.g. <c>.Add()</c> /
+    /// <c>.Remove()</c> on a <see cref="List{T}"/>) without reassigning the
+    /// backing field — Blazor's parameter-change detection compares field
+    /// references, so in-place mutations don't trigger a re-render and the
+    /// dropdown would show a stale list. For the common case of reassignment
+    /// (<c>_items = _items.Append(x).ToArray()</c>) Blazor detects the change
+    /// automatically and <see cref="Refresh"/> is not needed.
+    /// </summary>
+    public void Refresh() => StateHasChanged();
+
+    /// <summary>
+    /// Looks up the full <typeparamref name="TItem"/> in <see cref="Items"/>
+    /// for a given key. Returns <c>false</c> when no item matches. Mirrors
+    /// <see cref="CodedValueDropdown.TryFindItem"/> so consumers that need
+    /// the full object for a known key (e.g. to read extra fields beyond the
+    /// key, or to pass the full object to a downstream API that wants the
+    /// DTO rather than just the id) can do so without an extra API
+    /// round-trip.
+    /// </summary>
+    public bool TryFindItem(TValue? key, out TItem? item)
+    {
+        item = ResolveOption(key);
+        return item is not null;
+    }
+}
