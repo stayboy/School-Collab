@@ -141,6 +141,7 @@
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
+@inject IFeatureFlagService FeatureFlags
 @inject ILogger<EnrollStudentDialog> Logger
 
 <div class="enroll-dialog">
@@ -259,6 +260,25 @@
                                               class="enroll-grade-add" />
                             </FeatureFlagGate>
                         }
+                        @* The "Override name" button renames the SELECTED grade
+                           per-tenant (mirrors the GradeLevelWizard's Override Name
+                           action). Shown when grade-level setup is allowed (the
+                           flag) AND a grade is picked — renaming an existing grade
+                           is valid for both new + re-enrollment (unlike the +
+                           create button, which is new-enrollment-only). On success
+                           the dropdown is refreshed so the per-tenant name shows
+                           immediately. *@
+                        @if (_selectedGradeCodedValueId is not null)
+                        {
+                            <FeatureFlagGate Key="@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog">
+                                <FluentButton Appearance="Appearance.Neutral"
+                                              Title="Override the selected grade's name for this tenant"
+                                              OnClick="OnOverrideGradeNameAsync"
+                                              Disabled="@_overridingGrade"
+                                              IconStart="@FluentIcons.Edit"
+                                              class="enroll-grade-override" />
+                            </FeatureFlagGate>
+                        }
                     </div>
                 </FormRow>
 
@@ -321,6 +341,16 @@
 
     private bool _loading = true;
     private bool _creatingGrade;
+    private bool _overridingGrade;
+
+    /// <summary>Whether the FEATURE:EnableGradeLevelSetupOnEnrollDialog flag is
+    /// on for the current tenant, resolved once in <see cref="OnInitializedAsync"/>.
+    /// The <see cref="FeatureFlagGate"/> still drives the reactive +/Override button
+    /// rendering; this field drives the <see cref="SubmitAsync"/> auto-materialize
+    /// decision (the gate can't branch a submit-time path). Defaults to false
+    /// (disabled) on any resolution failure so the form still renders — the gate's
+    /// own fallback handles the buttons.</summary>
+    private bool _gradeSetupEnabled;
 
     /// <summary>Whether this dialog invocation is for a NEW enrollment
     /// (the student being enrolled has no active enrollment yet) versus
@@ -424,6 +454,23 @@
             var gradesTask = Api.ListGradeLevelsAsync(CancellationToken.None);
             await Task.WhenAll(periodsTask, gradesTask);
 
+            // Resolve the inline grade-level-setup flag once at init. The
+            // FeatureFlagGate still drives the reactive +/Override button
+            // rendering, but SubmitAsync's auto-materialize branch needs the
+            // flag state in code (the gate can't branch a submit-time path).
+            // Wrapped so a flag-resolution failure defaults to disabled
+            // (false) without blocking the form from rendering.
+            try
+            {
+                _gradeSetupEnabled = await FeatureFlags.IsEnabledAsync(
+                    FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog);
+            }
+            catch (Exception flagEx)
+            {
+                _gradeSetupEnabled = false;
+                Logger.LogWarning(flagEx, "Failed to resolve grade-setup flag; defaulting to disabled");
+            }
+
             var periods = periodsTask.Result ?? Array.Empty<PeriodDto>();
             // The current global period = the single period with
             // Status == "Active". The "at most one Active per tenant"
@@ -499,8 +546,84 @@
 
     protected override async Task<EnrollStudentResult?> SubmitAsync(EnrollStudentModel model)
     {
-        if (_activePeriod is null || _selectedGrade is null || _form.EnrolledOn is null)
+        // Guard each required field with a specific, actionable error. The
+        // EditForm has no DataAnnotationsValidator (the FormState model only
+        // owns EnrolledOn; the grade lives on a separate field), so Blazor
+        // validation does NOT block submit when the grade is unset. Without
+        // these guards a missing grade/period/date would silently return null
+        // — HandleSubmitAsync would neither close the dialog nor set an error,
+        // which presents to the user as "clicking Enroll does nothing". Surfacing
+        // the cause as <Error> turns the silent no-op into a visible, actionable
+        // message bar (rendered below the Enrolled-on field AND in the footer).
+        if (_activePeriod is null)
         {
+            Error = "No active academic period is open for this tenant. Open a period on the periods page before enrolling.";
+            return null;
+        }
+        if (_selectedGradeCodedValueId is null)
+        {
+            Error = "Select a grade level before enrolling.";
+            return null;
+        }
+        if (_selectedGrade is null)
+        {
+            // The picked coded value has no matching GradeLevel row yet (the
+            // tenant configured the GRADE coded value in Settings but never
+            // materialized a GradeLevel via the wizard). The enrollment API
+            // requires a GradeLevelId, not a CodedValueId, so the dialog must
+            // resolve a GradeLevel before it can submit. Two paths:
+            //   - Flag ON (_gradeSetupEnabled): the dialog sets the grade level
+            //     up BY ITSELF — materialize the GradeLevel via the idempotent
+            //     GetOrCreateGradeLevelAsync (same call the + button uses), then
+            //     proceed with the enrollment. No error.
+            //   - Flag OFF (!_gradeSetupEnabled): surface an actionable error
+            //     telling the user to enable the feature flag (so the dialog
+            //     can set the grade up inline) or set it up on the Grade Levels
+            //     page. The error shows ONLY when the flag blocks inline setup.
+            if (!_gradeSetupEnabled)
+            {
+                Error = "The selected grade is not set up as a grade level yet. Enable the grade-level setup feature flag to create it here, or set it up on the Grade Levels page, before enrolling.";
+                return null;
+            }
+
+            // Flag ON: auto-materialize the GradeLevel for the picked coded
+            // value. The CodedValueDropdown exposes the picked CodedValueDto
+            // (tenant-resolved Name + DisplayOrder) via TryFindItem so we can
+            // build the request without an extra API round-trip.
+            if (_gradeCodedValueDropdown is null
+                || !_gradeCodedValueDropdown.TryFindItem(_selectedGradeCodedValueId.Value, out var cv))
+            {
+                Error = "The selected grade could not be resolved. Pick a different grade or try again.";
+                return null;
+            }
+            if (cv is null)
+            {
+                Error = "The selected grade could not be resolved. Pick a different grade or try again.";
+                return null;
+            }
+
+            GradeLevelDto materialized;
+            try
+            {
+                materialized = await Api.GetOrCreateGradeLevelAsync(new GetOrCreateGradeLevelRequest(
+                    cv.Id, cv.DisplayOrder, cv.Name, cv.DisplayOrder));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to auto-materialize grade level for coded value {CodedValueId}", cv.Id);
+                Error = ex.Message;
+                return null;
+            }
+
+            // Cache the materialized row so a re-submit doesn't re-create it
+            // and the _gradeLevels list stays consistent for the enrollment
+            // below (which uses _selectedGrade.Id).
+            _selectedGrade = materialized;
+            _gradeLevels = _gradeLevels.Append(materialized).ToArray();
+        }
+        if (_form.EnrolledOn is null)
+        {
+            Error = "Pick an enrolled-on date before enrolling.";
             return null;
         }
 
@@ -611,6 +734,53 @@
         finally
         {
             _creatingGrade = false;
+        }
+    }
+
+    /// <summary>
+    /// Opens the shared <see cref="CodedValueDialog"/> in Override mode for the
+    /// currently-selected grade, letting the tenant rename it per-tenant (e.g.
+    /// "Grade 7" -> "Year 7"). Mirrors the GradeLevelWizard's "Override Name"
+    /// action. Shown when grade-level setup is allowed (the flag) and a grade
+    /// is picked. On success the <see cref="CodedValueDropdown"/> is refreshed
+    /// so the per-tenant name shows immediately; the selected CodedValueId is
+    /// unchanged so the user's selection is preserved. A null result (user
+    /// cancelled) is a no-op.
+    /// </summary>
+    private async Task OnOverrideGradeNameAsync()
+    {
+        if (_overridingGrade) return;
+        if (_selectedGradeCodedValueId is null) return;
+        var cvId = _selectedGradeCodedValueId.Value;
+        if (_gradeCodedValueDropdown is null
+            || !_gradeCodedValueDropdown.TryFindItem(cvId, out var cv))
+        {
+            return;
+        }
+        if (cv is null) return;
+
+        _overridingGrade = true;
+        try
+        {
+            var result = await DialogService.ShowShellDialogAsync<CodedValueDialog, CodedValueFormModel, CodedValueDto>(
+                CodedValueFormModel.ForOverride(cv, cv.IsOverridden),
+                title: "Override grade name",
+                size: DialogSize.Medium);
+            if (result is null) return;
+
+            // Refresh the dropdown so the overridden (per-tenant) name shows
+            // immediately. The selected CodedValueId is unchanged so the
+            // user's selection is preserved.
+            await _gradeCodedValueDropdown.RefreshAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to override grade name for coded value {CodedValueId}", cvId);
+            Error = ex.Message;
+        }
+        finally
+        {
+            _overridingGrade = false;
         }
     }
 }

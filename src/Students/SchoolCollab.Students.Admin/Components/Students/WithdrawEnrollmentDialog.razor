@@ -59,8 +59,16 @@
 
     protected override async Task<WithdrawEnrollmentResult?> SubmitAsync(WithdrawEnrollmentModel model)
     {
+        // Surface a specific, actionable error instead of a silent no-op. The
+        // EditForm has no DataAnnotationsValidator (the FluentDatePicker
+        // Required is display-only), so Blazor validation does NOT block submit
+        // when the date is cleared — without this guard a cleared exit date would
+        // silently return null and the user would see "clicking Withdraw does
+        // nothing". Setting <Error> turns the silent no-op into a visible
+        // message bar (footer).
         if (_form.ExitDate is null)
         {
+            Error = "Pick an exit date before withdrawing.";
             return null;
         }
 

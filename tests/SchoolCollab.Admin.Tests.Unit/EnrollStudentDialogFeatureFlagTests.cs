@@ -303,14 +303,72 @@ public class EnrollStudentDialogFeatureFlagTests
         // empty-grade warning branches).
         src.Should().NotContain("No grade levels are configured yet — create one before enrolling.",
             "the dialog MUST NOT have a 'No grade levels are configured yet' warning copy — that is the empty-list warning wording that was removed");
-        // And the IFeatureFlagService + _gradeSetupEnabled state field
-        // that drove the flag-off branch must be gone too (the dialog
-        // no longer injects the flag service; the FeatureFlagGate
-        // component resolves the flag itself via the settings service).
-        src.Should().NotContain("_gradeSetupEnabled",
-            "the dialog MUST NOT have a _gradeSetupEnabled state field — the flag is consumed only by <FeatureFlagGate>, not by the dialog's own OnInitializedAsync; keeping the field would mean two flag-resolution paths to keep in sync");
-        src.Should().NotContain("IFeatureFlagService",
-            "the dialog MUST NOT inject IFeatureFlagService — the flag is consumed via the shared <FeatureFlagGate> component which resolves the flag from the settings service; injecting the service here would be a redundant resolution path");
+        // The dialog DOES inject IFeatureFlagService and keep a _gradeSetupEnabled
+        // field — but ONLY to drive the SubmitAsync auto-materialize decision
+        // (when the flag is ON and the picked coded value has no GradeLevel row,
+        // the dialog sets the grade level up by itself via GetOrCreateGradeLevelAsync
+        // instead of erroring). The FeatureFlagGate still owns the reactive
+        // +/Override button rendering; this code-path resolution is the supported
+        // way to branch a submit-time path on the flag (the gate can't).
+        src.Should().Contain("_gradeSetupEnabled",
+            "the dialog MUST keep a _gradeSetupEnabled field resolved in OnInitializedAsync — SubmitAsync's auto-materialize-vs-error branch is driven by the flag state in code");
+        src.Should().Contain("IFeatureFlagService",
+            "the dialog MUST inject IFeatureFlagService to resolve the flag for the SubmitAsync auto-materialize decision (the FeatureFlagGate can't branch a submit-time path)");
+        src.Should().Contain("FeatureFlags.IsEnabledAsync",
+            "the dialog MUST resolve the flag via IFeatureFlagService.IsEnabledAsync in OnInitializedAsync so SubmitAsync can branch on _gradeSetupEnabled");
+    }
+
+    [TestMethod]
+    public void EnrollDialog_AutoMaterializesGradeLevel_WhenFlagOn_Errors_WhenFlagOff()
+    {
+        // When the picked coded value has no matching GradeLevel row, SubmitAsync
+        // MUST branch on the flag:
+        //   - Flag ON (_gradeSetupEnabled): auto-materialize the GradeLevel via
+        //     GetOrCreateGradeLevelAsync (the dialog sets the grade level up BY
+        //     ITSELF) and proceed — NO error.
+        //   - Flag OFF (!_gradeSetupEnabled): surface an actionable error telling
+        //     the user to enable the feature flag (so the dialog can set the grade
+        //     up inline) or set it up on the Grade Levels page.
+        // The "not set up as a grade level" error MUST be inside the
+        // !_gradeSetupEnabled branch (shows ONLY when the flag blocks inline
+        // setup); the GetOrCreateGradeLevelAsync call MUST be inside the
+        // _gradeSetupEnabled branch.
+        var src = Load(DialogPath);
+
+        // The flag-off error is gated by !_gradeSetupEnabled.
+        src.Should().Contain("if (!_gradeSetupEnabled)",
+            "the 'not set up as a grade level' error MUST be gated by !_gradeSetupEnabled — it shows ONLY when the flag blocks inline grade-level setup");
+        src.Should().Contain("Enable the grade-level setup feature flag",
+            "the flag-off error MUST tell the user to enable the feature flag (so the dialog can set the grade up inline) or use the Grade Levels page");
+
+        // The flag-on auto-materialize path calls GetOrCreateGradeLevelAsync.
+        src.Should().Contain("GetOrCreateGradeLevelAsync",
+            "the flag-on branch MUST auto-materialize the GradeLevel via GetOrCreateGradeLevelAsync so the dialog sets the grade level up by itself instead of erroring");
+    }
+
+    [TestMethod]
+    public void EnrollDialog_Has_OverrideNameButton_GatedByFlagAndSelectedGrade()
+    {
+        // The "Override name" button (renames the selected grade per-tenant,
+        // mirroring the GradeLevelWizard's Override Name action) MUST render when
+        // a grade is selected AND the flag is on (FeatureFlagGate). It opens
+        // CodedValueDialog in Override mode and refreshes the dropdown on success.
+        // It is NOT gated by IsNewEnrollment (renaming an existing grade is valid
+        // for both new + re-enrollment, unlike the + create button).
+        var src = Load(DialogPath);
+
+        src.Should().Contain("OnOverrideGradeNameAsync",
+            "the dialog MUST have an OnOverrideGradeNameAsync handler that opens CodedValueDialog in Override mode for the selected grade");
+        src.Should().Contain("CodedValueFormModel.ForOverride",
+            "the override handler MUST open CodedValueDialog via CodedValueFormModel.ForOverride (Override mode)");
+        src.Should().Contain("enroll-grade-override",
+            "the Override name button MUST carry the .enroll-grade-override class so it can be styled + tested");
+        src.Should().Contain("_selectedGradeCodedValueId is not null",
+            "the Override button MUST be gated by a selected grade (_selectedGradeCodedValueId is not null) — it renames the SELECTED grade, so it only shows once one is picked");
+        // The override button uses the same Edit icon the GradeLevelWizard uses
+        // for its "Override the default name" action, for cross-page consistency.
+        src.Should().Contain("FluentIcons.Edit",
+            "the Override button MUST use FluentIcons.Edit (same icon as the GradeLevelWizard's override-name action)");
     }
 
     [TestMethod]

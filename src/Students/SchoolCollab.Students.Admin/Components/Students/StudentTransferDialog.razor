@@ -121,8 +121,23 @@
 
     protected override async Task<StudentTransferResult?> SubmitAsync(StudentTransferModel model)
     {
-        if (_enrollment is null) return null;
-        if (_selectedGrade is null) return null;
+        // Surface a specific, actionable error on each null-guard instead of a
+        // silent no-op. The EditForm has no DataAnnotationsValidator (the
+        // FluentSelect / FluentTextArea Required is display-only), so Blazor
+        // validation does NOT block submit when the grade is unset — without
+        // these guards a missing enrollment/grade would silently return null
+        // and the user would see "clicking Transfer does nothing". Setting
+        // <Error> turns the silent no-op into a visible message bar (footer).
+        if (_enrollment is null)
+        {
+            Error = "This student has no active enrollment to transfer.";
+            return null;
+        }
+        if (_selectedGrade is null)
+        {
+            Error = "Select a grade to transfer to.";
+            return null;
+        }
 
         try
         {
