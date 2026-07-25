@@ -23,6 +23,7 @@ public sealed class AddContactHandler(
                 command.Channel,
                 command.Value,
                 command.Label,
+                command.CountryCode,
                 command.IsPrimary)
             .WithTenant(tenantProvider);
 

@@ -267,6 +267,53 @@ public class GuardianContactsCqrsTests
         s.Db.Contacts.IgnoreQueryFilters().Single(c => c.Id == first).IsPrimary.Should().BeFalse();
     }
 
+    [TestMethod]
+    public async Task AddContact_WithCountryCode_StoresCountryCode()
+    {
+        using var s = new StudentsTestScope("c-add-cc");
+        var studentId = await SeedStudentAsync(s, "S1");
+
+        var id = await NewAddContact(s).HandleAsync(
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile", false)
+            { CountryCode = "+233" });
+
+        var c = s.Db.Contacts.IgnoreQueryFilters().Single(x => x.Id == id);
+        c.CountryCode.Should().Be("+233");
+        c.Value.Should().Be("201234567");
+    }
+
+    [TestMethod]
+    public async Task UpdateContact_ChangesCountryCode()
+    {
+        using var s = new StudentsTestScope("c-update-cc");
+        var studentId = await SeedStudentAsync(s, "S1");
+        var id = await NewAddContact(s).HandleAsync(
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile", false)
+            { CountryCode = "+233" });
+
+        await NewUpdateContact(s).HandleAsync(
+            new UpdateContact(id, "208765432", "Mobile") { CountryCode = "+27" });
+
+        var c = s.Db.Contacts.IgnoreQueryFilters().Single(x => x.Id == id);
+        c.Value.Should().Be("208765432");
+        c.CountryCode.Should().Be("+27");
+    }
+
+    [TestMethod]
+    public async Task ListContacts_ProjectsCountryCode()
+    {
+        using var s = new StudentsTestScope("c-list-cc");
+        var studentId = await SeedStudentAsync(s, "S1");
+        await NewAddContact(s).HandleAsync(
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile", false)
+            { CountryCode = "+233" });
+
+        var results = await new ListContactsHandler(s.Db, s.Cache)
+            .HandleAsync(new ListContacts(ContactOwnerType.Student, studentId));
+
+        results.Should().ContainSingle(c => c.CountryCode == "+233");
+    }
+
     // ── Subscriptions ───────────────────────────────────────────────────────────
 
     [TestMethod]

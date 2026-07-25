@@ -61,7 +61,7 @@
               Items="@(_items ?? [])"
               SelectedOption="@_selectedOption"
               SelectedOptionChanged="@OnSelectedOptionChanged"
-              OptionText="@(o => o.Name)"
+              OptionText="@EffectiveOptionText"
               OptionValue="@(o => o.Id.ToString())"
               Label="@Label"              
               Placeholder="@EffectivePlaceholder"              
@@ -97,6 +97,16 @@
     /// </summary>
     [Parameter]
     public string? Class { get; set; }
+
+    /// <summary>
+    /// Optional override for the function that produces the display text
+    /// for each option. Defaults to <c>o =&gt; o.Name</c> (the coded value's
+    /// Name field). Use this to compose a richer label from a coded value's
+    /// attributes — e.g. <c>o =&gt; $"{o.Name} ({o.Attributes.First(a =&gt; a.Key == "COUNTRY").Value})"</c>
+    /// for country calling codes that should display "+233 (Ghana)".
+    /// </summary>
+    [Parameter]
+    public Func<CodedValueDto, string>? OptionText { get; set; }
 
     /// <summary>
     /// The currently selected coded value id (two-way bindable).
@@ -143,6 +153,8 @@
     private string EffectiveClass => string.IsNullOrWhiteSpace(Class) 
         ? "coded-value-dropdown" 
         : $"{Class} coded-value-dropdown";
+
+    private Func<CodedValueDto, string> EffectiveOptionText => OptionText ?? (o => o.Name);
 
     protected override async Task OnInitializedAsync()
     {

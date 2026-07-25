@@ -13,4 +13,7 @@ public sealed record ContactDto(
     bool IsVerified,
     bool IsDeleted,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt)
+{
+    public string? CountryCode { get; init; }
+}

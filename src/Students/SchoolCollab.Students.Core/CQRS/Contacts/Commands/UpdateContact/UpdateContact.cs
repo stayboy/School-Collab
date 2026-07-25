@@ -5,4 +5,7 @@ namespace SchoolCollab.Students.Core.CQRS.Contacts.Commands.UpdateContact;
 public sealed record UpdateContact(
     Guid Id,
     string Value,
-    string? Label) : ICommand;
+    string? Label) : ICommand
+{
+    public string? CountryCode { get; init; }
+}

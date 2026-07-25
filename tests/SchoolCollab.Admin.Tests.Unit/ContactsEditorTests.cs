@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text.Json;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -5,6 +7,8 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Admin.Shared.Constants;
+using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Core.Contracts;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
@@ -58,6 +62,7 @@ public class ContactsEditorTests : BunitContext
         public int AddContactCalls;
         public bool? LastRequestedPrimary;
         public string? LastRequestedValue;
+        public string? LastRequestedCountryCode;
 
         public Task<ContactDto[]?> ListContactsAsync(ContactOwnerType ownerType, Guid ownerId, CancellationToken ct = default)
         {
@@ -71,6 +76,7 @@ public class ContactsEditorTests : BunitContext
             AddContactCalls++;
             LastRequestedPrimary = req.IsPrimary;
             LastRequestedValue = req.Value;
+            LastRequestedCountryCode = req.CountryCode;
             if (OnAddContact is not null) return OnAddContact(req);
             var newId = Guid.NewGuid();
             Contacts.Add(new ContactDto(
@@ -84,7 +90,7 @@ public class ContactsEditorTests : BunitContext
                 IsVerified: false,
                 IsDeleted: false,
                 CreatedAt: DateTimeOffset.UtcNow,
-                UpdatedAt: DateTimeOffset.UtcNow));
+                UpdatedAt: DateTimeOffset.UtcNow) { CountryCode = req.CountryCode });
             return Task.FromResult(newId);
         }
 
@@ -132,13 +138,54 @@ public class ContactsEditorTests : BunitContext
         }
     }
 
+    private sealed class MockHttpMessageHandler : HttpMessageHandler
+    {
+        private readonly HttpStatusCode _statusCode;
+        private readonly string _content;
+
+        public HttpRequestMessage? LastRequest { get; private set; }
+
+        public MockHttpMessageHandler(HttpStatusCode statusCode, string content)
+        {
+            _statusCode = statusCode;
+            _content = content;
+        }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            var response = new HttpResponseMessage(_statusCode)
+            {
+                Content = new StringContent(_content, System.Text.Encoding.UTF8, "application/json")
+            };
+            return Task.FromResult(response);
+        }
+    }
+
+    private static readonly string CountryCodesJson = JsonSerializer.Serialize(new[]
+    {
+        new CodedValueDto(FakeCodedValues.UsaId, "CNCODES_USA", "+1", null, null, null, false, 1, default, default,
+            new[] { new CodedValueAttributeDto("COUNTRY", "United States") }, []),
+        new CodedValueDto(FakeCodedValues.GhanaId, "CNCODES_GHA", "+233", null, null, null, false, 3, default, default,
+            new[] { new CodedValueAttributeDto("COUNTRY", "Ghana") }, [])
+    });
+
+    private static class FakeCodedValues
+    {
+        public static readonly Guid GhanaId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        public static readonly Guid UsaId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    }
+
     private IRenderedComponent<ContactsEditor> RenderEditor(
         FakeContactsClient fake,
         ContactOwnerType ownerType = ContactOwnerType.Student,
         Guid? ownerId = null,
         bool showSubscription = true)
     {
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
         Services.AddSingleton<IContactsClient>(fake);
+        Services.AddSingleton(new CodedValuesApiClient(http));
         Services.AddSingleton(NullLogger<ContactsEditor>.Instance);
         return Render<ContactsEditor>(parameters => parameters
             .Add(p => p.OwnerType, ownerType)
@@ -223,5 +270,117 @@ public class ContactsEditorTests : BunitContext
             refreshed.GetAttribute("value").Should().Be("user@example.com",
                 "a failed Add must preserve the user's typed value");
         });
+    }
+
+    private void SetChannel(IRenderedComponent<ContactsEditor> cut, ContactChannel channel)
+    {
+        var field = typeof(ContactsEditor).GetField("_newChannel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        field?.SetValue(cut.Instance, channel);
+        cut.Render();
+    }
+
+    private void SetCountryCodeSelection(IRenderedComponent<ContactsEditor> cut, Guid countryCodeId, CodedValueDto[] options)
+    {
+        var optionsField = typeof(ContactsEditor).GetField("_countryCodeOptions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var idField = typeof(ContactsEditor).GetField("_newCountryCodeId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        optionsField?.SetValue(cut.Instance, options);
+        idField?.SetValue(cut.Instance, countryCodeId);
+        cut.Render();
+    }
+
+    [TestMethod]
+    public void EmailChannel_HidesCountryCodeDropdown()
+    {
+        var fake = new FakeContactsClient();
+        var cut = RenderEditor(fake);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("fluent-select.contacts-country-code").Should().BeEmpty();
+        });
+    }
+
+    [TestMethod]
+    public void SmsChannel_ShowsCountryCodeDropdown()
+    {
+        var fake = new FakeContactsClient();
+        var cut = RenderEditor(fake);
+
+        SetChannel(cut, ContactChannel.SMS);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("fluent-select.contacts-country-code").Should().ContainSingle();
+        });
+    }
+
+    [TestMethod]
+    public void WhatsAppChannel_ShowsCountryCodeDropdown()
+    {
+        var fake = new FakeContactsClient();
+        var cut = RenderEditor(fake);
+
+        SetChannel(cut, ContactChannel.WhatsApp);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("fluent-select.contacts-country-code").Should().ContainSingle();
+        });
+    }
+
+    [TestMethod]
+    public void AddAsync_Sms_IncludesSelectedCountryCode()
+    {
+        var fake = new FakeContactsClient();
+        var cut = RenderEditor(fake);
+
+        SetChannel(cut, ContactChannel.SMS);
+        SetCountryCodeSelection(cut, FakeCodedValues.GhanaId, new[]
+        {
+            new CodedValueDto(FakeCodedValues.UsaId, "CNCODES_USA", "+1", null, null, null, false, 1, default, default,
+                new[] { new CodedValueAttributeDto("COUNTRY", "United States") }, []),
+            new CodedValueDto(FakeCodedValues.GhanaId, "CNCODES_GHA", "+233", null, null, null, false, 3, default, default,
+                new[] { new CodedValueAttributeDto("COUNTRY", "Ghana") }, [])
+        });
+
+        var valueInput = cut.Find("fluent-text-field.contacts-value");
+        valueInput.Change("201234567");
+
+        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        addButton.Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            fake.LastRequestedCountryCode.Should().Be("+233");
+            fake.LastRequestedValue.Should().Be("201234567");
+        });
+    }
+
+    [TestMethod]
+    public void CountryCodeDropdown_OptionText_IncludesCountryName()
+    {
+        var fake = new FakeContactsClient();
+        var cut = RenderEditor(fake);
+
+        SetChannel(cut, ContactChannel.SMS);
+        SetCountryCodeSelection(cut, FakeCodedValues.GhanaId, new[]
+        {
+            new CodedValueDto(FakeCodedValues.UsaId, "CNCODES_USA", "+1", null, null, null, false, 1, default, default,
+                new[] { new CodedValueAttributeDto("COUNTRY", "United States") }, []),
+            new CodedValueDto(FakeCodedValues.GhanaId, "CNCODES_GHA", "+233", null, null, null, false, 3, default, default,
+                new[] { new CodedValueAttributeDto("COUNTRY", "Ghana") }, [])
+        });
+
+        var countryCodeDropdown = cut.FindComponent<CodedValueDropdown>();
+        var optionText = countryCodeDropdown.Instance.OptionText;
+        optionText.Should().NotBeNull("ContactsEditor should supply a display formatter that includes the country name");
+
+        var ghana = new CodedValueDto(FakeCodedValues.GhanaId, "CNCODES_GHA", "+233", null, null, null, false, 3, default, default,
+            new[] { new CodedValueAttributeDto("COUNTRY", "Ghana") }, []);
+        var usa = new CodedValueDto(FakeCodedValues.UsaId, "CNCODES_USA", "+1", null, null, null, false, 1, default, default,
+            new[] { new CodedValueAttributeDto("COUNTRY", "United States") }, []);
+
+        optionText!(ghana).Should().Be("+233 (Ghana)");
+        optionText!(usa).Should().Be("+1 (United States)");
     }
 }
