@@ -17,7 +17,7 @@ public sealed class UpdateContactHandler(
         var contact = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new ContactNotFoundException(command.Id);
 
-        contact.Update(command.Value, command.Label);
+        contact.Update(command.Value, command.Label, command.CountryCode);
 
         try
         {

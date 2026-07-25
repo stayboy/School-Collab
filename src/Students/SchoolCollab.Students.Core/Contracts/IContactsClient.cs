@@ -42,10 +42,16 @@ public record AddContactRequest(
     ContactChannel Channel,
     string Value,
     string? Label,
-    bool IsPrimary);
+    bool IsPrimary)
+{
+    public string? CountryCode { get; init; }
+}
 
 /// <summary>Request body for updating a contact's value / label.</summary>
-public record UpdateContactRequest(string Value, string? Label);
+public record UpdateContactRequest(string Value, string? Label)
+{
+    public string? CountryCode { get; init; }
+}
 
 /// <summary>Request body for (un)subscribing a contact to a scope.</summary>
 public record SubscriptionRequest(SubscriptionScope Scope, Guid? ScopeRefId);

@@ -11,7 +11,8 @@ public enum CodedValueParent
     Salutations = 6,
     Communities = 7,
     Cities = 8,
-    Countries = 9
+    Countries = 9,
+    CountryCallingCodes = 10
 }
 
 public static class CodedValueParentExtensions
@@ -28,6 +29,7 @@ public static class CodedValueParentExtensions
         CodedValueParent.Communities => "COMMUNITYS",
         CodedValueParent.Cities => "CITIES",
         CodedValueParent.Countries => "COUNTRYS",
+        CodedValueParent.CountryCallingCodes => "CNCODES",
         _ => throw new ArgumentOutOfRangeException(nameof(parent))
     };
 }

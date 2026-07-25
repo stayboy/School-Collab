@@ -18,16 +18,20 @@
 }
 
 .contacts-channel {
-    width: 140px;
+    width: 100px;
+}
+
+.contacts-country-code {
+    width: 120px;
 }
 
 .contacts-value {
-    flex: 1 1 220px;
-    min-width: 200px;
+    flex: 1 1 320px;
+    min-width: 260px;
 }
 
 .contacts-label {
-    width: 160px;
+    width: 140px;
 }
 
 .contacts-primary {

@@ -43,7 +43,7 @@ public static class ContactRoutes
         {
             try
             {
-                await handler.HandleAsync(new UpdateContact(id, req.Value, req.Label), ct);
+                await handler.HandleAsync(new UpdateContact(id, req.Value, req.Label) { CountryCode = req.CountryCode }, ct);
                 return Results.NoContent();
             }
             catch (ContactNotFoundException)
@@ -140,4 +140,7 @@ public static class ContactRoutes
     }
 }
 
-internal record UpdateContactRequest(string Value, string? Label);
+internal record UpdateContactRequest(string Value, string? Label)
+{
+    public string? CountryCode { get; init; }
+}

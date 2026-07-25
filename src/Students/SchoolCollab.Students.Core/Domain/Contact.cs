@@ -20,6 +20,7 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public ContactChannel Channel { get; private set; }
     public string Value { get; private set; } = default!;
     public string? Label { get; private set; }
+    public string? CountryCode { get; private set; }
     public bool IsPrimary { get; private set; }
     public bool IsVerified { get; private set; }
 
@@ -34,7 +35,7 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public IReadOnlyList<ContactSubscription> Subscriptions => _subscriptions.AsReadOnly();
 
     public static Contact Create(
-        ContactOwnerType ownerType, Guid ownerId, ContactChannel channel, string value, string? label, bool isPrimary)
+        ContactOwnerType ownerType, Guid ownerId, ContactChannel channel, string value, string? label, string? countryCode, bool isPrimary)
     {
         var now = DateTimeOffset.UtcNow;
         return new Contact
@@ -45,6 +46,7 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
             Channel = channel,
             Value = value.Trim(),
             Label = label?.Trim(),
+            CountryCode = countryCode?.Trim(),
             IsPrimary = isPrimary,
             IsVerified = false,
             IsDeleted = false,
@@ -53,10 +55,11 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         };
     }
 
-    public void Update(string value, string? label)
+    public void Update(string value, string? label, string? countryCode)
     {
         Value = value.Trim();
         Label = label?.Trim();
+        CountryCode = countryCode?.Trim();
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

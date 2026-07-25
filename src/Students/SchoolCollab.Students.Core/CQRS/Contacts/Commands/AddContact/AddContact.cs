@@ -9,4 +9,7 @@ public sealed record AddContact(
     ContactChannel Channel,
     string Value,
     string? Label,
-    bool IsPrimary) : ICommand;
+    bool IsPrimary) : ICommand
+{
+    public string? CountryCode { get; init; }
+}

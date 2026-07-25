@@ -17,7 +17,10 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Services
 @inject IContactsClient Api
+@inject CodedValuesApiClient CodedValuesApi
 @inject ILogger<ContactsEditor> Logger
 
 <div class="contacts-editor">
@@ -32,10 +35,19 @@
         <div class="contacts-editor-add">
             <DropdownForEnum TEnum="ContactChannel"
                               @bind-SelectedValue="_newChannel"
+                              @bind-SelectedValue:after="OnChannelChanged"
                               Placeholder="Channel"
                               Class="contacts-channel" />
+            @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+            {
+                <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                    @bind-SelectedId="_newCountryCodeId"
+                                    Placeholder="Code"
+                                    Class="contacts-country-code"
+                                    OptionText="@FormatCountryCodeOption" />
+            }
             <FluentTextField @bind-Value="_newValue"
-                              Placeholder="Email / phone / WhatsApp…"
+                              Placeholder="@ValuePlaceholder"
                               class="contacts-value" />
             <FluentTextField @bind-Value="_newLabel"
                               Placeholder="Label (optional)"
@@ -67,7 +79,7 @@
                 {
                     <li class="contact-item">
                         <span class="contact-channel" title="@c.Channel">@ChannelGlyph(c.Channel) @c.Channel</span>
-                        <span class="contact-value">@c.Value</span>
+                        <span class="contact-value">@FormatValue(c)</span>
                         @if (!string.IsNullOrWhiteSpace(c.Label))
                         {
                             <span class="contact-label">@c.Label</span>
@@ -151,9 +163,18 @@
 
     // New-contact form state.
     private ContactChannel _newChannel = ContactChannel.Email;
+    private Guid? _newCountryCodeId;
+    private CodedValueDto[]? _countryCodeOptions;
     private string _newValue = string.Empty;
     private string _newLabel = string.Empty;
     private bool _newIsPrimary;
+
+    private string ValuePlaceholder => _newChannel switch
+    {
+        ContactChannel.SMS => "Phone number…",
+        ContactChannel.WhatsApp => "WhatsApp number…",
+        _ => "Email address…"
+    };
 
     public void Dispose()
     {
@@ -231,6 +252,46 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    private async Task OnChannelChanged()
+    {
+        if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            await LoadCountryCodesAsync();
+        }
+        else
+        {
+            _newCountryCodeId = null;
+        }
+    }
+
+    private async Task LoadCountryCodesAsync()
+    {
+        if (_countryCodeOptions is not null) return;
+        try
+        {
+            _countryCodeOptions = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.CountryCallingCodes.ToCode(), MutationToken) ?? [];
+
+            // Default to Ghana (+233) when available.
+            _newCountryCodeId ??= _countryCodeOptions
+                .FirstOrDefault(x => x.Code.Equals("CNCODES_GHA", StringComparison.OrdinalIgnoreCase))?.Id
+                ?? _countryCodeOptions.FirstOrDefault()?.Id;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load country calling codes");
+            _error = "Could not load country codes.";
+        }
+    }
+
+    private string? ResolveCountryCode()
+    {
+        if (_newCountryCodeId is null || _countryCodeOptions is null) return null;
+        var selected = _countryCodeOptions.FirstOrDefault(x => x.Id == _newCountryCodeId);
+        return selected?.Name;
+    }
+
     private async Task AddAsync()
     {
         if (string.IsNullOrWhiteSpace(_newValue)) return;
@@ -239,15 +300,20 @@
         _error = null;
         try
         {
+            var countryCode = _newChannel is ContactChannel.SMS or ContactChannel.WhatsApp
+                ? ResolveCountryCode()
+                : null;
+
             await Api.AddContactAsync(new AddContactRequest(
                 OwnerType, OwnerId, _newChannel, _newValue.Trim(),
                 string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
-                _newIsPrimary), MutationToken);
+                _newIsPrimary) { CountryCode = countryCode }, MutationToken);
 
             _newValue = string.Empty;
             _newLabel = string.Empty;
             _newIsPrimary = false;
             _newChannel = ContactChannel.Email;
+            _newCountryCodeId = null;
             await LoadAsync();
         }
         catch (OperationCanceledException) { }
@@ -362,6 +428,19 @@
                 await InvokeAsync(StateHasChanged);
             }
         }
+    }
+
+    private static string FormatValue(ContactDto c) => c.Channel switch
+    {
+        ContactChannel.SMS or ContactChannel.WhatsApp when !string.IsNullOrWhiteSpace(c.CountryCode)
+            => $"{c.CountryCode} {c.Value}",
+        _ => c.Value
+    };
+
+    private static string FormatCountryCodeOption(CodedValueDto o)
+    {
+        var country = o.Attributes.FirstOrDefault(a => a.Key == "COUNTRY")?.Value;
+        return string.IsNullOrWhiteSpace(country) ? o.Name : $"{o.Name} ({country})";
     }
 
     private static string ChannelGlyph(ContactChannel channel) => channel switch
