@@ -208,12 +208,14 @@
     private bool _savingAttr;
     private readonly EditModel _model = new();
     private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _mutationCts = new();
     private volatile bool _disposed;
+    private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
 
     private async Task OpenAddDefinitionDialog()
     {
-        if (_item is null || _loadCts is null) return;
-        var ct = _loadCts.Token;
+        if (_item is null || _mutationCts is null) return;
+        var ct = MutationToken;
         var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
         var defResult = await DialogService.ShowShellDialogAsync<AttributeDefinitionDialog, AttributeDefinitionFormModel, AttributeDefinitionResult>(
             AttributeDefinitionFormModel.ForCreate(parentValues.Where(p => p.Id != _item.Id).ToArray()),
@@ -228,8 +230,8 @@
 
     private async Task EditDefinitionDialog(CodedValueAttributeDefinitionDto existing)
     {
-        if (_item is null || _loadCts is null) return;
-        var ct = _loadCts.Token;
+        if (_item is null || _mutationCts is null) return;
+        var ct = MutationToken;
         var parentValues = await Api.GetRootValuesAsync(ct) ?? Array.Empty<CodedValueDto>();
         var defResult = await DialogService.ShowShellDialogAsync<AttributeDefinitionDialog, AttributeDefinitionFormModel, AttributeDefinitionResult>(
             AttributeDefinitionFormModel.ForEdit(existing, parentValues.Where(p => p.Id != _item.Id).ToArray()),
@@ -273,8 +275,8 @@
 
     private async Task RemoveDefinitionAsync(string key)
     {
-        if (_item is null || _loadCts is null) return;
-        var ct = _loadCts.Token;
+        if (_item is null || _mutationCts is null) return;
+        var ct = MutationToken;
         try
         {
             Logger.LogInformation("Removing attribute definition {Key} from coded value {Id}", key, _item.Id);
@@ -357,8 +359,8 @@
 
     private async Task SubmitAsync()
     {
-        if (_item is null || _loadCts is null) return;
-        var ct = _loadCts.Token;
+        if (_item is null || _mutationCts is null) return;
+        var ct = MutationToken;
         _saving = true;
         _error = null;
 
@@ -404,9 +406,9 @@
 
     private async Task SaveAttributeEditAsync()
     {
-        if (_item is null || _editingAttrKey is null || string.IsNullOrWhiteSpace(_editAttrValue) || _loadCts is null)
+        if (_item is null || _editingAttrKey is null || string.IsNullOrWhiteSpace(_editAttrValue) || _mutationCts is null)
             return;
-        var ct = _loadCts.Token;
+        var ct = MutationToken;
         _savingAttr = true;
 
         try
@@ -433,9 +435,9 @@
 
     private async Task AddAttributeAsync()
     {
-        if (_item is null || _selectedAttrDef is null || string.IsNullOrWhiteSpace(_attrValue) || _loadCts is null)
+        if (_item is null || _selectedAttrDef is null || string.IsNullOrWhiteSpace(_attrValue) || _mutationCts is null)
             return;
-        var ct = _loadCts.Token;
+        var ct = MutationToken;
 
         try
         {
@@ -458,8 +460,8 @@
 
     private async Task RemoveAttributeAsync(string key)
     {
-        if (_item is null || _loadCts is null) return;
-        var ct = _loadCts.Token;
+        if (_item is null || _mutationCts is null) return;
+        var ct = MutationToken;
         try
         {
             await Api.RemoveAttributeAsync(_item.Id, key, ct);
@@ -503,6 +505,9 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+        _mutationCts?.Cancel();
+        _mutationCts?.Dispose();
+        _mutationCts = null;
     }
 
     private sealed class EditModel

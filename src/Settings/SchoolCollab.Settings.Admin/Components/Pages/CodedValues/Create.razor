@@ -56,7 +56,9 @@
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _mutationCts = new();
     private volatile bool _disposed;
+    private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -90,7 +92,7 @@
     {
         _saving = true;
         _error = null;
-        var ct = _loadCts?.Token ?? CancellationToken.None;
+        var ct = MutationToken;
 
         try
         {
@@ -125,6 +127,9 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+        _mutationCts?.Cancel();
+        _mutationCts?.Dispose();
+        _mutationCts = null;
     }
 
     private void Cancel() =>

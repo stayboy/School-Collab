@@ -276,6 +276,40 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
    When you create a new read-only list page, copy that file and change only the
    route, the title, the API call, and the columns.
 
+## CancellationTokenSource: loads vs. mutations
+
+A component that only loads data once can use a single `_loadCts` for both the
+initial load and any subsequent mutations, disposing it only in `Dispose()`.
+
+When a component **reloads data** (e.g. `OwnerId` or `Code` changes) and also has
+user-triggered mutations, use **two separate CTSes**:
+
+- `_loadCts` — recreated per load, cancels stale loads, disposed after each load
+  or in `Dispose()`.
+- `_mutationCts` — created once for the component lifetime, disposed only in
+  `Dispose()`. Mutations pass `MutationToken` (`_mutationCts.Token`).
+
+```csharp
+private CancellationTokenSource? _loadCts;
+private CancellationTokenSource? _mutationCts = new();
+private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
+
+public void Dispose()
+{
+    _loadCts?.Cancel();
+    _loadCts?.Dispose();
+    _loadCts = null;
+    _mutationCts?.Cancel();
+    _mutationCts?.Dispose();
+    _mutationCts = null;
+}
+```
+
+**Why:** `LoadAsync` disposes its CTS when it finishes. If `AddAsync` later
+reuses `_loadCts.Token`, it throws `ObjectDisposedException` ("CancellationTokenSource
+disposed"). Mutations must never depend on a CTS whose lifetime is shorter than the
+mutation itself.
+
 ## Blazor CSS isolation and styling
 
 ### Prefer Blazor CSS isolation over global CSS
