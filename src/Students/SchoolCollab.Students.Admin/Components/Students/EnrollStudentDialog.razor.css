@@ -61,6 +61,15 @@
     margin-bottom: 4px;
 }
 
+/* The "Override name" button sits next to the + button in the grade
+   row. Same sizing/alignment as the + button so the two action
+   buttons (create-new / override-existing) line up and the dropdown
+   keeps the flex:1 space. */
+.enroll-grade-override {
+    flex: 0 0 auto;
+    margin-bottom: 4px;
+}
+
 /* ── Per-input widths ──
    The read-only Period row takes the full input cell so the
    resolved value (the academic-year token + tooltip) is easy to

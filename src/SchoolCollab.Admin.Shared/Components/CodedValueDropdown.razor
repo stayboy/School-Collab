@@ -265,7 +265,23 @@
             var items = await Api.GetChildrenByParentCodeAsync(parentCode, ct) ?? [];
             if (_disposed || ct.IsCancellationRequested) return;
 
+            // Render the items BEFORE applying the selection. FluentSelect does
+            // not select SelectedOption when Items and SelectedOption change in
+            // the same render cycle — the <fluent-select> web component has not
+            // registered the new options yet when the selection is applied, so the
+            // pre-selected value is silently dropped (microsoft/fluentui-blazor
+            // #1533). The maintainers' documented workaround: StateHasChanged
+            // (render the items), yield one tick so the web component registers
+            // the new options, then set the selected option. Without this, an
+            // asynchronously-loaded CodedValueDropdown (e.g. the gender field on
+            // the student Edit page, where the tenant's GENDER coded values load
+            // after the form renders) never shows the pre-selected value even
+            // though Model.GenderCodedValueId is correctly set.
             _items = items;
+            await InvokeAsync(StateHasChanged);
+            await Task.Delay(1);
+
+            if (_disposed || ct.IsCancellationRequested) return;
             _selectedOption = _items.FirstOrDefault(x => x.Id == SelectedId);
         }
         catch (OperationCanceledException)

@@ -1,0 +1,14 @@
+<Project>
+  <!-- Import the root Directory.Build.props so we don't lose centralized
+       package management and other repo-wide settings. -->
+  <Import Project="$([MSBuild]::GetPathOfFileAbove('Directory.Build.props', '$(MSBuildThisFileDirectory)../'))" />
+
+  <!-- Pin patched versions of transitive dependencies that are pulled in by
+       test-only packages (bunit) or by the shared .NET 10 preview packages.
+       Without explicit PackageReference entries, NuGet restores the vulnerable
+       transitive versions. -->
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <PackageReference Include="AngleSharp" />
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+  </ItemGroup>
+</Project>

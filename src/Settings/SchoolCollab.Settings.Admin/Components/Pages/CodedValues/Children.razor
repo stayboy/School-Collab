@@ -99,7 +99,9 @@
     private string? _error;
     private string? _loadedParentCode;
     private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _mutationCts = new();
     private volatile bool _disposed;
+    private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
 
     // Search state
     private string _searchText = string.Empty;
@@ -194,9 +196,9 @@
         try
         {
             if (disable)
-                await Api.DisableAsync(id, _loadCts?.Token ?? CancellationToken.None);
+                await Api.DisableAsync(id, MutationToken);
             else
-                await Api.EnableAsync(id, _loadCts?.Token ?? CancellationToken.None);
+                await Api.EnableAsync(id, MutationToken);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -234,7 +236,7 @@
 
         try
         {
-            await Api.DeleteAsync(id, _loadCts?.Token ?? CancellationToken.None);
+            await Api.DeleteAsync(id, MutationToken);
             if (_parent is not null && _children is not null)
             {
                 _children = _children.Where(c => c.Id != id).ToArray();
@@ -303,6 +305,9 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+        _mutationCts?.Cancel();
+        _mutationCts?.Dispose();
+        _mutationCts = null;
         _searchCts?.Cancel();
         _searchCts?.Dispose();
         _searchCts = null;

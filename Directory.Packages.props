@@ -78,6 +78,13 @@
   <ItemGroup Label="Other">
     <PackageVersion Include="Humanizer" Version="2.14.1" />
     <PackageVersion Include="Scrutor" Version="7.0.0" />
-    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.9" />
+    <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+  </ItemGroup>
+  <ItemGroup Label="Transitive Security Overrides">
+    <!-- AngleSharp is pulled in transitively by bunit. The 1.4.0 version has
+         a moderate severity vulnerability (GHSA-pgww-w46g-26qg). We pin the
+         patched 1.5.2 version explicitly in test projects so bunit keeps
+         working without the vulnerable transitive dependency. -->
+    <PackageVersion Include="AngleSharp" Version="1.5.2" />
   </ItemGroup>
 </Project>

@@ -4,6 +4,7 @@
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Admin.Components.Students
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Constants
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @inject StudentsApiClient Api
@@ -108,8 +109,8 @@
                                                   Size="ButtonSize.Small"
                                                   OnClick="OnEnrollAsync"
                                                   Disabled="@_savingEnrollment"
-                                                  Title="Enroll this student in a grade level for the active period">
-                                        <FluentIcon Icon="@(Icons.Regular.Size16.Add)" Slot="start" />
+                                                  Title="Enroll this student in a grade level for the active period"
+                                                  IconStart="@FluentIcons.Add">
                                         Enroll
                                     </FluentButton>
                                     @if (PrimaryActiveEnrollment is not null)

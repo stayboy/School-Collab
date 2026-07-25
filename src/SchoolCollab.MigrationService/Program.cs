@@ -246,7 +246,7 @@ static async Task SeedEnableGradeLevelSetupOnEnrollDialogAsync(SettingsDbContext
         key,
         "Enable inline grade-level setup (\"+\" button) on the Enroll Student dialog",
         null,
-        isEnabled: false);
+        isEnabled: true);
     db.FeatureFlags.Add(flag);
     db.FlagAuditEntries.Add(FlagAuditEntry.Create(
         tenantId: null,

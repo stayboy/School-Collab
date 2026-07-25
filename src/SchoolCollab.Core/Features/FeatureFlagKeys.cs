@@ -26,8 +26,9 @@ public static class FeatureFlagKeys
 
     /// <summary>
     /// Enables the inline "+" grade-create button on the Enroll Student dialog.
-    /// Opt-in (default false) because the action has a global side-effect: it
-    /// creates a new GRADE coded value and a matching GradeLevel row.
+    /// Enabled by default as of the feature rollout. The action has a global
+    /// side-effect (it creates a new GRADE coded value and a matching
+    /// GradeLevel row), so tenants can opt out via the ConfigFlags page.
     /// </summary>
     public const string EnableGradeLevelSetupOnEnrollDialog = "FEATURE:EnableGradeLevelSetupOnEnrollDialog";
 }

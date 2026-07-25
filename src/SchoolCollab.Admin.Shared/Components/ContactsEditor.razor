@@ -138,14 +138,16 @@
     private string? _error;
     private Guid? _loadedOwnerId;
 
-    // Cancellation: a single CTS for the in-flight load plus a disposed flag
-    // so synchronous post-await StateHasChanged calls after teardown don't
-    // throw. The pattern mirrors TeacherSetupWizard / GuardianSetupWizard
-    // (see PR #75, 76) and is the established convention for async-load
-    // blazor pages in this repo.
+    // Cancellation: separate CTSes for loads and mutations.
+    // _loadCts is recreated per load and disposed when the load finishes or
+    // is superseded, so it must NOT be reused by later mutation calls.
+    // _mutationCts lives for the component lifetime and is disposed in
+    // Dispose(), cancelling any in-flight add/remove/verify/etc. calls.
     private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _mutationCts = new();
     private volatile bool _disposed;
     private CancellationToken LoadToken => _loadCts?.Token ?? CancellationToken.None;
+    private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
 
     // New-contact form state.
     private ContactChannel _newChannel = ContactChannel.Email;
@@ -156,11 +158,14 @@
     public void Dispose()
     {
         _disposed = true;
-        // Cancel any in-flight load so an awaited Api call doesn't try to
-        // touch _contacts / _subscribed on a torn-down component.
+        // Cancel any in-flight load or mutation so awaited Api calls don't
+        // try to touch component state on a torn-down component.
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+        _mutationCts?.Cancel();
+        _mutationCts?.Dispose();
+        _mutationCts = null;
     }
 
     protected override async Task OnParametersSetAsync()
@@ -237,7 +242,7 @@
             await Api.AddContactAsync(new AddContactRequest(
                 OwnerType, OwnerId, _newChannel, _newValue.Trim(),
                 string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
-                _newIsPrimary), LoadToken);
+                _newIsPrimary), MutationToken);
 
             _newValue = string.Empty;
             _newLabel = string.Empty;
@@ -267,7 +272,7 @@
         _error = null;
         try
         {
-            await Api.DeleteContactAsync(id, LoadToken);
+            await Api.DeleteContactAsync(id, MutationToken);
             _subscribed.Remove(id);
             await LoadAsync();
         }
@@ -289,7 +294,7 @@
         _error = null;
         try
         {
-            await Api.VerifyContactAsync(id, LoadToken);
+            await Api.VerifyContactAsync(id, MutationToken);
             await LoadAsync();
         }
         catch (OperationCanceledException) { }
@@ -310,7 +315,7 @@
         _error = null;
         try
         {
-            await Api.SetPrimaryContactAsync(id, LoadToken);
+            await Api.SetPrimaryContactAsync(id, MutationToken);
             await LoadAsync();
         }
         catch (OperationCanceledException) { }
@@ -332,9 +337,9 @@
         try
         {
             if (subscribe)
-                await Api.SubscribeAsync(id, ct: LoadToken);
+                await Api.SubscribeAsync(id, ct: MutationToken);
             else
-                await Api.UnsubscribeAsync(id, ct: LoadToken);
+                await Api.UnsubscribeAsync(id, ct: MutationToken);
 
             if (subscribe)
                 _subscribed.Add(id);
