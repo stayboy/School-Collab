@@ -1,0 +1,14 @@
+/* GuardianGrid (spec §4.7 / goal #5): the shared column structure for
+   guardian lists (picker + per-student). The .guardian-name-cell class is
+   the visual anchor of the linked-mode Name column: it hosts the
+   salutation-aware name and the Emergency badge on the same line. */
+
+.guardian-name-cell {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.muted {
+    color: var(--neutral-foreground-hint, #666);
+}
