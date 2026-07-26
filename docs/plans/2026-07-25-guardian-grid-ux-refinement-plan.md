@@ -18,6 +18,7 @@ This plan captures seven related UX requests for guardian selection and display 
 5. **Student guardian list shows up to 3 contacts per row**, formatted as channel on top and contact value below.
 6. **One reusable grid component** for guardian selection/display everywhere.
 7. **Tick/check indicator** in each contact column to show whether the contact is primary and/or carries a country code.
+8. **Title included in guardian displayed name** — e.g. "Mr. John Smith", "Dr. Jane Doe" — everywhere the guardian name appears (grid cells, picker pills, dialogs).
 
 ---
 
@@ -35,14 +36,14 @@ The work reshapes three public surfaces:
 
 | Surface | Current | Proposed |
 |---------|---------|----------|
-| `GuardianPickerDialog` | 3-column `EntityGrid<GuardianDto>` + inline single-contact `GuardianFormFields` | Wider dialog; single reusable `GuardianGrid` in picker mode; inline **in-memory** multi-contact editor for new guardians |
-| `StudentGuardiansList` | 6-column grid with one primary contact | 4-column grid (Name, Relationship, Contacts ≤3, Role, Actions) using same `GuardianGrid` in display mode |
+| `GuardianPickerDialog` | 3-column `EntityGrid<GuardianDto>` + inline single-contact `GuardianFormFields` | Wider dialog; single reusable `GuardianGrid` in picker mode; inline **in-memory** multi-contact editor for new guardians; title shown in name display |
+| `StudentGuardiansList` | 6-column grid with one primary contact | 4-column grid (Name incl. title, Relationship, Contacts ≤3, Role, Actions) using same `GuardianGrid` in display mode |
 | `GuardiansTab` / legacy grids | Deprecated / separate | Replaced by `GuardianGrid` |
 
 A new `GuardianGrid.razor` component is the central primitive. It consumes a normalized row model (`GuardianGridRow`) and exposes two modes:
 
 - **`Picker`** — multi-select checkbox, search (still owned by parent), Name column, up to 3 Contacts columns, optional "New guardian" button.
-- **`Display`** — Name (+ emergency badge), Relationship, up to 3 Contacts columns, Role badge, per-row Actions.
+- **`Display`** — Name (+ title + emergency badge), Relationship, up to 3 Contacts columns, Role badge, per-row Actions.
 
 A new `GuardianContactsEditor.razor` component provides the `ContactsEditor`-style UI but operates **in-memory**, so the picker can capture multiple contacts for a guardian that has not yet been persisted. On confirm the parent receives the contacts and creates them together with the guardian.
 
@@ -268,6 +269,39 @@ Alternative: if the user literally wants a tick to mean "has country code", show
 
 CSS class `.contact-meta` will host the indicator row.
 
+### 4.8 Title included in guardian displayed name
+
+Guardians have an optional `TitleCodedValueId` (e.g., Mr., Mrs., Dr.). Today it is stored but not surfaced in lists or pills. This requirement adds the resolved title to every guardian name display.
+
+#### Title resolution
+
+- `GuardianGrid` loads the title coded-value dictionary once via `CodedValuesApiClient.GetChildrenByParentCodeAsync(CodedValueParent.Titles.ToCode(), ...)` (verify the exact `CodedValueParent` member name against the existing constants file).
+- Store in `_titleNames: Dictionary<Guid, string>`.
+- A helper formats:
+  ```csharp
+  private string FormatGuardianName(GuardianGridRow g)
+  {
+      var title = g.TitleCodedValueId is { } id && _titleNames.TryGetValue(id, out var t)
+          ? t
+          : null;
+      var name = string.IsNullOrWhiteSpace(g.DisplayName)
+          ? $"{g.FirstName} {g.LastName}"
+          : g.DisplayName;
+      return string.IsNullOrWhiteSpace(title) ? name : $"{title} {name}";
+  }
+  ```
+- If the title already appears inside `DisplayName`, do not prepend it again (some tenants may store the full display name). Detect by checking whether `DisplayName` starts with the resolved title, case-insensitive.
+
+#### Surfaces updated
+
+- `GuardianGrid` Name column (both Picker and Display modes).
+- `GuardianGrid` chip/pill label if the picker renders its own pills.
+- Anywhere else `GuardianDto` or `StudentGuardianViewDto` names are displayed should route through `GuardianGrid` after the migration.
+
+#### DTO / handler changes (optional)
+
+Alternative to client-side resolution: compute the formatted name server-side in `ListGuardiansHandler` and `ListGuardiansByStudentHandler` by batch-loading title coded values. This keeps the UI simpler but duplicates formatting logic. Recommendation: resolve client-side in `GuardianGrid` so the component is self-contained and reusable across contexts where only the `TitleCodedValueId` is available.
+
 ---
 
 ## 5. Data Model / DTO Changes
@@ -334,18 +368,19 @@ CSS class `.contact-meta` will host the indicator row.
 3. **Tick meaning:** Does "tick for primary or cc" mean one tick for either condition, or separate indicators? Recommendation: separate — checkmark for primary, country-code text for CC.
 4. **Relationship/Role in picker create panel:** Keep Relationship dropdown (it is per-link) and add Role (Primary/CC)? Current `GuardianAssignmentModel` already has these; ensure the new editor still captures them.
 5. **Backward compatibility of `StudentGuardianViewDto`:** The DTO is a positional record. Adding a new array parameter at the end with a default empty array keeps existing callers compiling, but verify all construction sites.
+6. **Title source:** Confirm the exact `CodedValueParent` value for guardian titles (e.g. `Titles`, `GuardianTitles`, `PersonTitles`) and whether the title text already includes a trailing period ("Mr." vs "Mr"). The formatter must not double the period if the coded value already contains it.
 
 ---
 
 ## 11. Suggested Implementation Order
 
 1. **Header wrapping CSS** — low risk, global improvement.
-2. **`GuardianGrid` shell** — build the component with Picker and Display modes using mock data.
+2. **`GuardianGrid` shell** — build the component with Picker and Display modes using mock data; include title-resolution helper and formatted name display.
 3. **StudentGuardiansList migration** — switch to `GuardianGrid` Display mode; verify 3-contact rendering.
 4. **DTO/handler enrichment** — add `GuardianContactView[]` to `StudentGuardianViewDto`; update `ListGuardiansByStudentHandler`.
 5. **`GuardianContactsEditor` in-memory component** — build and unit-test independently.
 6. **Picker migration** — swap grid to `GuardianGrid`, swap New panel to `GuardianContactsEditor`, extend `GuardianAssignment`, wire parent pages to create multiple contacts.
-7. **Dialog sizing + polish** — bump sizes, tune column widths, add tick indicators.
+7. **Dialog sizing + polish** — bump sizes, tune column widths, add tick indicators, verify title appears in names and pills.
 8. **Full test pass + cleanup** — remove `GuardiansTab`, consolidate CSS.
 
 ---
