@@ -32,6 +32,7 @@
    visible. The previous Outline/Neutral appearances washed the icon out
    against the dialog body background — the icon was effectively invisible. *@
 @inherits DialogShellBase<GuardianPickerModel, GuardianAssignment[]>
+@using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Core.DTOs
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Students.Admin.Components.Students
@@ -121,7 +122,15 @@
                    in-body label would be redundant. This section is JUST the
                    form fields; the actions live in the dialog footer. *@
                 <div class="picker-create-section">
-                    <GuardianFormFields Model="_newGuardian" />
+                    <GuardianFormFields Model="_newGuardian" ShowContactFields="false" />
+                    <div class="picker-create-contacts">
+                        <div class="picker-create-contacts-label">Contacts</div>
+                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                        OwnerType="ContactOwnerType.Guardian"
+                                        Contacts="_newGuardian.Contacts"
+                                        ShowSubscription="false"
+                                        ContactsChanged="OnNewContactsChanged" />
+                    </div>
                 </div>
             }
         </FluentStack>
@@ -537,18 +546,31 @@
         // GuardianAssignment so SubmitAsync can emit it with
         // ExistingGuardianId = null (signalling "create me" to the parent).
         var tempId = Guid.NewGuid();
+
+        // The preferred contact (lowest Order) drives the synthetic grid
+        // row's PrimaryContact* fields so the picker grid shows what the
+        // user entered. The full contact list is carried on the assignment
+        // so the parent can persist every contact in order after it creates
+        // the guardian. Falls back to nulls when no contacts were entered.
+        var preferred = _newGuardian.Contacts.OrderBy(x => x.Order).FirstOrDefault();
+        var preferredChannel = preferred?.Channel;
+        var preferredValue = string.IsNullOrWhiteSpace(preferred?.Value) ? null : preferred!.Value.Trim();
+        var preferredCountryCode = preferred?.CountryCode;
+
         _pendingNew[tempId] = new GuardianAssignment(
             null,
             _newGuardian.FirstName!.Trim(),
             _newGuardian.LastName!.Trim(),
             _newGuardian.RelationshipCodedValueId,
-            _newGuardian.ContactChannel,
-            string.IsNullOrWhiteSpace(_newGuardian.ContactValue) ? null : _newGuardian.ContactValue.Trim(),
+            preferredChannel,
+            preferredValue,
             _newGuardian.TitleCodedValueId,
-            _newGuardian.CountryCode);
+            preferredCountryCode,
+            GuardianRole.Primary,
+            _newGuardian.Contacts);
         _newGuardianIds.Add(tempId);
 
-        // Synthetic grid row carrying the form's contact info so the grid's
+        // Synthetic grid row carrying the preferred contact so the grid's
         // "Preferred contact" + "Contact value" columns show what the user
         // just entered. DisplayName is null so the Name column falls back to
         // First + Last (same logic as existing guardians).
@@ -557,9 +579,9 @@
             _newGuardian.FirstName!.Trim(), _newGuardian.LastName!.Trim(),
             null, null, null, false,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-            _newGuardian.ContactChannel,
-            string.IsNullOrWhiteSpace(_newGuardian.ContactValue) ? null : _newGuardian.ContactValue.Trim(),
-            _newGuardian.CountryCode);
+            preferredChannel,
+            preferredValue,
+            preferredCountryCode);
         _items = new[] { synthetic }.Concat(_items).ToArray();
         _picked[tempId] = synthetic;
 
@@ -568,6 +590,13 @@
         _createError = null;
         UpdateDialogTitle();
     }
+
+    /// <summary>Re-render callback from the buffered &lt;ContactsEditor&gt;
+    /// in the New panel. The editor mutates <c>_newGuardian.Contacts</c> in
+    /// place; this just triggers a parent re-render so any parent-level
+    /// display (e.g. a future contact count) stays fresh. The editor itself
+    /// re-renders its own list on every mutation.</summary>
+    private void OnNewContactsChanged() => StateHasChanged();
 
     protected override Task<GuardianAssignment[]?> SubmitAsync(GuardianPickerModel model)
     {

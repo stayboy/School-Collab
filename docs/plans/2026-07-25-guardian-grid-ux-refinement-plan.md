@@ -48,6 +48,8 @@ A new `GuardianGrid.razor` component is the central primitive. It consumes a nor
 
 A new `GuardianContactsEditor.razor` component provides the `ContactsEditor`-style UI but operates **in-memory**, so the picker can capture multiple contacts for a guardian that has not yet been persisted. On confirm the parent receives the contacts and creates them together with the guardian.
 
+> **Decision (Option C — adopted):** Instead of a separate `GuardianContactsEditor` component, the existing shared `ContactsEditor` gained a `Mode` parameter (`Live` | `Buffered`). `Buffered` mode operates on an in-memory `List<ContactModel>` + `ContactsChanged` callback and never calls the API; the parent flushes on save. This avoids a visual-clone component — one editor, two modes. The standalone `GuardianContactsEditor.razor` was deleted; `ContactModel` lives in `SchoolCollab.Admin.Shared.Components` so both the editor and `GuardianAssignment` can reference it.
+
 ---
 
 ## 4. Detailed Design
@@ -98,6 +100,11 @@ Proposed templates after header/content audit:
 The current picker New panel uses `GuardianFormFields`, which only captures one contact. Replace it with a new component that reuses the visual design of `ContactsEditor` but stores contacts locally.
 
 #### New component: `GuardianContactsEditor.razor`
+
+> **Superseded by Option C** — see the decision note above. The existing
+> `ContactsEditor` now has a `Buffered` mode; no separate component.
+> The `ContactModel` shape below still applies (it lives in
+> `SchoolCollab.Admin.Shared.Components.ContactModel`).
 
 Parameters:
 ```csharp

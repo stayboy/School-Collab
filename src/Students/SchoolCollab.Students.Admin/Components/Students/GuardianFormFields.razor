@@ -64,34 +64,48 @@
                             Placeholder="Select relationship" />
     </FormRow>
 
-    <FormRow Label="Preferred contact">
-        <DropdownForEnum TEnum="ContactChannel"
-                        @bind-SelectedValue="Model.ContactChannel"
-                        @bind-SelectedValue:after="OnChannelChanged"
-                        Placeholder="Select mode"
-                        Class="guardian-field" />
-    </FormRow>
+    @if (ShowContactFields)
+    {
+        <FormRow Label="Preferred contact">
+            <DropdownForEnum TEnum="ContactChannel"
+                            @bind-SelectedValue="Model.ContactChannel"
+                            @bind-SelectedValue:after="OnChannelChanged"
+                            Placeholder="Select mode"
+                            Class="guardian-field" />
+        </FormRow>
 
-    <FormRow Label="Contact value">
-        @if (Model.ContactChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
-        {
-            <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                @bind-SelectedId="Model.CountryCodeCodedValueId"
-                                @bind-SelectedId:after="OnCountryCodeChanged"
-                                Placeholder="Code"
-                                Class="guardian-country-code"
-                                OptionText="@FormatCountryCodeOption" />
-        }
-        <FluentTextField Id="guardianFormContact"
-                         @bind-Value="Model.ContactValue"
-                         Placeholder="@ValuePlaceholder"
-                         class="guardian-field" />
-    </FormRow>
+        <FormRow Label="Contact value">
+            @if (Model.ContactChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+            {
+                <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                    @bind-SelectedId="Model.CountryCodeCodedValueId"
+                                    @bind-SelectedId:after="OnCountryCodeChanged"
+                                    Placeholder="Code"
+                                    Class="guardian-country-code"
+                                    OptionText="@FormatCountryCodeOption" />
+            }
+            <FluentTextField Id="guardianFormContact"
+                             @bind-Value="Model.ContactValue"
+                             Placeholder="@ValuePlaceholder"
+                             class="guardian-field" />
+        </FormRow>
+    }
 </FluentStack>
 
 @code {
     /// <summary>The guardian being edited. Required.</summary>
     [Parameter, EditorRequired] public GuardianAssignmentModel Model { get; set; } = default!;
+
+    /// <summary>When true (default), renders the single-contact rows
+    /// (Preferred contact + Contact value) bound to
+    /// <c>Model.ContactChannel/ContactValue/CountryCode</c>. When false,
+    /// those rows are omitted — the parent supplies a multi-contact
+    /// editor (<c>&lt;ContactsEditor Mode=Buffered&gt;</c>) instead. The
+    /// picker's New panel sets this to false so a guardian can be created
+    /// with multiple contacts (SMS + email + ...); other callers
+    /// (<c>GuardianFormDialog</c>, <c>StudentFormFields</c> inline create)
+    /// keep the default and use the single-contact shortcut.</summary>
+    [Parameter] public bool ShowContactFields { get; set; } = true;
 
     /// <summary>Country calling-code options (loaded lazily when a phone
     /// channel is first selected). Cached for the component lifetime. The

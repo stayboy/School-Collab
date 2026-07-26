@@ -525,21 +525,48 @@
                 await Api.LinkGuardianAsync(new LinkGuardianRequest(
                     Id, guardianId, a.RelationshipCodedValueId, a.Role, false, null), ct);
                 // Seed the contact captured in the picker for a newly-created
-                // guardian (existing guardians already own their contacts).
-                // Mirrors the wizard's Phase 4 contact-creation block.
-                if (a.ExistingGuardianId is null && a.ContactValue is not null)
+                // Seed contacts for a newly-created guardian. The picker's
+                // multi-contact editor (Buffered ContactsEditor) populates
+                // a.Contacts; the legacy single-contact path (StudentFormFields
+                // inline create) populates a.ContactChannel/ContactValue/
+                // CountryCode. Prefer the multi-contact list when present;
+                // fall back to the single-contact shortcut otherwise.
+                if (a.ExistingGuardianId is null)
                 {
-                    try
+                    if (a.Contacts is { Count: > 0 })
                     {
-                        await Api.AddContactAsync(new AddContactRequest(
-                            ContactOwnerType.Guardian, guardianId,
-                            a.ContactChannel ?? ContactChannel.Email, a.ContactValue, null, true)
-                            { CountryCode = a.CountryCode }, ct);
+                        var ordered = a.Contacts.OrderBy(x => x.Order).ToList();
+                        for (var i = 0; i < ordered.Count; i++)
+                        {
+                            var c = ordered[i];
+                            try
+                            {
+                                await Api.AddContactAsync(new AddContactRequest(
+                                    ContactOwnerType.Guardian, guardianId,
+                                    c.Channel, c.Value, c.Label, i == 0)
+                                    { CountryCode = c.CountryCode, DisplayOrder = i }, ct);
+                            }
+                            catch (OperationCanceledException) { throw; }
+                            catch (Exception contactEx)
+                            {
+                                Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                            }
+                        }
                     }
-                    catch (OperationCanceledException) { throw; }
-                    catch (Exception contactEx)
+                    else if (a.ContactValue is not null)
                     {
-                        Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                        try
+                        {
+                            await Api.AddContactAsync(new AddContactRequest(
+                                ContactOwnerType.Guardian, guardianId,
+                                a.ContactChannel ?? ContactChannel.Email, a.ContactValue, null, true)
+                                { CountryCode = a.CountryCode }, ct);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception contactEx)
+                        {
+                            Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                        }
                     }
                 }
             }

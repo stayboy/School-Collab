@@ -91,3 +91,12 @@
     gap: 2px;
     margin-left: auto;
 }
+
+/* Buffered-mode (create-time) preferred-row highlight. The lowest-Order
+   contact is the preferred one; a tinted border + background make it the
+   visual anchor of the list, mirroring the old GuardianContactsEditor.
+   Append-only (dialog-ui skill: never overwrite razor.css). */
+.contact-item--preferred {
+    border-color: var(--accent-fill-rest, #0078d4);
+    background: var(--accent-fill-rest-area, #e6f2fa);
+}

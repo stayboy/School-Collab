@@ -401,4 +401,108 @@ public class ContactsEditorTests : BunitContext
         optionText!(ghana).Should().Be("+233 (Ghana)");
         optionText!(usa).Should().Be("+1 (United States)");
     }
+
+    // ─── Buffered mode (create-time, in-memory) ─────────────────────────
+    // Spec §4.4 Option C: ContactsEditor gains a Buffered mode so the
+    // picker can capture multiple contacts for a guardian that has not
+    // been persisted yet. No API calls; the parent flushes on save.
+
+    private IRenderedComponent<ContactsEditor> RenderBuffered(
+        List<ContactModel>? contacts = null,
+        ContactOwnerType ownerType = ContactOwnerType.Guardian)
+    {
+        contacts ??= new List<ContactModel>();
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        // A fake that THROWs on AddContactAsync — Buffered mode must never
+        // call the API. If it does, the test fails loudly.
+        var fake = new FakeContactsClient
+        {
+            OnAddContact = _ => throw new InvalidOperationException("Buffered mode must not call AddContactAsync")
+        };
+        Services.AddSingleton<IContactsClient>(fake);
+        Services.AddSingleton(new CodedValuesApiClient(http));
+        Services.AddSingleton(NullLogger<ContactsEditor>.Instance);
+        return Render<ContactsEditor>(parameters => parameters
+            .Add(p => p.Mode, ContactsEditor.EditorMode.Buffered)
+            .Add(p => p.OwnerType, ownerType)
+            .Add(p => p.Contacts, contacts)
+            .Add(p => p.ShowSubscription, false));
+    }
+
+    [TestMethod]
+    public void BufferedMode_RendersEmptyState()
+    {
+        var contacts = new List<ContactModel>();
+        var cut = RenderBuffered(contacts);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find(".contacts-empty").TextContent.Should().Contain("No contacts yet.");
+        });
+    }
+
+    [TestMethod]
+    public void BufferedMode_HidesPrimaryCheckboxAndSubscriptionToggle()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "a@x.com", Order = 0 }
+        };
+        var cut = RenderBuffered(contacts);
+
+        // Contacts have no Primary/CC role during creation (that is a
+        // guardian-link concept); the Primary checkbox in the add row is
+        // Live-only. The subscribe toggle is also Live-only.
+        cut.FindAll(".contacts-primary").Should().BeEmpty("Primary checkbox is Live-only");
+        cut.FindAll(".contact-subscribe").Should().BeEmpty("subscribe toggle is Live-only");
+    }
+
+    [TestMethod]
+    public void BufferedMode_Add_AppendsInMemory_WithoutApiCall()
+    {
+        var contacts = new List<ContactModel>();
+        var cut = RenderBuffered(contacts);
+
+        var valueInput = cut.Find("fluent-text-field.contacts-value");
+        valueInput.Change("parent@example.com");
+
+        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        addButton.Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            contacts.Should().HaveCount(1, "Buffered Add appends to the in-memory list");
+            contacts[0].Value.Should().Be("parent@example.com");
+            contacts[0].Channel.Should().Be(ContactChannel.Email);
+            contacts[0].Order.Should().Be(0, "the first contact is Order 0 = preferred");
+            // No error bar — the API was never called.
+            cut.FindAll(".contacts-error").Should().BeEmpty();
+        });
+    }
+
+    [TestMethod]
+    public void BufferedMode_PreferredRow_ShowsPreferredBadgeAndHighlight()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "preferred@x.com", Order = 0 },
+            new() { Channel = ContactChannel.SMS, Value = "5551234", CountryCode = "+233", Order = 1 },
+        };
+        var cut = RenderBuffered(contacts);
+
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll(".contact-item");
+            rows.Should().HaveCount(2);
+            // The first (lowest Order) row is the preferred one: tinted
+            // highlight + "Preferred" badge (not "Primary").
+            rows[0].ClassList.Should().Contain("contact-item--preferred");
+            rows[0].TextContent.Should().Contain("Preferred");
+            rows[0].TextContent.Should().Contain("preferred@x.com");
+            // The second row is not preferred and shows no Preferred badge.
+            rows[1].ClassList.Should().NotContain("contact-item--preferred");
+            rows[1].TextContent.Should().NotContain("Preferred");
+        });
+    }
 }

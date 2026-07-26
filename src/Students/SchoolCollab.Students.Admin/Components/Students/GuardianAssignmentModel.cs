@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels;
+using SchoolCollab.Admin.Shared.Components;
 
 namespace SchoolCollab.Students.Admin.Components.Students;
 
@@ -39,6 +40,16 @@ public sealed class GuardianAssignmentModel
     /// <summary>True when editing an existing assignment (affects button labels).</summary>
     public bool IsEdit { get; set; }
 
+    /// <summary>In-memory contacts captured by the multi-contact editor
+    /// (<c>&lt;ContactsEditor Mode=Buffered&gt;</c>) when the picker's New
+    /// panel renders <c>GuardianFormFields</c> with
+    /// <c>ShowContactFields=false</c>. Empty for the single-contact create
+    /// path (<c>StudentFormFields</c> inline / <c>GuardianFormDialog</c>)
+    /// which still uses <see cref="ContactChannel"/> / <see cref="ContactValue"/>
+    /// / <see cref="CountryCode"/>. The first entry (lowest Order) is the
+    /// preferred contact.</summary>
+    public List<ContactModel> Contacts { get; set; } = new();
+
     public static GuardianAssignmentModel ForAdd() => new();
 
     public static GuardianAssignmentModel ForEdit(GuardianAssignment a) => new()
@@ -53,5 +64,6 @@ public sealed class GuardianAssignmentModel
         CountryCodeCodedValueId = null,
         CountryCode = a.CountryCode,
         IsEdit = true,
+        Contacts = a.Contacts?.ToList() ?? new(),
     };
 }
