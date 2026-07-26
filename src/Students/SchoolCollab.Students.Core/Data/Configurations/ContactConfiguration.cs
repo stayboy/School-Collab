@@ -29,6 +29,9 @@ internal sealed class ContactConfiguration : TenantEntityTypeConfigurationBase<C
         builder.Property(x => x.Label);
         builder.Property(x => x.IsPrimary).HasDefaultValue(false);
         builder.Property(x => x.IsVerified).HasDefaultValue(false);
+        // Spec §4.9: contact ordering replaces the legacy IsPrimary bool.
+        // The additive phase keeps IsPrimary in sync (order 0 == primary).
+        builder.Property(x => x.DisplayOrder).HasDefaultValue(0);
 
         builder.HasIndex(x => new { x.TenantId, x.OwnerType, x.OwnerId, x.Channel, x.Value })
             .IsUnique()

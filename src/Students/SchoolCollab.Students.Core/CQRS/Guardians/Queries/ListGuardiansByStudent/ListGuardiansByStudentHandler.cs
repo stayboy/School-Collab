@@ -56,8 +56,11 @@ public sealed class ListGuardiansByStudentHandler(
                                  && !c.IsDeleted)
                         .ToListAsync(ct);
                 var contactsByOwner = contacts
+                    // Spec §4.9: the "primary contact" is now the contact
+                    // with the lowest DisplayOrder. IsPrimary is still
+                    // honored as a tiebreaker for the additive phase.
                     .GroupBy(c => c.OwnerId)
-                    .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.IsPrimary).First());
+                    .ToDictionary(g => g.Key, g => g.OrderBy(c => c.DisplayOrder).ThenByDescending(c => c.IsPrimary).First());
 
                 return rows.Select(r =>
                 {

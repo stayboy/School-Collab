@@ -116,6 +116,24 @@ public class ContactsEditorTests : BunitContext
             return Task.CompletedTask;
         }
 
+        // Spec §4.9: contact display-order surface. The fake no-ops so
+        // existing tests aren't affected; new tests can hook OnReorder /
+        // OnSetOrder to assert behaviour.
+        public Func<ContactOwnerType, Guid, IReadOnlyList<Guid>, Task>? OnReorder { get; set; }
+        public Func<Guid, int, Task>? OnSetOrder { get; set; }
+
+        public Task SetContactOrderAsync(Guid id, int order, CancellationToken ct = default)
+        {
+            if (OnSetOrder is not null) return OnSetOrder(id, order);
+            return Task.CompletedTask;
+        }
+
+        public Task ReorderContactsAsync(ContactOwnerType ownerType, Guid ownerId, IReadOnlyList<Guid> orderedIds, CancellationToken ct = default)
+        {
+            if (OnReorder is not null) return OnReorder(ownerType, ownerId, orderedIds);
+            return Task.CompletedTask;
+        }
+
         public Task<SubscribedContactDto[]?> ListSubscribedContactsAsync(
             ContactOwnerType ownerType, Guid? ownerId = null, SubscriptionScope? scope = null, CancellationToken ct = default)
         {

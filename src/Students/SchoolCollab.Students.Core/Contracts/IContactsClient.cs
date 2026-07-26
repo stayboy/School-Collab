@@ -25,6 +25,12 @@ public interface IContactsClient
 
     Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default);
 
+    /// <summary>Spec §4.9: sets a single contact's display order (lower = earlier).</summary>
+    Task SetContactOrderAsync(Guid id, int order, CancellationToken ct = default);
+
+    /// <summary>Spec §4.9: atomically reorders an owner's contacts.</summary>
+    Task ReorderContactsAsync(ContactOwnerType ownerType, Guid ownerId, IReadOnlyList<Guid> orderedIds, CancellationToken ct = default);
+
     Task<SubscribedContactDto[]?> ListSubscribedContactsAsync(
         ContactOwnerType ownerType, Guid? ownerId = null, SubscriptionScope? scope = null, CancellationToken ct = default);
 
@@ -45,6 +51,8 @@ public record AddContactRequest(
     bool IsPrimary)
 {
     public string? CountryCode { get; init; }
+    /// <summary>Initial display order (spec §4.9). Lower renders first.</summary>
+    public int DisplayOrder { get; init; }
 }
 
 /// <summary>Request body for updating a contact's value / label.</summary>

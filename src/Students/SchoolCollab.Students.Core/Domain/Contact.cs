@@ -22,6 +22,15 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public string? Label { get; private set; }
     public string? CountryCode { get; private set; }
     public bool IsPrimary { get; private set; }
+    /// <summary>
+    /// Display ordering hint for the owner's contact list (spec §4.9). Lower
+    /// values render first; the contact with the smallest <c>DisplayOrder</c>
+    /// is the owner's preferred contact. <c>IsPrimary</c> remains for
+    /// backward compatibility during the additive phase; it is kept in sync
+    /// with <c>DisplayOrder == 0</c> by <see cref="SetPrimary"/> and the
+    /// repository's reorder APIs.
+    /// </summary>
+    public int DisplayOrder { get; private set; }
     public bool IsVerified { get; private set; }
 
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
@@ -35,7 +44,7 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public IReadOnlyList<ContactSubscription> Subscriptions => _subscriptions.AsReadOnly();
 
     public static Contact Create(
-        ContactOwnerType ownerType, Guid ownerId, ContactChannel channel, string value, string? label, string? countryCode, bool isPrimary)
+        ContactOwnerType ownerType, Guid ownerId, ContactChannel channel, string value, string? label, string? countryCode, bool isPrimary, int displayOrder = 0)
     {
         var now = DateTimeOffset.UtcNow;
         return new Contact
@@ -48,6 +57,11 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
             Label = label?.Trim(),
             CountryCode = countryCode?.Trim(),
             IsPrimary = isPrimary,
+            // DisplayOrder drives ordering; IsPrimary is kept in sync for
+            // the additive phase. The first contact added becomes both
+            // primary and order 0; subsequent contacts default to order 0
+            // (i.e. also "primary" candidates) until the user reorders.
+            DisplayOrder = displayOrder,
             IsVerified = false,
             IsDeleted = false,
             CreatedAt = now,
@@ -65,6 +79,8 @@ public sealed class Contact : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
 
     public void Verify() { IsVerified = true; UpdatedAt = DateTimeOffset.UtcNow; }
     public void SetPrimary(bool isPrimary) { IsPrimary = isPrimary; UpdatedAt = DateTimeOffset.UtcNow; }
+    /// <summary>Sets the contact's display order. Lower values render first.</summary>
+    public void SetDisplayOrder(int order) { DisplayOrder = order; UpdatedAt = DateTimeOffset.UtcNow; }
 
     public void SoftDelete()
     {

@@ -89,15 +89,20 @@ public class GuardianContactsListTests
     }
 
     [TestMethod]
-    public void Component_Sorts_Contacts_Primary_First_Then_By_Channel()
+    public void Component_Sorts_Contacts_By_DisplayOrder_Then_Channel()
     {
-        // Per-card sort: the primary contact anchors the card visually;
-        // verified contacts come next; then by channel (Email < SMS <
-        // WhatsApp) for stable display.
+        // Spec §4.9 (additive phase): the contact with the lowest
+        // DisplayOrder anchors the card visually. IsPrimary remains a
+        // tiebreaker (kept in sync with DisplayOrder == 0 by the repo),
+        // verified contacts sort above unverified, then by channel
+        // (Email < SMS < WhatsApp) for stable display.
         var razor = ReadRazorSource("GuardianContactsList.razor");
         razor.Should().MatchRegex(
-            @"OrderByDescending\s*\(\s*c\s*=>\s*c\.IsPrimary\s*\)",
-            "primary contact renders first in the card");
+            @"OrderBy\s*\(\s*c\s*=>\s*c\.DisplayOrder\s*\)",
+            "preferred contact (lowest DisplayOrder) renders first");
+        razor.Should().MatchRegex(
+            @"ThenByDescending\s*\(\s*c\s*=>\s*c\.IsPrimary\s*\)",
+            "IsPrimary is a tiebreaker during the additive phase");
         razor.Should().MatchRegex(
             @"ThenByDescending\s*\(\s*c\s*=>\s*c\.IsVerified\s*\)",
             "verified contacts sort above unverified");

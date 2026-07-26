@@ -21,6 +21,9 @@ public static class FluentIcons
     public static readonly Icon CheckmarkCircleFilled = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Filled.Size24.CheckmarkCircle();
     public static readonly Icon ArrowLeft = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowLeft();
     public static readonly Icon ArrowRight = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ArrowRight();
+    // Contact ordering (spec §4.9): move-up / move-down affordances.
+    public static readonly Icon ChevronUp = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ChevronUp();
+    public static readonly Icon ChevronDown = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.ChevronDown();
     public static readonly Icon Save = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Save();
     public static readonly Icon Settings = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Settings();
     public static readonly Icon Open = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Open();

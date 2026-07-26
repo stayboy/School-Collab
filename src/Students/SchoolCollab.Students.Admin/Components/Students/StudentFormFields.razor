@@ -755,8 +755,13 @@
                 try
                 {
                     var contacts = await Api.ListContactsAsync(ContactOwnerType.Guardian, g.Id, ct);
-                    contact = contacts?.FirstOrDefault(c => c.IsPrimary)?.Value
-                           ?? contacts?.FirstOrDefault()?.Value;
+                    // Spec §4.9: preferred contact is the one with the
+                    // lowest DisplayOrder; fall back to IsPrimary, then to
+                    // the first contact when none are marked.
+                    contact = contacts?
+                        .OrderBy(c => c.DisplayOrder)
+                        .ThenByDescending(c => c.IsPrimary)
+                        .FirstOrDefault()?.Value;
                 }
                 catch
                 {

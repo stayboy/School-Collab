@@ -16,4 +16,6 @@ public sealed record ContactDto(
     DateTimeOffset UpdatedAt)
 {
     public string? CountryCode { get; init; }
+    /// <summary>Display ordering hint (spec §4.9). Lower renders first.</summary>
+    public int DisplayOrder { get; init; }
 }

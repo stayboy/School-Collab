@@ -114,6 +114,20 @@
                                               IconStart="@FluentIcons.Checkmark"
                                               OnClick="@(() => VerifyAsync(c.Id))" />
                             }
+                            @* Spec §4.9 additive phase: move-up/move-down
+                               reorder controls plus the legacy Primary
+                               button. Move-up swaps the contact with its
+                               predecessor; move-down with its successor. *@
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          Title="Move up (higher priority)"
+                                          IconStart="@FluentIcons.ChevronUp"
+                                          Disabled="@(IsFirst(c))"
+                                          OnClick="@(() => MoveUpAsync(c.Id))" />
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          Title="Move down (lower priority)"
+                                          IconStart="@FluentIcons.ChevronDown"
+                                          Disabled="@(IsLast(c))"
+                                          OnClick="@(() => MoveDownAsync(c.Id))" />
                             @if (!c.IsPrimary)
                             {
                                 <FluentButton Appearance="Appearance.Lightweight"
@@ -389,6 +403,51 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to set primary contact {ContactId}", id);
+            _error = ex.Message;
+            if (!_disposed)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+    }
+
+    // Spec §4.9: move-up / move-down reorder. Sends the new ordered list
+    // atomically so the server assigns sequential DisplayOrder values and
+    // (additive phase) keeps IsPrimary in sync.
+    private bool IsFirst(ContactDto c) => ReferenceEquals(_contacts.FirstOrDefault(), c);
+    private bool IsLast(ContactDto c) => ReferenceEquals(_contacts.LastOrDefault(), c);
+
+    private async Task MoveUpAsync(Guid id)
+    {
+        var orderedIds = _contacts.Select(x => x.Id).ToList();
+        var idx = orderedIds.IndexOf(id);
+        if (idx <= 0) return;
+        (orderedIds[idx - 1], orderedIds[idx]) = (orderedIds[idx], orderedIds[idx - 1]);
+        await ReorderAsync(orderedIds);
+    }
+
+    private async Task MoveDownAsync(Guid id)
+    {
+        var orderedIds = _contacts.Select(x => x.Id).ToList();
+        var idx = orderedIds.IndexOf(id);
+        if (idx < 0 || idx >= orderedIds.Count - 1) return;
+        (orderedIds[idx + 1], orderedIds[idx]) = (orderedIds[idx], orderedIds[idx + 1]);
+        await ReorderAsync(orderedIds);
+    }
+
+    private async Task ReorderAsync(IReadOnlyList<Guid> orderedIds)
+    {
+        _error = null;
+        try
+        {
+            await Api.ReorderContactsAsync(OwnerType, OwnerId, orderedIds, MutationToken);
+            await LoadAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reorder contacts for {OwnerType} {OwnerId}", OwnerType, OwnerId);
             _error = ex.Message;
             if (!_disposed)
             {

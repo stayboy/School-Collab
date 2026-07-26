@@ -192,10 +192,13 @@
                     ContactOwnerType.Guardian, link.GuardianId, ct)
                     ?? Array.Empty<ContactDto>();
 
-                // Sort: primary first, then verified, then by channel order
-                // (Email, SMS, WhatsApp) for stable display.
+                // Sort: lowest DisplayOrder first (preferred contact), then verified, then
+                // by channel order (Email, SMS, WhatsApp) for stable display.
+                // Spec §4.9: DisplayOrder is the new primary ordering key;
+                // IsPrimary is kept as a tiebreaker for the additive phase.
                 var sorted = contacts
-                    .OrderByDescending(c => c.IsPrimary)
+                    .OrderBy(c => c.DisplayOrder)
+                    .ThenByDescending(c => c.IsPrimary)
                     .ThenByDescending(c => c.IsVerified)
                     .ThenBy(c => c.Channel)
                     .ToList();

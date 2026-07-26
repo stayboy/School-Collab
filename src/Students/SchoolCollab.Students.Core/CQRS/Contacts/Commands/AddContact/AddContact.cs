@@ -12,4 +12,6 @@ public sealed record AddContact(
     bool IsPrimary) : ICommand
 {
     public string? CountryCode { get; init; }
+    /// <summary>Initial display order (spec §4.9). Lower renders first.</summary>
+    public int DisplayOrder { get; init; }
 }
