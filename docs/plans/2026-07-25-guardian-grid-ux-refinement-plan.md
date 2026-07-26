@@ -18,7 +18,7 @@ This plan captures seven related UX requests for guardian selection and display 
 5. **Student guardian list shows up to 3 contacts per row**, formatted as channel on top and contact value below.
 6. **One reusable grid component** for guardian selection/display everywhere.
 7. **Tick/check indicator** in each contact column to show whether the contact is primary and/or carries a country code.
-8. **Title included in guardian displayed name** — e.g. "Mr. John Smith", "Dr. Jane Doe" — everywhere the guardian name appears (grid cells, picker pills, dialogs).
+8. **Title included in guardian displayed name** — the canonical single-line guardian display is `Title GuardianCombinedName (Relationship, FirstPrimaryContact)` (e.g. `"Mr. John Smith (Father, +233 0241234567)"`) used for pills/chips and tooltips; the grid Name cell shows `Title Name` with relationship/contacts in dedicated columns.
 
 ---
 
@@ -87,7 +87,7 @@ GridTemplateColumns = "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr)"
 ```
 Proposed templates after header/content audit:
 
-- **Picker:** Name | Contact 1 | Contact 2 | Contact 3 (or fewer) — see §4.6.
+- **Picker:** Name | Contact 1 | Contact 2 | Contact 3 (or fewer) — see §4.6. The old separate "Preferred contact" + "Contact value" columns are **removed**; the primary contact now appears as the first contact column (ordered IsPrimary-first), which also resolves the original "Preferred contact" clipping complaint (req 3) because the column is wider and the channel label wraps.
   Template example: `"minmax(200px,1.5fr) minmax(170px,1fr) minmax(170px,1fr) minmax(170px,1fr)"`.
 - Each contact column has a fixed minimum wide enough for "WhatsApp" + value + tick.
 - Add CSS to the contact-cell so long channel names wrap (`white-space: normal`) and the value line truncates with ellipsis but exposes a `title` tooltip.
@@ -275,27 +275,46 @@ Guardians have an optional `TitleCodedValueId` (e.g., Mr., Mrs., Dr.). Today it 
 
 #### Title resolution
 
-- `GuardianGrid` loads the title coded-value dictionary once via `CodedValuesApiClient.GetChildrenByParentCodeAsync(CodedValueParent.Titles.ToCode(), ...)` (verify the exact `CodedValueParent` member name against the existing constants file).
+- `GuardianGrid` loads the title coded-value dictionary once via `CodedValuesApiClient.GetChildrenByParentCodeAsync(CodedValueParent.Salutations.ToCode(), ...)` — the guardian title parent is **`Salutations`** (code `"SALUTS"`), NOT a hypothetical `Titles` member (verified in `CodedValueConstants.cs`).
 - Store in `_titleNames: Dictionary<Guid, string>`.
-- A helper formats:
+- A helper formats the **combined guardian display string** the prompt specifies: `Title GuardianCombinedName (Relationship, FirstPrimaryContact)` — e.g. `"Mr. John Smith (Father, +233 0241234567)"`. This is the canonical single-line guardian display used by pills/chips and any tooltip/badge that shows a guardian in one line. It composes three parts:
+  1. **Title** — resolved from `TitleCodedValueId` via `_titleNames` (e.g. `"Mr."`); omitted when null.
+  2. **GuardianCombinedName** — `DisplayName` when present, else `$"{FirstName} {LastName}"`.
+  3. **(Relationship, FirstPrimaryContact)** — subtitle part: the relationship display name (resolved from `RelationshipCodedValueId`) and the **FirstPrimaryContact** (the contact with `IsPrimary=true`, or the first contact if none is marked primary, formatted as `[+CC] value`). Omit the relationship part when unknown (existing-picker picks); omit the contact part when the guardian has no contacts; omit the whole parenthetical when both are absent.
   ```csharp
   private string FormatGuardianName(GuardianGridRow g)
   {
       var title = g.TitleCodedValueId is { } id && _titleNames.TryGetValue(id, out var t)
-          ? t
-          : null;
+          ? t : null;
       var name = string.IsNullOrWhiteSpace(g.DisplayName)
-          ? $"{g.FirstName} {g.LastName}"
-          : g.DisplayName;
-      return string.IsNullOrWhiteSpace(title) ? name : $"{title} {name}";
+          ? $"{g.FirstName} {g.LastName}" : g.DisplayName;
+      var label = string.IsNullOrWhiteSpace(title) ? name : $"{title} {name}";
+      return label;
+  }
+
+  private string FormatGuardianDisplay(GuardianGridRow g)
+  {
+      var label = FormatGuardianName(g);
+      var rel = g.RelationshipCodedValueId is { } rid
+          && RelationshipNameLookup?.Invoke(rid) is { } rn && !string.IsNullOrWhiteSpace(rn)
+          ? rn : null;
+      var contact = FormatFirstPrimaryContact(g);
+      var parts = new[] { rel, contact }.Where(x => !string.IsNullOrWhiteSpace(x)).ToArray();
+      return parts.Length == 0 ? label : $"{label} ({string.Join(", ", parts)})";
   }
   ```
+- **FirstPrimaryContact** = the contact with `IsPrimary=true`, or the first contact if none is marked primary, formatted as `$"{CountryCode} {Value}"` when a country code is present, else `Value`. Returns null when the guardian has no contacts.
 - If the title already appears inside `DisplayName`, do not prepend it again (some tenants may store the full display name). Detect by checking whether `DisplayName` starts with the resolved title, case-insensitive.
 
-#### Surfaces updated
+#### Surfaces updated (combined vs split display)
 
-- `GuardianGrid` Name column (both Picker and Display modes).
-- `GuardianGrid` chip/pill label if the picker renders its own pills.
+The combined `Title Name (Relationship, FirstPrimaryContact)` form is used wherever a guardian is shown on **one line** — picker pills/chips, tooltips, and any badge-style display. The **grid Name cell** shows only `Title Name` (title + combined name) because the grid has dedicated Relationship and Contact columns; rendering the full combined string in the Name cell would duplicate those columns. Concretely:
+
+- **Grid Name cell (Picker + Display):** `FormatGuardianName(g)` → `"Mr. John Smith"`.
+- **Picker pill label:** `FormatGuardianName(g)` → `"Mr. John Smith"`; **subtitle:** the `(Relationship, FirstPrimaryContact)` part from `FormatGuardianDisplay(g)`.
+  - *New* guardians (relationship captured in the create form): subtitle = `(Father, +233 0241234567)`.
+  - *Existing* picker picks (relationship not yet known): subtitle = `(+233 0241234567)` (FirstPrimaryContact only — relationship is set per-link after the picker returns).
+- **Display-mode rows** (StudentGuardiansList, where relationship is known per link): the Name cell still shows `Title Name`; relationship and contacts live in their own columns. The combined form is available for tooltips on the Name cell.
 - Anywhere else `GuardianDto` or `StudentGuardianViewDto` names are displayed should route through `GuardianGrid` after the migration.
 
 #### DTO / handler changes (optional)
@@ -365,10 +384,10 @@ Alternative to client-side resolution: compute the formatted name server-side in
 
 1. **Dialog size:** `Large` (640 px typical) or `Panel` (full-height side panel)? Recommendation: `Large` for the picker; `Panel` only if the in-memory contact editor feels cramped.
 2. **New-guardian contact requirement:** Require at least one contact, or allow name-only and default to no contacts? Recommendation: require at least one contact because the user explicitly replaced the single-contact form with a contact editor.
-3. **Tick meaning:** Does "tick for primary or cc" mean one tick for either condition, or separate indicators? Recommendation: separate — checkmark for primary, country-code text for CC.
+3. **Tick meaning ("primary or cc"):** The domain has `GuardianRole { Primary=0, CC=1 }` (CC = carbon-copy guardian role), AND contacts carry a `CountryCode` (the dial code added recently). "cc" in the prompt is therefore genuinely ambiguous: it could mean (a) the contact has a **c**ountry **c**ode, or (b) the contact belongs to a guardian whose **role is CC**. Contacts themselves have only `IsPrimary` (no `IsCC`/role field), so a per-contact "cc" tick is only mechanically possible if cc = country code. Recommendation: **confirm with user.** Default if unconfirmed: a single checkmark (`FluentIcons.Checkmark`) on the contact that is `IsPrimary`, and render the country code as text (not a tick) since it is already shown in the value line. If the user means the guardian CC role, surface the role via the existing Role badge column (Display mode) rather than a per-contact tick.
 4. **Relationship/Role in picker create panel:** Keep Relationship dropdown (it is per-link) and add Role (Primary/CC)? Current `GuardianAssignmentModel` already has these; ensure the new editor still captures them.
 5. **Backward compatibility of `StudentGuardianViewDto`:** The DTO is a positional record. Adding a new array parameter at the end with a default empty array keeps existing callers compiling, but verify all construction sites.
-6. **Title source:** Confirm the exact `CodedValueParent` value for guardian titles (e.g. `Titles`, `GuardianTitles`, `PersonTitles`) and whether the title text already includes a trailing period ("Mr." vs "Mr"). The formatter must not double the period if the coded value already contains it.
+6. **Title source (resolved):** The guardian title parent is `CodedValueParent.Salutations` (code `"SALUTS"`) — verified in `src/SchoolCollab.Admin.Shared/Constants/CodedValueConstants.cs`. There is no `Titles` member. Remaining sub-question: whether the title text already includes a trailing period (`"Mr."` vs `"Mr"`). The formatter must not double the period if the coded value already contains it.
 
 ---
 
