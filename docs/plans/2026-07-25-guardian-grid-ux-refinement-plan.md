@@ -17,14 +17,15 @@ This plan captures seven related UX requests for guardian selection and display 
 4. **New-guardian setup uses a multi-contact editor** (like `ContactsEditor`) instead of the current single-contact `GuardianFormFields`.
 5. **Student guardian list shows up to 3 contacts per row**, formatted as channel on top and contact value below.
 6. **One reusable grid component** for guardian selection/display everywhere.
-7. **Tick/check indicator** in each contact column to show whether the contact is primary and/or carries a country code.
+7. **Preferred-contact indicator** in the contact columns — a subtle marker on the single highest-priority contact. Contacts have **no Primary/CC role**; that role belongs to the guardian *link* (`StudentGuardian.Role`), not the contact, so there is no per-contact role tick.
 8. **Title included in guardian displayed name** — the canonical single-line guardian display is `Title GuardianCombinedName (Relationship, FirstPrimaryContact)` (e.g. `"Mr. John Smith (Father, +233 0241234567)"`) used for pills/chips and tooltips; the grid Name cell shows `Title Name` with relationship/contacts in dedicated columns.
+9. **Contact ordering** — contacts carry a display-order / relevance field used to prioritise which contacts show first in the 3-column grid and to identify the preferred ("first primary") contact.
 
 ---
 
 ## 2. Non-Goals
 
-- Do **not** change the underlying `Contact` entity or database schema beyond possibly extending DTOs.
+- The `Contact` schema change is limited to adding a `DisplayOrder` ordering column and removing the redundant `IsPrimary` role flag (see §4.9); no other entity/schema changes.
 - Do **not** change the current page-level create/link flow on `Edit.razor` / `Detail.razor` / `GradeLevelWizard.razor` unless required by the new component contract.
 - Do **not** support more than three contacts in the compact per-row display; additional contacts remain reachable via the full `ContactsEditor` after the guardian exists.
 
@@ -113,13 +114,18 @@ public sealed class ContactModel
     public string? CountryCode { get; set; }
     public string Value { get; set; } = string.Empty;
     public string? Label { get; set; }
-    public bool IsPrimary { get; set; }
+    /// <summary>Display/priority order (0 = highest priority / preferred).
+    /// Assigned by add sequence; the editor exposes move-up/move-down to
+    /// reorder. Replaces the binary IsPrimary role on contacts — the
+    /// Primary/CC role belongs to the guardian link, not the contact.
+    /// </summary>
+    public int Order { get; set; }
 }
 ```
 
 Behavior:
-- Same add row as `ContactsEditor`: Channel dropdown, optional country-code dropdown for SMS/WhatsApp, Value text field, optional Label, Primary checkbox, Add button.
-- List rendered with channel glyph, formatted value, Primary/Verified-style badges, Set-primary and Remove actions.
+- Same add row as `ContactsEditor`: Channel dropdown, optional country-code dropdown for SMS/WhatsApp, Value text field, optional Label, Add button. **No "Primary" checkbox** — contacts have no Primary/CC role (that is a guardian-link concept). Priority is expressed by `Order` (add sequence); the editor exposes move-up / move-down buttons to reorder.
+- List rendered with channel glyph, formatted value, Verified badge, move-up / move-down, and Remove actions. The first row (lowest `Order`) is the "preferred" contact.
 - No API calls. `OnChannelChanged` still loads country-code options via `CodedValuesApiClient`.
 - Country-code default Ghana (`+233`), copied from `ContactsEditor`.
 
@@ -130,7 +136,7 @@ In `GuardianPickerDialog` New mode:
 - Add `List<ContactModel> _newContacts` bound to `GuardianContactsEditor`.
 - On "Add to list":
   - Validate at least one contact exists **or** keep name-only fallback? Decision needed; recommend requiring at least one contact because the user explicitly asked for a contact editor.
-  - Pick the first `IsPrimary` contact (or the first contact if none marked primary) to populate the synthetic `GuardianDto.PrimaryContact*` fields so the picker grid shows a primary contact immediately.
+  - Pick the first contact by `Order` (lowest = preferred) to populate the synthetic `GuardianDto.PrimaryContact*` fields so the picker grid shows the preferred contact immediately.
   - Store the full `ContactModel[]` inside `GuardianAssignment`.
 
 #### Data model change: `GuardianAssignment`
@@ -159,8 +165,7 @@ This extension is backward-compatible because of the optional default.
 When a new `GuardianAssignment` (with `ExistingGuardianId == null`) is returned:
 - Create guardian.
 - Link guardian.
-- If `Contacts` is non-empty, call `AddContactAsync` for each contact (mirrors current Phase 4 wizard logic but iterated).
-- Set the first contact as primary server-side if `IsPrimary` is true (the existing `SetPrimaryContactAsync` endpoint does this).
+- If `Contacts` is non-empty, call `AddContactAsync` for each contact with its `Order` (mirrors current Phase 4 wizard logic but iterated). The first (lowest `Order`) is the preferred contact — no separate "set primary" call needed.
 
 ### 4.5 Student guardian list: up to 3 contacts per row
 
@@ -172,7 +177,7 @@ public sealed record GuardianContactView(
     ContactChannel Channel,
     string Value,
     string? CountryCode,
-    bool IsPrimary);
+    int Order);
 
 public sealed record StudentGuardianViewDto(
     ...existing fields...,
@@ -183,7 +188,7 @@ Use `GuardianContactView[]` instead of `IReadOnlyList<ContactDto>` to avoid leak
 
 #### Handler change
 
-`ListGuardiansByStudentHandler` already batch-loads contacts. Modify the projection to keep up to 3 non-deleted contacts per guardian, ordered by `IsPrimary` descending then by creation order. The existing single-contact fields can be deprecated/removed or kept for backward compatibility; recommend removing them once `GuardianGrid` is updated.
+`ListGuardiansByStudentHandler` already batch-loads contacts. Modify the projection to keep up to 3 non-deleted contacts per guardian, ordered by `DisplayOrder` ascending then by `CreatedAt` ascending (so the preferred contact — lowest `DisplayOrder` — is first). The existing single-contact fields can be deprecated/removed or kept for backward compatibility; recommend removing them once `GuardianGrid` is updated.
 
 #### Component change
 
@@ -196,14 +201,14 @@ Use `GuardianContactView[]` instead of `IReadOnlyList<ContactDto>` to avoid leak
               OnRemove="OnRemove" />
 ```
 
-The Contacts column renders each `GuardianContactView` as:
+The Contacts column renders each `GuardianContactView` as a stacked cell (channel on top, value below). **No per-contact role tick** (contacts have no Primary/CC role). A subtle "preferred" star marks the single first-by-`Order` contact:
 ```
 <div class="contact-stack">
     <span class="contact-channel">📱 WhatsApp</span>
-    <span class="contact-value">+233 0241234567</span>
-    <span class="contact-meta">✓ Primary · +233</span>
+    <span class="contact-value">⭐ +233 0241234567</span>
 </div>
 ```
+The star (`FluentIcons.Star`, `title="Preferred contact"`) appears only on the first (lowest `Order`) contact. The country code is part of the value line, not a separate tick.
 
 ### 4.6 Single reusable `GuardianGrid` component
 
@@ -254,20 +259,18 @@ Internally uses `EntityGrid<GuardianGridRow>` so it inherits search, empty state
 4. Remove or deprecate `GuardiansTab` (already marked deprecated).
 5. Update `GuardianAssignmentList` (wizard) to use `GuardianGrid` if it also lists guardians; otherwise leave it.
 
-### 4.7 Tick/check sign for primary / country code
+### 4.7 Preferred-contact indicator (no per-contact role tick)
 
-Use FluentUI icons for consistency:
-- **Primary:** `FluentIcons.Checkmark` or `FluentIcons.CheckmarkCircle` with `Appearance.Accent`, title="Primary contact".
-- **Country code:** do not use a tick; instead display the dial code as text (e.g., `+233`). The "tick sign" requirement is interpreted as: a visible indicator sits beside each contact value showing whether it is the primary contact. The country code is already shown as part of the formatted value.
+**Contacts have no Primary/CC role.** The Primary/CC role belongs to the guardian *link* (`StudentGuardian.Role`), surfaced via the Role badge column in Display mode — never as a per-contact tick. Therefore the original "tick for primary or cc" on each contact column is **removed**.
 
-Alternative: if the user literally wants a tick to mean "has country code", show `FluentIcons.Checkmark` next to the country-code text. Combined render:
+The only per-contact indicator is a subtle **preferred** marker on the single highest-priority contact (the first by `DisplayOrder`) — rendered as a small `FluentIcons.Star` (or `Checkmark`) beside the contact value, `title="Preferred contact"`. The country code is shown as text within the value line (e.g. `+233 0241234567`), not as a tick.
+
 ```
 📱 WhatsApp
-+233 0241234567
-✓ Primary   CC: +233
+⭐ +233 0241234567
 ```
 
-CSS class `.contact-meta` will host the indicator row.
+CSS class `.contact-preferred` hosts the marker. The Role badge column (Display mode) shows the guardian's Primary/CC *link* role, which is the only place that role appears.
 
 ### 4.8 Title included in guardian displayed name
 
@@ -280,7 +283,7 @@ Guardians have an optional `TitleCodedValueId` (e.g., Mr., Mrs., Dr.). Today it 
 - A helper formats the **combined guardian display string** the prompt specifies: `Title GuardianCombinedName (Relationship, FirstPrimaryContact)` — e.g. `"Mr. John Smith (Father, +233 0241234567)"`. This is the canonical single-line guardian display used by pills/chips and any tooltip/badge that shows a guardian in one line. It composes three parts:
   1. **Title** — resolved from `TitleCodedValueId` via `_titleNames` (e.g. `"Mr."`); omitted when null.
   2. **GuardianCombinedName** — `DisplayName` when present, else `$"{FirstName} {LastName}"`.
-  3. **(Relationship, FirstPrimaryContact)** — subtitle part: the relationship display name (resolved from `RelationshipCodedValueId`) and the **FirstPrimaryContact** (the contact with `IsPrimary=true`, or the first contact if none is marked primary, formatted as `[+CC] value`). Omit the relationship part when unknown (existing-picker picks); omit the contact part when the guardian has no contacts; omit the whole parenthetical when both are absent.
+  3. **(Relationship, FirstPrimaryContact)** — subtitle part: the relationship display name (resolved from `RelationshipCodedValueId`) and the **FirstPrimaryContact** (the contact with the lowest `DisplayOrder` — i.e. the preferred contact — formatted as `[+CC] value`). Omit the relationship part when unknown (existing-picker picks); omit the contact part when the guardian has no contacts; omit the whole parenthetical when both are absent.
   ```csharp
   private string FormatGuardianName(GuardianGridRow g)
   {
@@ -303,7 +306,7 @@ Guardians have an optional `TitleCodedValueId` (e.g., Mr., Mrs., Dr.). Today it 
       return parts.Length == 0 ? label : $"{label} ({string.Join(", ", parts)})";
   }
   ```
-- **FirstPrimaryContact** = the contact with `IsPrimary=true`, or the first contact if none is marked primary, formatted as `$"{CountryCode} {Value}"` when a country code is present, else `Value`. Returns null when the guardian has no contacts.
+- **FirstPrimaryContact** = the contact with the lowest `DisplayOrder` (the preferred contact), formatted as `$"{CountryCode} {Value}"` when a country code is present, else `Value`. Returns null when the guardian has no contacts.
 - If the title already appears inside `DisplayName`, do not prepend it again (some tenants may store the full display name). Detect by checking whether `DisplayName` starts with the resolved title, case-insensitive.
 
 #### Surfaces updated (combined vs split display)
@@ -321,12 +324,32 @@ The combined `Title Name (Relationship, FirstPrimaryContact)` form is used where
 
 Alternative to client-side resolution: compute the formatted name server-side in `ListGuardiansHandler` and `ListGuardiansByStudentHandler` by batch-loading title coded values. This keeps the UI simpler but duplicates formatting logic. Recommendation: resolve client-side in `GuardianGrid` so the component is self-contained and reusable across contexts where only the `TitleCodedValueId` is available.
 
+### 4.9 Contact ordering (domain change)
+
+**Background:** The `Primary/CC` role is a guardian-*link* property (`StudentGuardian.Role`), not a contact property. Today `Contact` has a binary `IsPrimary` flag plus a `SetPrimaryContactAsync` endpoint, which conflates "preferred contact" with a "primary role". The user has clarified contacts should not carry a role; instead they need an **order of display / relevance** for prioritisation.
+
+**Change:** Replace `Contact.IsPrimary` (bool) with `Contact.DisplayOrder` (int, non-nullable, default 0). Lower = higher priority; the contact with the smallest `DisplayOrder` is the "preferred" contact.
+
+- `Contact` entity: replace `IsPrimary` with `int DisplayOrder`; `Create(...)` takes `displayOrder` instead of `isPrimary`; `SetPrimary(bool)` becomes `SetOrder(int)` (or `MoveTo(int)`).
+- `ContactDto`: replace `IsPrimary` with `int DisplayOrder`.
+- `AddContactRequest`: replace `IsPrimary` with `int DisplayOrder` (default 0; new contacts appended at the end get the next available order).
+- `IContactsClient.SetPrimaryContactAsync` → rename/repurpose to `SetContactOrderAsync(Guid id, int order)` (or keep `SetPrimaryContactAsync` as a thin convenience that sets `DisplayOrder = 0` and shifts others). A full reorder endpoint (`ReorderContactsAsync(Guid ownerType, Guid ownerId, Guid[] orderedIds)`) is the cleanest for move-up/move-down UX.
+- DB migration: add `DisplayOrder int NOT NULL DEFAULT 0`; backfill from `IsPrimary` (primary → 0, others → `ROW_NUMBER` over `CreatedAt`); drop the `IsPrimary` column.
+- Handlers (`ListContactsHandler`, `ListGuardiansByStudentHandler`, `ListGuardiansHandler`): order by `DisplayOrder` ascending then `CreatedAt` ascending; the "primary contact" projection becomes the row with `MIN(DisplayOrder)`.
+
+**Editor impact:** `ContactsEditor` loses the "Primary" checkbox and "Set as primary" button; gains move-up / move-down buttons (or drag-and-drop) that call the reorder endpoint. The first row is the preferred contact. `GuardianContactsEditor` (in-memory) mirrors this with `ContactModel.Order`.
+
+**Migration risk:** `IsPrimary` is referenced across Core, API, Admin, tests, and the DB. This is the largest single change in the plan — sequence it first (see §11) so downstream grid/editor work depends on the new field.
+
 ---
 
 ## 5. Data Model / DTO Changes
 
 | File | Change |
 |------|--------|
+| `Contact.cs` (Domain) | Replace `IsPrimary` with `int DisplayOrder`; `Create`/`SetPrimary` → `SetOrder`; add migration |
+| `ContactDto.cs` | Replace `IsPrimary` with `int DisplayOrder` |
+| `AddContactRequest` / `UpdateContactRequest` (Contracts) | Add `int DisplayOrder`; reorder support |
 | `GuardianAssignment.cs` | Add optional `IReadOnlyList<ContactRequest>? Contacts` parameter |
 | `GuardianDto.cs` | Keep existing primary-contact fields; no change required if `GuardianGrid` maps from DTO |
 | `StudentGuardianViewDto.cs` | Replace primary-contact scalar fields with `GuardianContactView[] Contacts` (default empty array) |
@@ -336,9 +359,9 @@ Alternative to client-side resolution: compute the formatted name server-side in
 
 ## 6. API / Client Changes
 
-- No new endpoints required.
-- Parent pages will iterate over `GuardianAssignment.Contacts` and call the existing `AddContactAsync` for each.
-- `IContactsClient.AddContactAsync` already accepts `AddContactRequest` with `CountryCode`.
+- **New/replaced endpoint:** `SetContactOrderAsync(Guid id, int order)` (and/or `ReorderContactsAsync(ContactOwnerType ownerType, Guid ownerId, Guid[] orderedIds)`) replaces `SetPrimaryContactAsync`. The old endpoint is removed or kept as a thin shim that sets `DisplayOrder = 0`.
+- `AddContactAsync` accepts `DisplayOrder` on `AddContactRequest` (new contacts default to the next available order).
+- Parent pages iterate `GuardianAssignment.Contacts` and call `AddContactAsync` for each with its `Order`.
 
 ---
 
@@ -352,6 +375,7 @@ Alternative to client-side resolution: compute the formatted name server-side in
 | `GuardianPickerDialog.razor.css` | Adjust for larger dialog and contact columns |
 | `StudentGuardiansList.razor` | Replace grid with `GuardianGrid` Display mode |
 | `StudentGuardiansList.razor.css` | Merge useful styles into `GuardianGrid.razor.css`; otherwise delete |
+| `ContactsEditor.razor` | Drop "Primary" checkbox + "Set as primary"; add move-up/move-down (or drag) calling the reorder endpoint; first row = preferred |
 | `GuardiansTab.razor` | Remove or keep deprecated comment; do not extend |
 | `GuardianFormFields.razor` | Keep for inline mode in long forms if still needed, but no longer used by picker |
 | `EntityGrid.razor` / `.css` | Add header-wrap CSS and verify `MultiLine` propagates to headers |
@@ -361,7 +385,7 @@ Alternative to client-side resolution: compute the formatted name server-side in
 ## 8. CSS Changes
 
 - `EntityGrid.razor.css`: header wrapping rules.
-- `GuardianGrid.razor.css`: column templates for Picker/Display, contact-stack layout, tick/meta styling, emergency badge inline layout.
+- `GuardianGrid.razor.css`: column templates for Picker/Display, contact-stack layout, preferred-star styling, emergency badge inline layout.
 - `GuardianContactsEditor.razor.css`: reuse the layout of `ContactsEditor.razor.css` (or import/shared classes) without the page-card styling.
 - `GuardianPickerDialog.razor.css`: widen `.picker-dialog` max-width if needed; the dialog width is primarily controlled by `DialogSize` but body CSS can add padding/max-width guards.
 
@@ -373,7 +397,9 @@ Alternative to client-side resolution: compute the formatted name server-side in
 - Unit tests for `GuardianContactsEditor`:
   - Add contact updates `ContactsChanged`.
   - SMS/WhatsApp shows country-code dropdown.
-  - Primary flag surfaces on the right contact.
+  - Move-up/move-down reorders `ContactModel.Order`; first row is preferred.
+- Unit tests for `ContactsEditor` reorder: move-up calls `SetContactOrderAsync` (or `ReorderContactsAsync`) with the right order sequence.
+- Contact-ordering domain tests: `Contact.Create` assigns `DisplayOrder`; `SetOrder` shifts; handlers order by `DisplayOrder` then `CreatedAt`.
 - Update `StudentDetailSectionsTests` if it still asserts the old 6-column layout.
 - Update CQRS handler tests for `ListGuardiansByStudentHandler` to assert up to 3 contacts are projected.
 - Run the full suite with `-p:BuildProjectReferences=false` to avoid file-lock issues.
@@ -384,29 +410,32 @@ Alternative to client-side resolution: compute the formatted name server-side in
 
 1. **Dialog size:** `Large` (640 px typical) or `Panel` (full-height side panel)? Recommendation: `Large` for the picker; `Panel` only if the in-memory contact editor feels cramped.
 2. **New-guardian contact requirement:** Require at least one contact, or allow name-only and default to no contacts? Recommendation: require at least one contact because the user explicitly replaced the single-contact form with a contact editor.
-3. **Tick meaning ("primary or cc"):** The domain has `GuardianRole { Primary=0, CC=1 }` (CC = carbon-copy guardian role), AND contacts carry a `CountryCode` (the dial code added recently). "cc" in the prompt is therefore genuinely ambiguous: it could mean (a) the contact has a **c**ountry **c**ode, or (b) the contact belongs to a guardian whose **role is CC**. Contacts themselves have only `IsPrimary` (no `IsCC`/role field), so a per-contact "cc" tick is only mechanically possible if cc = country code. Recommendation: **confirm with user.** Default if unconfirmed: a single checkmark (`FluentIcons.Checkmark`) on the contact that is `IsPrimary`, and render the country code as text (not a tick) since it is already shown in the value line. If the user means the guardian CC role, surface the role via the existing Role badge column (Display mode) rather than a per-contact tick.
+3. **Tick meaning (resolved):** Contacts have **no Primary/CC role** — that role belongs to the guardian *link* (`StudentGuardian.Role`), shown via the Role badge column. There is therefore **no per-contact role tick**. The only per-contact marker is a "preferred" star on the single highest-priority contact (first by `DisplayOrder`). See §4.7 and §4.9.
 4. **Relationship/Role in picker create panel:** Keep Relationship dropdown (it is per-link) and add Role (Primary/CC)? Current `GuardianAssignmentModel` already has these; ensure the new editor still captures them.
 5. **Backward compatibility of `StudentGuardianViewDto`:** The DTO is a positional record. Adding a new array parameter at the end with a default empty array keeps existing callers compiling, but verify all construction sites.
 6. **Title source (resolved):** The guardian title parent is `CodedValueParent.Salutations` (code `"SALUTS"`) — verified in `src/SchoolCollab.Admin.Shared/Constants/CodedValueConstants.cs`. There is no `Titles` member. Remaining sub-question: whether the title text already includes a trailing period (`"Mr."` vs `"Mr"`). The formatter must not double the period if the coded value already contains it.
+7. **`IsPrimary` vs `DisplayOrder` (decision):** Replace `Contact.IsPrimary` (bool) with `Contact.DisplayOrder` (int) — recommended, matches "contacts have no role" + "order of relevance". Alternative: keep `IsPrimary` and add `DisplayOrder` alongside (less migration, but keeps the redundant binary role on contacts). Recommendation: **replace** (see §4.9). This is the largest change (Core + DB + API + tests + `ContactsEditor`) — confirm before migration.
 
 ---
 
 ## 11. Suggested Implementation Order
 
-1. **Header wrapping CSS** — low risk, global improvement.
-2. **`GuardianGrid` shell** — build the component with Picker and Display modes using mock data; include title-resolution helper and formatted name display.
-3. **StudentGuardiansList migration** — switch to `GuardianGrid` Display mode; verify 3-contact rendering.
-4. **DTO/handler enrichment** — add `GuardianContactView[]` to `StudentGuardianViewDto`; update `ListGuardiansByStudentHandler`.
-5. **`GuardianContactsEditor` in-memory component** — build and unit-test independently.
-6. **Picker migration** — swap grid to `GuardianGrid`, swap New panel to `GuardianContactsEditor`, extend `GuardianAssignment`, wire parent pages to create multiple contacts.
-7. **Dialog sizing + polish** — bump sizes, tune column widths, add tick indicators, verify title appears in names and pills.
-8. **Full test pass + cleanup** — remove `GuardiansTab`, consolidate CSS.
+1. **Contact ordering domain change (§4.9)** — add `DisplayOrder` to `Contact`/DTOs/contracts, DB migration, reorder endpoint, update `ContactsEditor`. Sequence first; downstream grid/editor depend on it.
+2. **Header wrapping CSS** — low risk, global improvement.
+3. **`GuardianGrid` shell** — build the component with Picker and Display modes using mock data; include title-resolution helper and formatted name display.
+4. **StudentGuardiansList migration** — switch to `GuardianGrid` Display mode; verify 3-contact (ordered) rendering.
+5. **DTO/handler enrichment** — add `GuardianContactView[]` to `StudentGuardianViewDto`; update `ListGuardiansByStudentHandler` (order by `DisplayOrder`).
+6. **`GuardianContactsEditor` in-memory component** — build and unit-test independently.
+7. **Picker migration** — swap grid to `GuardianGrid`, swap New panel to `GuardianContactsEditor`, extend `GuardianAssignment`, wire parent pages to create multiple contacts with order.
+8. **Dialog sizing + polish** — bump sizes, tune column widths, add preferred-contact star, verify title appears in names and pills.
+9. **Full test pass + cleanup** — remove `GuardiansTab`, consolidate CSS.
 
 ---
 
 ## 12. Risks
 
 - **Scope creep:** items 4–7 together are large. Consider splitting into two deliverables: (A) grid unification + 3-contact display, (B) in-memory contact editor + picker migration.
+- **`IsPrimary` → `DisplayOrder` migration (highest risk):** Replacing the binary `Contact.IsPrimary` with an `int DisplayOrder` touches the domain entity, DTOs, contracts, API endpoint, DB migration, `ContactsEditor`, handlers, and all contact tests. A bug here breaks contact display across students AND guardians. Mitigate by sequencing it first (§11.1), writing a reversible EF migration with `IsPrimary`→`DisplayOrder` backfill, and keeping `SetPrimaryContactAsync` as a thin shim during transition. Confirm the decision (§10.7) before starting.
 - **`ContactsEditor` API dependency:** The in-memory editor must not accidentally call `IContactsClient`; careful parameter design is required.
 - **Grid column width on small screens:** More columns (up to 3 contacts + Name + checkbox) may overflow on narrow viewports; ensure `minmax()` and horizontal scroll in `EntityGrid` handle it.
 - **Record positional constructor breaks:** `StudentGuardianViewDto` is widely used; adding the contacts array must not break handlers or tests.
@@ -424,6 +453,16 @@ Alternative to client-side resolution: compute the formatted name server-side in
 
 ## 14. Files to Modify
 
+**Domain / contracts / API (§4.9 ordering change):**
+- `src/Students/SchoolCollab.Students.Core/Domain/Contact.cs` — replace `IsPrimary` with `int DisplayOrder`; `Create`/`SetOrder`
+- `src/Students/SchoolCollab.Students.Core/DTOs/ContactDto.cs` — `DisplayOrder`
+- `src/Students/SchoolCollab.Students.Core/Contracts/IContactsClient.cs` — `SetContactOrderAsync` / `ReorderContactsAsync`; `AddContactRequest`/`UpdateContactRequest` `DisplayOrder`
+- `src/Students/SchoolCollab.Students.Api/Endpoints/` — contact routes (rename/repurpose set-primary → order; add reorder)
+- `src/Students/SchoolCollab.Students.Core/CQRS/Contacts/` — handlers (order by `DisplayOrder`)
+- EF migration (add `DisplayOrder`, backfill from `IsPrimary`, drop `IsPrimary`)
+
+**Admin UI:**
+- `src/SchoolCollab.Admin.Shared/Components/ContactsEditor.razor` — drop Primary checkbox/Set-primary; add move-up/move-down
 - `src/Students/SchoolCollab.Students.Admin/Components/Students/GuardianPickerDialog.razor` + `.css`
 - `src/Students/SchoolCollab.Students.Admin/Components/Students/StudentGuardiansList.razor` + `.css`
 - `src/Students/SchoolCollab.Students.Admin/Components/Pages/Students/Edit.razor`
@@ -432,5 +471,10 @@ Alternative to client-side resolution: compute the formatted name server-side in
 - `src/Students/SchoolCollab.Students.Admin/Components/Pages/Students/GradeLevels/GradeLevelWizard.razor`
 - `src/Students/SchoolCollab.Students.Core/DTOs/StudentGuardianViewDto.cs`
 - `src/Students/SchoolCollab.Students.Core/CQRS/Guardians/Queries/ListGuardiansByStudent/ListGuardiansByStudentHandler.cs`
+- `src/Students/SchoolCollab.Students.Core/CQRS/Guardians/Queries/ListGuardians/ListGuardiansHandler.cs`
 - `src/SchoolCollab.Admin.Shared/Components/EntityGrid.razor.css`
+
+**Tests:**
 - `tests/SchoolCollab.Admin.Tests.Unit/StudentDetailSectionsTests.cs`
+- `tests/SchoolCollab.Students.Tests.Unit/` — contact CQRS / ordering tests (`GuardianContactsCqrsTests.cs` and related)
+- `tests/SchoolCollab.Students.Tests.Integration/` — contact reorder endpoint tests
