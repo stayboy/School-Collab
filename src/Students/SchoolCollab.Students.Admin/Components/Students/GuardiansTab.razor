@@ -1,4 +1,21 @@
-@* Student → Guardians tab (spec §11). Lists the student's linked guardians
+@* DEPRECATED — no longer rendered. The page-side callers
+   (/students/{id}/edit, /students/{id}) now own the guardian link
+   list and the dialog opens (GuardianPickerDialog /
+   GuardianFormDialog) directly, and render the read-only list
+   via the shared StudentGuardiansList component.
+
+   This file is kept in the codebase for any external embed
+   surface and as a historical reference. It is no longer wired
+   up by Detail.razor or Edit.razor.
+
+   To re-introduce a "guardians tab" experience, use the
+   StudentGuardiansList component + the dialog approach the
+   pages use. The component is presentational only (no API
+   calls, no dialog opens) and is shared with Edit.razor.
+
+   ─────────────────────────────────────────────────────────────────
+
+   Student → Guardians tab (spec §11). Lists the student's linked guardians
    grouped by role, with add / remove. Reuses StudentsApiClient's
    ListGuardiansByStudentAsync (returns StudentGuardianViewDto[] carrying both
    the link role and the guardian name) and LinkGuardianAsync / UnlinkGuardianAsync. *@

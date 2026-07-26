@@ -17,4 +17,7 @@ public sealed record StudentGuardianViewDto(
     bool IsEmergencyContact,
     string FirstName,
     string LastName,
-    string? DisplayName);
+    string? DisplayName,
+    ContactChannel? PrimaryContactChannel = null,
+    string? PrimaryContactValue = null,
+    string? PrimaryContactCountryCode = null);

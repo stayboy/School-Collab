@@ -1,11 +1,16 @@
 @page "/students/{id:guid}"
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.Contracts
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
@@ -164,9 +169,35 @@
                             </FluentDataGrid>
                         }
 
-                        @* ── Guardians (embedded, not in a tab) ─────────────────── *@
-                        <div class="section-header"><h3>Guardians</h3></div>
-                        <GuardiansTab StudentId="Id" />
+                        @* ── Guardians (embedded, not in a tab) ───────────────────
+                           Replaces the deprecated <GuardiansTab>. The
+                           page owns the link list + the dialog opens
+                           + the API calls. The "Manage" button opens
+                           GuardianPickerDialog; the per-row "Edit"
+                           button opens GuardianFormDialog in ForEdit
+                           mode. Each action is IMMEDIATE (the view
+                           page has no Save flow of its own) — the
+                           page reloads the link list on success. The
+                           dedicated StudentGuardiansList component
+                           is presentational only (no API calls, no
+                           dialog opens) and is shared with Edit.razor. *@
+                        <div class="section-header">
+                            <h3>Guardians</h3>
+                            <FluentButton Appearance="Appearance.Accent"
+                                          Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.PersonAdd"
+                                          OnClick="OnManageGuardiansAsync">
+                                Manage
+                            </FluentButton>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_guardianError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error">@_guardianError</FluentMessageBar>
+                        }
+                        <StudentGuardiansList Items="_links.ToArray()"
+                                               RelationshipNameLookup="ResolveRelName"
+                                               OnEdit="OnEditGuardianAsync"
+                                               OnRemove="OnRemoveGuardianAsync" />
 
                         @* ── Contacts (embedded, not in a tab) — guardians & their
                            contacts. The student's own direct contact is inside
@@ -213,6 +244,19 @@
     private bool _isRealTenant;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
+
+    // ── Guardian link state (page-owned; replaces the deprecated
+    //    <GuardiansTab>) ──
+    //
+    // The view page has no Save flow of its own, so every
+    // link / unlink / edit is IMMEDIATE. The page owns the link
+    // list, the dialog opens, and the API calls. The dedicated
+    // <StudentGuardiansList> component is a thin presenter that
+    // fires the EventCallback<StudentGuardianViewDto> handlers
+    // below on every user action.
+    private List<SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto> _links = new();
+    private Dictionary<Guid, string> _relNames = new();
+    private string? _guardianError;
 
     /// <summary>
     /// The student's currently-active enrollment. Active = no exit date AND
@@ -338,6 +382,11 @@
                 .ToDictionary(g => g.Id, g => g.Name);
             _periodNames = (periodsTask.Result ?? Array.Empty<PeriodDto>())
                 .ToDictionary(p => p.Id, p => p.Name);
+
+            // 3. Guardian link list (page-owned, replaces the deprecated
+            //    <GuardiansTab>). The list is used by the StudentGuardiansList
+            //    below the title row.
+            await LoadGuardiansAsync(ct);
         }
         catch (OperationCanceledException)
         {
@@ -436,6 +485,163 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    // ── Guardian link handlers (page-owned, immediate persist) ──
+    //
+    // Replaces the deprecated <GuardiansTab>. Each action is
+    // IMMEDIATE — the view page has no Save flow of its own, so
+    // the link / unlink / edit lands the moment the user confirms
+    // the dialog. The page reloads the list on success so the
+    // StudentGuardiansList re-renders without a full page refresh.
+    //
+    // "Manage" opens GuardianPickerDialog (the same dialog the
+    // wizard uses for adding multiple guardians to a student);
+    // "Edit" opens GuardianFormDialog in ForEdit mode; "Remove"
+    // is a single API call. The per-row relationship / role /
+    // emergency flag changes go through
+    // Api.UpdateGuardianLinkAsync (PUT /students/{studentId}/guardians/{guardianId}).
+
+    private async Task OnManageGuardiansAsync()
+    {
+        if (_disposed) return;
+        _guardianError = null;
+        try
+        {
+            var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
+                new GuardianPickerModel(), "Manage guardians", DialogSize.Large);
+            if (results is null) return;
+
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            foreach (var a in results)
+            {
+                var guardianId = a.ExistingGuardianId
+                    ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                        a.TitleCodedValueId, a.FirstName, a.LastName, null, null, null), ct);
+                await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                    Id, guardianId, a.RelationshipCodedValueId, a.Role, false, null), ct);
+                // Seed the contact captured in the picker for a newly-created
+                // guardian (existing guardians already own their contacts).
+                // Mirrors the wizard's Phase 4 contact-creation block.
+                if (a.ExistingGuardianId is null && a.ContactValue is not null)
+                {
+                    try
+                    {
+                        await Api.AddContactAsync(new AddContactRequest(
+                            ContactOwnerType.Guardian, guardianId,
+                            a.ContactChannel ?? ContactChannel.Email, a.ContactValue, null, true)
+                            { CountryCode = a.CountryCode }, ct);
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception contactEx)
+                    {
+                        Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                    }
+                }
+            }
+            await LoadGuardiansAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to link guardian(s) for student {StudentId}", Id);
+            _guardianError = ex.Message;
+        }
+    }
+
+    private async Task OnEditGuardianAsync(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link)
+    {
+        if (_disposed) return;
+        _guardianError = null;
+        try
+        {
+            // The shared <GuardianFormDialog> (used by the wizard's
+            // per-link edit) collects Title / First / Last /
+            // Relationship / Preferred contact — not Role or the
+            // emergency flag. We pre-populate it from the
+            // <see cref="StudentGuardianViewDto"/> read shape (the
+            // <c>GuardianAssignment</c> draft is the wizard's per-link
+            // payload, with Role defaulting to Primary since the
+            // dialog doesn't surface it). On confirm we apply the
+            // relationship change via
+            // <c>UpdateGuardianLinkAsync</c>; Role and
+            // IsEmergencyContact stay as the link's current values
+            // (PUT requires the full link metadata, so we mirror
+            // them through).
+            var draft = new GuardianAssignment(
+                link.GuardianId,
+                link.FirstName,
+                link.LastName,
+                link.RelationshipCodedValueId,
+                null,
+                null,
+                null);
+            var result = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
+                GuardianAssignmentModel.ForEdit(draft), "Edit guardian", DialogSize.Medium);
+            if (result is null) return;
+
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            await Api.UpdateGuardianLinkAsync(Id, link.GuardianId, new UpdateGuardianLinkRequest(
+                link.Role, result.RelationshipCodedValueId, link.IsEmergencyContact), ct);
+            await LoadGuardiansAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update guardian link for student {StudentId} guardian {GuardianId}",
+                Id, link.GuardianId);
+            _guardianError = ex.Message;
+        }
+    }
+
+    private async Task OnRemoveGuardianAsync(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link)
+    {
+        if (_disposed) return;
+        _guardianError = null;
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            await Api.UnlinkGuardianAsync(Id, link.GuardianId, ct);
+            await LoadGuardiansAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to unlink guardian {GuardianId} from student {StudentId}",
+                link.GuardianId, Id);
+            _guardianError = ex.Message;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadGuardiansAsync(CancellationToken ct)
+    {
+        try
+        {
+            var links = await Api.ListGuardiansByStudentAsync(Id, ct) ?? [];
+            _links = links.ToList();
+
+            _relNames = new Dictionary<Guid, string>();
+            foreach (var link in _links.Where(l => l.RelationshipCodedValueId.HasValue))
+            {
+                var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
+                if (cv is not null) _relNames[cv.Id] = cv.Name;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load guardians for student {StudentId}", Id);
+            _guardianError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string? ResolveRelName(Guid? id)
+        => id is { } g && _relNames.TryGetValue(g, out var n) ? n : null;
 
     public void Dispose()
     {

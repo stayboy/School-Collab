@@ -1,0 +1,25 @@
+/* Student → Guardians list (page-side, used by Edit.razor and Detail.razor).
+   The list is intentionally compact: the page already has its own
+   page-level Save / Cancel flow, and the parent page owns the dialog
+   opens + API calls. This component is purely presentational. */
+
+.student-guardians-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Name cell: the guardian's name + an optional "Emergency" badge sit
+   inline with a small gap. Keeps the emergency flag visible without
+   dedicating a whole column to it (the grid already surfaces Name,
+   Relationship, Preferred contact, Contact value, Role, Actions). */
+.guardian-name-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.muted {
+    color: var(--neutral-foreground-hc, #6b6b6b);
+}

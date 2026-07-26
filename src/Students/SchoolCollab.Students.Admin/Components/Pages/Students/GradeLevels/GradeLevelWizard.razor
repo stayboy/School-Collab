@@ -1462,7 +1462,8 @@
                             {
                                 await Api.AddContactAsync(new AddContactRequest(
                                     ContactOwnerType.Guardian, guardianId,
-                                    d.ContactChannel ?? ContactChannel.Email, d.ContactValue, null, true), ct);
+                                    d.ContactChannel ?? ContactChannel.Email, d.ContactValue, null, true)
+                                    { CountryCode = d.CountryCode }, ct);
                             }
                             catch (OperationCanceledException) { throw; }
                             catch (Exception contactEx)
@@ -1602,7 +1603,13 @@
         => id is { } g && _codedValueNames.TryGetValue(g, out var n) ? n : null;
 
     private static string ContactLabel(GuardianAssignment g)
-        => g.ContactValue is null ? string.Empty : $" · {g.ContactChannel}: {g.ContactValue}";
+    {
+        if (g.ContactValue is null) return string.Empty;
+        var value = !string.IsNullOrWhiteSpace(g.CountryCode)
+            ? $"{g.CountryCode} {g.ContactValue}"
+            : g.ContactValue;
+        return $" · {g.ContactChannel}: {value}";
+    }
 
     private async Task RefreshCodedValueNamesAsync()
     {

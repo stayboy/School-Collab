@@ -17,4 +17,5 @@ public sealed record GuardianAssignment(
     ContactChannel? ContactChannel,
     string? ContactValue,
     Guid? TitleCodedValueId,
+    string? CountryCode = null,
     GuardianRole Role = GuardianRole.Primary);

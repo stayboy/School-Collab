@@ -44,12 +44,13 @@
     {
         <div class="entity-grid-loading"><FluentProgressRing /></div>
     }
-    else if (Items.Length == 0)
-    {
-        <FluentMessageBar Intent="MessageIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
-    }
     else
     {
+        @* Always render the grid (even when empty) so the column
+           headers stay visible — the user sees the grid structure +
+           the "no rows" message below it, rather than a bare message
+           bar with no context. The <FluentDataGrid> renders just its
+           header row when <c>Items</c> is an empty queryable. *@
         <div class="entity-grid-scroll">
             <FluentDataGrid Items="@Items.AsQueryable()"
                             GridTemplateColumns="@EffectiveTemplate"
@@ -66,6 +67,10 @@
                 }
                 @Columns
             </FluentDataGrid>
+            @if (Items.Length == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
+            }
             @if (ShowPager)
             {
                 <FluentPaginator State="@_paginationState" />

@@ -98,6 +98,30 @@
 .muted {
     color: var(--neutral-foreground-hint, #6b6b6b);
 }
+
+/* ── Linked mode (page-side, opt-in via Mode="Linked") ──
+   Compact "Guardians (N) — Manage" header + read-only grid +
+   per-row delete. Used by /students/{id}/edit (and any future page
+   that owns its own Save flow + DialogService). The modifier is
+   applied to the same .student-guardians wrapper the dialog
+   callers use, so the default styles don't need to be overridden —
+   this only adds the header row and tighter spacing. */
+.student-form-guardians--linked {
+    gap: 0.375rem;
+}
+.student-guardians-linked-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+}
+.student-guardians-linked-count {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.95rem;
+}
+
 /* ── Guardian add section (inline panel switch, no nested dialog) ── */
 .guardian-add-section {
     display: flex;

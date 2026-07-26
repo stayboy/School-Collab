@@ -13,3 +13,22 @@
     gap: 6px;
     margin-bottom: 4px;
 }
+
+/* Inline create form (New panel). Takes the FULL dialog body in New
+   mode — the chip list and grid are hidden (List-mode only) and the
+   dialog title carries the " — New guardian" suffix, so this section is
+   JUST the form fields. No heading, no inline action row (the dialog
+   footer is the single action row for both modes). A little top padding
+   separates the first field from the dialog title; no card background /
+   border (those would make it look like a sub-section rather than the
+   full screen). The footer's own border-top provides the content/actions
+   separator. */
+.picker-create-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-top: 0.5rem;
+    padding: 0.5rem 0.25rem 0.25rem;
+}

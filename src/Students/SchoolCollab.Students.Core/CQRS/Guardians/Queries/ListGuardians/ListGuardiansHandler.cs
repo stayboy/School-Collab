@@ -44,9 +44,33 @@ public sealed class ListGuardiansHandler(
                 var results = await q.OrderBy(g => g.LastName).ThenBy(g => g.FirstName)
                     .ToArrayAsync(ct);
 
-                return results.Select(g => new GuardianDto(
-                    g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.Address, g.CommunityId,
-                    g.IsDeleted, g.CreatedAt, g.UpdatedAt)).ToArray();
+                // Load the primary (or first non-deleted) contact for each
+                // guardian in a single round-trip so list UIs can show how to
+                // reach the guardian without N+1 queries. A guardian may own
+                // multiple contacts (spec §4.4); we surface the IsPrimary one,
+                // falling back to the first contact when none is marked primary.
+                var guardianIds = results.Select(g => g.Id).ToArray();
+                var contacts = guardianIds.Length == 0
+                    ? new List<Contact>()
+                    : await db.Contacts
+                        .IgnoreQueryFilters(["Tenant"])
+                        .Where(c => c.TenantId == tenantId
+                                 && c.OwnerType == ContactOwnerType.Guardian
+                                 && guardianIds.Contains(c.OwnerId)
+                                 && !c.IsDeleted)
+                        .ToListAsync(ct);
+                var contactsByOwner = contacts
+                    .GroupBy(c => c.OwnerId)
+                    .ToDictionary(g => g.Key, g => g.OrderByDescending(c => c.IsPrimary).First());
+
+                return results.Select(g =>
+                {
+                    var c = contactsByOwner.TryGetValue(g.Id, out var pc) ? pc : null;
+                    return new GuardianDto(
+                        g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.Address, g.CommunityId,
+                        g.IsDeleted, g.CreatedAt, g.UpdatedAt,
+                        c?.Channel, c?.Value, c?.CountryCode);
+                }).ToArray();
             },
             CacheOptions,
             tags: ["guardians"],

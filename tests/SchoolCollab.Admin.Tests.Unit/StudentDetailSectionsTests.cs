@@ -259,19 +259,31 @@ public class StudentDetailSectionsTests
     [TestMethod]
     public void Detail_Embeds_Guardians_And_Contacts_Subcomponents()
     {
-        // The two subcomponents must be embedded (not reimplemented).
-        // Their placement tells the information-architecture story:
-        //   - GuardiansTab  → "Guardians" section (who is linked)
+        // The view page is read-only and embeds two subcomponents:
+        //   - StudentGuardiansList  → "Guardians" section (who is
+        //     linked, with per-row Edit / Remove buttons that fire
+        //     EventCallback<StudentGuardianViewDto> back to the page).
+        //     The page owns the link list + the dialog opens + the
+        //     API calls. Replaces the deprecated <GuardiansTab>;
+        //     GuardianPickerDialog / GuardianFormDialog are opened
+        //     via ShowShellDialogAsync from the page-level
+        //     OnManageGuardiansAsync / OnEditGuardianAsync handlers.
         //   - GuardianContactsList  → "Contacts" section (how to reach
-        //     each guardian)
+        //     each guardian).
         // The student's own contact edit surface was MOVED to the Edit
         // form (Edit.razor) — see EditContactEditorTests. The view page
         // is read-only and the contact editor's write actions (Add,
         // Verify, Set primary, Remove) don't belong on it.
         // The component names in the markup confirm the wiring.
         var source = ReadDetailSource();
-        source.Should().Contain("<GuardiansTab", "the Guardians section embeds the shared GuardiansTab");
-        source.Should().Contain("StudentId=\"Id\"", "the embedded GuardiansTab binds to the route Id");
+        source.Should().Contain("<StudentGuardiansList",
+            "the Guardians section embeds the page-side StudentGuardiansList (replaces the deprecated GuardiansTab)");
+        source.Should().Contain("OnManageGuardiansAsync",
+            "the 'Manage' button is wired to open GuardianPickerDialog via ShowShellDialogAsync");
+        source.Should().Contain("OnEditGuardianAsync",
+            "the per-row 'Edit' button is wired to open GuardianFormDialog in ForEdit mode");
+        source.Should().NotContain("<GuardiansTab ",
+            "the deprecated <GuardiansTab> must NOT be rendered — replaced by the page-side dialog flow");
         source.Should().NotContain("<ContactsEditor",
             "the view page does NOT embed <ContactsEditor> — contact editing is on the Edit page");
         source.Should().Contain("<GuardianContactsList", "the Contacts section embeds the new GuardianContactsList");

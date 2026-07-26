@@ -1,10 +1,36 @@
-@* Guardian picker dialog for the GradeLevelWizard. Lists existing tenant
-   guardians with server-side search + multi-select, and a "New guardian"
-   button that opens the create/edit form dialog. Selected guardians are
-   shown as a chip list above the grid (the shared <EntityGrid> handles the
-   checkbox column; this dialog renders the combined chip list). On confirm
-   it returns one <see cref="GuardianAssignment"/> per picked existing
-   guardian plus any created-in-dialog guardians. *@
+@* Guardian picker dialog. Lists existing tenant guardians with server-side
+   search + multi-select (the default List panel), and offers an inline
+   "New guardian" create form (the New panel) that takes over the dialog
+   body. Selected guardians are shown as a chip ("pill") list above the
+   grid; on confirm the dialog returns one <see cref="GuardianAssignment"/>
+   per picked existing guardian plus any created-in-dialog guardians.
+
+   Panel switch (List ↔ New): no nested dialog (the dialog-ui skill forbids
+   dialogs opening dialogs). The New panel embeds the presentational
+   <GuardianFormFields> directly inside the picker's existing <EditForm> —
+   no nested <form> (<GuardianFormFields> is intentionally NOT an EditForm).
+
+   Dialog title: the caller passes a base title ("Manage guardians" /
+   "Add guardians") via ShowShellDialogAsync. The picker mutates
+   <c>Dialog.Instance.Parameters.Title</c> to append " — New guardian" while
+   the New panel is open and restores the base title on cancel / add-to-list,
+   so the dialog's chrome reflects the current sub-mode. The in-body "New
+   guardian" heading was removed because the title now carries it.
+
+   Footer: a single <DialogShellFooter> is rendered in BOTH modes. In List
+   mode it confirms the multi-select pick (SubmitText="Add", cancel closes
+   the dialog). In New mode it drives the create sub-flow (SubmitText="Add
+   to list", cancel returns to the list without closing). The footer's
+   Submit button is Type=Submit, so it fires the EditForm's OnValidSubmit,
+   which <c>OnFormSubmitAsync</c> branches on _panelMode (New → add to
+   pending list + return to list; List → close dialog with the result). This
+   replaces the previous inline action row inside the create section — the
+   dialog now has exactly one action row (the footer) in both modes.
+
+   "New guardian" button: Appearance.Accent (filled, accent-colored
+   background, white icon + label) so the PersonAdd icon is always clearly
+   visible. The previous Outline/Neutral appearances washed the icon out
+   against the dialog body background — the icon was effectively invisible. *@
 @inherits DialogShellBase<GuardianPickerModel, GuardianAssignment[]>
 @using SchoolCollab.Students.Core.DTOs
 @using SchoolCollab.Students.Admin.Services
@@ -14,78 +40,123 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Constants
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Services
 @inject StudentsApiClient StudentsApi
-@inject IDialogService DialogService
+@inject CodedValuesApiClient CodedValuesApi
 @inject ILogger<GuardianPickerDialog> _logger
 
 <div class="picker-dialog">
-    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+    <EditForm Model="Model" OnValidSubmit="OnFormSubmitAsync">
         <FluentStack Orientation="Orientation.Vertical" Spacing="3">
-            @* Combined chip list: existing picks (from the grid) + guardians
-               created in the dialog. Rendered above the grid. Each chip is the
-               shared <Chip> component (built on FluentBadge) whose dismiss
-               button removes it. *@
-            @if (_picked.Count > 0 || _pendingNew.Count > 0)
+            @if (_panelMode == PickerPanelMode.List)
             {
-                <div class="entity-grid-chips">
-                    @foreach (var g in _picked.Values)
-                    {
-                        <Chip Label="@($"{g.FirstName} {g.LastName}")"
-                              Subtitle="@g.DisplayName"
-                              OnDismiss="@(() => RemovePicked(g.Id))" />
-                    }
-                    @foreach (var a in _pendingNew)
-                    {
-                        <Chip Label="@($"{a.FirstName} {a.LastName}")"
-                              OnDismiss="@(() => RemovePending(a))" />
-                    }
+                @* Combined chip list: existing picks (from the grid) +
+                   guardians created in the dialog. Rendered above the grid as
+                   dismissible "pills" (the shared <Chip> component, built on
+                   FluentBadge). *@
+                @if (_picked.Count > 0)
+                {
+                    <div class="entity-grid-chips">
+                        @foreach (var g in _picked.Values)
+                        {
+                            <Chip Label="@($"{g.FirstName} {g.LastName}")"
+                                  Subtitle="@FormatPillSubtitle(g)"
+                                  OnDismiss="@(() => RemovePicked(g.Id))" />
+                        }
+                    </div>
+                }
+
+                <EntityGrid TItem="GuardianDto"
+                            Items="_items"
+                            GridSettings="_gridSettings"
+                            Loading="_loading"
+                            EmptyMessage="@_emptyMessage"
+                            ShowSearch="true"
+                            Search="_search"
+                            SearchChanged="@OnSearchChanged"
+                            SearchPlaceholder="Search guardians by name"
+                            Selected="_picked"
+                            SelectedChanged="@OnPickedChanged"
+                            GetKey="@(g => g.Id)"
+                            GetDisplayName="@(g => string.IsNullOrWhiteSpace(g.DisplayName) ? $"{g.FirstName} {g.LastName}" : g.DisplayName!)"
+                            GetSubtitle="@(g => g.DisplayName)"
+                            ShowChips="false">
+                    <Columns>
+                        <TemplateColumn TGridItem="GuardianDto" Title="Name" Context="row">
+                            <span>@(string.IsNullOrWhiteSpace(row.DisplayName) ? $"{row.FirstName} {row.LastName}" : row.DisplayName)</span>
+                        </TemplateColumn>
+                        <TemplateColumn TGridItem="GuardianDto" Title="Preferred contact" Context="row">
+                            <span>@(row.PrimaryContactChannel?.ToString() ?? "—")</span>
+                        </TemplateColumn>
+                        <TemplateColumn TGridItem="GuardianDto" Title="Contact value" Context="row">
+                            <span>@FormatContact(row)</span>
+                        </TemplateColumn>
+                    </Columns>
+                </EntityGrid>
+
+                @* "New guardian" button: Appearance.Accent (filled, accent
+                   background, white icon + label) so the PersonAdd icon is
+                   always clearly visible. Outline/Neutral washed the icon out
+                   against the dialog body — the icon was effectively
+                   invisible. Accent reads as the primary create affordance. *@
+                <FluentButton Appearance="Appearance.Accent"
+                              IconStart="@FluentIcons.PersonAdd"
+                              Type="ButtonType.Button"
+                              OnClick="StartCreateNew">
+                    New guardian
+                </FluentButton>
+            }
+            else
+            {
+                @* Inline create form (New panel). <GuardianFormFields> is
+                   presentational (no <EditForm>), so it embeds inside the
+                   picker's <EditForm> without nesting <form> elements. Field
+                   validation (First/Last name required) runs via the dialog
+                   footer's Submit button (Type=Submit) → OnValidSubmit →
+                   OnFormSubmitAsync → OnAddCreatedAsync. The error (if any)
+                   surfaces in the footer's message bar.
+
+                   No heading here — the dialog title carries the
+                   "… — New guardian" suffix in New mode, so a duplicate
+                   in-body label would be redundant. This section is JUST the
+                   form fields; the actions live in the dialog footer. *@
+                <div class="picker-create-section">
+                    <GuardianFormFields Model="_newGuardian" />
                 </div>
             }
-
-            <EntityGrid TItem="GuardianDto"
-                        Items="_items"
-                        GridSettings="_gridSettings"
-                        Loading="_loading"
-                        EmptyMessage="@_emptyMessage"
-                        ShowSearch="true"
-                        Search="_search"
-                        SearchChanged="@OnSearchChanged"
-                        SearchPlaceholder="Search guardians by name"
-                        Selected="_picked"
-                        SelectedChanged="@OnPickedChanged"
-                        GetKey="@(g => g.Id)"
-                        GetDisplayName="@(g => $"{g.FirstName} {g.LastName}")"
-                        GetSubtitle="@(g => g.DisplayName)"
-                        ShowChips="false">
-                <Columns>
-                    <PropertyColumn Property="@(x => x.FirstName)" Title="First name" TGridItem="GuardianDto" TProp="string" />
-                    <PropertyColumn Property="@(x => x.LastName)" Title="Last name" TGridItem="GuardianDto" TProp="string" />
-                    <TemplateColumn TGridItem="GuardianDto" Title="Display name" Context="row">
-                        <span>@row.DisplayName</span>
-                    </TemplateColumn>
-                </Columns>
-            </EntityGrid>
-
-            <FluentButton Appearance="Appearance.Neutral"
-                          IconStart="@FluentIcons.PersonAdd"
-                          Type="ButtonType.Button"
-                          OnClick="OnCreateNew">
-                New guardian
-            </FluentButton>
         </FluentStack>
 
+        @* Single shared footer for BOTH modes. In List mode it confirms the
+           multi-select pick (SubmitText="Add", OnCancel closes the dialog).
+           In New mode it drives the create sub-flow (SubmitText="Add to
+           list", OnCancel returns to the list without closing). The Submit
+           button is Type=Submit → fires the EditForm's OnValidSubmit, which
+           OnFormSubmitAsync branches on _panelMode. The Error slot surfaces
+           the create-form validation error in New mode (the EditForm's
+           EditContext is the empty GuardianPickerModel, which is always
+           valid, so OnValidSubmit always fires and OnAddCreatedAsync does
+           the manual First/Last name check, setting _createError on
+           failure). *@
         <DialogShellFooter Saving="@Saving"
-                           Error="@Error"
-                           SubmitText="Add"
+                           Error="@(_panelMode == PickerPanelMode.New ? _createError : Error)"
+                           SubmitText="@(_panelMode == PickerPanelMode.New ? "Add to list" : "Add")"
                            SavingText="Adding…"
-                           OnCancel="HandleCancelAsync" />
+                           OnCancel="@(_panelMode == PickerPanelMode.New ? EventCallback.Factory.Create(this, CancelCreateNew) : EventCallback.Factory.Create(this, HandleCancelAsync))" />
     </EditForm>
 </div>
 
 @code {
+    /// <summary>Panel mode for the picker's body. <see cref="List"/> shows
+    /// the search grid + "New guardian" button; <see cref="New"/> shows the
+    /// inline create form. Same panel-switch pattern as
+    /// <c>StudentFormFields</c> uses for the long form's guardian section —
+    /// inline form, no nested dialog (the dialog-ui skill explicitly forbids
+    /// dialogs from opening dialogs).</summary>
+    private enum PickerPanelMode { List, New }
+
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(180px,2fr) minmax(180px,2fr) minmax(160px,1fr)"
+        GridTemplateColumns = "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr)"
     };
 
     private string _search = string.Empty;
@@ -93,12 +164,122 @@
     private bool _loading;
     private string _emptyMessage = "No guardians found.";
     private Dictionary<object, GuardianDto> _picked = new();
-    private readonly List<GuardianAssignment> _pendingNew = new();
+    private readonly Dictionary<Guid, GuardianAssignment> _pendingNew = new();
+    private readonly HashSet<Guid> _newGuardianIds = new();
+    private Dictionary<Guid, string> _relNames = new();
     private CancellationTokenSource? _searchCts;
+
+    /// <summary>Current panel mode (List / New). Default List shows the
+    /// search grid; New reveals the inline <c>GuardianFormFields</c>.</summary>
+    private PickerPanelMode _panelMode = PickerPanelMode.List;
+
+    /// <summary>Form-state model bound to the inline
+    /// <c>GuardianFormFields</c> in <see cref="PickerPanelMode.New"/> mode.
+    /// Re-initialised on every transition into New mode (StartCreateNew) so
+    /// a half-typed previous attempt doesn't leak across attempts.</summary>
+    private GuardianAssignmentModel _newGuardian = GuardianAssignmentModel.ForAdd();
+
+    /// <summary>Field-level validation error from the inline create form.
+    /// Surfaced via the <c>DialogShellFooter</c>'s Error slot in New mode.
+    /// Cleared on the next StartCreateNew / successful add-to-list.</summary>
+    private string? _createError;
+
+    /// <summary>The dialog's base title, captured from
+    /// <c>Dialog.Instance.Parameters.Title</c> on first init so it can be
+    /// restored when leaving New mode. The caller passes this via
+    /// <c>ShowShellDialogAsync(model, title, size)</c> ("Manage guardians" /
+    /// "Add guardians").</summary>
+    private string? _baseTitle;
+    private bool _baseTitleCaptured;
 
     protected override async Task OnInitializedAsync()
     {
+        CaptureBaseTitle();
+        await LoadRelationshipNamesAsync();
         await LoadAsync(string.Empty);
+    }
+
+    /// <summary>Loads all relationship coded values once so
+    /// <see cref="FormatPillSubtitle"/> can resolve a new guardian's
+    /// relationship id to its display name without a per-pill API call.</summary>
+    private async Task LoadRelationshipNamesAsync()
+    {
+        try
+        {
+            var rels = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.Relationships.ToCode(), CancellationToken.None) ?? [];
+            _relNames = rels.ToDictionary(r => r.Id, r => r.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load relationship coded values for picker pills");
+            _relNames = new Dictionary<Guid, string>();
+        }
+    }
+
+    /// <summary>Captures the caller's base dialog title once (on init) so
+    /// <see cref="UpdateDialogTitle"/> can restore it when leaving New mode.
+    /// Reads from <c>Dialog.Instance.Parameters.Title</c> — the same store
+    /// the caller populated via <c>BuildShellParameters</c>.</summary>
+    private void CaptureBaseTitle()
+    {
+        if (_baseTitleCaptured) return;
+        try
+        {
+            _baseTitle = Dialog.Instance?.Parameters?.Title;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not read dialog base title; dynamic title suffix will use a fallback.");
+            _baseTitle = null;
+        }
+        _baseTitleCaptured = true;
+    }
+
+    /// <summary>Mutates <c>Dialog.Instance.Parameters.Title</c> to reflect
+    /// the current panel mode, then nudges the hosting <c>FluentDialog</c>
+    /// to re-render its header so the new title is visible. In New mode the
+    /// base title is suffixed with " — New guardian" (e.g. "Manage guardians
+    /// — New guardian"); in List mode the title is restored to the caller's
+    /// original value. Uses the em-dash separator (matches the repo's
+    /// breadcrumb / page-header suffix convention). Falls back to "Manage
+    /// guardians" when the base title could not be captured.
+    ///
+    /// <para>FluentDialog captures its parameters once in
+    /// <c>OnInitialized</c> via <c>_parameters = Instance.Parameters</c> — a
+    /// reference assignment, so <c>_parameters</c> and
+    /// <c>Instance.Parameters</c> alias the same object. Mutating
+    /// <c>Instance.Parameters.Title</c> in place therefore updates the value
+    /// FluentDialog reads on its next render. But the content component's
+    /// own <c>StateHasChanged</c> only re-renders the content, not the
+    /// FluentDialog parent that owns the header — so the title would not
+    /// visibly update without an extra nudge. <c>RefreshHeaderFooter</c> is
+    /// private and <c>SetDialogHeader</c> is internal, so neither is callable
+    /// from here. The least-invasive public method that triggers
+    /// FluentDialog's <c>StateHasChanged</c> (and refreshes the default
+    /// header) is <c>TogglePrimaryActionButton</c>. This dialog sets
+    /// <c>PrimaryAction = null</c> (no built-in primary button — the footer
+    /// owns the actions), so toggling <c>PrimaryActionEnabled</c> has no
+    /// visible side effect; we call it purely for its re-render side
+    /// effect.</para></summary>
+    private void UpdateDialogTitle()
+    {
+        var baseTitle = string.IsNullOrWhiteSpace(_baseTitle) ? "Manage guardians" : _baseTitle!;
+        try
+        {
+            if (Dialog.Instance?.Parameters is not null)
+            {
+                Dialog.Instance.Parameters.Title = _panelMode == PickerPanelMode.New
+                    ? $"{baseTitle} \u2014 New guardian"
+                    : baseTitle;
+                // Nudge the FluentDialog host to re-render its header.
+                Dialog.TogglePrimaryActionButton(true);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Could not mutate dialog title for panel-mode switch.");
+        }
     }
 
     protected override string SubmitText => "Add";
@@ -118,14 +299,15 @@
         _loading = true;
         try
         {
-            _items = await StudentsApi.ListGuardiansAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search) ?? [];
+            _items = WithSyntheticRows(await StudentsApi.ListGuardiansAsync(
+                ct, string.IsNullOrWhiteSpace(search) ? null : search) ?? []);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (ct.IsCancellationRequested) return;
             _logger.LogWarning(ex, "Failed to load guardians for the picker");
-            _items = [];
+            _items = WithSyntheticRows([]);
         }
         finally
         {
@@ -138,35 +320,229 @@
     }
 
     private void OnPickedChanged(Dictionary<object, GuardianDto> picked)
-        => _picked = picked;
+    {
+        // When a synthetic new-guardian row is deselected in the grid,
+        // clean up its pending assignment + synthetic _items entry so it
+        // doesn't reappear on the next search reload or get submitted.
+        var stillPickedIds = picked.Values.Select(g => g.Id).ToHashSet();
+        var removedNew = _newGuardianIds.Where(id => !stillPickedIds.Contains(id)).ToArray();
+        foreach (var id in removedNew)
+        {
+            _newGuardianIds.Remove(id);
+            _pendingNew.Remove(id);
+        }
+        if (removedNew.Length > 0)
+        {
+            _items = _items.Where(g => !removedNew.Contains(g.Id)).ToArray();
+        }
+        _picked = picked;
+    }
 
     private void RemovePicked(Guid id)
     {
         var next = new Dictionary<object, GuardianDto>(_picked);
         next.Remove(id);
         _picked = next;
+        // If the dismissed pill was a synthetic new-guardian row, clean up
+        // its pending assignment + remove the synthetic row from the grid
+        // so it doesn't reappear on the next search reload.
+        if (_newGuardianIds.Remove(id))
+        {
+            _pendingNew.Remove(id);
+            _items = _items.Where(g => g.Id != id).ToArray();
+        }
     }
 
-    private async Task OnCreateNew()
+    /// <summary>Formats a guardian's primary contact value for the grid's
+    /// "Contact value" column. Prepends the country dial code (e.g. "+233")
+    /// for phone contacts when present (mirrors <c>ContactsEditor.FormatValue</c>);
+    /// renders an em-dash placeholder when the guardian has no contact on
+    /// file so the column never reads as blank.</summary>
+    private static string FormatContact(GuardianDto g)
     {
-        var created = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
-            GuardianAssignmentModel.ForAdd(), "New guardian", DialogSize.Medium);
-        if (created is null) return;
-        _pendingNew.Add(created);
+        if (string.IsNullOrWhiteSpace(g.PrimaryContactValue)) return "—";
+        return !string.IsNullOrWhiteSpace(g.PrimaryContactCountryCode)
+            ? $"{g.PrimaryContactCountryCode} {g.PrimaryContactValue}"
+            : g.PrimaryContactValue!;
     }
 
-    private void RemovePending(GuardianAssignment a) => _pendingNew.Remove(a);
+    /// <summary>Same as <see cref="FormatContact"/> but returns null
+    /// (instead of "—") when the guardian has no contact, so the pill
+    /// subtitle builder can skip the contact part cleanly.</summary>
+    private static string? FormatContactOrNull(GuardianDto g)
+    {
+        if (string.IsNullOrWhiteSpace(g.PrimaryContactValue)) return null;
+        return !string.IsNullOrWhiteSpace(g.PrimaryContactCountryCode)
+            ? $"{g.PrimaryContactCountryCode} {g.PrimaryContactValue}"
+            : g.PrimaryContactValue!;
+    }
+
+    /// <summary>Formats a picked guardian's pill subtitle. For a new
+    /// guardian created in this dialog session: "(relationship,
+    /// contactvalue)" — e.g. "(Father, +233 0241234567)". Omits the
+    /// relationship part when none was selected, omits the contact part
+    /// when none was entered, and returns null when neither is present.
+    /// For an existing tenant guardian: "(contact value)" only — the
+    /// picker does not capture a relationship for existing picks
+    /// (relationship is set per-link after the picker returns).</summary>
+    private string? FormatPillSubtitle(GuardianDto g)
+    {
+        var contact = FormatContactOrNull(g);
+        if (_newGuardianIds.Contains(g.Id) && _pendingNew.TryGetValue(g.Id, out var a))
+        {
+            var relName = a.RelationshipCodedValueId is { } relId
+                && _relNames.TryGetValue(relId, out var rn) ? rn : null;
+            if (relName is not null && contact is not null) return $"({relName}, {contact})";
+            if (relName is not null) return $"({relName})";
+            if (contact is not null) return $"({contact})";
+            return null;
+        }
+        return contact is not null ? $"({contact})" : null;
+    }
+
+    /// <summary>Prepends the pending new-guardian synthetic rows to the
+    /// API-returned items so the user sees their in-dialog creations in
+    /// the grid even after a search reload (the guardian isn't persisted
+    /// yet — creation is deferred to the parent's confirm). Called from
+    /// <see cref="LoadAsync"/> on both success and failure paths.</summary>
+    private GuardianDto[] WithSyntheticRows(GuardianDto[] apiItems)
+    {
+        if (_pendingNew.Count == 0) return apiItems;
+        var synthetics = _pendingNew.Select(kv => new GuardianDto(
+            kv.Key, kv.Value.TitleCodedValueId,
+            kv.Value.FirstName, kv.Value.LastName,
+            null, null, null, false,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            kv.Value.ContactChannel, kv.Value.ContactValue, kv.Value.CountryCode)).ToArray();
+        return synthetics.Concat(apiItems).ToArray();
+    }
+
+    /// <summary>The <c>EditForm.OnValidSubmit</c> handler, branched on panel
+    /// mode. In New mode it validates the inline create form and appends a
+    /// <see cref="GuardianAssignment"/> to <c>_pendingNew</c> (then returns
+    /// to List mode — the dialog stays open). In List mode it delegates to
+    /// <see cref="DialogShellBase{TModel, TResult}.HandleSubmitAsync"/>,
+    /// which calls <see cref="SubmitAsync"/> and closes the dialog with the
+    /// combined pick result. Routed this way so the single
+    /// <c>DialogShellFooter</c> Submit button (Type=Submit) drives both
+    /// modes without an inline action row inside the create section.</summary>
+    private Task OnFormSubmitAsync()
+    {
+        if (_panelMode == PickerPanelMode.New)
+        {
+            OnAddCreated();
+            return Task.CompletedTask;
+        }
+        return HandleSubmitAsync();
+    }
+
+    /// <summary>Switches the picker into the inline create panel. Re-
+    /// initialises the form-state model so a half-typed previous attempt
+    /// doesn't leak across attempts, clears any stale field error, and
+    /// appends " — New guardian" to the dialog title. Same role as
+    /// <c>StudentFormFields.StartNewGuardian</c> plays inside the long
+    /// form.</summary>
+    private void StartCreateNew()
+    {
+        _newGuardian = GuardianAssignmentModel.ForAdd();
+        _createError = null;
+        _panelMode = PickerPanelMode.New;
+        UpdateDialogTitle();
+    }
+
+    /// <summary>Cancels the inline create form and returns to the search
+    /// grid. The user's typed values are discarded (no draft persistence) —
+    /// matches the Cancel button's role in <c>GuardianFormDialog</c>.
+    /// Restores the dialog's base title (drops the " — New guardian"
+    /// suffix).</summary>
+    private void CancelCreateNew()
+    {
+        _newGuardian = GuardianAssignmentModel.ForAdd();
+        _createError = null;
+        _panelMode = PickerPanelMode.List;
+        UpdateDialogTitle();
+    }
+
+    /// <summary>Validates the inline create form (First / Last name required
+    /// — same checks <c>GuardianFormDialog.SubmitAsync</c> performed) and on
+    /// success appends a new <see cref="GuardianAssignment"/> to
+    /// <c>_pendingNew</c> (surfaced as a chip in the combined chip list
+    /// above the grid). On failure, sets <c>_createError</c> so the footer's
+    /// message bar surfaces the field-level error and the picker stays open
+    /// in New mode (the user can fix the field and click Add to list again).
+    /// The wizard's downstream Phase 4 will CreateGuardianAsync on this
+    /// assignment (ExistingGuardianId = null). On success it returns to List
+    /// mode and restores the dialog's base title.</summary>
+    private void OnAddCreated()
+    {
+        if (string.IsNullOrWhiteSpace(_newGuardian.FirstName) || string.IsNullOrWhiteSpace(_newGuardian.LastName))
+        {
+            _createError = "First and last name are required.";
+            return;
+        }
+
+        // Generate a temp id for the synthetic guardian row. The real
+        // guardian id is assigned by the database when the parent (page /
+        // wizard) calls CreateGuardianAsync after the picker returns. The
+        // temp id lets us insert a display row into the grid + mark it as
+        // picked so the user sees the new guardian in the grid immediately
+        // (not just as a pill above it). _pendingNew maps temp id → the
+        // GuardianAssignment so SubmitAsync can emit it with
+        // ExistingGuardianId = null (signalling "create me" to the parent).
+        var tempId = Guid.NewGuid();
+        _pendingNew[tempId] = new GuardianAssignment(
+            null,
+            _newGuardian.FirstName!.Trim(),
+            _newGuardian.LastName!.Trim(),
+            _newGuardian.RelationshipCodedValueId,
+            _newGuardian.ContactChannel,
+            string.IsNullOrWhiteSpace(_newGuardian.ContactValue) ? null : _newGuardian.ContactValue.Trim(),
+            _newGuardian.TitleCodedValueId,
+            _newGuardian.CountryCode);
+        _newGuardianIds.Add(tempId);
+
+        // Synthetic grid row carrying the form's contact info so the grid's
+        // "Preferred contact" + "Contact value" columns show what the user
+        // just entered. DisplayName is null so the Name column falls back to
+        // First + Last (same logic as existing guardians).
+        var synthetic = new GuardianDto(
+            tempId, _newGuardian.TitleCodedValueId,
+            _newGuardian.FirstName!.Trim(), _newGuardian.LastName!.Trim(),
+            null, null, null, false,
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            _newGuardian.ContactChannel,
+            string.IsNullOrWhiteSpace(_newGuardian.ContactValue) ? null : _newGuardian.ContactValue.Trim(),
+            _newGuardian.CountryCode);
+        _items = new[] { synthetic }.Concat(_items).ToArray();
+        _picked[tempId] = synthetic;
+
+        _panelMode = PickerPanelMode.List;
+        _newGuardian = GuardianAssignmentModel.ForAdd();
+        _createError = null;
+        UpdateDialogTitle();
+    }
 
     protected override Task<GuardianAssignment[]?> SubmitAsync(GuardianPickerModel model)
     {
         var result = new List<GuardianAssignment>();
         foreach (var g in _picked.Values)
         {
-            // Link the existing tenant guardian with no relationship/contact
-            // yet — those are edited per-assignment in the guardian list.
-            result.Add(new GuardianAssignment(g.Id, g.FirstName, g.LastName, null, null, null, g.TitleCodedValueId));
+            if (_newGuardianIds.Contains(g.Id))
+            {
+                // Synthetic row created in this dialog session: emit the
+                // pending GuardianAssignment (ExistingGuardianId = null →
+                // the parent will CreateGuardianAsync + LinkGuardianAsync).
+                // Carries the relationship + contact captured in the create
+                // form so the parent can seed the contact in one pass.
+                result.Add(_pendingNew[g.Id]);
+            }
+            else
+            {
+                // Existing tenant guardian: link with no relationship /
+                // contact (those are edited per-assignment after linking).
+                result.Add(new GuardianAssignment(g.Id, g.FirstName, g.LastName, null, null, null, g.TitleCodedValueId));
+            }
         }
-        result.AddRange(_pendingNew);
         return Task.FromResult<GuardianAssignment[]?>(result.ToArray());
     }
 }

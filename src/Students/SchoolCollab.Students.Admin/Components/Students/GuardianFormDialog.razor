@@ -51,7 +51,8 @@
             model.RelationshipCodedValueId,
             model.ContactChannel,
             string.IsNullOrWhiteSpace(model.ContactValue) ? null : model.ContactValue.Trim(),
-            model.TitleCodedValueId);
+            model.TitleCodedValueId,
+            model.CountryCode);
         return Task.FromResult<GuardianAssignment?>(assignment);
     }
 }
