@@ -1,0 +1,91 @@
+/* GuardianContactsEditor (spec §4.9 / goal #6): in-memory multi-contact
+   editor used inside GuardianFormDialog. Mirrors the ContactsEditor list
+   styling (compact rows, channel glyph + value, preferred badge) so the
+   two editors feel like the same component from the user's perspective. */
+
+.guardian-contacts-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.guardian-contacts-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.guardian-contact-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    border: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+    border-radius: 4px;
+    background: var(--neutral-fill-rest, #fafafa);
+}
+
+.guardian-contact-row--preferred {
+    border-color: var(--accent-fill-rest, #0078d4);
+    background: var(--accent-fill-rest-area, #e6f2fa);
+}
+
+.guardian-contact-channel {
+    font-weight: 600;
+    min-width: 100px;
+}
+
+.guardian-contact-value {
+    flex: 1;
+    word-break: break-all;
+}
+
+.guardian-contact-label {
+    color: var(--neutral-foreground-hint, #666);
+    font-style: italic;
+}
+
+.guardian-contact-actions {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+    margin-left: auto;
+}
+
+.guardian-contact-badge {
+    margin-left: 8px;
+}
+
+.guardian-contacts-add {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+}
+
+.guardian-contacts-channel {
+    min-width: 120px;
+}
+
+.guardian-contacts-country-code {
+    min-width: 160px;
+}
+
+.guardian-contacts-value {
+    flex: 1;
+    min-width: 200px;
+}
+
+.guardian-contacts-label {
+    min-width: 160px;
+}
+
+.guardian-contacts-empty,
+.guardian-contacts-error {
+    margin: 0;
+}

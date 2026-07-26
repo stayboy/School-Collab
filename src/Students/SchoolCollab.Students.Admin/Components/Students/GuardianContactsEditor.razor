@@ -1,0 +1,296 @@
+@* In-memory multi-channel contacts editor for the guardian form
+   (spec §4.9 / goal #6). Owns a list of <see cref="ContactModel"/>
+   entries that the parent component (GuardianFormFields / GuardianFormDialog
+   or the new GuardianGrid) hands in via <see cref="Contacts"/> +
+   <see cref="ContactsChanged"/>. The editor never calls the API itself —
+   the parent flushes the list to /contacts on Save. The first entry
+   (lowest Order) is the preferred contact.
+
+   The editor supports:
+     - Add a new contact (Channel + Country code + Value + Label)
+     - Remove a contact
+     - Move-up / Move-down (swap with neighbour; updates Order)
+     - "Mark as preferred" shortcut: sets Order = 0 and bumps the rest
+
+   Cancellation: the editor is purely in-memory so no CTS is needed.
+   All mutations are synchronous and operate on the in-process list.
+   The parent (GuardianFormDialog) owns any server-side save lifecycle. *@
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject CodedValuesApiClient CodedValuesApi
+@inject ILogger<GuardianContactsEditor> Logger
+
+<div class="guardian-contacts-editor">
+    @if (Contacts.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info" Class="guardian-contacts-empty">
+            No contacts yet. Add one below.
+        </FluentMessageBar>
+    }
+    else
+    {
+        <ul class="guardian-contacts-list">
+            @foreach (var c in Contacts.OrderBy(x => x.Order).ToList())
+            {
+                <li class="guardian-contact-row @(c.Order == 0 ? "guardian-contact-row--preferred" : null)">
+                    <span class="guardian-contact-channel">
+                        @ChannelGlyph(c.Channel) @c.Channel
+                    </span>
+                    <span class="guardian-contact-value">@FormatValue(c)</span>
+                    @if (!string.IsNullOrWhiteSpace(c.Label))
+                    {
+                        <span class="guardian-contact-label">(@c.Label)</span>
+                    }
+                    @if (c.Order == 0)
+                    {
+                        <FluentBadge Appearance="Appearance.Accent" Class="guardian-contact-badge">Preferred</FluentBadge>
+                    }
+                    <span class="guardian-contact-actions">
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      Title="Move up (higher priority)"
+                                      IconStart="@FluentIcons.ChevronUp"
+                                      Disabled="@(c.Order == 0)"
+                                      OnClick="@(() => MoveUp(c))" />
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      Title="Move down (lower priority)"
+                                      IconStart="@FluentIcons.ChevronDown"
+                                      Disabled="@(c.Order >= Contacts.Count - 1)"
+                                      OnClick="@(() => MoveDown(c))" />
+                        @if (c.Order != 0)
+                        {
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          Title="Mark as preferred"
+                                          IconStart="@FluentIcons.Star"
+                                          OnClick="@(() => MakePreferred(c))" />
+                        }
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      Title="Remove contact"
+                                      IconStart="@FluentIcons.Delete"
+                                      OnClick="@(() => Remove(c))" />
+                    </span>
+                </li>
+            }
+        </ul>
+    }
+
+    <div class="guardian-contacts-add">
+        <DropdownForEnum TEnum="ContactChannel"
+                         @bind-SelectedValue="_newChannel"
+                         @bind-SelectedValue:after="OnChannelChanged"
+                         Placeholder="Channel"
+                         Class="guardian-contacts-channel" />
+        @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                @bind-SelectedId="_newCountryCodeId"
+                                Placeholder="Code"
+                                Class="guardian-contacts-country-code"
+                                OptionText="@FormatCountryCodeOption" />
+        }
+        <FluentTextField @bind-Value="_newValue"
+                          Placeholder="@ValuePlaceholder"
+                          Class="guardian-contacts-value" />
+        <FluentTextField @bind-Value="_newLabel"
+                          Placeholder="Label (optional)"
+                          Class="guardian-contacts-label" />
+        <FluentButton Appearance="Appearance.Accent"
+                      IconStart="@FluentIcons.Add"
+                      OnClick="AddAsync"
+                      Disabled="@(string.IsNullOrWhiteSpace(_newValue))">
+            Add
+        </FluentButton>
+    </div>
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error" Class="guardian-contacts-error">@_error</FluentMessageBar>
+    }
+</div>
+
+@code {
+    /// <summary>The in-memory list of contacts being edited. The parent
+    /// supplies the initial list (e.g. the guardian's existing contacts
+    /// when editing, or a single empty placeholder when creating). The
+    /// editor mutates this list in place and raises
+    /// <see cref="ContactsChanged"/> after every mutation so the parent
+    /// can keep a copy for the eventual save.</summary>
+    [Parameter, EditorRequired] public IList<ContactModel> Contacts { get; set; } = new List<ContactModel>();
+
+    /// <summary>Raised after every add/remove/reorder so the parent can
+    /// persist / re-render. The editor never calls the API itself.</summary>
+    [Parameter] public EventCallback OnContactsChanged { get; set; }
+
+    private ContactChannel _newChannel = ContactChannel.Email;
+    private Guid? _newCountryCodeId;
+    private CodedValueDto[]? _countryCodeOptions;
+    private string _newValue = string.Empty;
+    private string _newLabel = string.Empty;
+    private string? _error;
+
+    private string ValuePlaceholder => _newChannel switch
+    {
+        ContactChannel.SMS => "Phone number…",
+        ContactChannel.WhatsApp => "WhatsApp number…",
+        _ => "Email address…"
+    };
+
+    /// <summary>In-memory contact model. Lives in the editor's namespace
+    /// so the parent can construct / pass a list without taking a
+    /// dependency on the editor's internal helpers.</summary>
+    public sealed class ContactModel
+    {
+        public ContactChannel Channel { get; set; } = ContactChannel.Email;
+        public string Value { get; set; } = string.Empty;
+        public string? Label { get; set; }
+        public string? CountryCode { get; set; }
+        public int Order { get; set; }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            await LoadCountryCodesAsync();
+        }
+    }
+
+    private async Task LoadCountryCodesAsync()
+    {
+        if (_countryCodeOptions is not null) return;
+        try
+        {
+            _countryCodeOptions = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.CountryCallingCodes.ToCode(), CancellationToken.None) ?? [];
+
+            _newCountryCodeId ??= _countryCodeOptions
+                .FirstOrDefault(x => x.Code.Equals("CNCODES_GHA", StringComparison.OrdinalIgnoreCase))?.Id
+                ?? _countryCodeOptions.FirstOrDefault()?.Id;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load country calling codes");
+            _error = "Could not load country codes.";
+        }
+    }
+
+    private async Task OnChannelChanged()
+    {
+        if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            await LoadCountryCodesAsync();
+        }
+        else
+        {
+            _newCountryCodeId = null;
+        }
+    }
+
+    private string? ResolveCountryCode()
+    {
+        if (_newCountryCodeId is null || _countryCodeOptions is null) return null;
+        var selected = _countryCodeOptions.FirstOrDefault(x => x.Id == _newCountryCodeId);
+        return selected?.Name;
+    }
+
+    private async Task AddAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newValue)) return;
+        _error = null;
+
+        var countryCode = _newChannel is ContactChannel.SMS or ContactChannel.WhatsApp
+            ? ResolveCountryCode()
+            : null;
+
+        var next = new ContactModel
+        {
+            Channel = _newChannel,
+            Value = _newValue.Trim(),
+            Label = string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
+            CountryCode = countryCode,
+            // Append at the tail (Order = current count).
+            Order = Contacts.Count
+        };
+        Contacts.Add(next);
+
+        // Reset form.
+        _newValue = string.Empty;
+        _newLabel = string.Empty;
+        _newChannel = ContactChannel.Email;
+        _newCountryCodeId = null;
+
+        await NotifyChangedAsync();
+    }
+
+    private async Task Remove(ContactModel c)
+    {
+        Contacts.Remove(c);
+        // Re-stamp Order so the remaining contacts stay sequential.
+        var ordered = Contacts.OrderBy(x => x.Order).ToList();
+        for (var i = 0; i < ordered.Count; i++) ordered[i].Order = i;
+        await NotifyChangedAsync();
+    }
+
+    private async Task MoveUp(ContactModel c)
+    {
+        var ordered = Contacts.OrderBy(x => x.Order).ToList();
+        var idx = ordered.IndexOf(c);
+        if (idx <= 0) return;
+        (ordered[idx - 1], ordered[idx]) = (ordered[idx], ordered[idx - 1]);
+        for (var i = 0; i < ordered.Count; i++) ordered[i].Order = i;
+        await NotifyChangedAsync();
+    }
+
+    private async Task MoveDown(ContactModel c)
+    {
+        var ordered = Contacts.OrderBy(x => x.Order).ToList();
+        var idx = ordered.IndexOf(c);
+        if (idx < 0 || idx >= ordered.Count - 1) return;
+        (ordered[idx + 1], ordered[idx]) = (ordered[idx], ordered[idx + 1]);
+        for (var i = 0; i < ordered.Count; i++) ordered[i].Order = i;
+        await NotifyChangedAsync();
+    }
+
+    private async Task MakePreferred(ContactModel c)
+    {
+        // Move c to Order 0 and push everything else down by one.
+        var others = Contacts.Where(x => x != c).OrderBy(x => x.Order).ToList();
+        c.Order = 0;
+        for (var i = 0; i < others.Count; i++) others[i].Order = i + 1;
+        await NotifyChangedAsync();
+    }
+
+    private async Task NotifyChangedAsync()
+    {
+        if (OnContactsChanged.HasDelegate)
+        {
+            await OnContactsChanged.InvokeAsync();
+        }
+        else
+        {
+            StateHasChanged();
+        }
+    }
+
+    private static string FormatValue(ContactModel c) => c.Channel switch
+    {
+        ContactChannel.SMS or ContactChannel.WhatsApp when !string.IsNullOrWhiteSpace(c.CountryCode)
+            => $"{c.CountryCode} {c.Value}",
+        _ => c.Value
+    };
+
+    private static string FormatCountryCodeOption(CodedValueDto o)
+    {
+        var country = o.Attributes.FirstOrDefault(a => a.Key == "COUNTRY")?.Value;
+        return string.IsNullOrWhiteSpace(country) ? o.Name : $"{o.Name} ({country})";
+    }
+
+    private static string ChannelGlyph(ContactChannel channel) => channel switch
+    {
+        ContactChannel.Email => "✉",
+        ContactChannel.SMS => "📱",
+        ContactChannel.WhatsApp => "💬",
+        _ => "•"
+    };
+}
