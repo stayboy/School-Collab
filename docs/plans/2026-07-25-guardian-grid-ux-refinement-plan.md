@@ -38,13 +38,13 @@ The work reshapes three public surfaces:
 | Surface | Current | Proposed |
 |---------|---------|----------|
 | `GuardianPickerDialog` | 3-column `EntityGrid<GuardianDto>` + inline single-contact `GuardianFormFields` | Wider dialog; single reusable `GuardianGrid` in picker mode; inline **in-memory** multi-contact editor for new guardians; title shown in name display |
-| `StudentGuardiansList` | 6-column grid with one primary contact | 4-column grid (Name incl. title, Relationship, Contacts ≤3, Role, Actions) using same `GuardianGrid` in display mode |
+| `StudentGuardiansList` | 6-column grid with one primary contact | grid (Name incl. title, Relationship, Contacts ≤3, **Primary tick**, Actions) using same `GuardianGrid` in display mode |
 | `GuardiansTab` / legacy grids | Deprecated / separate | Replaced by `GuardianGrid` |
 
 A new `GuardianGrid.razor` component is the central primitive. It consumes a normalized row model (`GuardianGridRow`) and exposes two modes:
 
 - **`Picker`** — multi-select checkbox, search (still owned by parent), Name column, up to 3 Contacts columns, optional "New guardian" button.
-- **`Display`** — Name (+ title + emergency badge), Relationship, up to 3 Contacts columns, Role badge, per-row Actions.
+- **`Display`** — Name (+ title + emergency badge), Relationship, up to 3 Contacts columns, **Primary tick column** (checkmark when the guardian link's `Role == GuardianRole.Primary`; header "Primary"), per-row Actions.
 
 A new `GuardianContactsEditor.razor` component provides the `ContactsEditor`-style UI but operates **in-memory**, so the picker can capture multiple contacts for a guardian that has not yet been persisted. On confirm the parent receives the contacts and creates them together with the guardian.
 
@@ -247,7 +247,7 @@ public enum GuardianGridMode { Picker, Display }
 
 Built-in column layout:
 - **Picker:** Checkbox (if `Selected` bound), Name, Contact 1, Contact 2, Contact 3.
-- **Display:** Name (with emergency badge), Relationship, Contact 1, Contact 2, Contact 3, Role badge, Actions.
+- **Display:** Name (with emergency badge), Relationship, Contact 1, Contact 2, Contact 3, **Primary tick** (checkmark when `Role == GuardianRole.Primary`; header "Primary"; muted — for CC), per-row Actions.
 
 Internally uses `EntityGrid<GuardianGridRow>` so it inherits search, empty state, and selection behavior.
 
@@ -261,7 +261,7 @@ Internally uses `EntityGrid<GuardianGridRow>` so it inherits search, empty state
 
 ### 4.7 Preferred-contact indicator (no per-contact role tick)
 
-**Contacts have no Primary/CC role.** The Primary/CC role belongs to the guardian *link* (`StudentGuardian.Role`), surfaced via the Role badge column in Display mode — never as a per-contact tick. Therefore the original "tick for primary or cc" on each contact column is **removed**.
+**Contacts have no Primary/CC role.** The Primary/CC role belongs to the guardian *link* (`StudentGuardian.Role`), surfaced via the **Primary tick column** in Display mode (a `FluentIcons.CheckmarkCircle` checkmark when `Role == GuardianRole.Primary`; header "Primary"; a muted — for CC) — never as a per-contact tick. Therefore the original "tick for primary or cc" on each contact column is **removed**.
 
 The only per-contact indicator is a subtle **preferred** marker on the single highest-priority contact (the first by `DisplayOrder`) — rendered as a small `FluentIcons.Star` (or `Checkmark`) beside the contact value, `title="Preferred contact"`. The country code is shown as text within the value line (e.g. `+233 0241234567`), not as a tick.
 
@@ -270,7 +270,7 @@ The only per-contact indicator is a subtle **preferred** marker on the single hi
 ⭐ +233 0241234567
 ```
 
-CSS class `.contact-preferred` hosts the marker. The Role badge column (Display mode) shows the guardian's Primary/CC *link* role, which is the only place that role appears.
+CSS class `.contact-preferred` hosts the marker. The guardian link's Primary/CC *role* is shown by the dedicated **Primary tick column** (Display mode) — a checkmark when the link is the Primary guardian.
 
 ### 4.8 Title included in guardian displayed name
 
@@ -410,7 +410,7 @@ Alternative to client-side resolution: compute the formatted name server-side in
 
 1. **Dialog size:** `Large` (640 px typical) or `Panel` (full-height side panel)? Recommendation: `Large` for the picker; `Panel` only if the in-memory contact editor feels cramped.
 2. **New-guardian contact requirement:** Require at least one contact, or allow name-only and default to no contacts? Recommendation: require at least one contact because the user explicitly replaced the single-contact form with a contact editor.
-3. **Tick meaning (resolved):** Contacts have **no Primary/CC role** — that role belongs to the guardian *link* (`StudentGuardian.Role`), shown via the Role badge column. There is therefore **no per-contact role tick**. The only per-contact marker is a "preferred" star on the single highest-priority contact (first by `DisplayOrder`). See §4.7 and §4.9.
+3. **Tick meaning (resolved):** Contacts have **no Primary/CC role** — that role belongs to the guardian *link* (`StudentGuardian.Role`), shown via the **Primary tick column** (checkmark when `Role == GuardianRole.Primary`; header "Primary"). There is therefore **no per-contact role tick**. The only per-contact marker is a "preferred" star on the single highest-priority contact (first by `DisplayOrder`). See §4.7 and §4.9.
 4. **Relationship/Role in picker create panel:** Keep Relationship dropdown (it is per-link) and add Role (Primary/CC)? Current `GuardianAssignmentModel` already has these; ensure the new editor still captures them.
 5. **Backward compatibility of `StudentGuardianViewDto`:** The DTO is a positional record. Adding a new array parameter at the end with a default empty array keeps existing callers compiling, but verify all construction sites.
 6. **Title source (resolved):** The guardian title parent is `CodedValueParent.Salutations` (code `"SALUTS"`) — verified in `src/SchoolCollab.Admin.Shared/Constants/CodedValueConstants.cs`. There is no `Titles` member. Remaining sub-question: whether the title text already includes a trailing period (`"Mr."` vs `"Mr"`). The formatter must not double the period if the coded value already contains it.

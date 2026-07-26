@@ -75,8 +75,15 @@ else
                 <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Contact value" Context="cell">
                     <span>@FormatContact(cell)</span>
                 </TemplateColumn>
-                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Role" Context="cell">
-                    <FluentBadge Appearance="@RoleAppearance(cell.Role)">@cell.Role</FluentBadge>
+                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Primary" Context="cell">
+                    @if (cell.Role == GuardianRole.Primary)
+                    {
+                        <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" Title="Primary guardian" />
+                    }
+                    else
+                    {
+                        <span class="muted">—</span>
+                    }
                 </TemplateColumn>
                 <TemplateColumn TGridItem="StudentGuardianViewDto" Title="" Sortable="false" Context="cell">
                     <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
@@ -134,14 +141,7 @@ else
 
     private static readonly LandingGridSettings GridSettings = new()
     {
-        GridTemplateColumns = "minmax(170px,2fr) minmax(120px,1fr) minmax(120px,1fr) minmax(160px,2fr) minmax(100px,0.8fr) 90px"
-    };
-
-    private static Appearance RoleAppearance(GuardianRole role) => role switch
-    {
-        GuardianRole.Primary => Appearance.Accent,
-        GuardianRole.CC => Appearance.Neutral,
-        _ => Appearance.Lightweight,
+        GridTemplateColumns = "minmax(170px,2fr) minmax(120px,1fr) minmax(120px,1fr) minmax(160px,2fr) minmax(72px,0.5fr) 90px"
     };
 
     /// <summary>Formats a linked guardian's primary contact value for the
