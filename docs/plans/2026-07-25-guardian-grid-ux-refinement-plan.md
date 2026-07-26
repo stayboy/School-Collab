@@ -460,6 +460,12 @@ Alternative to client-side resolution: compute the formatted name server-side in
 
 ## 14. Files to Modify
 
+**Status update** (after picker migration + 3-contact grid): Items listed in
+§4.2–§4.8 and §11 are now implemented except for the full removal of
+`Contact.IsPrimary` (deferred "Commit B"). The picker uses `GuardianGrid` in
+Picker mode with Name + 3 contact columns; the in-memory multi-contact editor
+in the New panel is implemented as `ContactsEditor.Mode=Buffered` (Option C).
+
 **Domain / contracts / API (§4.9 ordering change):**
 - `src/Students/SchoolCollab.Students.Core/Domain/Contact.cs` — replace `IsPrimary` with `int DisplayOrder`; `Create`/`SetOrder`
 - `src/Students/SchoolCollab.Students.Core/DTOs/ContactDto.cs` — `DisplayOrder`

@@ -24,6 +24,7 @@
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
@@ -48,16 +49,37 @@
     <Columns>
         @if (Mode == GridMode.Picker)
         {
-            @* Picker mode: 3 columns (Name, Preferred contact, Contact value) *@
+            @* Picker mode: 4 columns (Name + up to 3 contact columns).
+               The first contact is the preferred one; a star icon marks it.
+               Missing contacts render an em-dash placeholder. *@
             <TemplateColumn TGridItem="TItem" Title="Name" Context="row">
                 <span>@(GetName?.Invoke(row) ?? "")</span>
             </TemplateColumn>
-            <TemplateColumn TGridItem="TItem" Title="Preferred contact" Context="row">
-                <span>@(GetContactChannel?.Invoke(row)?.ToString() ?? "—")</span>
-            </TemplateColumn>
-            <TemplateColumn TGridItem="TItem" Title="Contact value" Context="row">
-                <span>@FormatContactValue(row)</span>
-            </TemplateColumn>
+            @for (var i = 0; i < 3; i++)
+            {
+                var index = i;
+                var isPreferred = index == 0;
+                <TemplateColumn TGridItem="TItem" Title="@(isPreferred ? "Preferred contact" : $"Contact {index + 1}")" Context="row">
+                    @{
+                        var contact = GetContact(row, index);
+                    }
+                    @if (contact is not null)
+                    {
+                        <span class="guardian-contact-cell">
+                            @if (isPreferred)
+                            {
+                                <FluentIcon Icon="@(Icons.Regular.Size20.Star)" Color="@Color.Accent" Title="Preferred contact" Class="contact-preferred-star" />
+                            }
+                            <span>@(string.IsNullOrWhiteSpace(contact.CountryCode) ? contact.Value : $"{contact.CountryCode} {contact.Value}")</span>
+                        </span>
+                        <div class="contact-channel muted">@contact.Channel</div>
+                    }
+                    else
+                    {
+                        <span class="muted">—</span>
+                    }
+                </TemplateColumn>
+            }
         }
         else
         {
@@ -144,6 +166,11 @@
     [Parameter] public Func<TItem, ContactChannel?>? GetContactChannel { get; set; }
     [Parameter] public Func<TItem, string?>? GetContactValue { get; set; }
     [Parameter] public Func<TItem, string?>? GetContactCountryCode { get; set; }
+    /// <summary>All top contacts (up to 3) for each row. Used by Picker
+    /// mode to render Name + 3 contact columns (including preferred star).
+    /// Linked mode currently consumes the single preferred contact fields
+    /// above, but consumers may still pass this for future use.</summary>
+    [Parameter] public Func<TItem, IReadOnlyList<GuardianContactViewDto>>? GetContacts { get; set; }
     [Parameter] public Func<TItem, bool>? GetIsPrimaryLink { get; set; }
     [Parameter] public Func<TItem, bool>? GetIsEmergencyContact { get; set; }
 
@@ -162,8 +189,9 @@
 
     private static readonly LandingGridSettings PickerSettings = new()
     {
-        // Mirrors the original GuardianPickerDialog 3-column template.
-        GridTemplateColumns = "minmax(170px,1.8fr) minmax(150px,1.2fr) minmax(170px,2fr)"
+        // Name + up to 3 contact columns. The preferred contact column gets
+        // a little more room because of the star icon + channel subtitle.
+        GridTemplateColumns = "minmax(150px,1.8fr) minmax(150px,1.4fr) minmax(140px,1.2fr) minmax(140px,1.2fr)"
     };
 
     private static readonly LandingGridSettings LinkedSettings = new()
@@ -182,5 +210,15 @@
         if (string.IsNullOrWhiteSpace(value)) return "—";
         var code = GetContactCountryCode?.Invoke(row);
         return !string.IsNullOrWhiteSpace(code) ? $"{code} {value}" : value!;
+    }
+
+    /// <summary>Gets the contact at the given index for a row, or null if
+    /// the row has fewer contacts. Used by the picker mode's 3-contact
+    /// columns.</summary>
+    private GuardianContactViewDto? GetContact(TItem row, int index)
+    {
+        var contacts = GetContacts?.Invoke(row);
+        if (contacts is null || index >= contacts.Count) return null;
+        return contacts[index];
     }
 }

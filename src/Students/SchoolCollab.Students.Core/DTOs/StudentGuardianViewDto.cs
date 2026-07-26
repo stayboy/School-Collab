@@ -21,4 +21,13 @@ public sealed record StudentGuardianViewDto(
     Guid? TitleCodedValueId = null,
     ContactChannel? PrimaryContactChannel = null,
     string? PrimaryContactValue = null,
-    string? PrimaryContactCountryCode = null);
+    string? PrimaryContactCountryCode = null)
+{
+    /// <summary>
+    /// The guardian's top contacts in display order (index 0 is the
+    /// preferred contact). List/grid UI can render up to the first three
+    /// entries. Empty when the guardian has no contacts.
+    /// </summary>
+    public IReadOnlyList<GuardianContactViewDto> Contacts { get; init; } =
+        System.Array.Empty<GuardianContactViewDto>();
+}

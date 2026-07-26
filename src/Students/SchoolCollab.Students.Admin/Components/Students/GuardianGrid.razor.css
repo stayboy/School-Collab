@@ -12,3 +12,19 @@
 .muted {
     color: var(--neutral-foreground-hint, #666);
 }
+
+/* Picker-mode contact cells: star + value on one line, channel subtitle
+   below. The star is vertically centered with the value. */
+.guardian-contact-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.contact-preferred-star {
+    flex: 0 0 auto;
+}
+.contact-channel {
+    font-size: 0.75rem;
+    line-height: 1.2;
+}

@@ -44,11 +44,11 @@ public sealed class ListGuardiansHandler(
                 var results = await q.OrderBy(g => g.LastName).ThenBy(g => g.FirstName)
                     .ToArrayAsync(ct);
 
-                // Load the primary (or first non-deleted) contact for each
-                // guardian in a single round-trip so list UIs can show how to
-                // reach the guardian without N+1 queries. A guardian may own
-                // multiple contacts (spec §4.4); we surface the IsPrimary one,
-                // falling back to the first contact when none is marked primary.
+                // Load the guardian's top contacts in display order so
+                // list UIs can show how to reach the guardian without N+1
+                // queries. A guardian may own multiple contacts (spec §4.4);
+                // we surface the first three ordered by DisplayOrder, with
+                // IsPrimary used as a tiebreaker during the additive phase.
                 var guardianIds = results.Select(g => g.Id).ToArray();
                 var contacts = guardianIds.Length == 0
                     ? new List<Contact>()
@@ -60,19 +60,24 @@ public sealed class ListGuardiansHandler(
                                  && !c.IsDeleted)
                         .ToListAsync(ct);
                 var contactsByOwner = contacts
-                    // Spec §4.9: the "primary contact" is now the contact
-                    // with the lowest DisplayOrder. IsPrimary is still
-                    // honored as a tiebreaker for the additive phase.
                     .GroupBy(c => c.OwnerId)
-                    .ToDictionary(g => g.Key, g => g.OrderBy(c => c.DisplayOrder).ThenByDescending(c => c.IsPrimary).First());
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.OrderBy(c => c.DisplayOrder)
+                              .ThenByDescending(c => c.IsPrimary)
+                              .Take(3)
+                              .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
+                              .ToList());
 
                 return results.Select(g =>
                 {
-                    var c = contactsByOwner.TryGetValue(g.Id, out var pc) ? pc : null;
+                    var list = contactsByOwner.TryGetValue(g.Id, out var l) ? l : null;
+                    var c = list?.FirstOrDefault();
                     return new GuardianDto(
                         g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.Address, g.CommunityId,
                         g.IsDeleted, g.CreatedAt, g.UpdatedAt,
-                        c?.Channel, c?.Value, c?.CountryCode);
+                        c?.Channel, c?.Value, c?.CountryCode)
+                    { Contacts = (IReadOnlyList<GuardianContactViewDto>?)list?.AsReadOnly() ?? System.Array.Empty<GuardianContactViewDto>() };
                 }).ToArray();
             },
             CacheOptions,

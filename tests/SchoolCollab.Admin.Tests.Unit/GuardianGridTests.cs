@@ -121,6 +121,24 @@ public class GuardianGridTests
         razor.Should().Contain("public string? SearchPlaceholder", "SearchPlaceholder parameter exists");
     }
 
+    [TestMethod]
+    public void Component_Picker_Mode_Renders_Name_Plus_Three_Contact_Columns()
+    {
+        var razor = ReadSource(ComponentPath);
+
+        // Goal #3 final layout: the picker now renders Name + up to three
+        // contacts. Contact 1 is titled "Preferred contact" and gets a star
+        // icon; contacts 2 and 3 are titled via string interpolation.
+        razor.Should().Contain("\"Preferred contact\"",
+            "first contact column is the preferred one");
+        razor.Should().Contain("$\"Contact {index + 1}\"",
+            "subsequent contact columns are titled Contact 2 / Contact 3 at runtime");
+        razor.Should().Contain("contact-preferred-star");
+        razor.Should().Contain("GetContacts");
+        razor.Should().MatchRegex(@"for\s*\(\s*var\s+i\s*=\s*0\s*;\s*i\s*<\s*3",
+            "picker mode loops 3 times to emit contact columns");
+    }
+
     private static string ReadSource(string relativePath)
     {
         var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;

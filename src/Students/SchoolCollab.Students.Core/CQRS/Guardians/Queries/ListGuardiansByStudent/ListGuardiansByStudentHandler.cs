@@ -40,11 +40,10 @@ public sealed class ListGuardiansByStudentHandler(
                         l.IsEmergencyContact, g.FirstName, g.LastName, g.DisplayName, g.TitleCodedValueId
                     }).ToArrayAsync(ct);
 
-                // Batch-load each linked guardian's primary (or first
-                // non-deleted) contact so the per-student list can show how
-                // to reach each guardian without N+1 queries. A guardian may
-                // own multiple contacts (spec §4.4); we surface the IsPrimary
-                // one, falling back to the first contact when none is primary.
+                // Batch-load each linked guardian's top contacts (up to
+                // three) so the per-student list can show how to reach each
+                // guardian without N+1 queries. Ordered by DisplayOrder with
+                // IsPrimary used as a tiebreaker during the additive phase.
                 var guardianIds = rows.Select(r => r.GuardianId).Distinct().ToArray();
                 var contacts = guardianIds.Length == 0
                     ? new List<Contact>()
@@ -56,19 +55,24 @@ public sealed class ListGuardiansByStudentHandler(
                                  && !c.IsDeleted)
                         .ToListAsync(ct);
                 var contactsByOwner = contacts
-                    // Spec §4.9: the "primary contact" is now the contact
-                    // with the lowest DisplayOrder. IsPrimary is still
-                    // honored as a tiebreaker for the additive phase.
                     .GroupBy(c => c.OwnerId)
-                    .ToDictionary(g => g.Key, g => g.OrderBy(c => c.DisplayOrder).ThenByDescending(c => c.IsPrimary).First());
+                    .ToDictionary(
+                        g => g.Key,
+                        g => g.OrderBy(c => c.DisplayOrder)
+                              .ThenByDescending(c => c.IsPrimary)
+                              .Take(3)
+                              .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
+                              .ToList());
 
                 return rows.Select(r =>
                 {
-                    var c = contactsByOwner.TryGetValue(r.GuardianId, out var pc) ? pc : null;
+                    var list = contactsByOwner.TryGetValue(r.GuardianId, out var l) ? l : null;
+                    var c = list?.FirstOrDefault();
                     return new StudentGuardianViewDto(
                         r.GuardianId, r.StudentId, r.Role, r.RelationshipCodedValueId,
                         r.IsEmergencyContact, r.FirstName, r.LastName, r.DisplayName, r.TitleCodedValueId,
-                        c?.Channel, c?.Value, c?.CountryCode);
+                        c?.Channel, c?.Value, c?.CountryCode)
+                    { Contacts = (IReadOnlyList<GuardianContactViewDto>?)list?.AsReadOnly() ?? System.Array.Empty<GuardianContactViewDto>() };
                 }).ToArray();
             },
             CacheOptions,

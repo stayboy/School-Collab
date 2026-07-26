@@ -83,9 +83,7 @@
                               GetKey="@(g => g.Id)"
                               GetDisplayName="@(g => string.IsNullOrWhiteSpace(g.DisplayName) ? $"{g.FirstName} {g.LastName}" : g.DisplayName!)"
                               GetName="@(g => FormatName(g))"
-                              GetContactChannel="@(g => g.PrimaryContactChannel)"
-                              GetContactValue="@(g => g.PrimaryContactValue)"
-                              GetContactCountryCode="@(g => g.PrimaryContactCountryCode)" />
+                              GetContacts="@(g => g.Contacts)" />
 
                 @* "New guardian" button: Appearance.Accent (filled, accent
                    background, white icon + label) so the PersonAdd icon is
@@ -527,6 +525,12 @@
         var preferredValue = string.IsNullOrWhiteSpace(preferred?.Value) ? null : preferred!.Value.Trim();
         var preferredCountryCode = preferred?.CountryCode;
 
+        var contactSummaries = _newGuardian.Contacts
+            .OrderBy(x => x.Order)
+            .Take(3)
+            .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
+            .ToList();
+
         _pendingNew[tempId] = new GuardianAssignment(
             null,
             _newGuardian.FirstName!.Trim(),
@@ -541,9 +545,10 @@
         _newGuardianIds.Add(tempId);
 
         // Synthetic grid row carrying the preferred contact so the grid's
-        // "Preferred contact" + "Contact value" columns show what the user
-        // just entered. DisplayName is null so the Name column falls back to
-        // First + Last (same logic as existing guardians).
+        // contact columns show what the user just entered. DisplayName is
+        // null so the Name column falls back to First + Last (same logic
+        // as existing guardians). Contacts carries up to the first three
+        // contacts so the new 3-contact grid columns render correctly.
         var synthetic = new GuardianDto(
             tempId, _newGuardian.TitleCodedValueId,
             _newGuardian.FirstName!.Trim(), _newGuardian.LastName!.Trim(),
@@ -551,7 +556,8 @@
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             preferredChannel,
             preferredValue,
-            preferredCountryCode);
+            preferredCountryCode)
+        { Contacts = contactSummaries.AsReadOnly() };
         _items = new[] { synthetic }.Concat(_items).ToArray();
         _picked[tempId] = synthetic;
 
