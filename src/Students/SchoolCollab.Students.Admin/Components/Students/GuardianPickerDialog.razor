@@ -59,7 +59,7 @@
                     <div class="entity-grid-chips">
                         @foreach (var g in _picked.Values)
                         {
-                            <Chip Label="@($"{g.FirstName} {g.LastName}")"
+                            <Chip Label="@FormatName(g)"
                                   Subtitle="@FormatPillSubtitle(g)"
                                   OnDismiss="@(() => RemovePicked(g.Id))" />
                         }
@@ -83,7 +83,7 @@
                             ShowChips="false">
                     <Columns>
                         <TemplateColumn TGridItem="GuardianDto" Title="Name" Context="row">
-                            <span>@(string.IsNullOrWhiteSpace(row.DisplayName) ? $"{row.FirstName} {row.LastName}" : row.DisplayName)</span>
+                            <span>@FormatName(row)</span>
                         </TemplateColumn>
                         <TemplateColumn TGridItem="GuardianDto" Title="Preferred contact" Context="row">
                             <span>@(row.PrimaryContactChannel?.ToString() ?? "—")</span>
@@ -173,6 +173,10 @@
     private readonly Dictionary<Guid, GuardianAssignment> _pendingNew = new();
     private readonly HashSet<Guid> _newGuardianIds = new();
     private Dictionary<Guid, string> _relNames = new();
+    // Spec §4.8: salutation (title) lookup so the Name column and pill
+    // label can prepend titles ("Mr", "Mrs", etc.) for any guardian
+    // without a per-row lookup. Empty when salutations aren't configured.
+    private Dictionary<Guid, string> _salutations = new();
     private CancellationTokenSource? _searchCts;
 
     /// <summary>Current panel mode (List / New). Default List shows the
@@ -202,6 +206,9 @@
     {
         CaptureBaseTitle();
         await LoadRelationshipNamesAsync();
+        // Spec §4.8: load salutations in parallel with relationships so
+        // the Name column + pill label can prepend titles immediately.
+        await LoadSalutationsAsync();
         await LoadAsync(string.Empty);
     }
 
@@ -220,6 +227,23 @@
         {
             _logger.LogWarning(ex, "Failed to load relationship coded values for picker pills");
             _relNames = new Dictionary<Guid, string>();
+        }
+    }
+
+    /// <summary>Spec §4.8: load all salutations once so the Name column
+    /// and pill label can prepend titles without a per-row API call.</summary>
+    private async Task LoadSalutationsAsync()
+    {
+        try
+        {
+            var sals = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.Salutations.ToCode(), CancellationToken.None) ?? [];
+            _salutations = sals.ToDictionary(s => s.Id, s => s.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to load salutation coded values for picker Name column");
+            _salutations = new Dictionary<Guid, string>();
         }
     }
 
@@ -370,6 +394,23 @@
         return !string.IsNullOrWhiteSpace(g.PrimaryContactCountryCode)
             ? $"{g.PrimaryContactCountryCode} {g.PrimaryContactValue}"
             : g.PrimaryContactValue!;
+    }
+
+    /// <summary>Spec §4.8: formats a guardian's displayed name. The
+    /// salutation (title) is prepended when both a coded-value id is
+    /// present on the row AND the lookup resolves it to a non-empty
+    /// name; otherwise falls back to DisplayName-or-FirstName+LastName.
+    /// Used by both the Name column and the pill label so the
+    /// title-in-name presentation is consistent across the dialog.</summary>
+    private string FormatName(GuardianDto g)
+    {
+        var baseName = string.IsNullOrWhiteSpace(g.DisplayName)
+            ? $"{g.FirstName} {g.LastName}".Trim()
+            : g.DisplayName;
+        if (g.TitleCodedValueId is not { } id) return baseName;
+        if (!_salutations.TryGetValue(id, out var title) || string.IsNullOrWhiteSpace(title))
+            return baseName;
+        return $"{title} {baseName}";
     }
 
     /// <summary>Same as <see cref="FormatContact"/> but returns null

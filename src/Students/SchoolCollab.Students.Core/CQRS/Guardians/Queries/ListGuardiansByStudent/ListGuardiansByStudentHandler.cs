@@ -37,7 +37,7 @@ public sealed class ListGuardiansByStudentHandler(
                     select new
                     {
                         l.GuardianId, l.StudentId, l.Role, l.RelationshipCodedValueId,
-                        l.IsEmergencyContact, g.FirstName, g.LastName, g.DisplayName
+                        l.IsEmergencyContact, g.FirstName, g.LastName, g.DisplayName, g.TitleCodedValueId
                     }).ToArrayAsync(ct);
 
                 // Batch-load each linked guardian's primary (or first
@@ -67,7 +67,7 @@ public sealed class ListGuardiansByStudentHandler(
                     var c = contactsByOwner.TryGetValue(r.GuardianId, out var pc) ? pc : null;
                     return new StudentGuardianViewDto(
                         r.GuardianId, r.StudentId, r.Role, r.RelationshipCodedValueId,
-                        r.IsEmergencyContact, r.FirstName, r.LastName, r.DisplayName,
+                        r.IsEmergencyContact, r.FirstName, r.LastName, r.DisplayName, r.TitleCodedValueId,
                         c?.Channel, c?.Value, c?.CountryCode);
                 }).ToArray();
             },

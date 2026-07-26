@@ -50,7 +50,7 @@ else
             <Columns>
                 <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Name" Context="cell">
                     <span class="guardian-name-cell">
-                        <span>@(string.IsNullOrWhiteSpace(cell.DisplayName) ? $"{cell.FirstName} {cell.LastName}" : cell.DisplayName)</span>
+                        <span>@FormatGuardianName(cell)</span>
                         @if (cell.IsEmergencyContact)
                         {
                             <FluentBadge Appearance="Appearance.Accent">Emergency</FluentBadge>
@@ -126,6 +126,13 @@ else
     /// wizard and the page share the same name-resolution path.</summary>
     [Parameter] public Func<Guid?, string?>? RelationshipNameLookup { get; set; }
 
+    /// <summary>Optional resolver for a salutation (title) coded-value id
+    /// → display name. Used by <see cref="FormatGuardianName"/> to prepend
+    /// the title (e.g. "Mr", "Mrs") to the displayed name. Pages that
+    /// already load salutations for other purposes can pass their cached
+    /// lookup; otherwise the cell renders without a title.</summary>
+    [Parameter] public Func<Guid?, string?>? SalutationLookup { get; set; }
+
     /// <summary>Fired when the user clicks the per-row Edit button.
     /// Not delegated to → button is hidden (Edit is optional from
     /// pages that only allow link / unlink, e.g. a future bulk
@@ -156,5 +163,21 @@ else
         return !string.IsNullOrWhiteSpace(g.PrimaryContactCountryCode)
             ? $"{g.PrimaryContactCountryCode} {g.PrimaryContactValue}"
             : g.PrimaryContactValue!;
+    }
+
+    /// <summary>Formats the guardian's displayed name (spec §4.8). The
+    /// salutation (title) is prepended when both a coded-value id is
+    /// present on the row AND the parent supplied a
+    /// <see cref="SalutationLookup"/> that resolves it to a non-empty
+    /// name; otherwise the row falls back to the existing
+    /// DisplayName-or-FirstName+LastName rendering.</summary>
+    private string FormatGuardianName(StudentGuardianViewDto g)
+    {
+        var baseName = string.IsNullOrWhiteSpace(g.DisplayName)
+            ? $"{g.FirstName} {g.LastName}".Trim()
+            : g.DisplayName;
+        if (SalutationLookup is null) return baseName;
+        var title = SalutationLookup(g.TitleCodedValueId);
+        return string.IsNullOrWhiteSpace(title) ? baseName : $"{title} {baseName}";
     }
 }

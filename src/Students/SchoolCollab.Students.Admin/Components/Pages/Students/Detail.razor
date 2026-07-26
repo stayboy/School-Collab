@@ -196,6 +196,7 @@
                         }
                         <StudentGuardiansList Items="_links.ToArray()"
                                                RelationshipNameLookup="ResolveRelName"
+                                               SalutationLookup="ResolveSalutation"
                                                OnEdit="OnEditGuardianAsync"
                                                OnRemove="OnRemoveGuardianAsync" />
 
@@ -256,6 +257,10 @@
     // below on every user action.
     private List<SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto> _links = new();
     private Dictionary<Guid, string> _relNames = new();
+    // Spec §4.8: salutation (title) lookup for the guardian grid Name cell.
+    // Loaded once per page load; covers Mr/Mrs/Ms/etc. across all linked
+    // guardians. Empty when salutations aren't configured for the tenant.
+    private Dictionary<Guid, string> _salutations = new();
     private string? _guardianError;
 
     /// <summary>
@@ -629,6 +634,21 @@
                 var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
                 if (cv is not null) _relNames[cv.Id] = cv.Name;
             }
+
+            // Spec §4.8: batch-load all salutations so the Name cell can
+            // prepend "Mr", "Mrs", etc. for any linked guardian without a
+            // per-row API call. Failure is non-fatal — the Name cell falls
+            // back to FirstName + LastName when the lookup is empty.
+            try
+            {
+                var sals = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                    CodedValueParent.Salutations.ToCode(), ct) ?? [];
+                _salutations = sals.ToDictionary(s => s.Id, s => s.Name);
+            }
+            catch
+            {
+                _salutations = new Dictionary<Guid, string>();
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -642,6 +662,9 @@
 
     private string? ResolveRelName(Guid? id)
         => id is { } g && _relNames.TryGetValue(g, out var n) ? n : null;
+
+    private string? ResolveSalutation(Guid? id)
+        => id is { } g && _salutations.TryGetValue(g, out var n) ? n : null;
 
     public void Dispose()
     {

@@ -18,6 +18,7 @@ public sealed record StudentGuardianViewDto(
     string FirstName,
     string LastName,
     string? DisplayName,
+    Guid? TitleCodedValueId = null,
     ContactChannel? PrimaryContactChannel = null,
     string? PrimaryContactValue = null,
     string? PrimaryContactCountryCode = null);

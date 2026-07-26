@@ -169,6 +169,7 @@
                         }
                         <StudentGuardiansList Items="LinkedItems"
                                                RelationshipNameLookup="ResolveRelName"
+                                               SalutationLookup="ResolveSalutation"
                                                OnRemove="OnLinkedRemoveAsync" />
                     }
                     else
@@ -559,6 +560,10 @@
     private string? _guardianError;
     private List<StudentGuardianViewDto> _links = new();
     private Dictionary<Guid, string> _relNames = new();
+    // Spec §4.8: salutation (title) lookup for the guardian Name cell.
+    // Loaded once per guardian-list refresh; covers Mr/Mrs/Ms across all
+    // linked guardians. Empty when salutations aren't configured.
+    private Dictionary<Guid, string> _salutations = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -588,6 +593,19 @@
             {
                 var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
                 if (cv is not null) _relNames[cv.Id] = cv.Name;
+            }
+            // Spec §4.8: batch-load salutations so the Name cell can prepend
+            // titles for any linked guardian without a per-row lookup. Failure
+            // is non-fatal — the cell falls back to FirstName + LastName.
+            try
+            {
+                var sals = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                    CodedValueParent.Salutations.ToCode(), ct) ?? [];
+                _salutations = sals.ToDictionary(s => s.Id, s => s.Name);
+            }
+            catch
+            {
+                _salutations = new Dictionary<Guid, string>();
             }
         }
         catch (Exception ex)
@@ -660,6 +678,9 @@
     /// after every link / unlink.</summary>
     private string? ResolveRelName(Guid? id)
         => id is { } g && _relNames.TryGetValue(g, out var n) ? n : null;
+
+    private string? ResolveSalutation(Guid? id)
+        => id is { } g && _salutations.TryGetValue(g, out var n) ? n : null;
 
     /// <summary>Linked-mode per-row delete handler. Fire-and-forget
     /// the async <see cref="OnRemoveGuardian"/> callback; the form

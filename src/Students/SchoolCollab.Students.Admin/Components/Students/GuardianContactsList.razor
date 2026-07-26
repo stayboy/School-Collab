@@ -24,6 +24,7 @@
    load is re-issued whenever StudentId changes (e.g. navigating
    between students that reuse the same component instance). *@
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Students.Core.Contracts
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Core.DTOs
@@ -57,7 +58,7 @@
             <div class="guardian-contact-card">
                 <div class="guardian-contact-header">
                     <span class="guardian-contact-name">
-                        <strong>@item.FirstName @item.LastName</strong>
+                        <strong>@FormatName(item)</strong>
                     </span>
                     <FluentBadge Appearance="@(item.Role == GuardianRole.Primary ? Appearance.Accent : Appearance.Neutral)"
                                  Class="guardian-contact-role">
@@ -123,6 +124,10 @@
     private volatile bool _disposed;
     private Guid? _loadedStudentId;
 
+    // Spec §4.8: salutation (title) lookup so each card header can
+    // prepend "Mr" / "Mrs" to the guardian's first/last name.
+    private Dictionary<Guid, string> _salutations = new();
+
     /// <summary>
     /// One row in the rendered list — a guardian plus the contacts
     /// that belong to them, pre-sorted (primary first, then by channel).
@@ -131,6 +136,7 @@
         Guid GuardianId,
         string FirstName,
         string LastName,
+        Guid? TitleCodedValueId,
         GuardianRole Role,
         bool IsEmergencyContact,
         string? RelationshipName,
@@ -183,6 +189,19 @@
                     .ToDictionary(c => c.Id, c => c.Name)
                 : new Dictionary<Guid, string>();
 
+            // 2b. Spec §4.8: batch-load all salutations so the card
+            // header can prepend titles without a per-card lookup.
+            try
+            {
+                var sals = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                    CodedValueParent.Salutations.ToCode(), ct) ?? [];
+                _salutations = sals.ToDictionary(s => s.Id, s => s.Name);
+            }
+            catch
+            {
+                _salutations = new Dictionary<Guid, string>();
+            }
+
             // 3. Per-guardian contact fetch (bounded N — typical 1-4 guardians).
             var items = new List<GuardianContactsItem>(links.Length);
             foreach (var link in links)
@@ -207,6 +226,7 @@
                     GuardianId: link.GuardianId,
                     FirstName: link.FirstName,
                     LastName: link.LastName,
+                    TitleCodedValueId: link.TitleCodedValueId,
                     Role: link.Role,
                     IsEmergencyContact: link.IsEmergencyContact,
                     RelationshipName: link.RelationshipCodedValueId.HasValue
@@ -253,4 +273,16 @@
         ContactChannel.WhatsApp => "💬",
         _ => "•"
     };
+
+    /// <summary>Spec §4.8: format a guardian's card-header name with the
+    /// salutation (title) prepended when the coded-value id resolves to a
+    /// non-empty name; otherwise just first + last.</summary>
+    private string FormatName(GuardianContactsItem item)
+    {
+        var baseName = $"{item.FirstName} {item.LastName}".Trim();
+        if (item.TitleCodedValueId is not { } id) return baseName;
+        if (!_salutations.TryGetValue(id, out var title) || string.IsNullOrWhiteSpace(title))
+            return baseName;
+        return $"{title} {baseName}";
+    }
 }
