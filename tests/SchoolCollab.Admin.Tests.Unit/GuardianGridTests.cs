@@ -102,6 +102,25 @@ public class GuardianGridTests
             "the muted placeholder class is defined in the CSS");
     }
 
+    [TestMethod]
+    public void Component_Forwards_Selection_And_Loading_To_EntityGrid()
+    {
+        var razor = ReadSource(ComponentPath);
+
+        // The grid forwards selection changes from EntityGrid back to the
+        // parent using the same Dictionary<object, TItem> shape. It also
+        // exposes Loading and SearchPlaceholder so the picker can forward
+        // its _loading state and custom search placeholder.
+        razor.Should().Contain("SelectedChanged=\"SelectedChanged\"",
+            "selection changes are forwarded to EntityGrid");
+        razor.Should().Contain("Loading=\"Loading\"",
+            "Loading state is forwarded to EntityGrid");
+        razor.Should().Contain("SearchPlaceholder=\"@SearchPlaceholder\"",
+            "SearchPlaceholder is forwarded to EntityGrid");
+        razor.Should().Contain("public bool Loading", "Loading parameter exists");
+        razor.Should().Contain("public string? SearchPlaceholder", "SearchPlaceholder parameter exists");
+    }
+
     private static string ReadSource(string relativePath)
     {
         var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;

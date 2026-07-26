@@ -34,6 +34,7 @@
 @inherits DialogShellBase<GuardianPickerModel, GuardianAssignment[]>
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Core.DTOs
+@using GuardianGridMode = SchoolCollab.Students.Admin.Components.Students.GuardianGrid<SchoolCollab.Students.Core.DTOs.GuardianDto>.GridMode
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Students.Admin.Components.Students
 @using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels
@@ -67,33 +68,24 @@
                     </div>
                 }
 
-                <EntityGrid TItem="GuardianDto"
-                            Items="_items"
-                            GridSettings="_gridSettings"
-                            Loading="_loading"
-                            EmptyMessage="@_emptyMessage"
-                            ShowSearch="true"
-                            Search="_search"
-                            SearchChanged="@OnSearchChanged"
-                            SearchPlaceholder="Search guardians by name"
-                            Selected="_picked"
-                            SelectedChanged="@OnPickedChanged"
-                            GetKey="@(g => g.Id)"
-                            GetDisplayName="@(g => string.IsNullOrWhiteSpace(g.DisplayName) ? $"{g.FirstName} {g.LastName}" : g.DisplayName!)"
-                            GetSubtitle="@(g => g.DisplayName)"
-                            ShowChips="false">
-                    <Columns>
-                        <TemplateColumn TGridItem="GuardianDto" Title="Name" Context="row">
-                            <span>@FormatName(row)</span>
-                        </TemplateColumn>
-                        <TemplateColumn TGridItem="GuardianDto" Title="Preferred contact" Context="row">
-                            <span>@(row.PrimaryContactChannel?.ToString() ?? "—")</span>
-                        </TemplateColumn>
-                        <TemplateColumn TGridItem="GuardianDto" Title="Contact value" Context="row">
-                            <span>@FormatContact(row)</span>
-                        </TemplateColumn>
-                    </Columns>
-                </EntityGrid>
+                <GuardianGrid TItem="GuardianDto"
+                              Mode="GuardianGridMode.Picker"
+                              Items="_items"
+                              Loading="_loading"
+                              EmptyMessage="@_emptyMessage"
+                              ShowSearch="true"
+                              Search="_search"
+                              SearchChanged="@OnSearchChanged"
+                              SearchPlaceholder="Search guardians by name"
+                              Selected="_picked"
+                              SelectedChanged="@OnPickedChanged"
+                              ShowChips="false"
+                              GetKey="@(g => g.Id)"
+                              GetDisplayName="@(g => string.IsNullOrWhiteSpace(g.DisplayName) ? $"{g.FirstName} {g.LastName}" : g.DisplayName!)"
+                              GetName="@(g => FormatName(g))"
+                              GetContactChannel="@(g => g.PrimaryContactChannel)"
+                              GetContactValue="@(g => g.PrimaryContactValue)"
+                              GetContactCountryCode="@(g => g.PrimaryContactCountryCode)" />
 
                 @* "New guardian" button: Appearance.Accent (filled, accent
                    background, white icon + label) so the PersonAdd icon is
@@ -162,17 +154,6 @@
     /// inline form, no nested dialog (the dialog-ui skill explicitly forbids
     /// dialogs from opening dialogs).</summary>
     private enum PickerPanelMode { List, New }
-
-    private static readonly LandingGridSettings _gridSettings = new()
-    {
-        // Widen the middle (Preferred contact) column so channel labels like
-        // "WhatsApp" no longer clip. Combined with the EntityGrid header-wrap
-        // CSS, both the header text and the cell content stay readable on
-        // the current 3-column picker layout. The future GuardianGrid refactor
-        // will replace this with a 4-column layout (Name + 3 Contacts); this
-        // template is the interim fix for the clipping complaint.
-        GridTemplateColumns = "minmax(170px,1.8fr) minmax(150px,1.2fr) minmax(170px,2fr)"
-    };
 
     private string _search = string.Empty;
     private GuardianDto[] _items = [];
@@ -394,17 +375,6 @@
 
     /// <summary>Formats a guardian's primary contact value for the grid's
     /// "Contact value" column. Prepends the country dial code (e.g. "+233")
-    /// for phone contacts when present (mirrors <c>ContactsEditor.FormatValue</c>);
-    /// renders an em-dash placeholder when the guardian has no contact on
-    /// file so the column never reads as blank.</summary>
-    private static string FormatContact(GuardianDto g)
-    {
-        if (string.IsNullOrWhiteSpace(g.PrimaryContactValue)) return "—";
-        return !string.IsNullOrWhiteSpace(g.PrimaryContactCountryCode)
-            ? $"{g.PrimaryContactCountryCode} {g.PrimaryContactValue}"
-            : g.PrimaryContactValue!;
-    }
-
     /// <summary>Spec §4.8: formats a guardian's displayed name. The
     /// salutation (title) is prepended when both a coded-value id is
     /// present on the row AND the lookup resolves it to a non-empty
@@ -422,7 +392,7 @@
         return $"{title} {baseName}";
     }
 
-    /// <summary>Same as <see cref="FormatContact"/> but returns null
+    /// <summary>Same as the grid's contact formatter but returns null
     /// (instead of "—") when the guardian has no contact, so the pill
     /// subtitle builder can skip the contact part cleanly.</summary>
     private static string? FormatContactOrNull(GuardianDto g)

@@ -34,16 +34,17 @@
 <EntityGrid TItem="TItem"
             Items="Items"
             GridSettings="settings"
+            Loading="Loading"
             EmptyMessage="@EmptyMessage"
             Selected="Selected"
             ShowChips="ShowChips"
             ShowSearch="ShowSearch"
-            SearchPlaceholder="Search guardians..."
+            SearchPlaceholder="@SearchPlaceholder"
             Search="@Search"
             SearchChanged="@SearchChanged"
             GetDisplayName="GetDisplayName"
             GetKey="GetKey"
-            OnSelectionChanged="OnSelectionChanged">
+            SelectedChanged="SelectedChanged">
     <Columns>
         @if (Mode == GridMode.Picker)
         {
@@ -150,7 +151,14 @@
     [Parameter] public EventCallback<TItem> OnEdit { get; set; }
     [Parameter] public EventCallback<TItem> OnRemove { get; set; }
 
-    [Parameter] public EventCallback<HashSet<Guid>> OnSelectionChanged { get; set; }
+    // Selection callback forwarded from EntityGrid.
+    [Parameter] public EventCallback<Dictionary<object, TItem>> SelectedChanged { get; set; }
+
+    /// <summary>Show the loading spinner even when <see cref="Items"/> is non-null.</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>Placeholder text for the optional search box.</summary>
+    [Parameter] public string? SearchPlaceholder { get; set; } = "Search guardians...";
 
     private static readonly LandingGridSettings PickerSettings = new()
     {
