@@ -12,25 +12,27 @@
        re-nesting would be invalid HTML; the existing dialog-ui skill
        explicitly forbids nested EditForms / nested dialogs).
 
-   Layout matches the existing per-row pattern used in GuardianAssignmentList
-   (the wizard's per-student compact list): each row surfaces
-   First / Last / Relationship / Emergency badge / Edit / Remove icon
-   buttons in a single flex row, with the count surfaced in a small
-   header. The list is empty-state-aware ("No guardians linked yet.").
+   The 6-column structure is now delegated to the shared
+   <see cref="GuardianGrid{TItem}"/> component (spec §4.7 / goal #5) so
+   the linked list and the picker share the same column profile, header
+   titles, and cell formatting. This wrapper still owns:
+     - the loading-spinner / empty-state UX (the grid only renders
+       when Items is non-null AND non-empty)
+     - the parent-supplied relationship-name + salutation lookups
+       (the grid is a dumb display; lookups are passed via accessors)
+     - the per-row Edit / Remove callbacks (optional — Edit is hidden
+       when the parent doesn't wire OnEdit)
+     - the count badge in the small header (for the linked section)
 
    The data shape is <see cref="StudentGuardianViewDto"/> — the same
-   projection every other guardian list already consumes
-   (GuardiansTab.razor, the StudentFormFields linked grid, the wizard's
-   GuardianAssignmentList). Carries the link metadata (Role, Relationship,
-   EmergencyContact) AND the guardian's display name, so the list renders
-   without a second round-trip per guardian. *@
-@using SchoolCollab.Students.Admin.Services
+   projection every other guardian list already consumes. Carries the
+   link metadata (Role, Relationship, EmergencyContact) AND the
+   guardian's display name, so the list renders without a second
+   round-trip per guardian. *@
 @using SchoolCollab.Students.Core.DTOs
 @using SchoolCollab.Students.Core.Domain
-@using SchoolCollab.Admin.Shared.Components
-@using SchoolCollab.Admin.Shared.Components.Landing
 @using Microsoft.FluentUI.AspNetCore.Components
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using GuardianGridMode = SchoolCollab.Students.Admin.Components.Students.GuardianGrid<SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto>.GridMode
 
 @if (Items is null)
 {
@@ -43,67 +45,21 @@ else if (Items.Length == 0)
 else
 {
     <div class="student-guardians-list">
-        <EntityGrid TItem="StudentGuardianViewDto"
-                    Items="Items"
-                    GridSettings="GridSettings"
-                    EmptyMessage="@(EmptyMessage ?? "No guardians linked yet.")">
-            <Columns>
-                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Name" Context="cell">
-                    <span class="guardian-name-cell">
-                        <span>@FormatGuardianName(cell)</span>
-                        @if (cell.IsEmergencyContact)
-                        {
-                            <FluentBadge Appearance="Appearance.Accent">Emergency</FluentBadge>
-                        }
-                    </span>
-                </TemplateColumn>
-                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Relationship" Context="cell">
-                    @if (cell.RelationshipCodedValueId is { } id
-                        && RelationshipNameLookup is not null
-                        && !string.IsNullOrEmpty(RelationshipNameLookup(id)))
-                    {
-                        <span>@RelationshipNameLookup(id)</span>
-                    }
-                    else
-                    {
-                        <span class="muted">—</span>
-                    }
-                </TemplateColumn>
-                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Preferred contact" Context="cell">
-                    <span>@(cell.PrimaryContactChannel?.ToString() ?? "—")</span>
-                </TemplateColumn>
-                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Contact value" Context="cell">
-                    <span>@FormatContact(cell)</span>
-                </TemplateColumn>
-                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="Primary" Context="cell">
-                    @if (cell.Role == GuardianRole.Primary)
-                    {
-                        <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" Title="Primary guardian" />
-                    }
-                    else
-                    {
-                        <span class="muted">—</span>
-                    }
-                </TemplateColumn>
-                <TemplateColumn TGridItem="StudentGuardianViewDto" Title="" Sortable="false" Context="cell">
-                    <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
-                        @if (OnEdit.HasDelegate)
-                        {
-                            <FluentButton Appearance="Appearance.Lightweight"
-                                          Title="Edit guardian link"
-                                          OnClick="@(() => OnEdit.InvokeAsync(cell))">
-                                <FluentIcon Icon="@(Icons.Regular.Size20.Edit)" />
-                            </FluentButton>
-                        }
-                        <FluentButton Appearance="Appearance.Lightweight"
-                                      Title="Remove guardian link"
-                                      OnClick="@(() => OnRemove.InvokeAsync(cell))">
-                            <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
-                        </FluentButton>
-                    </FluentStack>
-                </TemplateColumn>
-            </Columns>
-        </EntityGrid>
+        <GuardianGrid TItem="StudentGuardianViewDto"
+                      Items="Items"
+                      Mode="GuardianGridMode.Linked"
+                      EmptyMessage="@(EmptyMessage ?? "No guardians linked yet.")"
+                      GetKey="@(g => g.GuardianId)"
+                      GetDisplayName="@(g => FormatGuardianName(g))"
+                      GetName="@(g => FormatGuardianName(g))"
+                      GetRelationshipName="@(g => ResolveRelName(g))"
+                      GetContactChannel="@(g => g.PrimaryContactChannel)"
+                      GetContactValue="@(g => g.PrimaryContactValue)"
+                      GetContactCountryCode="@(g => g.PrimaryContactCountryCode)"
+                      GetIsPrimaryLink="@(g => g.Role == GuardianRole.Primary)"
+                      GetIsEmergencyContact="@(g => g.IsEmergencyContact)"
+                      OnEdit="OnEdit"
+                      OnRemove="OnRemove" />
     </div>
 }
 
@@ -146,31 +102,9 @@ else
     /// <c>UnlinkGuardianAsync</c> and reloads.</summary>
     [Parameter] public EventCallback<StudentGuardianViewDto> OnRemove { get; set; }
 
-    private static readonly LandingGridSettings GridSettings = new()
-    {
-        GridTemplateColumns = "minmax(170px,2fr) minmax(120px,1fr) minmax(120px,1fr) minmax(160px,2fr) minmax(72px,0.5fr) 90px"
-    };
-
-    /// <summary>Formats a linked guardian's primary contact value for the
-    /// grid's "Contact value" column. Prepends the country dial code (e.g.
-    /// "+233") for phone contacts when present (mirrors
-    /// <c>ContactsEditor.FormatValue</c>); renders an em-dash placeholder
-    /// when the guardian has no contact on file so the column never reads
-    /// as blank.</summary>
-    private static string FormatContact(StudentGuardianViewDto g)
-    {
-        if (string.IsNullOrWhiteSpace(g.PrimaryContactValue)) return "—";
-        return !string.IsNullOrWhiteSpace(g.PrimaryContactCountryCode)
-            ? $"{g.PrimaryContactCountryCode} {g.PrimaryContactValue}"
-            : g.PrimaryContactValue!;
-    }
-
-    /// <summary>Formats the guardian's displayed name (spec §4.8). The
-    /// salutation (title) is prepended when both a coded-value id is
-    /// present on the row AND the parent supplied a
-    /// <see cref="SalutationLookup"/> that resolves it to a non-empty
-    /// name; otherwise the row falls back to the existing
-    /// DisplayName-or-FirstName+LastName rendering.</summary>
+    /// <summary>Spec §4.8: format a linked guardian's displayed name
+    /// with the salutation prepended when both the id and the lookup
+    /// resolve; otherwise fall back to DisplayName-or-First+Last.</summary>
     private string FormatGuardianName(StudentGuardianViewDto g)
     {
         var baseName = string.IsNullOrWhiteSpace(g.DisplayName)
@@ -179,5 +113,15 @@ else
         if (SalutationLookup is null) return baseName;
         var title = SalutationLookup(g.TitleCodedValueId);
         return string.IsNullOrWhiteSpace(title) ? baseName : $"{title} {baseName}";
+    }
+
+    /// <summary>Resolves a row's relationship id through the parent-supplied
+    /// lookup. Returns the resolved name (or null when the lookup is
+    /// missing / doesn't know the id); the grid's GetRelationshipName
+    /// accessor treats null as the em-dash placeholder.</summary>
+    private string? ResolveRelName(StudentGuardianViewDto g)
+    {
+        if (RelationshipNameLookup is null) return null;
+        return RelationshipNameLookup(g.RelationshipCodedValueId);
     }
 }
