@@ -156,7 +156,13 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(180px,2fr) minmax(130px,1fr) minmax(180px,2fr)"
+        // Widen the middle (Preferred contact) column so channel labels like
+        // "WhatsApp" no longer clip. Combined with the EntityGrid header-wrap
+        // CSS, both the header text and the cell content stay readable on
+        // the current 3-column picker layout. The future GuardianGrid refactor
+        // will replace this with a 4-column layout (Name + 3 Contacts); this
+        // template is the interim fix for the clipping complaint.
+        GridTemplateColumns = "minmax(170px,1.8fr) minmax(150px,1.2fr) minmax(170px,2fr)"
     };
 
     private string _search = string.Empty;
