@@ -38,6 +38,21 @@ public record StudentWithdrawn(
     Guid PeriodId,
     DateTimeOffset OccurredAt);
 
+/// <summary>A student&#39;s guardian link metadata (role / relationship /
+/// emergency-contact flag) was updated in place via
+/// PUT /students/{studentId}/guardians/{guardianId}. Emits a single
+/// event instead of the unlink+relink double event (spec §3.2 / §5).
+/// <c>Role</c> is the <c>GuardianRole</c> enum name as a string so the
+/// contract stays decoupled from the Core domain assembly.
+/// </summary>
+public record StudentGuardianUpdated(
+    Guid StudentId,
+    Guid GuardianId,
+    string Role,
+    Guid? RelationshipCodedValueId,
+    bool IsEmergencyContact,
+    DateTimeOffset OccurredAt);
+
 public record PeriodActivated(
     Guid Id,
     string Name,

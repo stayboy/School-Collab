@@ -22,13 +22,17 @@ public sealed class ListGuardiansHandler(
         // Capture the tenant: db.CurrentTenantId is lost inside the HybridCache factory.
         var tenantId = db.CurrentTenantId;
         var search = (query.Search ?? string.Empty).Trim();
+        var excludeStudentId = query.ExcludeStudentId;
 
         return await cache.GetOrCreateAsync(
-            $"guardians:list:{tenantId}:{search}",
-            (db, tenantId, search),
+            // Partition the cache by the excluded student so a guardian list
+            // that hides student S's already-linked guardians does not leak
+            // into a different student's picker. null = no exclusion.
+            $"guardians:list:{tenantId}:{search}:{excludeStudentId}",
+            (db, tenantId, search, excludeStudentId),
             static async (state, ct) =>
             {
-                var (db, tenantId, search) = state;
+                var (db, tenantId, search, excludeStudentId) = state;
                 var q = db.Guardians
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(g => g.TenantId == tenantId);
@@ -40,6 +44,20 @@ public sealed class ListGuardiansHandler(
                                  || db.Contacts.Any(c => c.OwnerType == ContactOwnerType.Guardian
                                                       && c.OwnerId == g.Id
                                                       && c.Value.Contains(search)));
+                }
+                // Exclude guardians already linked to the given student so the
+                // guardian picker cannot offer a guardian that is already
+                // linked (prevents double-linking). StudentGuardian has no
+                // soft-delete (links are hard-deleted on unlink), so only the
+                // Tenant filter is ignored — and we filter tenant explicitly
+                // because db.CurrentTenantId is lost inside the cache factory.
+                if (excludeStudentId is { } sid)
+                {
+                    q = q.Where(g => !db.StudentGuardians
+                        .IgnoreQueryFilters(new[] { "Tenant" })
+                        .Any(sg => sg.TenantId == tenantId
+                                && sg.StudentId == sid
+                                && sg.GuardianId == g.Id));
                 }
                 var results = await q.OrderBy(g => g.LastName).ThenBy(g => g.FirstName)
                     .ToArrayAsync(ct);
@@ -70,11 +88,9 @@ public sealed class ListGuardiansHandler(
                 return results.Select(g =>
                 {
                     var list = contactsByOwner.TryGetValue(g.Id, out var l) ? l : null;
-                    var c = list?.FirstOrDefault();
                     return new GuardianDto(
                         g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.Address, g.CommunityId,
-                        g.IsDeleted, g.CreatedAt, g.UpdatedAt,
-                        c?.Channel, c?.Value, c?.CountryCode)
+                        g.IsDeleted, g.CreatedAt, g.UpdatedAt)
                     { Contacts = (IReadOnlyList<GuardianContactViewDto>?)list?.AsReadOnly() ?? System.Array.Empty<GuardianContactViewDto>() };
                 }).ToArray();
             },

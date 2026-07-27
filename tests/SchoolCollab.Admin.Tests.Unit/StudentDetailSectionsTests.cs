@@ -54,13 +54,17 @@ public class StudentDetailSectionsTests
         // 1. Title row
         // 2. Profile (FluentCard with profile-grid)
         // 3. Enrollments
-        // 4. Guardians
-        // 5. Contacts
+        // 4. Guardians (carries each guardian's contacts via the C1/C2/C3
+        //    columns + the 'View all (N) contacts' anchor)
+        // The standalone Contacts section is REMOVED (spec 2026-07-27
+        // §4.1) — guardian contacts are now inside the guardians grid.
         var source = ReadDetailSource();
         // Use a flexible matcher: any <h3> that contains the section name.
         source.Should().MatchRegex(@"<h3>\s*Enrollments\s*</h3>", "Enrollments section heading");
         source.Should().MatchRegex(@"<h3>\s*Guardians\s*</h3>", "Guardians section heading");
-        source.Should().MatchRegex(@"<h3>\s*Contacts\s*</h3>", "Contacts section heading");
+        // Regression guard: no standalone Contacts section anymore.
+        source.Should().NotMatchRegex(@"<h3>\s*Contacts\s*</h3>",
+            "the <h3>Contacts</h3> section is removed — contacts live in the guardians grid");
         // Profile uses profile-grid, not a heading, but the section header
         // is a class="profile-grid" element.
         source.Should().Contain("class=\"profile-grid\"", "Profile section uses profile-grid layout");
@@ -268,8 +272,11 @@ public class StudentDetailSectionsTests
         //     GuardianPickerDialog / GuardianFormDialog are opened
         //     via ShowShellDialogAsync from the page-level
         //     OnManageGuardiansAsync / OnEditGuardianAsync handlers.
-        //   - GuardianContactsList  → "Contacts" section (how to reach
-        //     each guardian).
+        //   - Guardians grid (StudentGuardiansList -> GuardianGrid
+        //     Linked mode) carries each guardian's contacts via the
+        //     C1/C2/C3 columns, with the per-row 'View all (N)
+        //     contacts' anchor opening <GuardianContactsDialog> via
+        //     OnViewAllContactsAsync.
         // The student's own contact edit surface was MOVED to the Edit
         // form (Edit.razor) — see EditContactEditorTests. The view page
         // is read-only and the contact editor's write actions (Add,
@@ -286,8 +293,56 @@ public class StudentDetailSectionsTests
             "the deprecated <GuardiansTab> must NOT be rendered — replaced by the page-side dialog flow");
         source.Should().NotContain("<ContactsEditor",
             "the view page does NOT embed <ContactsEditor> — contact editing is on the Edit page");
-        source.Should().Contain("<GuardianContactsList", "the Contacts section embeds the new GuardianContactsList");
-        source.Should().Contain("StudentId=\"Id\"", "the embedded GuardianContactsList binds to the route Id");
+        // Spec 2026-07-27 §4.1: the standalone Contacts section is GONE —
+        // guardian contacts are inside the guardians grid (C1/C2/C3 + the
+        // 'View all (N) contacts' anchor -> GuardianContactsDialog). The
+        // Contacts section was redundant and is replaced by the grid.
+        source.Should().NotContain("<GuardianContactsList",
+            "the standalone Contacts section is removed — guardian contacts live in the guardians grid");
+        source.Should().NotContain("<h3>Contacts</h3>",
+            "the <h3>Contacts</h3> section header is removed (replaced by the grid)");
+    }
+
+    [TestMethod]
+    public void Section_GuardiansGrid_Wires_OnViewAllContacts_To_GuardianContactsDialog()
+    {
+        // Spec 2026-07-27 §4.4 / §4.5: the per-row "View all (N) contacts"
+        // anchor (rendered by GuardianGrid in the Linked Name cell when
+        // TotalContactCount > 3) must open the read-only
+        // GuardianContactsDialog. StudentGuardiansList forwards the
+        // EventCallback; the page (Detail.razor) owns the dialog open via
+        // DialogService.ShowReadonlyDialogAsync<GuardianContactsDialog>.
+        var source = ReadDetailSource();
+
+        // The <StudentGuardiansList> element wires the callback.
+        source.Should().Contain("OnViewAllContacts=\"OnViewAllContactsAsync\"",
+            "the StudentGuardiansList forwards the 'View all' anchor click to the page");
+        // The page method opens the dialog via the read-only helper.
+        source.Should().Contain("OnViewAllContactsAsync(",
+            "the page defines an OnViewAllContactsAsync handler");
+        source.Should().Contain("ShowReadonlyDialogAsync<GuardianContactsDialog>(",
+            "the handler opens GuardianContactsDialog via the DialogServiceExtensions.ShowReadonlyDialogAsync helper");
+        // GuardianId / GuardianName / Subtitle are passed via nameof(...) keys.
+        source.Should().Contain("nameof(GuardianContactsDialog.GuardianId)",
+            "GuardianId is passed by parameter name so DialogParameters binds it to the [Parameter]");
+        source.Should().Contain("nameof(GuardianContactsDialog.GuardianName)",
+            "GuardianName is passed by parameter name");
+        source.Should().Contain("nameof(GuardianContactsDialog.Subtitle)",
+            "Subtitle is passed by parameter name");
+    }
+
+    [TestMethod]
+    public void EditGuardian_Draft_Preserves_TitleCodedValueId()
+    {
+        // The Edit guardian dialog's Title dropdown binds to
+        // Model.TitleCodedValueId, which comes from the
+        // GuardianAssignment draft built in OnEditGuardianAsync. The draft
+        // MUST carry link.TitleCodedValueId (not null) so the guardian's
+        // current title is pre-selected — a previous build passed null and
+        // the dropdown showed nothing selected.
+        var source = ReadDetailSource();
+        source.Should().Contain("TitleCodedValueId: link.TitleCodedValueId",
+            "the edit-guardian draft carries the guardian's TitleCodedValueId so the Title dropdown pre-selects it");
     }
 
     [TestMethod]
@@ -319,30 +374,25 @@ public class StudentDetailSectionsTests
     }
 
     [TestMethod]
-    public void Contacts_Section_Embeds_GuardianContactsList_Not_StudentContacts()
+    public void Contacts_Section_IsRemoved_GuardiansGridCarriesContacts()
     {
-        // The Contacts section is for GUARDIANS' contacts, not the
-        // student's own. Asserted by: the <GuardianContactsList> tag
-        // comes AFTER the <h3>Contacts</h3> heading, AND no
-        // <ContactsEditor OwnerType=Student> tag appears in that
-        // section's body.
+        // Spec 2026-07-27 §4.1: the standalone Contacts section is GONE.
+        // Guardian contacts are rendered inside the guardians grid —
+        // C1/C2/C3 columns plus the 'View all (N) contacts' anchor that
+        // opens <GuardianContactsDialog>. The view page no longer has a
+        // <h3>Contacts</h3> section header or a <GuardianContactsList>
+        // embed.
         var source = ReadDetailSource();
-        var headerStart = source.IndexOf("<h3>Contacts</h3>", StringComparison.Ordinal);
-        headerStart.Should().BeGreaterThan(-1, "the Contacts section heading exists");
-
-        // Slice from the header to the next <div class="section-header">
-        // (i.e. the start of whatever section follows Contacts) or the
-        // end of the file if Contacts is the last section.
-        var afterHeader = source.Substring(headerStart);
-        var nextSection = afterHeader.IndexOf("<div class=\"section-header\"", 1, StringComparison.Ordinal);
-        var sectionBody = nextSection > 0
-            ? afterHeader.Substring(0, nextSection)
-            : afterHeader;
-
-        sectionBody.Should().Contain("<GuardianContactsList",
-            "the Contacts section embeds the GuardianContactsList");
-        sectionBody.Should().NotContain("OwnerType=\"ContactOwnerType.Student\"",
-            "the Contacts section does NOT host the student's own ContactsEditor (that lives in the Profile card)");
+        source.Should().NotContain("<h3>Contacts</h3>",
+            "the Contacts section header is removed");
+        source.Should().NotContain("<GuardianContactsList",
+            "the GuardianContactsList embed is removed");
+        // And the replacement IS wired: the guardians grid still has the
+        // 'View all' anchor plumbing via StudentGuardiansList (regression
+        // guard against accidentally removing the wiring at the same
+        // time as the section).
+        source.Should().Contain("OnViewAllContacts=\"OnViewAllContactsAsync\"",
+            "the guardians grid still wires the 'View all' anchor to the dialog");
     }
 
     [TestMethod]

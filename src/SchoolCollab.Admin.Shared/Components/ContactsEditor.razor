@@ -28,7 +28,6 @@
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Services
@@ -50,13 +49,13 @@
                               @bind-SelectedValue="_newChannel"
                               @bind-SelectedValue:after="OnChannelChanged"
                               Placeholder="Channel"
-                              Class="contacts-channel" />
+                              Width="FieldWidth.W2" />
             @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
             {
                 <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
                                     @bind-SelectedId="_newCountryCodeId"
                                     Placeholder="Code"
-                                    Class="contacts-country-code"
+                                    Width="FieldWidth.W3"
                                     OptionText="@FormatCountryCodeOption" />
             }
             <FluentTextField @bind-Value="_newValue"

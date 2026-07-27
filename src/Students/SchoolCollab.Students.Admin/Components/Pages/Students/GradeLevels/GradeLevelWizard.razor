@@ -1693,8 +1693,12 @@
 
     private async Task OnRequestAddGuardian(Guid studentId)
     {
+        // Pass the student id so the backend excludes guardians already
+        // linked to this student (prevents double-linking). When the
+        // student is not yet persisted the backend finds no links, so
+        // nothing is excluded — harmless.
         var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
-            new GuardianPickerModel(), "Add guardians", DialogSize.Large);
+            new GuardianPickerModel(studentId), "Add guardians", DialogSize.Large);
         if (results is null) return;
         foreach (var r in results) _guardianAssignmentList?.AddAssignment(studentId, r);
         await RefreshCodedValueNamesAsync();
@@ -1706,7 +1710,7 @@
         if (drafts is null || !drafts.TryGetValue(req.StudentId, out var list) || req.Index < 0 || req.Index >= list.Count)
             return;
         var result = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
-            GuardianAssignmentModel.ForEdit(list[req.Index]), "Edit guardian", DialogSize.Medium);
+            GuardianAssignmentModel.ForEdit(list[req.Index]), "Edit guardian", DialogSize.Large);
         if (result is null) return;
         _guardianAssignmentList?.UpdateAssignment(req.StudentId, req.Index, result);
         await RefreshCodedValueNamesAsync();

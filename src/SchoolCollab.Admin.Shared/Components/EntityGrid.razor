@@ -67,7 +67,7 @@
                 }
                 @Columns
             </FluentDataGrid>
-            @if (Items.Length == 0)
+            @if (Items.Length == 0 && !string.IsNullOrWhiteSpace(EmptyMessage))
             {
                 <FluentMessageBar Intent="MessageIntent.Info" class="entity-grid-empty">@EmptyMessage</FluentMessageBar>
             }

@@ -13,3 +13,15 @@
     color: var(--neutral-foreground-hint, #6b6b6b);
     font-size: 0.9rem;
 }
+
+/* Section title for the inline Contacts editor block (mirrors the picker's
+   picker-create-contacts-label — a small uppercase label, NOT an <h3>, so
+   it doesn't duplicate the dialog title). */
+.gw-section-title {
+    margin: 10px 0 2px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-25  
 **Branch target:** `feature/guardian-grid-ux-refinement` (to be created from `main` after the current `feature/guardian-link-from-student-edit-gradelevel-wizard` branch is merged or its work is complete)  
-**Status:** Planned — implementation deferred  
+**Status:** Implemented (Commit B + picker/linked 3-contact grid + link-update event)  
 **Related plan:** [2026-07-25-guardian-link-from-student-edit-gradelevel-wizard.md](./2026-07-25-guardian-link-from-student-edit-gradelevel-wizard.md)  
 
 ---
@@ -460,11 +460,17 @@ Alternative to client-side resolution: compute the formatted name server-side in
 
 ## 14. Files to Modify
 
-**Status update** (after picker migration + 3-contact grid): Items listed in
-§4.2–§4.8 and §11 are now implemented except for the full removal of
-`Contact.IsPrimary` (deferred "Commit B"). The picker uses `GuardianGrid` in
-Picker mode with Name + 3 contact columns; the in-memory multi-contact editor
-in the New panel is implemented as `ContactsEditor.Mode=Buffered` (Option C).
+**Status update** (after picker migration + 3-contact grid + Commit B + link-update
+event): Items listed in §4.2–§4.8 and §11 are now implemented. The picker uses
+`GuardianGrid` in Picker mode with Name + 3 contact columns; the per-student
+linked list uses `GuardianGrid` Linked mode with the SAME 3 contact columns
+(preferred star on the first) plus Relationship / Primary tick / Actions;
+the in-memory multi-contact editor in the New panel is implemented as
+`ContactsEditor.Mode=Buffered` (Option C); `Contact.IsPrimary` has been fully
+removed (migration `DropContactIsPrimary`), leaving `DisplayOrder` as the
+sole ordering key; `UpdateGuardianLinkHandler` now raises a single
+`StudentGuardianUpdatedEvent` dispatched via the transactional outbox (spec
+§3.2 / §5 — no unlink+relink double event).
 
 **Domain / contracts / API (§4.9 ordering change):**
 - `src/Students/SchoolCollab.Students.Core/Domain/Contact.cs` — replace `IsPrimary` with `int DisplayOrder`; `Create`/`SetOrder`

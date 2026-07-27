@@ -304,7 +304,12 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.contacts-country-code").Should().BeEmpty();
+            // The country-code dropdown is a <CodedValueDropdown> whose
+            // underlying <fluent-select> carries the `coded-value-dropdown`
+            // base class (it used to carry a `contacts-country-code` width
+            // class before the FieldWidth enum migration — see Width="W2"
+            // on the call site). For the Email channel it is not rendered.
+            cut.FindAll("fluent-select.coded-value-dropdown").Should().BeEmpty();
         });
     }
 
@@ -318,7 +323,7 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.contacts-country-code").Should().ContainSingle();
+            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle();
         });
     }
 
@@ -332,7 +337,7 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.contacts-country-code").Should().ContainSingle();
+            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle();
         });
     }
 

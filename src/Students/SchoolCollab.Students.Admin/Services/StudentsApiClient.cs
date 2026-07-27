@@ -644,16 +644,34 @@ public sealed class StudentsApiClient : IContactsClient
         (await _http.DeleteAsync($"/students/student-subjects/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Guardians ───────────────────────────────────────────────────────────
+    // Guardian ENTITY routes (CRUD + name-history + students-for-guardian) are
+    // the root-level /guardians group (StudentEndpoints.cs:
+    //   var guardiansGroup = app.MapGroup("/guardians"); guardiansGroup.MapGuardianRoutes();),
+    // NOT a /students/guardians sub-resource — a guardian is an independent
+    // entity shared across students. The earlier client wrongly prefixed these
+    // with /students and the resulting 405 surfaced when adding a guardian on
+    // student edit (CreateGuardianAsync POST /students/guardians → no such
+    // route). The student↔guardian LINK routes below ARE nested at
+    // /students/{studentId}/guardians (a relationship under the student).
+    // Mirrors the /contacts convention (see the contacts comment below).
 
-    public async Task<GuardianDto[]?> ListGuardiansAsync(CancellationToken ct = default, string? search = null)
+    public async Task<GuardianDto[]?> ListGuardiansAsync(CancellationToken ct = default, string? search = null, Guid? excludeStudentId = null)
     {
-        var url = string.IsNullOrWhiteSpace(search) ? "/students/guardians" : $"/students/guardians?search={Uri.EscapeDataString(search)}";
+        // Build the query string from whichever optional filters are set.
+        // excludeStudentId hides guardians already linked to that student
+        // (server-side exclusion) so the picker cannot double-link.
+        var parts = new List<string>(2);
+        if (!string.IsNullOrWhiteSpace(search))
+            parts.Add($"search={Uri.EscapeDataString(search)}");
+        if (excludeStudentId is { } sid)
+            parts.Add($"excludeStudentId={sid:D}");
+        var url = parts.Count == 0 ? "/guardians" : $"/guardians?{string.Join('&', parts)}";
         return await _http.GetFromJsonAsync<GuardianDto[]>(url, ct);
     }
 
     public async Task<GuardianDto?> GetGuardianByIdAsync(Guid id, CancellationToken ct = default)
     {
-        var response = await _http.GetAsync($"/students/guardians/{id}", ct);
+        var response = await _http.GetAsync($"/guardians/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<GuardianDto>(ct);
@@ -661,23 +679,23 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task<Guid> CreateGuardianAsync(CreateGuardianRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/students/guardians", req, ct);
+        var response = await _http.PostAsJsonAsync("/guardians", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
     public async Task UpdateGuardianAsync(Guid id, UpdateGuardianRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/students/guardians/{id}", req, ct)).EnsureSuccessStatusCode();
+        (await _http.PutAsJsonAsync($"/guardians/{id}", req, ct)).EnsureSuccessStatusCode();
 
     public async Task DeleteGuardianAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/students/guardians/{id}", ct)).EnsureSuccessStatusCode();
+        (await _http.DeleteAsync($"/guardians/{id}", ct)).EnsureSuccessStatusCode();
 
     public async Task<GuardianNameHistoryDto[]?> GetGuardianNameHistoryAsync(Guid id, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GuardianNameHistoryDto[]>($"/students/guardians/{id}/name-history", ct);
+        await _http.GetFromJsonAsync<GuardianNameHistoryDto[]>($"/guardians/{id}/name-history", ct);
 
     public async Task<StudentDto[]?> ListStudentsForGuardianAsync(Guid guardianId, CancellationToken ct = default) =>
-        await EnrichStudentsAsync(await _http.GetFromJsonAsync<StudentDto[]>($"/students/guardians/{guardianId}/students", ct), ct);
+        await EnrichStudentsAsync(await _http.GetFromJsonAsync<StudentDto[]>($"/guardians/{guardianId}/students", ct), ct);
 
     // ── Student ↔ Guardian links ─────────────────────────────────────────────
 

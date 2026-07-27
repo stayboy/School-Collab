@@ -198,17 +198,9 @@
                                                RelationshipNameLookup="ResolveRelName"
                                                SalutationLookup="ResolveSalutation"
                                                OnEdit="OnEditGuardianAsync"
-                                               OnRemove="OnRemoveGuardianAsync" />
+                                               OnRemove="OnRemoveGuardianAsync"
+                                               OnViewAllContacts="OnViewAllContactsAsync" />
 
-                        @* ── Contacts (embedded, not in a tab) — guardians & their
-                           contacts. The student's own direct contact is inside
-                           the Profile card above. This section answers "how do
-                           I reach this student's guardians?" — one card per
-                           linked guardian, with all their channels (primary
-                           anchored, others de-emphasized). Edits to a
-                           guardian's contact happen on GuardianDetail.razor. *@
-                        <div class="section-header"><h3>Contacts</h3></div>
-                        <GuardianContactsList StudentId="Id" />
                     }
                 </ChildContent>
                 <Fallback>
@@ -513,7 +505,7 @@
         try
         {
             var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
-                new GuardianPickerModel(), "Manage guardians", DialogSize.Large);
+                new GuardianPickerModel(Id), "Manage guardians", DialogSize.Large);
             if (results is null) return;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;
@@ -588,8 +580,10 @@
         {
             // The shared <GuardianFormDialog> (used by the wizard's
             // per-link edit) collects Title / First / Last /
-            // Relationship / Preferred contact — not Role or the
-            // emergency flag. We pre-populate it from the
+            // Relationship — not Role or the emergency flag, and not
+            // contacts (contacts are managed on GuardianDetail.razor;
+            // the dialog carries the draft's Contacts through unchanged).
+            // We pre-populate it from the
             // <see cref="StudentGuardianViewDto"/> read shape (the
             // <c>GuardianAssignment</c> draft is the wizard's per-link
             // payload, with Role defaulting to Primary since the
@@ -604,11 +598,11 @@
                 link.FirstName,
                 link.LastName,
                 link.RelationshipCodedValueId,
-                null,
-                null,
-                null);
+                ContactChannel: null,
+                ContactValue: null,
+                TitleCodedValueId: link.TitleCodedValueId);
             var result = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
-                GuardianAssignmentModel.ForEdit(draft), "Edit guardian", DialogSize.Medium);
+                GuardianAssignmentModel.ForEdit(draft), "Edit guardian", DialogSize.Large);
             if (result is null) return;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;
@@ -646,6 +640,47 @@
         {
             await InvokeAsync(StateHasChanged);
         }
+    }
+
+    /// <summary>
+    /// Opens the read-only <see cref="GuardianContactsDialog"/> for a
+    /// guardian whose row shows the <c>View all (N) contacts</c> anchor
+    /// (TotalContactCount &gt; 3 — spec 2026-07-27 §4.4 / §4.5). The
+    /// grid raises this callback; the page owns the dialog open since
+    /// <see cref="StudentGuardiansList"/> is presentational only.
+    /// Title is the salutation-aware guardian name; subtitle is
+    /// <c>"Relationship · Role"</c> when the relationship name resolves,
+    /// otherwise just the role. Mirrors the name-format used by the
+    /// guardians grid (title + DisplayName-or-First+Last).
+    /// </summary>
+    private async Task OnViewAllContactsAsync(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto link)
+    {
+        if (_disposed) return;
+
+        // Mirrors StudentGuardiansList.FormatGuardianName: prefer
+        // DisplayName; fall back to "First Last"; prepend salutation.
+        var baseName = string.IsNullOrWhiteSpace(link.DisplayName)
+            ? $"{link.FirstName} {link.LastName}".Trim()
+            : link.DisplayName;
+        var titleText = ResolveSalutation(link.TitleCodedValueId) is { } salutation
+                       && !string.IsNullOrWhiteSpace(salutation)
+            ? $"{salutation} {baseName}"
+            : baseName;
+
+        var relName = ResolveRelName(link.RelationshipCodedValueId);
+        var subtitle = string.IsNullOrWhiteSpace(relName)
+            ? link.Role.ToString()
+            : $"{relName} · {link.Role}";
+
+        var parameters = new Dictionary<string, object?>
+        {
+            { nameof(GuardianContactsDialog.GuardianId), link.GuardianId },
+            { nameof(GuardianContactsDialog.GuardianName), titleText },
+            { nameof(GuardianContactsDialog.Subtitle), subtitle },
+        };
+
+        await DialogService.ShowReadonlyDialogAsync<GuardianContactsDialog>(
+            titleText, parameters, DialogSize.Medium);
     }
 
     private async Task LoadGuardiansAsync(CancellationToken ct)

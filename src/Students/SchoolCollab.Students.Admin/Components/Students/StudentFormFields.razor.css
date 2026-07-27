@@ -15,22 +15,16 @@
     max-width: 600px;
 }
 
-/* ── Per-input widths ──
-   Each input's intrinsic width is sized to the expected value length.
-   The FormRow input cell is flex:1 (fills the column) but each input
-   claims only as much horizontal space as it needs, left-aligned. DOB
-   is narrow because a date picker only needs ~150px; student number is
-   a little wider so the placeholder "e.g. S-2026-001" is visible;
-   email takes the full input cell; phone sits between them. The
-   name pair splits the cell equally via flex:1 on each FluentTextField.
-   max-width: 100% is a safety net so an unexpectedly long value can't
-   blow out the column. */
-.student-form-input--student-number { width: 220px; max-width: 100%; }
-.student-form-input--dob { width: 160px; max-width: 100%; }
-.student-form-input--email { width: 100%; }
-.student-form-input--phone { width: 200px; max-width: 100%; }
-.student-form-input--gender { width: 260px; max-width: 100%; }
-.student-form-input--name { flex: 1 1 0; min-width: 0; }
+/* ── Per-input widths ── now driven by the repo-wide W1–W9 ladder.
+   Each input uses a `w-N` class (FluentTextField / FluentDatePicker) or
+   the `Width` enum (CodedValueDropdown — emits an inline style that beats
+   this scoped stylesheet) from src/SchoolCollab.Admin.Shared/Components/
+   FieldWidth.cs. The previous per-input fixed-width rules
+   (.student-form-input--student-number/dob/email/phone/gender/name)
+   were removed when the call sites switched to the ladder — do not
+   reintroduce them. See the `input-width-scale` skill for the map:
+     student-number → w-5 (240px), name (×2) → w-9 (fill),
+     dob → w-3 (160px), gender → Width=FieldWidth.W6 (280px). */
 
 /* ── Error message ──
    Sits between the last field and the action-row separator. A small

@@ -61,7 +61,7 @@
                              ReadOnly="@ReadOnlyStudentNumber"
                              Required="@(!ReadOnlyStudentNumber)"
                              Placeholder="e.g. S-2026-001"
-                             class="student-form-input--student-number" />
+                             class="w-5" />
         </FormRow>
 
         @* Name. First + last sit side-by-side inside the input cell. *@
@@ -70,11 +70,11 @@
                              @bind-Value="Model.FirstName"
                              Required
                              Placeholder="First name"
-                             class="student-form-input--name" />
+                             class="w-9" />
             <FluentTextField @bind-Value="Model.LastName"
                              Required
                              Placeholder="Last name"
-                             class="student-form-input--name" />
+                             class="w-9" />
         </FormRow>
 
         @* Date of birth. FluentDatePicker binds to DateTime?, so we
@@ -86,7 +86,7 @@
                               Value="@DateOfBirthAsDateTime"
                               ValueChanged="@OnDateOfBirthChanged"
                               Required
-                              class="student-form-input--dob" />
+                              class="w-3" />
         </FormRow>
 
         @* Gender. Required coded-value dropdown for the GENDER parent
@@ -98,7 +98,7 @@
             <CodedValueDropdown Parent="CodedValueParent.Genders"
                                 @bind-SelectedId="Model.GenderCodedValueId"
                                 Placeholder="Select gender"
-                                class="student-form-input--gender" />
+                                Width="FieldWidth.W4" />
         </FormRow>
 
         @* Guardians section. Two modes (gated by the Mode parameter):

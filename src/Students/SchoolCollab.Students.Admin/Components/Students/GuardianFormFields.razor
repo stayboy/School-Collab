@@ -31,8 +31,6 @@
    docs/plans/2026-07-17-country-codes-for-contacts.md). The default
    selection is Ghana (+233) when the dropdown first appears. *@
 @using SchoolCollab.Students.Core.Domain
-@using SchoolCollab.Students.Core.DTOs
-@using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
@@ -44,7 +42,8 @@
     <FormRow Label="Title">
         <CodedValueDropdown Parent="CodedValueParent.Salutations"
                             @bind-SelectedId="Model.TitleCodedValueId"
-                            Placeholder="Optional" />
+                            Placeholder="Optional"
+                            Width="FieldWidth.W3" />
     </FormRow>
 
     <FormRow Label="Name" Required For="guardianFormFirst">
@@ -61,7 +60,8 @@
     <FormRow Label="Relationship">
         <CodedValueDropdown Parent="CodedValueParent.Relationships"
                             @bind-SelectedId="Model.RelationshipCodedValueId"
-                            Placeholder="Select relationship" />
+                            Placeholder="Select relationship"
+                            Width="FieldWidth.W4" />
     </FormRow>
 
     @if (ShowContactFields)
@@ -99,12 +99,16 @@
     /// <summary>When true (default), renders the single-contact rows
     /// (Preferred contact + Contact value) bound to
     /// <c>Model.ContactChannel/ContactValue/CountryCode</c>. When false,
-    /// those rows are omitted — the parent supplies a multi-contact
-    /// editor (<c>&lt;ContactsEditor Mode=Buffered&gt;</c>) instead. The
-    /// picker's New panel sets this to false so a guardian can be created
-    /// with multiple contacts (SMS + email + ...); other callers
-    /// (<c>GuardianFormDialog</c>, <c>StudentFormFields</c> inline create)
-    /// keep the default and use the single-contact shortcut.</summary>
+    /// those rows are omitted. The picker's New panel sets this to false
+    /// and supplies a multi-contact editor (<c>&lt;ContactsEditor
+    /// Mode=Buffered&gt;</c>) so a guardian can be created with multiple
+    /// contacts (SMS + email + ...). <c>GuardianFormDialog</c> (edit) also
+    /// sets this to false — editing a guardian does not collect contacts
+    /// (contacts are managed on <c>GuardianDetail.razor</c> for existing
+    /// guardians, or captured at create time via the picker); the dialog
+    /// carries the model's <c>Contacts</c> through unchanged. Only
+    /// <c>StudentFormFields</c> inline create keeps the default and uses
+    /// the single-contact shortcut.</summary>
     [Parameter] public bool ShowContactFields { get; set; } = true;
 
     /// <summary>Country calling-code options (loaded lazily when a phone

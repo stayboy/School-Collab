@@ -72,9 +72,9 @@
                               Mode="GuardianGridMode.Picker"
                               Items="_items"
                               Loading="_loading"
-                              EmptyMessage="@_emptyMessage"
+                              EmptyMessage=""
                               ShowSearch="true"
-                              Search="_search"
+                              Search="@_search"
                               SearchChanged="@OnSearchChanged"
                               SearchPlaceholder="Search guardians by name"
                               Selected="_picked"
@@ -156,7 +156,6 @@
     private string _search = string.Empty;
     private GuardianDto[] _items = [];
     private bool _loading;
-    private string _emptyMessage = "No guardians found.";
     private Dictionary<object, GuardianDto> _picked = new();
     private readonly Dictionary<Guid, GuardianAssignment> _pendingNew = new();
     private readonly HashSet<Guid> _newGuardianIds = new();
@@ -317,8 +316,12 @@
         _loading = true;
         try
         {
+            // Exclusion of already-linked guardians is done SERVER-SIDE via
+            // ListGuardians.ExcludeStudentId (passed from the caller's
+            // GuardianPickerModel) so the picker never even receives them.
             _items = WithSyntheticRows(await StudentsApi.ListGuardiansAsync(
-                ct, string.IsNullOrWhiteSpace(search) ? null : search) ?? []);
+                ct, string.IsNullOrWhiteSpace(search) ? null : search,
+                Model.ExcludeStudentId) ?? []);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -392,13 +395,17 @@
 
     /// <summary>Same as the grid's contact formatter but returns null
     /// (instead of "—") when the guardian has no contact, so the pill
-    /// subtitle builder can skip the contact part cleanly.</summary>
+    /// subtitle builder can skip the contact part cleanly. Uses the
+    /// first contact by display order (index 0 = preferred) from
+    /// <see cref="GuardianDto.Contacts"/>.</summary>
     private static string? FormatContactOrNull(GuardianDto g)
     {
-        if (string.IsNullOrWhiteSpace(g.PrimaryContactValue)) return null;
-        return !string.IsNullOrWhiteSpace(g.PrimaryContactCountryCode)
-            ? $"{g.PrimaryContactCountryCode} {g.PrimaryContactValue}"
-            : g.PrimaryContactValue!;
+        if (g.Contacts is null || g.Contacts.Count == 0) return null;
+        var c = g.Contacts[0];
+        if (string.IsNullOrWhiteSpace(c.Value)) return null;
+        return !string.IsNullOrWhiteSpace(c.CountryCode)
+            ? $"{c.CountryCode} {c.Value}"
+            : c.Value;
     }
 
     /// <summary>Formats a picked guardian's pill subtitle. For a new
@@ -432,12 +439,24 @@
     private GuardianDto[] WithSyntheticRows(GuardianDto[] apiItems)
     {
         if (_pendingNew.Count == 0) return apiItems;
-        var synthetics = _pendingNew.Select(kv => new GuardianDto(
-            kv.Key, kv.Value.TitleCodedValueId,
-            kv.Value.FirstName, kv.Value.LastName,
-            null, null, null, false,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-            kv.Value.ContactChannel, kv.Value.ContactValue, kv.Value.CountryCode)).ToArray();
+        var synthetics = _pendingNew.Select(kv =>
+        {
+            // The synthetic row shows up to 3 contacts (C1/C2/C3) from the
+            // in-memory assignment so the grid reflects what the user just
+            // entered (the guardian isn't persisted yet). GuardianDto no
+            // longer carries single PrimaryContact* scalars — Contacts is
+            // the only contact surface.
+            var summaries = (kv.Value.Contacts ?? Array.Empty<ContactModel>())
+                .OrderBy(c => c.Order).Take(3)
+                .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
+                .ToList();
+            return new GuardianDto(
+                kv.Key, kv.Value.TitleCodedValueId,
+                kv.Value.FirstName, kv.Value.LastName,
+                null, null, null, false,
+                DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+            { Contacts = summaries.AsReadOnly() };
+        }).ToArray();
         return synthetics.Concat(apiItems).ToArray();
     }
 
@@ -553,10 +572,7 @@
             tempId, _newGuardian.TitleCodedValueId,
             _newGuardian.FirstName!.Trim(), _newGuardian.LastName!.Trim(),
             null, null, null, false,
-            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-            preferredChannel,
-            preferredValue,
-            preferredCountryCode)
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
         { Contacts = contactSummaries.AsReadOnly() };
         _items = new[] { synthetic }.Concat(_items).ToArray();
         _picked[tempId] = synthetic;

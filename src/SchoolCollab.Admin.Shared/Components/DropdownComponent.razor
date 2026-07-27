@@ -76,6 +76,7 @@
               Label="@Label"
               Placeholder="@(Placeholder ?? "Select…")"
               Disabled="@Disabled"
+              Style="@EffectiveStyle"
               class="@EffectiveClass" />
 
 @code {
@@ -96,6 +97,17 @@
 
     /// <summary>CSS class to apply to the dropdown component.</summary>
     [Parameter] public string? Class { get; set; }
+
+    /// <summary>Fixed input width from the repo's W1–W9 ladder
+    /// (see <see cref="FieldWidth"/>). When set, emits an inline
+    /// <c>style</c> on the underlying <see
+    /// cref="Microsoft.FluentUI.AspNetCore.Components.FluentSelect"/> so the
+    /// width always wins over this wrapper's scoped
+    /// <c>.dropdown-component { width: ... }</c> default. Takes precedence
+    /// over any width set via <see cref="Class"/>. Leave null to let the
+    /// consumer's <see cref="Class"/> or the wrapper default control the
+    /// width.</summary>
+    [Parameter] public FieldWidth? Width { get; set; }
 
     /// <summary>Disables the dropdown independently of any other state.</summary>
     [Parameter] public bool Disabled { get; set; }
@@ -138,6 +150,11 @@
     private string EffectiveClass => string.IsNullOrWhiteSpace(Class)
         ? "dropdown-component"
         : $"{Class} dropdown-component";
+
+    /// <summary>Inline <c>style</c> emitted when <see cref="Width"/> is set;
+    /// null otherwise (so no empty <c>style=""</c> attribute is rendered).
+    /// </summary>
+    private string? EffectiveStyle => Width?.ToCssStyle();
 
     protected override void OnParametersSet()
     {

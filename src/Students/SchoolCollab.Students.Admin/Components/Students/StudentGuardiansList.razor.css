@@ -12,7 +12,7 @@
 /* Name cell: the guardian's name + an optional "Emergency" badge sit
    inline with a small gap. Keeps the emergency flag visible without
    dedicating a whole column to it (the grid already surfaces Name,
-   Relationship, Preferred contact, Contact value, Role, Actions). */
+   Relationship, up to 3 contact columns, Primary tick, Actions). */
 .guardian-name-cell {
     display: inline-flex;
     align-items: center;

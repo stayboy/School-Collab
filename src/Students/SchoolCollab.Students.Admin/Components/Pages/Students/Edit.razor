@@ -527,7 +527,7 @@
         try
         {
             var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
-                new GuardianPickerModel(), "Manage guardians", DialogSize.Large);
+                new GuardianPickerModel(Id), "Manage guardians", DialogSize.Large);
             if (results is null) return;
 
             var ct = _loadCts?.Token ?? CancellationToken.None;

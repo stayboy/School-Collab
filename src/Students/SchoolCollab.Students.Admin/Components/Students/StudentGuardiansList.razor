@@ -12,10 +12,13 @@
        re-nesting would be invalid HTML; the existing dialog-ui skill
        explicitly forbids nested EditForms / nested dialogs).
 
-   The 6-column structure is now delegated to the shared
+   The column structure is now delegated to the shared
    <see cref="GuardianGrid{TItem}"/> component (spec §4.7 / goal #5) so
    the linked list and the picker share the same column profile, header
-   titles, and cell formatting. This wrapper still owns:
+   titles, and cell formatting — including up to 3 contact columns titled
+   C1, C2, C3 (same as Picker; C1 is the lowest-DisplayOrder contact; no
+   per-contact star icon — preferred is conveyed by column order only).
+   This wrapper still owns:
      - the loading-spinner / empty-state UX (the grid only renders
        when Items is non-null AND non-empty)
      - the parent-supplied relationship-name + salutation lookups
@@ -53,13 +56,13 @@ else
                       GetDisplayName="@(g => FormatGuardianName(g))"
                       GetName="@(g => FormatGuardianName(g))"
                       GetRelationshipName="@(g => ResolveRelName(g))"
-                      GetContactChannel="@(g => g.PrimaryContactChannel)"
-                      GetContactValue="@(g => g.PrimaryContactValue)"
-                      GetContactCountryCode="@(g => g.PrimaryContactCountryCode)"
+                      GetContacts="@(g => g.Contacts)"
                       GetIsPrimaryLink="@(g => g.Role == GuardianRole.Primary)"
                       GetIsEmergencyContact="@(g => g.IsEmergencyContact)"
+                      GetTotalContactCount="@(g => g.TotalContactCount)"
                       OnEdit="OnEdit"
-                      OnRemove="OnRemove" />
+                      OnRemove="OnRemove"
+                      OnViewAllContacts="OnViewAllContacts" />
     </div>
 }
 
@@ -101,6 +104,15 @@ else
     /// every page-side flow. The page calls
     /// <c>UnlinkGuardianAsync</c> and reloads.</summary>
     [Parameter] public EventCallback<StudentGuardianViewDto> OnRemove { get; set; }
+
+    /// <summary>Fired when the user clicks the per-row
+    /// <c>View all (N) contacts</c> anchor in the Name cell (only for
+    /// guardians with &gt; 3 contacts; rendered by
+    /// <c>GuardianGrid</c> using <see cref="StudentGuardianViewDto.TotalContactCount"/>).
+    /// The page opens <c>GuardianContactsDialog</c> for the row's
+    /// guardian (spec 2026-07-27 §4.4 / §4.5). Not delegated to →
+    /// the anchor is hidden (Linked Name cell shows em-dash).</summary>
+    [Parameter] public EventCallback<StudentGuardianViewDto> OnViewAllContacts { get; set; }
 
     /// <summary>Spec §4.8: format a linked guardian's displayed name
     /// with the salutation prepended when both the id and the lookup

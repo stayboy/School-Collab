@@ -59,6 +59,17 @@
 /* ── Enrollments table ─────────────────────────────────────────────── */
 .enrollments-grid { width: 100%; }
 
+/* ── Equal-length grids on the student view page ───────────────────────
+   Enrollments and Guardians sit in the same detail-card, one above the
+   other. Give both grids the same min-height (header + ~3 rows) so the
+   two sections present a balanced footprint regardless of how many rows
+   each currently has. The enrollments grid carries the .enrollments-grid
+   class directly; the guardians grid is the <fluent-data-grid> inside
+   StudentGuardiansList -> EntityGrid, reached via ::deep. Keep the two
+   min-heights in sync. */
+.enrollments-grid { min-height: 220px; }
+::deep .student-guardians-list fluent-data-grid { min-height: 220px; }
+
 /* Right-align the row-level Actions column and keep the buttons compact
    so they don't push the other columns wider than needed. The
    [appearance="lightweight"] selector reaches the underlying

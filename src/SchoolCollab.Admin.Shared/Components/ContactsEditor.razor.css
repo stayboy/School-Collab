@@ -17,13 +17,11 @@
     gap: 8px;
 }
 
-.contacts-channel {
-    width: 100px;
-}
-
-.contacts-country-code {
-    width: 120px;
-}
+/* Channel + country-code dropdown widths are now driven by the FieldWidth
+   enum (Width="FieldWidth.W1" / W2) on <DropdownForEnum> / <CodedValueDropdown>,
+   which emits an inline style that beats this scoped stylesheet. The old
+   .contacts-channel / .contacts-country-code fixed-width rules were removed
+   when the call sites switched to the enum — do not reintroduce them. */
 
 .contacts-value {
     flex: 1 1 320px;

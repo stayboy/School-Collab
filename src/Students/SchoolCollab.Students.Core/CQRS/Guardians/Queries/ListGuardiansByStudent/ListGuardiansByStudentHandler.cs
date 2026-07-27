@@ -57,20 +57,32 @@ public sealed class ListGuardiansByStudentHandler(
                     .GroupBy(c => c.OwnerId)
                     .ToDictionary(
                         g => g.Key,
-                        g => g.OrderBy(c => c.DisplayOrder)
-                              .Take(3)
-                              .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
-                              .ToList());
+                        g => new
+                        {
+                            // Top 3 by display order for the inline C1/C2/C3 cells.
+                            Top = g.OrderBy(c => c.DisplayOrder)
+                                   .Take(3)
+                                   .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
+                                   .ToList(),
+                            // All non-deleted contacts for this guardian (NOT capped
+                            // at 3). Drives the "View all (N) contacts" anchor in the
+                            // student-view grid (shown only when Total > 3). Computed
+                            // from the already-materialized group, so no extra query.
+                            Total = g.Count(),
+                        });
 
                 return rows.Select(r =>
                 {
-                    var list = contactsByOwner.TryGetValue(r.GuardianId, out var l) ? l : null;
-                    var c = list?.FirstOrDefault();
+                    var entry = contactsByOwner.TryGetValue(r.GuardianId, out var e) ? e : null;
+                    var list = entry?.Top;
                     return new StudentGuardianViewDto(
                         r.GuardianId, r.StudentId, r.Role, r.RelationshipCodedValueId,
-                        r.IsEmergencyContact, r.FirstName, r.LastName, r.DisplayName, r.TitleCodedValueId,
-                        c?.Channel, c?.Value, c?.CountryCode)
-                    { Contacts = (IReadOnlyList<GuardianContactViewDto>?)list?.AsReadOnly() ?? System.Array.Empty<GuardianContactViewDto>() };
+                        r.IsEmergencyContact, r.FirstName, r.LastName, r.DisplayName, r.TitleCodedValueId)
+                    {
+                        Contacts = (IReadOnlyList<GuardianContactViewDto>?)list?.AsReadOnly()
+                                   ?? System.Array.Empty<GuardianContactViewDto>(),
+                        TotalContactCount = entry?.Total ?? 0,
+                    };
                 }).ToArray();
             },
             CacheOptions,

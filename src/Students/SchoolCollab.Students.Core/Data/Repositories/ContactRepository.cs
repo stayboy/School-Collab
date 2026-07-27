@@ -23,7 +23,24 @@ internal sealed class ContactRepository(StudentsDbContext db)
     public async Task SetOrderAsync(Guid contactId, int order, CancellationToken cancellationToken = default)
     {
         var target = await Db.Contacts.FirstAsync(c => c.Id == contactId, cancellationToken);
-        target.SetDisplayOrder(order);
+
+        // Spec §4.9: setting a contact's order is a "move to position"
+        // operation — the owner's other contacts shift to fill the gap,
+        // preserving their relative order. Renumber the owner's full
+        // contact list 0..n-1 with the target inserted at the new position.
+        var ownerContacts = await Db.Contacts
+            .Where(c => c.OwnerType == target.OwnerType && c.OwnerId == target.OwnerId && !c.IsDeleted)
+            .OrderBy(c => c.DisplayOrder)
+            .ToListAsync(cancellationToken);
+
+        var others = ownerContacts.Where(c => c.Id != target.Id).ToList();
+        var insertAt = Math.Clamp(order, 0, others.Count);
+        others.Insert(insertAt, target);
+        for (var i = 0; i < others.Count; i++)
+        {
+            others[i].SetDisplayOrder(i);
+        }
+
         await Db.SaveChangesAsync(cancellationToken);
     }
 

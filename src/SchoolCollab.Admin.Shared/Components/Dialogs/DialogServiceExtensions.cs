@@ -75,4 +75,54 @@ public static class DialogServiceExtensions
         if (result.Cancelled) return null;
         return result.Data is DialogShellResult<TResult> r ? r.Value : null;
     }
+
+    /// <summary>
+    /// Shows a read-only dialog (a plain <see cref="ComponentBase"/> that is
+    /// NOT a <see cref="DialogShellBase{TModel, TResult}"/>) with the same
+    /// shell chrome every shell dialog uses (title + width + no
+    /// PrimaryAction/SecondaryAction + PreventDismissOnOverlayClick = true).
+    /// Used to open presentational components that have no model, no OK/Cancel
+    /// result, and dismiss themselves via the cascading
+    /// <c>FluentDialog</c> reference (e.g. <c>GuardianContactsDialog</c> in
+    /// the student view's "View all (N) contacts" anchor flow).
+    /// </summary>
+    /// <typeparam name="TComponent">The dialog content type. Must be a
+    /// <see cref="ComponentBase"/> AND implement
+    /// <c>IDialogContentComponent&lt;DialogParameters&gt;</c> (an empty
+    /// marker interface — the component receives its entries as
+    /// <c>[Parameter]</c> properties, no separate Content payload needed).
+    /// </typeparam>
+    /// <param name="title">Dialog title (rendered in the FluentDialog header).</param>
+    /// <param name="parameters">Content parameters (key = parameter name,
+    /// value = value). Pass <c>nameof(TComponent.MyProperty)</c> keys. Each
+    /// entry is added to <see cref="DialogParameters"/> via its indexer;
+    /// FluentUI binds indexer entries to the content component's
+    /// <c>[Parameter]</c> properties.</param>
+    /// <param name="size">One of the four fixed <see cref="DialogSize"/>
+    /// widths. Default <see cref="DialogSize.Medium"/> (640px) — read-only
+    /// dialogs typically carry more body than a 3-field form.</param>
+    /// <returns>The <see cref="IDialogReference"/>. Callers may ignore it
+    /// (the dialog dismisses itself) or await <c>dialog.Result</c>.</returns>
+    public static async Task<IDialogReference> ShowReadonlyDialogAsync<TComponent>(
+        this IDialogService dialogService,
+        string title,
+        IDictionary<string, object?> parameters,
+        DialogSize size = DialogSize.Medium)
+        where TComponent : ComponentBase, IDialogContentComponent<DialogParameters>
+    {
+        // Build a single DialogParameters carrying both the shell chrome
+        // (Title/Width/etc.) and the content parameter entries. FluentUI
+        // binds indexer entries to the content's [Parameter]s the same way
+        // it binds the typed Title/Width/PrimaryAction/etc. properties.
+        // The same instance is passed as both the TData content (the
+        // dialog component's IDialogContentComponent.Content) and the
+        // DialogParameters argument — the dialog ignores Content and
+        // reads everything via [Parameter].
+        var dialogParams = BuildShellParameters(title, size);
+        foreach (var kvp in parameters)
+        {
+            dialogParams[kvp.Key] = kvp.Value;
+        }
+        return await dialogService.ShowDialogAsync<TComponent, DialogParameters>(dialogParams, dialogParams);
+    }
 }
