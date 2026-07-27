@@ -83,7 +83,7 @@
                     <ul class="guardian-contact-list">
                         @foreach (var c in item.Contacts)
                         {
-                            <li class="@(c.IsPrimary ? "guardian-contact-row guardian-contact-row--primary" : "guardian-contact-row")">
+                            <li class="@(c.DisplayOrder == 0 ? "guardian-contact-row guardian-contact-row--primary" : "guardian-contact-row")">
                                 <span class="guardian-contact-channel" title="@c.Channel">@ChannelGlyph(c.Channel) @c.Channel</span>
                                 <span class="guardian-contact-value">@c.Value</span>
                                 @if (!string.IsNullOrWhiteSpace(c.Label))
@@ -91,7 +91,7 @@
                                     <span class="muted guardian-contact-label">(@c.Label)</span>
                                 }
                                 <span class="guardian-contact-badges">
-                                    @if (c.IsPrimary)
+                                    @if (c.DisplayOrder == 0)
                                     {
                                         <FluentBadge Appearance="Appearance.Accent" Class="guardian-contact-badge">Primary</FluentBadge>
                                     }
@@ -213,11 +213,8 @@
 
                 // Sort: lowest DisplayOrder first (preferred contact), then verified, then
                 // by channel order (Email, SMS, WhatsApp) for stable display.
-                // Spec §4.9: DisplayOrder is the new primary ordering key;
-                // IsPrimary is kept as a tiebreaker for the additive phase.
                 var sorted = contacts
                     .OrderBy(c => c.DisplayOrder)
-                    .ThenByDescending(c => c.IsPrimary)
                     .ThenByDescending(c => c.IsVerified)
                     .ThenBy(c => c.Channel)
                     .ToList();

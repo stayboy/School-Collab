@@ -65,12 +65,6 @@
             <FluentTextField @bind-Value="_newLabel"
                               Placeholder="Label (optional)"
                               class="contacts-label" />
-            @if (Mode == EditorMode.Live)
-            {
-                <FluentCheckbox @bind-Value="_newIsPrimary" class="contacts-primary">
-                    Primary
-                </FluentCheckbox>
-            }
             <FluentButton Appearance="Appearance.Accent"
                           IconStart="@FluentIcons.Add"
                           OnClick="AddAsync"
@@ -148,13 +142,6 @@
                                           IconStart="@FluentIcons.ChevronDown"
                                           Disabled="@(IsLast(c))"
                                           OnClick="@(() => MoveDownAsync(c.Key))" />
-                            @if (!c.IsPreferred)
-                            {
-                                <FluentButton Appearance="Appearance.Lightweight"
-                                              Title="@(Mode == EditorMode.Live ? "Set as primary" : "Mark as preferred")"
-                                              IconStart="@FluentIcons.Star"
-                                              OnClick="@(() => MakePreferredAsync(c.Key))" />
-                            }
                             <FluentButton Appearance="Appearance.Lightweight"
                                           Title="Remove contact"
                                           IconStart="@FluentIcons.Delete"
@@ -225,7 +212,6 @@
     private CodedValueDto[]? _countryCodeOptions;
     private string _newValue = string.Empty;
     private string _newLabel = string.Empty;
-    private bool _newIsPrimary;
 
     private string ValuePlaceholder => _newChannel switch
     {
@@ -289,7 +275,7 @@
             }
             return _contacts.Select(x => new ContactRow(
                                x.Id, x.Channel, x.Value, x.Label,
-                               x.CountryCode, x.IsPrimary, x.IsVerified,
+                               x.CountryCode, x.DisplayOrder == 0, x.IsVerified,
                                x.DisplayOrder))
                             .ToList();
         }
@@ -426,8 +412,8 @@
         {
             await Api.AddContactAsync(new AddContactRequest(
                 OwnerType, OwnerId, _newChannel, _newValue.Trim(),
-                string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
-                _newIsPrimary) { CountryCode = countryCode }, MutationToken);
+                string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim())
+                { CountryCode = countryCode, DisplayOrder = _contacts.Count }, MutationToken);
             ResetAddForm();
             await LoadAsync();
         }
@@ -449,7 +435,6 @@
     {
         _newValue = string.Empty;
         _newLabel = string.Empty;
-        _newIsPrimary = false;
         _newChannel = ContactChannel.Email;
         _newCountryCodeId = null;
     }
@@ -544,38 +529,6 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to reorder contacts for {OwnerType} {OwnerId}", OwnerType, OwnerId);
-            _error = ex.Message;
-            if (!_disposed) await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    // ─── Make preferred / set primary ──────────────────────────────────
-    private async Task MakePreferredAsync(Guid key)
-    {
-        if (Mode == EditorMode.Buffered)
-        {
-            var list = Contacts;
-            if (list is null) return;
-            var target = list.FirstOrDefault(x => x.TempId == key);
-            if (target is null) return;
-            var others = list.Where(x => x != target).OrderBy(x => x.Order).ToList();
-            target.Order = 0;
-            for (var i = 0; i < others.Count; i++) others[i].Order = i + 1;
-            await NotifyChangedAsync();
-            return;
-        }
-
-        _error = null;
-        try
-        {
-            await Api.SetPrimaryContactAsync(key, MutationToken);
-            await LoadAsync();
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to set primary contact {ContactId}", key);
             _error = ex.Message;
             if (!_disposed) await InvokeAsync(StateHasChanged);
         }

@@ -36,7 +36,7 @@ public sealed class ListContactsHandler(
                     .ToArrayAsync(ct);
 
                 return results.Select(c => new ContactDto(
-                    c.Id, c.OwnerType, c.OwnerId, c.Channel, c.Value, c.Label, c.IsPrimary, c.IsVerified, c.IsDeleted,
+                    c.Id, c.OwnerType, c.OwnerId, c.Channel, c.Value, c.Label, c.IsVerified, c.IsDeleted,
                     c.CreatedAt, c.UpdatedAt)
                 {
                     CountryCode = c.CountryCode,

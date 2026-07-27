@@ -20,33 +20,10 @@ internal sealed class ContactRepository(StudentsDbContext db)
     public Task UpdateSubscriptionAsync(ContactSubscription subscription, CancellationToken cancellationToken = default) =>
         Db.SaveChangesAsync(cancellationToken);
 
-    public async Task SetPrimaryAsync(Guid contactId, ContactOwnerType ownerType, Guid ownerId, CancellationToken cancellationToken = default)
-    {
-        var siblings = await Db.Contacts
-            .Where(c => c.OwnerType == ownerType && c.OwnerId == ownerId && c.Id != contactId)
-            .ToArrayAsync(cancellationToken);
-
-        foreach (var sibling in siblings)
-        {
-            sibling.SetPrimary(false);
-            // Spec §4.9 additive phase: bump siblings to a high order so the
-            // designated contact becomes the lowest-DisplayOrder contact.
-            sibling.SetDisplayOrder(int.MaxValue);
-        }
-
-        var target = await Db.Contacts.FirstAsync(c => c.Id == contactId, cancellationToken);
-        target.SetPrimary(true);
-        target.SetDisplayOrder(0);
-
-        await Db.SaveChangesAsync(cancellationToken);
-    }
-
     public async Task SetOrderAsync(Guid contactId, int order, CancellationToken cancellationToken = default)
     {
         var target = await Db.Contacts.FirstAsync(c => c.Id == contactId, cancellationToken);
         target.SetDisplayOrder(order);
-        // Keep IsPrimary in sync for the additive phase.
-        target.SetPrimary(order == 0);
         await Db.SaveChangesAsync(cancellationToken);
     }
 
@@ -73,7 +50,6 @@ internal sealed class ContactRepository(StudentsDbContext db)
         for (var i = 0; i < combined.Count; i++)
         {
             combined[i].SetDisplayOrder(i);
-            combined[i].SetPrimary(i == 0);
         }
 
         await Db.SaveChangesAsync(cancellationToken);

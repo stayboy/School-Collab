@@ -91,18 +91,13 @@ public class GuardianContactsListTests
     [TestMethod]
     public void Component_Sorts_Contacts_By_DisplayOrder_Then_Channel()
     {
-        // Spec §4.9 (additive phase): the contact with the lowest
-        // DisplayOrder anchors the card visually. IsPrimary remains a
-        // tiebreaker (kept in sync with DisplayOrder == 0 by the repo),
-        // verified contacts sort above unverified, then by channel
-        // (Email < SMS < WhatsApp) for stable display.
+        // Spec §4.9: the contact with the lowest DisplayOrder anchors
+        // the card visually. Verified contacts sort above unverified, then
+        // by channel (Email < SMS < WhatsApp) for stable display.
         var razor = ReadRazorSource("GuardianContactsList.razor");
         razor.Should().MatchRegex(
             @"OrderBy\s*\(\s*c\s*=>\s*c\.DisplayOrder\s*\)",
             "preferred contact (lowest DisplayOrder) renders first");
-        razor.Should().MatchRegex(
-            @"ThenByDescending\s*\(\s*c\s*=>\s*c\.IsPrimary\s*\)",
-            "IsPrimary is a tiebreaker during the additive phase");
         razor.Should().MatchRegex(
             @"ThenByDescending\s*\(\s*c\s*=>\s*c\.IsVerified\s*\)",
             "verified contacts sort above unverified");
@@ -126,8 +121,8 @@ public class GuardianContactsListTests
             @"@foreach\s*\(\s*var\s+c\s*in\s*item\.Contacts\s*\)",
             "iterates over ALL contacts, not just primary");
         razor.Should().MatchRegex(
-            @"c\.IsPrimary\s*\?\s*""guardian-contact-row\s+guardian-contact-row--primary""\s*:\s*""guardian-contact-row""",
-            "primary row gets the --primary modifier; non-primary gets the base class");
+            @"c\.DisplayOrder\s*==\s*0\s*\?\s*""guardian-contact-row\s+guardian-contact-row--primary""\s*:\s*""guardian-contact-row""",
+            "preferred row (DisplayOrder 0) gets the --primary modifier; others get the base class");
     }
 
     [TestMethod]

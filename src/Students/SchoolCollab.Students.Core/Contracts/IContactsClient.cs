@@ -23,8 +23,6 @@ public interface IContactsClient
 
     Task VerifyContactAsync(Guid id, CancellationToken ct = default);
 
-    Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default);
-
     /// <summary>Spec §4.9: sets a single contact's display order (lower = earlier).</summary>
     Task SetContactOrderAsync(Guid id, int order, CancellationToken ct = default);
 
@@ -47,8 +45,7 @@ public record AddContactRequest(
     Guid OwnerId,
     ContactChannel Channel,
     string Value,
-    string? Label,
-    bool IsPrimary)
+    string? Label)
 {
     public string? CountryCode { get; init; }
     /// <summary>Initial display order (spec §4.9). Lower renders first.</summary>

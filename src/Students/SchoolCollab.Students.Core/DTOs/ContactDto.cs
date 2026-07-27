@@ -9,7 +9,6 @@ public sealed record ContactDto(
     ContactChannel Channel,
     string Value,
     string? Label,
-    bool IsPrimary,
     bool IsVerified,
     bool IsDeleted,
     DateTimeOffset CreatedAt,

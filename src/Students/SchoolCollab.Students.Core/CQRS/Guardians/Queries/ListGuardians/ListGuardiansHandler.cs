@@ -47,8 +47,7 @@ public sealed class ListGuardiansHandler(
                 // Load the guardian's top contacts in display order so
                 // list UIs can show how to reach the guardian without N+1
                 // queries. A guardian may own multiple contacts (spec §4.4);
-                // we surface the first three ordered by DisplayOrder, with
-                // IsPrimary used as a tiebreaker during the additive phase.
+                // we surface the first three ordered by DisplayOrder.
                 var guardianIds = results.Select(g => g.Id).ToArray();
                 var contacts = guardianIds.Length == 0
                     ? new List<Contact>()
@@ -64,7 +63,6 @@ public sealed class ListGuardiansHandler(
                     .ToDictionary(
                         g => g.Key,
                         g => g.OrderBy(c => c.DisplayOrder)
-                              .ThenByDescending(c => c.IsPrimary)
                               .Take(3)
                               .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
                               .ToList());

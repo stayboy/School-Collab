@@ -65,11 +65,11 @@ public sealed class GuardianContactsTeacherDomainTests
     [TestMethod]
     public void Contact_Create_DefaultsUnverified_AndSoftDeleteBlocks()
     {
-        var c = Contact.Create(ContactOwnerType.Student, Guid.NewGuid(), ContactChannel.Email, "a@b.com", "Home", null, true);
+        var c = Contact.Create(ContactOwnerType.Student, Guid.NewGuid(), ContactChannel.Email, "a@b.com", "Home", null);
 
         c.Value.Should().Be("a@b.com");
         c.Channel.Should().Be(ContactChannel.Email);
-        c.IsPrimary.Should().BeTrue();
+        c.DisplayOrder.Should().Be(0);
         c.IsVerified.Should().BeFalse(); // default unverified (spec §2)
 
         c.SoftDelete();

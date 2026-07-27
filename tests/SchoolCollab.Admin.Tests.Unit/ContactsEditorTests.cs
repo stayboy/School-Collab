@@ -53,14 +53,12 @@ public class ContactsEditorTests : BunitContext
         public Func<AddContactRequest, Task<Guid>>? OnAddContact { get; set; }
         public Func<Guid, Task>? OnDeleteContact { get; set; }
         public Func<Guid, Task>? OnVerifyContact { get; set; }
-        public Func<Guid, Task>? OnSetPrimaryContact { get; set; }
         public Func<Task<SubscribedContactDto[]?>>? OnListSubscribed { get; set; }
         public Func<Guid, Task>? OnSubscribe { get; set; }
         public Func<Guid, Task>? OnUnsubscribe { get; set; }
 
         public int ListContactsCalls;
         public int AddContactCalls;
-        public bool? LastRequestedPrimary;
         public string? LastRequestedValue;
         public string? LastRequestedCountryCode;
 
@@ -74,7 +72,6 @@ public class ContactsEditorTests : BunitContext
         public Task<Guid> AddContactAsync(AddContactRequest req, CancellationToken ct = default)
         {
             AddContactCalls++;
-            LastRequestedPrimary = req.IsPrimary;
             LastRequestedValue = req.Value;
             LastRequestedCountryCode = req.CountryCode;
             if (OnAddContact is not null) return OnAddContact(req);
@@ -86,7 +83,6 @@ public class ContactsEditorTests : BunitContext
                 Channel: req.Channel,
                 Value: req.Value,
                 Label: req.Label,
-                IsPrimary: req.IsPrimary,
                 IsVerified: false,
                 IsDeleted: false,
                 CreatedAt: DateTimeOffset.UtcNow,
@@ -107,12 +103,6 @@ public class ContactsEditorTests : BunitContext
         public Task VerifyContactAsync(Guid id, CancellationToken ct = default)
         {
             if (OnVerifyContact is not null) return OnVerifyContact(id);
-            return Task.CompletedTask;
-        }
-
-        public Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default)
-        {
-            if (OnSetPrimaryContact is not null) return OnSetPrimaryContact(id);
             return Task.CompletedTask;
         }
 
@@ -443,7 +433,7 @@ public class ContactsEditorTests : BunitContext
     }
 
     [TestMethod]
-    public void BufferedMode_HidesPrimaryCheckboxAndSubscriptionToggle()
+    public void BufferedMode_HidesSubscriptionToggle()
     {
         var contacts = new List<ContactModel>
         {
@@ -451,10 +441,9 @@ public class ContactsEditorTests : BunitContext
         };
         var cut = RenderBuffered(contacts);
 
-        // Contacts have no Primary/CC role during creation (that is a
-        // guardian-link concept); the Primary checkbox in the add row is
-        // Live-only. The subscribe toggle is also Live-only.
-        cut.FindAll(".contacts-primary").Should().BeEmpty("Primary checkbox is Live-only");
+        // Subscriptions need a persisted contact, so the subscribe toggle is
+        // Live-only. The preferred contact is simply the first (lowest Order)
+        // row; there is no per-contact Primary/CC role during creation.
         cut.FindAll(".contact-subscribe").Should().BeEmpty("subscribe toggle is Live-only");
     }
 

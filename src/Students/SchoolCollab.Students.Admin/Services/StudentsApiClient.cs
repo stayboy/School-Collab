@@ -777,9 +777,6 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task VerifyContactAsync(Guid id, CancellationToken ct = default) =>
         (await _http.PostAsync($"/contacts/{id}/verify", null, ct)).EnsureSuccessStatusCode();
 
-    public async Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/contacts/{id}/set-primary", null, ct)).EnsureSuccessStatusCode();
-
     public async Task SetContactOrderAsync(Guid id, int order, CancellationToken ct = default) =>
         (await _http.PostAsJsonAsync($"/contacts/{id}/order", new { Order = order }, ct)).EnsureSuccessStatusCode();
 

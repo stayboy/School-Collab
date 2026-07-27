@@ -556,7 +556,7 @@
                             {
                                 await Api.AddContactAsync(new AddContactRequest(
                                     ContactOwnerType.Guardian, guardianId,
-                                    c.Channel, c.Value, c.Label, i == 0)
+                                    c.Channel, c.Value, c.Label)
                                     { CountryCode = c.CountryCode, DisplayOrder = i }, ct);
                             }
                             catch (OperationCanceledException) { throw; }
@@ -572,7 +572,7 @@
                         {
                             await Api.AddContactAsync(new AddContactRequest(
                                 ContactOwnerType.Guardian, guardianId,
-                                a.ContactChannel ?? ContactChannel.Email, a.ContactValue, null, true)
+                                a.ContactChannel ?? ContactChannel.Email, a.ContactValue, null)
                                 { CountryCode = a.CountryCode }, ct);
                         }
                         catch (OperationCanceledException) { throw; }

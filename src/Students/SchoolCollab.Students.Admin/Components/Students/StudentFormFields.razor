@@ -777,11 +777,9 @@
                 {
                     var contacts = await Api.ListContactsAsync(ContactOwnerType.Guardian, g.Id, ct);
                     // Spec §4.9: preferred contact is the one with the
-                    // lowest DisplayOrder; fall back to IsPrimary, then to
-                    // the first contact when none are marked.
+                    // lowest DisplayOrder; fall back to the first contact.
                     contact = contacts?
                         .OrderBy(c => c.DisplayOrder)
-                        .ThenByDescending(c => c.IsPrimary)
                         .FirstOrDefault()?.Value;
                 }
                 catch

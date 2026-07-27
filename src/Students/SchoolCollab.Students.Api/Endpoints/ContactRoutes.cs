@@ -5,7 +5,6 @@ using SchoolCollab.Students.Core.CQRS.Contacts.Commands.AddContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.DeleteContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.ReorderContacts;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.SetContactOrder;
-using SchoolCollab.Students.Core.CQRS.Contacts.Commands.SetPrimaryContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.UpdateContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.VerifyContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Queries.GetSubscription;
@@ -86,26 +85,6 @@ public static class ContactRoutes
             try
             {
                 await handler.HandleAsync(new VerifyContact(id), ct);
-                return Results.NoContent();
-            }
-            catch (ContactNotFoundException)
-            {
-                return Results.NotFound();
-            }
-            catch (ConcurrencyException ex)
-            {
-                return Results.Conflict(new { ex.Message });
-            }
-        });
-
-        group.MapPost("/{id:guid}/set-primary", async (
-            Guid id,
-            [FromServices] ICommandHandler<SetPrimaryContact> handler,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                await handler.HandleAsync(new SetPrimaryContact(id), ct);
                 return Results.NoContent();
             }
             catch (ContactNotFoundException)

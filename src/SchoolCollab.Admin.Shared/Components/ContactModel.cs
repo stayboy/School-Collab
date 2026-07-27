@@ -34,8 +34,7 @@ public sealed class ContactModel
     public string? CountryCode { get; set; }
 
     /// <summary>Display/priority order (0 = highest priority / preferred).
-    /// Assigned by add sequence; move-up / move-down / mark-preferred
-    /// reorder. In the additive ordering phase the first persisted contact
-    /// (Order 0) is also flagged <c>IsPrimary</c> by the parent flush.</summary>
+    /// Assigned by add sequence and updated by move-up / move-down.
+    /// The lowest-ordered contact is the owner's preferred contact.</summary>
     public int Order { get; set; }
 }

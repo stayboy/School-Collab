@@ -6,7 +6,6 @@ using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.AddContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.DeleteContact;
-using SchoolCollab.Students.Core.CQRS.Contacts.Commands.SetPrimaryContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.Subscribe;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.Unsubscribe;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.UpdateContact;
@@ -52,8 +51,6 @@ public class GuardianContactsCqrsTests
         new(ContactRepo(s), s.Cache, NullLogger<DeleteContactHandler>.Instance);
     private static VerifyContactHandler NewVerifyContact(StudentsTestScope s) =>
         new(ContactRepo(s), s.Cache, NullLogger<VerifyContactHandler>.Instance);
-    private static SetPrimaryContactHandler NewSetPrimary(StudentsTestScope s) =>
-        new(ContactRepo(s), s.Cache, NullLogger<SetPrimaryContactHandler>.Instance);
     private static SubscribeHandler NewSubscribe(StudentsTestScope s) =>
         new(ContactRepo(s), s.Cache, s.Tenants, NullLogger<SubscribeHandler>.Instance);
     private static UnsubscribeHandler NewUnsubscribe(StudentsTestScope s) =>
@@ -123,7 +120,7 @@ public class GuardianContactsCqrsTests
         // Link + guardian-owned contact (so they can be checked for retention).
         await NewLink(s).HandleAsync(new LinkGuardianToStudent(studentId, guardianId, null, GuardianRole.Primary, false, null));
         var contactId = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Guardian, guardianId, ContactChannel.Email, "jane@example.com", null, true));
+            new AddContact(ContactOwnerType.Guardian, guardianId, ContactChannel.Email, "jane@example.com", null));
 
         await NewDeleteGuardian(s).HandleAsync(new DeleteGuardian(guardianId));
 
@@ -195,9 +192,9 @@ public class GuardianContactsCqrsTests
         var guardianId = await NewCreateGuardian(s).HandleAsync(new CreateGuardian(null, "Jane", "Doe", null, null, null));
 
         var studentContact = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null, true));
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null));
         var guardianContact = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Guardian, guardianId, ContactChannel.SMS, "+12345", "Mobile", false));
+            new AddContact(ContactOwnerType.Guardian, guardianId, ContactChannel.SMS, "+12345", "Mobile"));
 
         var sc = s.Db.Contacts.IgnoreQueryFilters().Single(c => c.Id == studentContact);
         sc.OwnerType.Should().Be(ContactOwnerType.Student);
@@ -216,7 +213,7 @@ public class GuardianContactsCqrsTests
         using var s = new StudentsTestScope("c-update");
         var studentId = await SeedStudentAsync(s, "S1");
         var id = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "old@example.com", "Old", true));
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "old@example.com", "Old"));
 
         await NewUpdateContact(s).HandleAsync(new UpdateContact(id, "new@example.com", "New"));
 
@@ -231,7 +228,7 @@ public class GuardianContactsCqrsTests
         using var s = new StudentsTestScope("c-delete");
         var studentId = await SeedStudentAsync(s, "S1");
         var id = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null, true));
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null));
 
         await NewDeleteContact(s).HandleAsync(new DeleteContact(id));
 
@@ -244,7 +241,7 @@ public class GuardianContactsCqrsTests
         using var s = new StudentsTestScope("c-verify");
         var studentId = await SeedStudentAsync(s, "S1");
         var id = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null, true));
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null));
 
         await NewVerifyContact(s).HandleAsync(new VerifyContact(id));
 
@@ -252,19 +249,20 @@ public class GuardianContactsCqrsTests
     }
 
     [TestMethod]
-    public async Task SetPrimaryContact_UnsetsOtherContactsForOwner()
+    public async Task SetContactOrder_MovesContactToPreferredPosition()
     {
-        using var s = new StudentsTestScope("c-primary");
+        using var s = new StudentsTestScope("c-order");
         var studentId = await SeedStudentAsync(s, "S1");
         var first = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "first@example.com", null, true));
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "first@example.com", null));
         var second = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "+111", null, false));
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "+111", null) { DisplayOrder = 1 });
 
-        await NewSetPrimary(s).HandleAsync(new SetPrimaryContact(second));
+        await new SetContactOrderHandler(ContactRepo(s), s.Cache, NullLogger<SetContactOrderHandler>.Instance)
+            .HandleAsync(new SetContactOrder(second, 0));
 
-        s.Db.Contacts.IgnoreQueryFilters().Single(c => c.Id == second).IsPrimary.Should().BeTrue();
-        s.Db.Contacts.IgnoreQueryFilters().Single(c => c.Id == first).IsPrimary.Should().BeFalse();
+        s.Db.Contacts.IgnoreQueryFilters().Single(c => c.Id == second).DisplayOrder.Should().Be(0);
+        s.Db.Contacts.IgnoreQueryFilters().Single(c => c.Id == first).DisplayOrder.Should().Be(1);
     }
 
     [TestMethod]
@@ -274,7 +272,7 @@ public class GuardianContactsCqrsTests
         var studentId = await SeedStudentAsync(s, "S1");
 
         var id = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile", false)
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile")
             { CountryCode = "+233" });
 
         var c = s.Db.Contacts.IgnoreQueryFilters().Single(x => x.Id == id);
@@ -288,7 +286,7 @@ public class GuardianContactsCqrsTests
         using var s = new StudentsTestScope("c-update-cc");
         var studentId = await SeedStudentAsync(s, "S1");
         var id = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile", false)
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile")
             { CountryCode = "+233" });
 
         await NewUpdateContact(s).HandleAsync(
@@ -305,7 +303,7 @@ public class GuardianContactsCqrsTests
         using var s = new StudentsTestScope("c-list-cc");
         var studentId = await SeedStudentAsync(s, "S1");
         await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile", false)
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.SMS, "201234567", "Mobile")
             { CountryCode = "+233" });
 
         var results = await new ListContactsHandler(s.Db, s.Cache)
@@ -322,7 +320,7 @@ public class GuardianContactsCqrsTests
         using var s = new StudentsTestScope("c-sub");
         var studentId = await SeedStudentAsync(s, "S1");
         var contactId = await NewAddContact(s).HandleAsync(
-            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null, true));
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null));
 
         await NewSubscribe(s).HandleAsync(new Subscribe(contactId, SubscriptionScope.AllAssignments, null));
 

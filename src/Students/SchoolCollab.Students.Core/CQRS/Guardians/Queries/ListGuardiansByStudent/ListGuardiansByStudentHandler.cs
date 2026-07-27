@@ -42,8 +42,7 @@ public sealed class ListGuardiansByStudentHandler(
 
                 // Batch-load each linked guardian's top contacts (up to
                 // three) so the per-student list can show how to reach each
-                // guardian without N+1 queries. Ordered by DisplayOrder with
-                // IsPrimary used as a tiebreaker during the additive phase.
+                // guardian without N+1 queries. Ordered by DisplayOrder.
                 var guardianIds = rows.Select(r => r.GuardianId).Distinct().ToArray();
                 var contacts = guardianIds.Length == 0
                     ? new List<Contact>()
@@ -59,7 +58,6 @@ public sealed class ListGuardiansByStudentHandler(
                     .ToDictionary(
                         g => g.Key,
                         g => g.OrderBy(c => c.DisplayOrder)
-                              .ThenByDescending(c => c.IsPrimary)
                               .Take(3)
                               .Select(c => new GuardianContactViewDto(c.Channel, c.Value, c.CountryCode))
                               .ToList());

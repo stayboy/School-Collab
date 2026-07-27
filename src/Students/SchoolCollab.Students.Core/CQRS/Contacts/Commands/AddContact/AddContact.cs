@@ -8,8 +8,7 @@ public sealed record AddContact(
     Guid OwnerId,
     ContactChannel Channel,
     string Value,
-    string? Label,
-    bool IsPrimary) : ICommand
+    string? Label) : ICommand
 {
     public string? CountryCode { get; init; }
     /// <summary>Initial display order (spec §4.9). Lower renders first.</summary>

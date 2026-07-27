@@ -10,7 +10,6 @@ public interface IContactRepository
     Task<ContactSubscription?> GetSubscriptionAsync(Guid contactId, SubscriptionScope scope, Guid? scopeRefId, CancellationToken cancellationToken = default);
     Task AddSubscriptionAsync(ContactSubscription subscription, CancellationToken cancellationToken = default);
     Task UpdateSubscriptionAsync(ContactSubscription subscription, CancellationToken cancellationToken = default);
-    Task SetPrimaryAsync(Guid contactId, ContactOwnerType ownerType, Guid ownerId, CancellationToken cancellationToken = default);
     /// <summary>Sets a single contact's <c>DisplayOrder</c> (spec §4.9).</summary>
     Task SetOrderAsync(Guid contactId, int order, CancellationToken cancellationToken = default);
     /// <summary>
