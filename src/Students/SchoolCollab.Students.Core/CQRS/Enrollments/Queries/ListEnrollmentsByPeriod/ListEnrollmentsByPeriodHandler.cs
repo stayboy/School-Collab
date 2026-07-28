@@ -42,6 +42,7 @@ public sealed class ListEnrollmentsByPeriodHandler(
                     e.StudentId,
                     e.PeriodId,
                     e.GradeLevelId,
+                    e.GradeStrandCodedValueId,
                     e.EnrolledOn,
                     e.ExitDate,
                     e.Status.ToString(),

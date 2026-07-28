@@ -24,6 +24,12 @@ else
     builder.AddRedisDistributedCache("cache");
 }
 
+// Cross-module: HTTP client for the Settings Coded Values API (strand validation).
+builder.Services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(client =>
+{
+    client.BaseAddress = new Uri("http://settings-api");
+});
+
 builder.Services.AddStudentsCore(builder.Configuration);
 // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
 // is resolvable by the Student/Teacher creation handlers.

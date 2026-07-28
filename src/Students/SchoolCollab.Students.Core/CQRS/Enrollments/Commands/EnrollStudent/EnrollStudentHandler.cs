@@ -9,12 +9,15 @@ using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Events;
 using SchoolCollab.Students.Core.Domain.Exceptions;
+using SchoolCollab.Students.Core.Services;
 
 namespace SchoolCollab.Students.Core.CQRS.Enrollments.Commands.EnrollStudent;
 
 public sealed class EnrollStudentHandler(
     IStudentEnrollmentRepository repository,
     IActivePeriodProvider activePeriodProvider,
+    IGradeLevelRepository gradeLevelRepository,
+    ICodedValuesApiClient codedValuesApi,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
     ILogger<EnrollStudentHandler> logger) : ICommandHandler<EnrollStudent, Guid>
@@ -37,11 +40,20 @@ public sealed class EnrollStudentHandler(
                 "Enrollments must target the tenant's active period.");
         }
 
+        // FR-9: strand validation. If a GradeStrandCodedValueId is provided, the strand
+        // must be a child of GRSTRNDS and its gradeLevel attribute must reference a
+        // CodedValue that matches the enrollment's GradeLevel.
+        if (command.GradeStrandCodedValueId is { } strandId)
+        {
+            await ValidateStrandAsync(command.GradeLevelId, strandId, cancellationToken);
+        }
+
         var enrollment = StudentEnrollment.Create(
             command.StudentId,
             command.PeriodId,
             command.GradeLevelId,
-            command.EnrolledOn);
+            command.EnrolledOn,
+            command.GradeStrandCodedValueId);
 
         await repository.AddAsync(enrollment, cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);
@@ -52,6 +64,7 @@ public sealed class EnrollStudentHandler(
                 evt.StudentId,
                 evt.PeriodId,
                 evt.GradeLevelId,
+                evt.GradeStrandCodedValueId,
                 enrollment.EnrolledOn,
                 DateTimeOffset.UtcNow), cancellationToken);
         }
@@ -60,5 +73,34 @@ public sealed class EnrollStudentHandler(
 
         logger.LogInformation("Student {StudentId} enrolled in period {PeriodId}", enrollment.StudentId, enrollment.PeriodId);
         return enrollment.Id;
+    }
+
+    private async Task ValidateStrandAsync(Guid gradeLevelId, Guid strandCodedValueId, CancellationToken cancellationToken)
+    {
+        // Resolve the grade's CodedValueId via the repository.
+        var gradeLevel = await gradeLevelRepository.GetAsync(gradeLevelId, cancellationToken)
+            ?? throw new GradeLevelNotFoundException(gradeLevelId);
+        var gradeCodedValueId = gradeLevel.CodedValueId;
+
+        // Fetch the strand coded value from the Settings API.
+        var strand = await codedValuesApi.GetByIdAsync(strandCodedValueId, cancellationToken)
+            ?? throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+
+        // The strand's gradeLevel attribute must reference a CodedValue whose Id
+        // matches the enrollment's grade's CodedValueId.
+        var gradeLevelAttr = strand.Attributes
+            .FirstOrDefault(a => a.Key == "gradeLevel");
+        if (gradeLevelAttr is null)
+        {
+            throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+        }
+
+        // The attribute value is the coded value's GUID (because DataType=CodedValue).
+        // We compare as Guid.
+        if (!Guid.TryParse(gradeLevelAttr.Value, out var strandGradeCodedValueId)
+            || strandGradeCodedValueId != gradeCodedValueId)
+        {
+            throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+        }
     }
 }

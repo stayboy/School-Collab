@@ -23,6 +23,7 @@ public record StudentEnrolled(
     Guid StudentId,
     Guid PeriodId,
     Guid GradeLevelId,
+    Guid? GradeStrandCodedValueId,
     DateOnly EnrolledOn,
     DateTimeOffset OccurredAt);
 
@@ -31,6 +32,7 @@ public record StudentTransferred(
     Guid PeriodId,
     Guid FromGradeLevelId,
     Guid ToGradeLevelId,
+    Guid? ToGradeStrandCodedValueId,
     DateTimeOffset OccurredAt);
 
 public record StudentWithdrawn(

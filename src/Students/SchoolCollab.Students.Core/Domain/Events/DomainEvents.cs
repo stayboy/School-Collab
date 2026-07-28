@@ -15,8 +15,8 @@ public sealed record PeriodUpdatedEvent(Guid PeriodId, string Name) : IDomainEve
 public sealed record PeriodActivatedEvent(Guid PeriodId, string Name) : IDomainEvent;
 public sealed record PeriodCompletedEvent(Guid PeriodId, string Name) : IDomainEvent;
 
-public sealed record StudentEnrolledEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid GradeLevelId) : IDomainEvent;
-public sealed record StudentTransferredEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid NewGradeLevelId) : IDomainEvent;
+public sealed record StudentEnrolledEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? GradeStrandCodedValueId) : IDomainEvent;
+public sealed record StudentTransferredEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid NewGradeLevelId, Guid? NewGradeStrandCodedValueId) : IDomainEvent;
 public sealed record StudentWithdrawnEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId) : IDomainEvent;
 
 // --- Student ↔ Guardian links ---
