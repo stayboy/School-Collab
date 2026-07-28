@@ -336,6 +336,7 @@
                                                   @ref="_gradeLevelDropdown"
                                                   Items="@_gradeLevels"
                                                   @bind-SelectedValue="_selectedGradeLevelId"
+                                                  @bind-SelectedValue:after="OnGradeLevelSelectedValueChanged"
                                                   OptionText="@(g => g.Name)"
                                                   OptionValue="@(g => g.Id)"
                                                   Placeholder="Select a grade"
@@ -621,25 +622,44 @@
     /// <see cref="GradeLevelDto"/> for the actual enrollment submit.
     /// Fire-and-forget the async helper (we never want the
     /// <c>:after</c> binder to wait on our lookup).
+    /// Also clears the strand selection — a strand from the previous
+    /// grade is no longer valid (the strand's gradeLevel attribute must
+    /// match the enrollment's grade; spec §4.3 / FR-9). The CodedValueDropdown
+    /// will reload its items because the strand picker's AttributeFilter
+    /// value (GradeCodedValueIdForFilter) changed.
     /// </summary>
     private void OnGradeCodedValueChanged()
-        => _ = ResolveSelectedGradeAsync();
+    {
+        _selectedStrand = null;
+        _ = ResolveSelectedGradeAsync();
+    }
 
     /// <summary>
     /// Flag-OFF path: the <see cref="DropdownComponent{TItem, TValue}"/> of
     /// <see cref="_gradeLevels"/> is bound to a PRIMITIVE KEY (<see cref="Guid"/>?).
-    /// The picked id is looked up in <see cref="_gradeLevels"/> to resolve the
-    /// full <see cref="GradeLevelDto"/> for <see cref="_selectedGrade"/> (no
-    /// CodedValueId resolution needed, no auto-materialize possible — every
-    /// item in the flag-OFF dropdown IS a <see cref="GradeLevelDto"/> by
-    /// construction). A null id (user cleared the dropdown) clears
-    /// <see cref="_selectedGrade"/>.
+    /// The picked id (now in <see cref="_selectedGradeLevelId"/> after the
+    /// binder writes) is looked up in <see cref="_gradeLevels"/> to resolve
+    /// the full <see cref="GradeLevelDto"/> for <see cref="_selectedGrade"/>
+    /// (no CodedValueId resolution needed, no auto-materialize possible —
+    /// every item in the flag-OFF dropdown IS a <see cref="GradeLevelDto"/>
+    /// by construction). A null <see cref="_selectedGradeLevelId"/> (user
+    /// cleared the dropdown) clears <see cref="_selectedGrade"/>.
+    /// Also clears the strand selection on every grade change for the
+    /// same reason as <see cref="OnGradeCodedValueChanged"/>: a strand
+    /// from a different grade is no longer valid.
+    /// <para>
+    /// Parameterless void per the repo rule: <see cref="DropdownComponent{TItem, TValue}"/>'s
+    /// <c>SelectedValueChanged</c> is the binder's internal callback; do NOT
+    /// pass it directly. Use <c>@bind-SelectedValue:after</c> for side-effects
+    /// (mirrors the rule documented on <see cref="CodedValueDropdown"/>).
+    /// </para>
     /// </summary>
-    private void OnGradeLevelSelectedValueChanged(Guid? id)
+    private void OnGradeLevelSelectedValueChanged()
     {
-        _selectedGrade = id is null
+        _selectedStrand = null;
+        _selectedGrade = _selectedGradeLevelId is null
             ? null
-            : _gradeLevels.FirstOrDefault(g => g.Id == id);
+            : _gradeLevels.FirstOrDefault(g => g.Id == _selectedGradeLevelId);
     }
 
     /// <summary>Resolves <see cref="_selectedGradeCodedValueId"/> to a
