@@ -637,21 +637,17 @@
     /// <summary>
     /// Flag-OFF path: the <see cref="DropdownComponent{TItem, TValue}"/> of
     /// <see cref="_gradeLevels"/> is bound to a PRIMITIVE KEY (<see cref="Guid"/>?).
-    /// The picked id (now in <see cref="_selectedGradeLevelId"/> after the
-    /// binder writes) is looked up in <see cref="_gradeLevels"/> to resolve
-    /// the full <see cref="GradeLevelDto"/> for <see cref="_selectedGrade"/>
-    /// (no CodedValueId resolution needed, no auto-materialize possible —
-    /// every item in the flag-OFF dropdown IS a <see cref="GradeLevelDto"/>
-    /// by construction). A null <see cref="_selectedGradeLevelId"/> (user
-    /// cleared the dropdown) clears <see cref="_selectedGrade"/>.
-    /// Also clears the strand selection on every grade change for the
-    /// same reason as <see cref="OnGradeCodedValueChanged"/>: a strand
-    /// from a different grade is no longer valid.
+    /// <see cref="OnGradeLevelSelectedValueChanged"/> keeps <see cref="_selectedGrade"/>
+    /// in sync via the picked <see cref="_selectedGradeLevelId"/> (linker reading).
+    /// Null <see cref="_selectedGradeLevelId"/> (user cleared the dropdown) clears
+    /// <see cref="_selectedGrade"/>.
+    /// Also clears the strand selection on grade change:
+    /// strands are filtered by the selected grade's <see cref="GradeLevelDto.CodedValueId"/>
+    /// so a strand from a previous grade is no longer valid (spec §4.3 / FR-9).
     /// <para>
-    /// Parameterless void per the repo rule: <see cref="DropdownComponent{TItem, TValue}"/>'s
-    /// <c>SelectedValueChanged</c> is the binder's internal callback; do NOT
-    /// pass it directly. Use <c>@bind-SelectedValue:after</c> for side-effects
-    /// (mirrors the rule documented on <see cref="CodedValueDropdown"/>).
+    /// The :after version of <c>@bind-SelectedValue="_selectedGradeLevelId"</c>
+    /// is "side-effect only" — the binder owns <see cref="DropdownComponent{TItem, TValue}.SelectedValueChanged"/>
+    /// and should not be passed directly.
     /// </para>
     /// </summary>
     private void OnGradeLevelSelectedValueChanged()
