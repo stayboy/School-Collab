@@ -434,28 +434,8 @@ public class EditSidebarLayoutTests
     [TestMethod]
     public void GradeLevelWizard_Step2_Shows_Read_Only_Enrolment_Target_Card()
     {
-        // The wizard's "Enrol Students" step is a context where the
-        // grade is already chosen (step 1) and the period is the
-        // tenant's active one. The spec says: selected grade level
-        // is display only in the wizard. The wizard surfaces this
-        // binding via a .wizard-step-context-card above the picker
-        // that shows "Grade: <name> | Period: <name>" plus a
-        // "Read-only — to change the grade, go back to step 1" hint.
-        // This test pins the source-level contract so a future
-        // regression (e.g. someone re-introducing a grade picker on
-        // step 2) is caught by the scan.
-        const string wizardPath = "src/Students/SchoolCollab.Students.Admin/Components/Pages/Students/GradeLevels/GradeLevelWizard.razor";
-        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        var srcPath = Path.GetFullPath(Path.Combine(
-            asmDir, "..", "..", "..", "..", "..", wizardPath));
-        File.Exists(srcPath).Should().BeTrue($"{wizardPath} should exist at '{srcPath}' — check the path resolution");
-        var src = File.ReadAllText(srcPath);
-
-        src.Should().Contain("wizard-step-context-card",
-            "step 2 (Enrol Students) must render a .wizard-step-context-card that surfaces the grade + period binding in read-only form");
-        src.Should().Contain("Read-only — to change the grade, go back to step 1",
-            "the context card must explicitly mark the grade as read-only so the user knows to go back to step 1 to change it (rather than expecting a re-pick UX on step 2)");
-        src.Should().Contain("Enrolment target",
-            "the context card must have a visible label that names it as the enrolment target (so the user understands it is the binding for the new enrollments)");
+        // REMOVED: The GradeLevelWizard was replaced by a single-page
+        // GradeLevelFormFields component (spec §3). Enrolment target card
+        // is no longer part of the grade-level management UX.
     }
 }

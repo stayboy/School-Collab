@@ -1,0 +1,117 @@
+@page "/students/grade-levels/create"
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.Contracts
+@using SchoolCollab.Students.Admin.Components.Students
+@using CodedValueDto = SchoolCollab.Admin.Shared.Services.CodedValueDto
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject NavigationManager Nav
+@inject ILogger<Create> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<PageTitle>New Grade Level</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+        <FluentCard AreaRestricted="false" Style="height: auto;">
+            <h2>New Grade Level</h2>
+            <p class="wizard-hint">Pick a grade coded value. The form mirrors the grade's DisplayOrder and lets you override the display name for this tenant.</p>
+
+            <GradeLevelFormFields Model="_model"
+                                  OnValidSubmit="SubmitAsync"
+                                  OnCancel="Cancel"
+                                  SubmitLabel="Create"
+                                  SubmittingLabel="Creating…"
+                                  ErrorMessage="@_error" />
+        </FluentCard>
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+                <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="mt-2">Back to List</FluentButton>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private readonly GradeLevelFormFields.GradeLevelFormModel _model = new();
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _cts = new();
+    private volatile bool _disposed;
+
+    private async Task SubmitAsync()
+    {
+        if (_model.CodedValueId is null)
+        {
+            _error = "Please pick a grade coded value.";
+            return;
+        }
+
+        _saving = true;
+        _error = null;
+        var ct = _cts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            // Resolve the picked coded value so Level = DisplayOrder is the
+            // source of truth (spec §4.1).
+            var codedValue = await CodedValuesApi.GetByIdAsync(_model.CodedValueId.Value, ct);
+            if (codedValue is null)
+            {
+                _error = $"Grade coded value '{_model.CodedValueId}' not found.";
+                return;
+            }
+
+            Logger.LogInformation("Creating grade level from coded value {CodedValueId}", _model.CodedValueId);
+
+            // Use the find-or-create endpoint so re-creating a grade from an
+            // already-existing coded value returns the existing row instead
+            // of conflicting on the unique coded_value_id index.
+            var result = await Api.GetOrCreateGradeLevelAsync(
+                new GetOrCreateGradeLevelRequest(
+                    _model.CodedValueId.Value,
+                    codedValue.DisplayOrder,
+                    _model.Name ?? codedValue.Name,
+                    codedValue.DisplayOrder),
+                ct);
+
+            Logger.LogInformation("Grade level {Id} created from coded value {CodedValueId}", result.Id, _model.CodedValueId);
+            Nav.NavigateTo("/students/grade-levels");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create grade level from coded value {CodedValueId}", _model.CodedValueId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/students/grade-levels");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
+}

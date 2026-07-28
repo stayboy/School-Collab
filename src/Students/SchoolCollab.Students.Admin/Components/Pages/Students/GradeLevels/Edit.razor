@@ -1,7 +1,14 @@
 @page "/students/grade-levels/{Id:guid}/edit"
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.Contracts
+@using SchoolCollab.Students.Admin.Components.Students
+@using CodedValueDto = SchoolCollab.Admin.Shared.Services.CodedValueDto
+@using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
 @inject NavigationManager Nav
 @inject ILogger<Edit> Logger
 @inject VisibleTenantService VisibleTenant
@@ -24,26 +31,16 @@
         }
         else
         {
-            <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="form-container">
-                <DataAnnotationsValidator />
-                <ValidationSummary />
+            <FluentCard AreaRestricted="false" Style="height: auto;">
+                <h2>Edit Grade Level</h2>
 
-                <FluentTextField @bind-Value="_model.Name" Label="Name *" class="full-width mb-3" Required />
-                <FluentNumberField @bind-Value="_model.Level" Label="Level" class="full-width mb-3" />
-                <FluentNumberField @bind-Value="_model.DisplayOrder" Label="Display Order" class="full-width mb-3" />
-
-                @if (!string.IsNullOrEmpty(_error))
-                {
-                    <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
-                }
-
-                <div>
-                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
-                        @(_saving ? "Saving…" : "Save")
-                    </FluentButton>
-                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="ms-2">Cancel</FluentButton>
-                </div>
-            </EditForm>
+                <GradeLevelFormFields Model="_model"
+                                      OnValidSubmit="SubmitAsync"
+                                      OnCancel="Cancel"
+                                      SubmitLabel="Save"
+                                      SubmittingLabel="Saving…"
+                                      ErrorMessage="@_error" />
+            </FluentCard>
         }
             </ChildContent>
             <Fallback>
@@ -62,15 +59,14 @@
 @code {
     [Parameter] public Guid Id { get; set; }
 
-    private GradeLevelDto? _item;
+    private SchoolCollab.Students.Admin.Services.GradeLevelDto? _item;
+    private readonly GradeLevelFormFields.GradeLevelFormModel _model = new();
     private bool _loading = true;
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
     private bool _isRealTenant;
-
-    private readonly EditFormModel _model = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -94,6 +90,7 @@
 
             if (_item is not null)
             {
+                _model.CodedValueId = _item.CodedValueId;
                 _model.Name = _item.Name;
                 _model.Level = _item.Level;
                 _model.DisplayOrder = _item.DisplayOrder;
@@ -149,14 +146,5 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
-    }
-
-    private sealed class EditFormModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Name { get; set; }
-
-        public int Level { get; set; }
-        public int DisplayOrder { get; set; }
     }
 }
