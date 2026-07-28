@@ -24,6 +24,8 @@ public sealed class Teacher : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public string Email { get; private set; } = default!;
     public string? ContactPhone { get; private set; }
     public Guid? StaffUserId { get; private set; }
+    /// <summary>Auto-generated staff number (e.g. STFA01) — spec §3.6.</summary>
+    public string? StaffNumber { get; private set; }
 
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
     public Guid TenantId { get; private set; }
@@ -37,7 +39,8 @@ public sealed class Teacher : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public IReadOnlyList<TeacherGradeLevel> GradeLevels => _gradeLevels.AsReadOnly();
 
     public static Teacher Create(
-        Guid? titleCodedValueId, string firstName, string lastName, string? displayName, string email, string? contactPhone)
+        Guid? titleCodedValueId, string firstName, string lastName, string? displayName, string email, string? contactPhone,
+        string? staffNumber = null)
     {
         var now = DateTimeOffset.UtcNow;
         return new Teacher
@@ -49,6 +52,7 @@ public sealed class Teacher : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
             DisplayName = displayName?.Trim(),
             Email = email.Trim(),
             ContactPhone = contactPhone?.Trim(),
+            StaffNumber = staffNumber?.Trim(),
             IsDeleted = false,
             CreatedAt = now,
             UpdatedAt = now

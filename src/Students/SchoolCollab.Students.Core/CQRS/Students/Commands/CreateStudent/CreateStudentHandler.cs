@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Students.Contracts.Events;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Events;
@@ -13,6 +14,7 @@ namespace SchoolCollab.Students.Core.CQRS.Students.Commands.CreateStudent;
 
 public sealed class CreateStudentHandler(
     IStudentRepository repository,
+    IEntityCodeGenerator entityCodeGenerator,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
     ITenantProvider tenantProvider,
@@ -23,15 +25,18 @@ public sealed class CreateStudentHandler(
         // FR-4: no strict entity may be created with an empty tenant.
         tenantProvider.RequireTenantContext(nameof(CreateStudent), typeof(Student));
 
-        logger.LogDebug("Handling CreateStudent {StudentNumber}", command.StudentNumber);
+        // Spec §4.4: auto-generate the student number before constructing the entity.
+        // The generated code is the canonical StudentNumber; command.StudentNumber is
+        // retained for API compatibility but is not used.
+        var studentNumber = await entityCodeGenerator.GenerateAsync("STUDENT_CODE", cancellationToken);
 
-        if (await repository.ExistsByStudentNumberAsync(command.StudentNumber, cancellationToken))
-            throw new DuplicateStudentNumberException(command.StudentNumber);
+        if (await repository.ExistsByStudentNumberAsync(studentNumber, cancellationToken))
+            throw new DuplicateStudentNumberException(studentNumber);
 
         var tenantContext = tenantProvider.GetTenantContext();
 
         var student = Student.Create(
-            command.StudentNumber,
+            studentNumber,
             command.FirstName,
             command.LastName,
             command.DateOfBirth,
@@ -53,7 +58,8 @@ public sealed class CreateStudentHandler(
 
         student.ClearDomainEvents();
 
-        logger.LogInformation("Student {Id} created with number {StudentNumber} for tenant {TenantId}", student.Id, student.StudentNumber, tenantContext.TenantId);
+        logger.LogInformation("Student {Id} created with number {StudentNumber} for tenant {TenantId}",
+            student.Id, student.StudentNumber, tenantContext.TenantId);
         return student.Id;
     }
 }

@@ -3,6 +3,7 @@ using Serilog;
 using SchoolCollab.Assignments.Api;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
+using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 
@@ -32,6 +33,9 @@ else
 }
 
 builder.Services.AddAssignmentsCore(builder.Configuration);
+// Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
+// is resolvable by the CreateAssignmentCommandHandler.
+builder.Services.AddSettingsCore(builder.Configuration);
 
 // Cross-bounded-context contact resolver (spec §9 G5): resolves subscribed
 // contacts from the Students API. The named client is resolved via Aspire

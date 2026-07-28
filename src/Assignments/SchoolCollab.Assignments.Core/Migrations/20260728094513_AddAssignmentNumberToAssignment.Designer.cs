@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.Assignments.Core.Data;
@@ -11,9 +12,11 @@ using SchoolCollab.Assignments.Core.Data;
 namespace SchoolCollab.Assignments.Core.Migrations
 {
     [DbContext(typeof(AssignmentsDbContext))]
-    partial class AssignmentsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260728094513_AddAssignmentNumberToAssignment")]
+    partial class AddAssignmentNumberToAssignment
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -29,8 +32,7 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnName("id");
 
                     b.Property<string>("AssignmentNumber")
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
+                        .HasColumnType("text")
                         .HasColumnName("assignment_number");
 
                     b.Property<int>("AssignmentType")

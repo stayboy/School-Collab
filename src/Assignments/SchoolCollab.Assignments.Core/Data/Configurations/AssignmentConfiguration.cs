@@ -38,6 +38,7 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
 
         builder.Property(x => x.SubjectId);
         builder.Property(x => x.GradeLevelId);
+        builder.Property(x => x.AssignmentNumber).HasMaxLength(50);
 
         builder.Property(x => x.DueDate);
 

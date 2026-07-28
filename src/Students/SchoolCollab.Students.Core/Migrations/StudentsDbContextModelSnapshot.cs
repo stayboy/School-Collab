@@ -1080,6 +1080,11 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
+                    b.Property<string>("StaffNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("staff_number");
+
                     b.Property<Guid?>("StaffUserId")
                         .HasColumnType("uuid")
                         .HasColumnName("staff_user_id");
