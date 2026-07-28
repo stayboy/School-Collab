@@ -507,6 +507,7 @@
     /// (unreachable in the flag-OFF path because every item in that
     /// dropdown IS a GradeLevelDto).</summary>
     private GradeLevelDto? _selectedGrade;
+    private Guid? _selectedStrand;
 
     /// <summary>Selection state for the flag-OFF GradeLevel dropdown (the
     /// generic <see cref="DropdownComponent{TItem, TValue}"/> of
@@ -725,6 +726,7 @@
                 model.StudentId,
                 _activePeriod.Id,
                 _selectedGrade.Id,
+                _selectedStrand,
                 enrolledOn));
             return new EnrollStudentResult(true);
         }

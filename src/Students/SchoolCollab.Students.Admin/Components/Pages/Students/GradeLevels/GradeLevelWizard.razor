@@ -1399,7 +1399,7 @@
                 try
                 {
                     await Api.EnrollStudentAsync(
-                        new EnrollStudentRequest(st.Id, _activePeriod.Id, gradeId.Value, DateOnly.FromDateTime(DateTime.UtcNow)), ct);
+                        new EnrollStudentRequest(st.Id, _activePeriod.Id, gradeId.Value, null, DateOnly.FromDateTime(DateTime.UtcNow)), ct);
                     enrolledCount++;
                 }
                 catch (OperationCanceledException) { throw; }

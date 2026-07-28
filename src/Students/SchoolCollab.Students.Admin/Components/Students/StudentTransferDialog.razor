@@ -73,6 +73,7 @@
     private List<GradeLevelDto> _allGrades = new();
     private List<GradeLevelDto> _gradeOptions = new();
     private GradeLevelDto? _selectedGrade;
+    private Guid? _selectedStrand;
 
     protected override async Task OnInitializedAsync()
     {
@@ -141,7 +142,7 @@
 
         try
         {
-            await Api.TransferStudentAsync(_enrollment.Id, new TransferStudentRequest(_selectedGrade.Id, null, _model.Reason));
+            await Api.TransferStudentAsync(_enrollment.Id, new TransferStudentRequest(_selectedGrade.Id, _selectedStrand, null, _model.Reason));
             return new StudentTransferResult(true);
         }
         catch (Exception ex)

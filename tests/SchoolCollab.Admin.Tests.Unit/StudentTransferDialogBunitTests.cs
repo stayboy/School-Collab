@@ -81,14 +81,14 @@ public class StudentTransferDialogBunitTests : BunitContext
                 {
                     return Json(HttpStatusCode.OK, new StudentEnrollmentDto[]
                     {
-                        new(EnrollmentId, StudentId, Guid.NewGuid(), CurrentGradeId,
+                        new(EnrollmentId, StudentId, Guid.NewGuid(), CurrentGradeId, null,
                             new DateOnly(2025, 9, 1), new DateOnly(2025, 10, 1), "Withdrawn",
                             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
                     });
                 }
                 return Json(HttpStatusCode.OK, new StudentEnrollmentDto[]
                 {
-                    new(EnrollmentId, StudentId, Guid.NewGuid(), CurrentGradeId,
+                    new(EnrollmentId, StudentId, Guid.NewGuid(), CurrentGradeId, null,
                         new DateOnly(2025, 9, 1), null, "Active",
                         DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
                 });
