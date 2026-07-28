@@ -1,0 +1,547 @@
+@page "/entity-code-rules/{Id:guid}/edit"
+@using SchoolCollab.Admin.Shared.Services
+@inject EntityCodeRulesApiClient Api
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject VisibleTenantService VisibleTenant
+@inject ILogger<Edit> Logger
+@implements IDisposable
+
+<PageTitle>Edit @(_rule?.Name ?? "Generation Rule")</PageTitle>
+<h2>Edit: @(_rule?.Code ?? "…")</h2>
+
+@if (!_isRealTenant)
+{
+    <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
+        Viewing as the default tenant — per-tenant override controls are disabled.
+    </FluentMessageBar>
+}
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (_rule is not null)
+        {
+            <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="form-container">
+                <DataAnnotationsValidator />
+                <ValidationSummary />
+
+                <div class="edit-layout">
+                    <div class="edit-layout-left">
+                        <FormRow Label="Code" For="field-code" LabelTip="Immutable rule identifier">
+                            <FluentTextField Id="field-code"
+                                             Value="@_rule.Code"
+                                             Disabled="true"
+                                             class="full-width" />
+                        </FormRow>
+                        <FormRow Label="Name" Required For="field-name">
+                            <FluentTextField Id="field-name"
+                                             @bind-Value="_model.Name"
+                                             Required
+                                             class="full-width" />
+                        </FormRow>
+                        <FormRow Label="Description" For="field-description" AlignTop>
+                            <FluentTextArea Id="field-description"
+                                            @bind-Value="_model.Description"
+                                            Rows="2"
+                                            class="full-width" />
+                        </FormRow>
+                        <FormRow Label="Active" For="field-active">
+                            <FluentCheckbox Id="field-active"
+                                            @bind-Value="_model.IsActive"
+                                            Label="Active" />
+                        </FormRow>
+
+                        @* Preview result lives directly under the form fields so the
+                           admin reads format samples next to the rule metadata. The
+                           Preview button itself stays in the right sidebar alongside
+                           Add segment (both are segment actions). *@
+                        @if (_preview.Count > 0)
+                        {
+                            <div class="edit-preview-row">
+                                <span class="edit-preview-label">Preview next 5 codes:</span>
+                                <ul class="edit-preview-codes">
+                                    @foreach (var item in _preview)
+                                    {
+                                        <li><code>@item</code></li>
+                                    }
+                                </ul>
+                                <p class="edit-preview-note">
+                                    Starts each sequence at its first value to verify the
+                                    format. Existing students/staff/assignments continue from
+                                    the server's stored state.
+                                </p>
+                            </div>
+                        }
+                    </div>
+
+                    <aside class="edit-layout-right">
+                        <h6 class="edit-sidebar-title">Segments actions</h6>
+                        <p class="edit-sidebar-help">
+                            Use these to edit the template segments below.
+                            Actions stay on screen while you scroll the table.
+                        </p>
+
+                        <div class="edit-sidebar-buttons">
+                            <FluentButton Appearance="Appearance.Accent"
+                                          IconStart="@FluentIcons.Add"
+                                          OnClick="@(() => _gridRef?.AddRow())">
+                                Add segment
+                            </FluentButton>
+                            <FluentButton Appearance="Appearance.Neutral"
+                                          IconStart="@FluentIcons.Tag"
+                                          OnClick="ComputePreview"
+                                          Disabled="@(_preview.Count > 0)">
+                                Preview next 5 codes
+                            </FluentButton>
+                        </div>
+                    </aside>
+                </div>
+
+                <hr class="my-4" />
+
+                <SegmentsGrid @ref="_gridRef" @bind-Segments="_model.Segments" />
+
+                @* Tenant overrides — only when a real tenant is resolved and the
+                   rule is the shared blueprint. Tenant-owned rules skip this section
+                   (spec §4.12: overrides layer on top of the shared rule only). *@
+                @if (_isRealTenant && _rule.TenantId is null)
+                {
+                    <hr class="my-4" />
+                    <div class="overrides-card">
+                        <div class="overrides-card-header">
+                            <h5 class="overrides-card-title">Tenant overrides</h5>
+                            <p class="overrides-card-help">
+                                Override individual segment fields for <strong>this tenant only</strong>.
+                                The shared sequence counter is <em>not</em> overridable.
+                            </p>
+                        </div>
+
+                        @if (_overrides.Count == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info" class="mb-2">
+                                No tenant overrides configured. This tenant sees the shared blueprint's format.
+                            </FluentMessageBar>
+                        }
+                        else
+                        {
+                            <table class="overrides-table">
+                                <thead>
+                                    <tr>
+                                        <th>Segment</th>
+                                        <th>Field</th>
+                                        <th>Value</th>
+                                        <th class="overrides-actions-col">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var ov in _overrides)
+                                    {
+                                        <tr>
+                                            <td>#@ov.SegmentIndex</td>
+                                            <td>@((OverrideFieldDto)ov.Field).ToString()</td>
+                                            <td><code>@ov.Value</code></td>
+                                            <td class="overrides-actions-col">
+                                                <FluentButton Appearance="Appearance.Neutral"
+                                                              IconStart="@FluentIcons.Edit"
+                                                              Title="Edit override"
+                                                              OnClick="@(() => OpenEditOverrideDialogAsync(ov))" />
+                                                <FluentButton Appearance="Appearance.Neutral"
+                                                              IconStart="@FluentIcons.Delete"
+                                                              Title="Remove override"
+                                                              OnClick="@(() => DeleteOverrideAsync(ov))" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+
+                        <div class="overrides-card-footer">
+                            <FluentButton Appearance="Appearance.Accent"
+                                          IconStart="@FluentIcons.Add"
+                                          OnClick="OpenAddOverrideDialogAsync"
+                                          Disabled="@(_segmentOptions.Count == 0)">
+                                Add override
+                            </FluentButton>
+                        </div>
+                    </div>
+                }
+
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                }
+
+                <div class="mt-3">
+                    <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                        @(_saving ? "Saving…" : "Save")
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="ms-2">Cancel</FluentButton>
+                </div>
+            </EditForm>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private EntityCodeRuleDto? _rule;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private bool _isRealTenant;
+    private readonly FormModel _model = new();
+    private SegmentsGrid? _gridRef;
+    private IReadOnlyList<string> _preview = [];
+    private Guid? _loadedId;
+    private CancellationTokenSource? _loadCts;
+    private CancellationTokenSource? _mutationCts = new();
+    private volatile bool _disposed;
+    private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
+
+    // Override state (loaded fresh after every mutation; see ReloadOverridesAsync).
+    private List<TenantEntityCodeRuleOverrideDto> _overrides = [];
+    private List<SegmentOption> _segmentOptions = [];
+
+    /// <summary>
+    /// Renders the next 5 representative codes from the current segments.
+    /// Drives the right-sidebar preview list (spec §4.11 "live preview of
+    /// the next few codes"). The grid owns its own preview state for the
+    /// legacy footer path (which we no longer use) but the parent owns the
+    /// sidebar state because the sidebar survives grid re-renders.
+    /// </summary>
+    private void ComputePreview() => _preview = EntityCodePreview.RenderNext5(_model.Segments);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _isRealTenant = (await VisibleTenant.GetScopeAsync()).IsRealTenant;
+
+        _loadCts = new CancellationTokenSource();
+        await LoadAsync(_loadCts.Token);
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Id != _loadedId && !_disposed)
+        {
+            _loadCts?.Cancel();
+            _loadCts?.Dispose();
+            _loadCts = new CancellationTokenSource();
+            await LoadAsync(_loadCts.Token);
+        }
+    }
+
+    private async Task LoadAsync(CancellationToken ct)
+    {
+        _loading = true;
+        _error = null;
+        Logger.LogInformation("Loading entity code rule {Id} for edit", Id);
+        try
+        {
+            _rule = await Api.GetByIdAsync(Id, ct);
+            _loadedId = Id;
+            if (_disposed) return;
+            if (_rule is not null)
+            {
+                _model.Name = _rule.Name;
+                _model.Description = _rule.Description;
+                _model.IsActive = _rule.IsActive;
+                _model.Segments = _rule.Segments
+                    .OrderBy(s => s.Index)
+                    .Select(s => new SegmentFormModel
+                    {
+                        Index = s.Index,
+                        Role = s.Role,
+                        Type = (SegmentTypeDto)(int)s.Type,
+                        FixedText = s.FixedText ?? "",
+                        Prefix = s.Prefix ?? "",
+                        Suffix = s.Suffix ?? "",
+                        ResetPeriod = (ResetPeriodDto)(int)s.ResetPeriod,
+                        MinWidth = s.MinWidth,
+                        UpperLimit = s.UpperLimit
+                    })
+                    .ToList();
+
+                _segmentOptions = _rule.Segments
+                    .OrderBy(s => s.Index)
+                    .Select(s => new SegmentOption(s.Id, s.Index, $"#{s.Index} ({(SegmentTypeDto)(int)s.Type})"))
+                    .ToList();
+
+                await ReloadOverridesAsync(ct);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load entity code rule {Id}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    private async Task ReloadOverridesAsync(CancellationToken ct)
+    {
+        if (_rule is null) return;
+        try
+        {
+            _overrides = (await Api.GetOverridesAsync(_rule.Id, ct)).ToList();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load overrides for rule {Id}", _rule.Id);
+            _error = $"Failed to load overrides: {ex.Message}";
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_rule is null || _mutationCts is null) return;
+        var ct = MutationToken;
+        _saving = true;
+        _error = null;
+
+        // Same client-side checks as Create (re-checked here in case the grid
+        // emitted a segment that was edited but the per-row commit was
+        // bypassed by an external binding update).
+        if (_model.Segments.Count == 0)
+        {
+            _error = "A rule must have at least one segment.";
+            _saving = false;
+            return;
+        }
+        var dupIndices = _model.Segments.GroupBy(s => s.Index).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (dupIndices.Count > 0)
+        {
+            _error = $"Duplicate segment indices: {string.Join(", ", dupIndices)}.";
+            _saving = false;
+            return;
+        }
+        var fixedMissing = _model.Segments.FirstOrDefault(s => s.Type == SegmentTypeDto.Fixed && string.IsNullOrWhiteSpace(s.FixedText));
+        if (fixedMissing is not null)
+        {
+            _error = $"Segment {fixedMissing.Index}: FixedText is required for Fixed segments.";
+            _saving = false;
+            return;
+        }
+        var alphaMissing = _model.Segments.FirstOrDefault(s => s.Type == SegmentTypeDto.AlphanumericSequence && string.IsNullOrWhiteSpace(s.Prefix));
+        if (alphaMissing is not null)
+        {
+            _error = $"Segment {alphaMissing.Index}: Prefix is required for AlphanumericSequence.";
+            _saving = false;
+            return;
+        }
+        if (_model.Segments.Any(s => s.Type is SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence && s.MinWidth < 1))
+        {
+            _error = "Numeric / Alphanumeric segments must have MinWidth >= 1.";
+            _saving = false;
+            return;
+        }
+
+        try
+        {
+            Logger.LogInformation("User initiated update for entity code rule {Id}", Id);
+            var request = new UpdateEntityCodeRuleRequest(
+                Name: _model.Name!,
+                Description: _model.Description,
+                IsActive: _model.IsActive,
+                Segments: _model.Segments.Select(ToDto).ToList());
+            await Api.UpdateAsync(Id, request, ct);
+            if (_disposed) return;
+            Logger.LogInformation("Updated entity code rule {Id}", Id);
+            Nav.NavigateTo("/entity-code-rules");
+        }
+        catch (KeyNotFoundException)
+        {
+            if (_disposed) return;
+            _error = "This rule was deleted by someone else. Reload the list.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        catch (ArgumentException ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update entity code rule {Id}", Id);
+            _error = $"Failed to save: {ex.Message}";
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    private static EntityCodeSegmentInputDto ToDto(SegmentFormModel s) => new(
+        Index: s.Index,
+        Role: string.IsNullOrWhiteSpace(s.Role) || s.Role == "(none)" ? null : s.Role,
+        Type: (int)s.Type,
+        FixedText: s.Type == SegmentTypeDto.Fixed ? s.FixedText : null,
+        Prefix: s.Type == SegmentTypeDto.Fixed ? null : s.Prefix,
+        Suffix: string.IsNullOrEmpty(s.Suffix) ? null : s.Suffix,
+        ResetPeriod: (int)s.ResetPeriod,
+        MinWidth: s.Type == SegmentTypeDto.Fixed ? 0 : s.MinWidth,
+        UpperLimit: string.IsNullOrWhiteSpace(s.UpperLimit) ? null : s.UpperLimit);
+
+    private void Cancel() => Nav.NavigateTo("/entity-code-rules");
+
+    // ── Override dialog flow ───────────────────────────────────────────────
+
+    private async Task OpenAddOverrideDialogAsync()
+    {
+        if (_rule is null) return;
+        var model = new OverrideFormModel
+        {
+            Id = Guid.Empty,
+            IsEdit = false,
+            Value = ""
+        };
+        var result = await DialogService.ShowShellDialogAsync<OverrideDialog, OverrideFormModel, OverrideResult>(
+            model, "Add override", DialogSize.Medium);
+        if (result is not null && !_disposed)
+            await ApplyOverrideAndReloadAsync(result.FormModel, isDelete: false);
+    }
+
+    private async Task OpenEditOverrideDialogAsync(TenantEntityCodeRuleOverrideDto existing)
+    {
+        if (_rule is null) return;
+        var model = new OverrideFormModel
+        {
+            Id = existing.Id,
+            IsEdit = true,
+            EntityCodeSegmentId = existing.EntityCodeSegmentId,
+            SegmentIndex = existing.SegmentIndex,
+            Field = (OverrideFieldDto)existing.Field,
+            Value = existing.Value
+        };
+        var result = await DialogService.ShowShellDialogAsync<OverrideDialog, OverrideFormModel, OverrideResult>(
+            model, "Edit override", DialogSize.Medium);
+        if (result is not null && !_disposed)
+            await ApplyOverrideAndReloadAsync(result.FormModel, isDelete: false);
+    }
+
+    private async Task DeleteOverrideAsync(TenantEntityCodeRuleOverrideDto row)
+    {
+        if (_rule is null || _disposed) return;
+
+        var confirm = await DialogService.ShowConfirmationAsync(
+            $"Remove the override of {(OverrideFieldDto)row.Field} on segment #{row.SegmentIndex} (value: '{row.Value}')?",
+            "Remove override",
+            "Cancel");
+        var result = await confirm.Result;
+        if (result.Cancelled) return;
+
+        // Build the synthetic OverrideFormModel with IsEdit=true + the existing Id
+        // so the handler treats it as a known row that will be removed from the
+        // incoming set (ReplaceForRuleAsync deletes anything not in incomingIds).
+        var model = new OverrideFormModel
+        {
+            Id = row.Id,
+            IsEdit = true,
+            EntityCodeSegmentId = row.EntityCodeSegmentId,
+            SegmentIndex = row.SegmentIndex,
+            Field = (OverrideFieldDto)row.Field,
+            Value = row.Value
+        };
+        await ApplyOverrideAndReloadAsync(model, isDelete: true);
+    }
+
+    /// <summary>
+    /// Applies a dialog result (or a delete) to the override list and PUTs the
+    /// full set to the server. Reloads the list on success.
+    /// </summary>
+    private async Task ApplyOverrideAndReloadAsync(OverrideFormModel change, bool isDelete)
+    {
+        if (_rule is null || _disposed) return;
+        var ct = MutationToken;
+
+        // Build the new list: replace by Id if present, else append. If
+        // isDelete, omit the matching row instead of including it.
+        var next = _overrides
+            .Select(o => new EntityCodeRuleOverrideInputDto(
+                Id: o.Id,
+                EntityCodeSegmentId: o.EntityCodeSegmentId,
+                Field: o.Field,
+                Value: o.Value))
+            .ToList();
+
+        if (isDelete)
+        {
+            next.RemoveAll(x => x.Id == change.Id);
+        }
+        else
+        {
+            var newRow = new EntityCodeRuleOverrideInputDto(
+                Id: change.Id,
+                EntityCodeSegmentId: change.EntityCodeSegmentId,
+                Field: (int)change.Field,
+                Value: change.Value);
+            var existingIdx = next.FindIndex(x => x.Id == change.Id);
+            if (existingIdx >= 0) next[existingIdx] = newRow;
+            else next.Add(newRow);
+        }
+
+        try
+        {
+            await Api.ReplaceOverridesAsync(_rule.Id, next, ct);
+            if (_disposed) return;
+            await ReloadOverridesAsync(ct);
+        }
+        catch (KeyNotFoundException)
+        {
+            if (_disposed) return;
+            _error = "This rule was deleted by someone else. Reload the list.";
+        }
+        catch (ArgumentException ex)
+        {
+            if (_disposed) return;
+            _error = $"Override save failed: {ex.Message}";
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save overrides for rule {Id}", _rule.Id);
+            _error = $"Failed to save overrides: {ex.Message}";
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        _mutationCts?.Cancel();
+        _mutationCts?.Dispose();
+        _mutationCts = null;
+    }
+
+    private sealed class FormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+        public bool IsActive { get; set; }
+        public List<SegmentFormModel> Segments { get; set; } = new();
+    }
+}

@@ -1,0 +1,204 @@
+@* Edit-a-segment dialog. Shown when the user clicks the Edit icon on a
+   row in SegmentsGrid. Replaces the previous inline-row-edit pattern
+   (segment-row-expand with SegmentRowEditor); a modal is cleaner because
+   the grid columns stay aligned, the user can see other segments' state,
+   and validation errors live in a contained scrollable dialog body.
+
+   Inherits DialogShellBase so the saving/error/Cancel/Close plumbing and
+   the Cancel/Save footer are shared (see dialog-ui skill). The dialog is
+   pure-form: it does NOT touch the API. The caller (grid) mutates the
+   SegmentFormModel in place from the returned SegmentEditResult.
+
+   Validation mirrors the old CommitEdit checks (FixedText required on
+   Fixed; Prefix required on AlphanumericSequence; MinWidth >= 1 on
+   numeric/alphanumeric; UpperLimit format per spec §4.11). Errors set
+   `Error` and keep the dialog open so the user can correct them. *@
+
+@inherits DialogShellBase<SegmentEditFormModel, SegmentEditResult>
+
+@using SchoolCollab.Admin.Shared.Services
+
+<div class="segment-edit-dialog">
+    <p class="segment-edit-dialog-hint">
+        Editing segment <strong>#@Model.OriginalIndex</strong>. Use the
+        <strong>↑ / ↓</strong> arrows on the grid row to re-order.
+    </p>
+
+    <EditForm Model="Model.Segment" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <div class="segment-edit-grid">
+            <FluentSelect TOption="string"
+                          Items="@_roleOptions"
+                          @bind-SelectedOption="Model.Segment.Role"
+                          OptionText="@(r => r)"
+                          OptionValue="@(r => r)"
+                          Label="Role"
+                          Placeholder="(none)"
+                          class="seg-role" />
+
+            <FluentSelect TOption="SegmentTypeDto"
+                          Items="@_segmentTypeOptions"
+                          @bind-SelectedOption="Model.Segment.Type"
+                          OptionText="@(t => t.ToString())"
+                          OptionValue="@(t => t.ToString())"
+                          Label="Type"
+                          class="seg-type" />
+
+            @if (showFixedFields)
+            {
+                <FluentTextField @bind-Value="Model.Segment.FixedText"
+                                 Label="@(Model.Segment.Role == "stamp" ? "Stamp text *" : "FixedText *")"
+                                 Placeholder="@(Model.Segment.Role == "stamp" ? "STU, STF, ASG, …" : "e.g. STU")"
+                                 Required="true"
+                                 class="seg-fixedtext" />
+            }
+            else
+            {
+                <FluentTextField @bind-Value="Model.Segment.FixedText"
+                                 Label="FixedText (unused)"
+                                 Disabled="true"
+                                 class="seg-fixedtext" />
+            }
+
+            @if (!showFixedFields)
+            {
+                <FluentTextField @bind-Value="Model.Segment.Prefix"
+                                 Label="@FixedTextLabel()"
+                                 Placeholder="@FixedTextPlaceholder()"
+                                 Required="@(Model.Segment.Type == SegmentTypeDto.AlphanumericSequence)"
+                                 class="seg-prefix" />
+                <FluentNumberField @bind-Value="Model.Segment.MinWidth"
+                                   Label="MinWidth"
+                                   Min="1"
+                                   Disabled="@(!showNumericFields)"
+                                   class="seg-minwidth" />
+            }
+            else
+            {
+                <FluentTextField Value="" Label="Prefix (unused)" Disabled="true" class="seg-prefix" />
+                <FluentTextField Value="" Label="MinWidth (unused)" Disabled="true" class="seg-minwidth" />
+            }
+
+            <FluentTextField @bind-Value="Model.Segment.Suffix"
+                             Label="Suffix"
+                             Placeholder=""
+                             class="seg-suffix" />
+
+            <FluentSelect TOption="ResetPeriodDto"
+                          Items="@_resetPeriodOptions"
+                          @bind-SelectedOption="Model.Segment.ResetPeriod"
+                          OptionText="@(r => r.ToString())"
+                          OptionValue="@(r => r.ToString())"
+                          Label="Reset"
+                          Disabled="showFixedFields"
+                          class="seg-reset" />
+
+            @if (showAlphaFields)
+            {
+                <FluentTextField @bind-Value="Model.Segment.UpperLimit"
+                                 Label="UpperLimit"
+                                 Placeholder="Z"
+                                 class="seg-upperlimit" />
+            }
+            else
+            {
+                <FluentTextField @bind-Value="Model.Segment.UpperLimit"
+                                 Label="UpperLimit"
+                                 Placeholder="(numeric)"
+                                 Disabled="@(!showNumericFields)"
+                                 class="seg-upperlimit" />
+            }
+        </div>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Save"
+                           SavingText="Saving…"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    private static readonly string[] _roleOptions = ["(none)", "prefix", "stamp", "suffix"];
+    private static readonly SegmentTypeDto[] _segmentTypeOptions = Enum.GetValues<SegmentTypeDto>();
+    private static readonly ResetPeriodDto[] _resetPeriodOptions = Enum.GetValues<ResetPeriodDto>();
+
+    private bool showFixedFields => Model.Segment.Type == SegmentTypeDto.Fixed;
+    private bool showNumericFields => Model.Segment.Type is SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence;
+    private bool showAlphaFields => Model.Segment.Type is SegmentTypeDto.AlphabeticSequence or SegmentTypeDto.AlphanumericSequence;
+
+    /// <summary>
+    /// Label for the Prefix text field. When Role=stamp on an
+    /// AlphanumericSequence segment the Prefix carries the INITIAL letter
+    /// (e.g. "A"), so the label clarifies the field is the stamp's
+    /// initial letter. Otherwise the field is a static prefix.
+    /// </summary>
+    private string FixedTextLabel() =>
+        (Model.Segment.Role == "stamp" && Model.Segment.Type == SegmentTypeDto.AlphanumericSequence)
+            ? "Stamp initial letter *"
+            : Model.Segment.Type == SegmentTypeDto.AlphanumericSequence
+                ? "Prefix *"
+                : "Prefix";
+
+    /// <summary>
+    /// Placeholder text for the Prefix field, mirroring the role-aware
+    /// label above.
+    /// </summary>
+    private string FixedTextPlaceholder() =>
+        (Model.Segment.Role == "stamp" && Model.Segment.Type == SegmentTypeDto.AlphanumericSequence)
+            ? "A"
+            : Model.Segment.Type == SegmentTypeDto.AlphanumericSequence
+                ? "A"
+                : "";
+
+    protected override Task<SegmentEditResult?> SubmitAsync(SegmentEditFormModel model)
+    {
+        var seg = model.Segment;
+        if (string.IsNullOrWhiteSpace(seg.FixedText) && seg.Type == SegmentTypeDto.Fixed)
+        {
+            Error = "FixedText is required for Fixed segments.";
+            return Task.FromResult<SegmentEditResult?>(null);
+        }
+        if (seg.Type == SegmentTypeDto.AlphanumericSequence && string.IsNullOrWhiteSpace(seg.Prefix))
+        {
+            Error = "Prefix is required for AlphanumericSequence (the initial letter, e.g. \"A\").";
+            return Task.FromResult<SegmentEditResult?>(null);
+        }
+        if ((seg.Type is SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence) && seg.MinWidth < 1)
+        {
+            Error = "Numeric / Alphanumeric segments must have MinWidth >= 1.";
+            return Task.FromResult<SegmentEditResult?>(null);
+        }
+        var upperLimitError = ValidateUpperLimit(seg);
+        if (upperLimitError is not null)
+        {
+            Error = upperLimitError;
+            return Task.FromResult<SegmentEditResult?>(null);
+        }
+        return Task.FromResult(new SegmentEditResult(model.OriginalIndex, seg));
+    }
+
+    /// <summary>
+    /// Per-segment UpperLimit format check (spec §4.11). Mirrors the
+    /// SegmentsGrid.ValidateUpperLimit helper that used to live there.
+    /// - NumericSequence / AlphanumericSequence: must be a positive integer.
+    /// - AlphabeticSequence: must be a single A-Z letter.
+    /// Empty is allowed.
+    /// </summary>
+    private static string? ValidateUpperLimit(SegmentFormModel seg)
+    {
+        if (string.IsNullOrWhiteSpace(seg.UpperLimit)) return null;
+        var raw = seg.UpperLimit.Trim();
+        return seg.Type switch
+        {
+            SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence
+                when !int.TryParse(raw, out var n) || n < 1
+                => "UpperLimit must be a positive integer (e.g. 99) for numeric sequences.",
+            SegmentTypeDto.AlphabeticSequence
+                when raw.Length != 1 || raw[0] < 'A' || raw[0] > 'Z'
+                => "UpperLimit must be a single A-Z letter (e.g. Z) for alphabetic sequences.",
+            _ => null
+        };
+    }
+}

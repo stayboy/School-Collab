@@ -1,0 +1,111 @@
+@* Read-only render of the ordered segments + a Preview button that computes
+   the next 5 codes from the *initial* sequence state (spec §4.11 + §1.2
+   non-goal: "computed on save, not real-time per keystroke"). The preview
+   delegates to <c>EntityCodePreview.RenderNext5</c>, which calls the
+   production <c>EntityCodeSegment.Advance</c> directly — the preview IS the
+   production code, no separate simulator that can drift. *@
+
+@using SchoolCollab.Admin.Shared.Services
+
+@if (Segments.Count == 0)
+{
+    <FluentMessageBar Intent="MessageIntent.Info">No segments defined.</FluentMessageBar>
+}
+else
+{
+    <div class="segments-list">
+        <div class="segments-list-header">
+            <h6 class="segments-list-title">Segments (preview)</h6>
+            <FluentButton Appearance="Appearance.Neutral"
+                          OnClick="ComputePreview"
+                          Disabled="@(_preview.Count > 0)">
+                Preview next 5 codes
+            </FluentButton>
+        </div>
+
+        <table class="segments-table">
+            <thead>
+                <tr>
+                    <th>#</th>
+                    <th>Role</th>
+                    <th>Type</th>
+                    <th>Static text</th>
+                    <th>Sequence</th>
+                    <th>Reset</th>
+                    <th>UpperLimit</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var s in Segments.OrderBy(s => s.Index))
+                {
+                    <tr>
+                        <td><span class="seg-index">@s.Index</span></td>
+                        <td>@(string.IsNullOrWhiteSpace(s.Role) ? "—" : s.Role)</td>
+                        <td>@s.Type.ToString()</td>
+                        <td>
+                            @if (s.Type == SegmentTypeDto.Fixed)
+                            {
+                                <code>@s.FixedText</code>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td>
+                            @if (s.Type == SegmentTypeDto.Fixed)
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                            else
+                            {
+                                @if (!string.IsNullOrEmpty(s.Prefix)) { <code>@s.Prefix</code> }
+                                @if (s.Type is SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence)
+                                {
+                                    <span class="text-muted">width @s.MinWidth</span>
+                                }
+                            }
+                        </td>
+                        <td>@s.ResetPeriod.ToString()</td>
+                        <td>@(string.IsNullOrWhiteSpace(s.UpperLimit) ? "—" : s.UpperLimit)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        @if (_preview.Count > 0)
+        {
+            <div class="segments-preview">
+                <div class="segments-preview-label">Initial run (from a fresh state):</div>
+                <ul>
+                    @foreach (var item in _preview)
+                    {
+                        <li><code>@item</code></li>
+                    }
+                </ul>
+                <p class="segments-preview-note">
+                    Preview starts each sequence at its first value to verify the
+                    format. Existing students/staff/assignments continue from the
+                    server's stored state — see the admin's active rule for the
+                    current LastSequence.
+                </p>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>The segments to render.</summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<SegmentFormModel> Segments { get; set; } = Array.Empty<SegmentFormModel>();
+
+    private List<string> _preview = [];
+
+    /// <summary>
+    /// Computes the next 5 codes by calling the shared
+    /// <see cref="EntityCodePreview.RenderNext5"/> helper (which delegates
+    /// to the production <c>EntityCodeSegment.Advance</c> — the preview IS
+    /// the production code, no separate simulator that can drift).
+    /// </summary>
+    private void ComputePreview() => _preview = EntityCodePreview.RenderNext5(Segments).ToList();
+}

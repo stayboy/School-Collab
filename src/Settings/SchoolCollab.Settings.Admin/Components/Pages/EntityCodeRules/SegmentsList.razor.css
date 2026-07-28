@@ -1,0 +1,81 @@
+/* Read-only segments list + preview helper. */
+
+.segments-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.segments-list-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+
+.segments-list-title {
+    margin: 0;
+    font-weight: 600;
+}
+
+.segments-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.segments-table th,
+.segments-table td {
+    padding: 0.5rem 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+}
+
+.segments-table th {
+    font-weight: 600;
+    background: var(--neutral-layer-2, #f5f5f5);
+}
+
+.seg-index {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.5rem;
+    height: 1.5rem;
+    padding: 0 0.4rem;
+    background: var(--neutral-stroke-control, #d0d0d0);
+    color: var(--neutral-foreground-1, #242424);
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.75rem;
+}
+
+.text-muted {
+    color: var(--neutral-foreground-3, #616161);
+}
+
+.segments-preview {
+    padding: 0.75rem;
+    background: var(--neutral-layer-2, #f5f5f5);
+    border-radius: 4px;
+}
+
+.segments-preview-label {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.segments-preview ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 0.5rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.segments-preview-note {
+    font-size: 0.8rem;
+    color: var(--neutral-foreground-3, #616161);
+    margin: 0.5rem 0 0 0;
+}

@@ -34,7 +34,7 @@
        The Coded Values landing page is hosted in the Settings Admin module
        (see /settings) but the sub-nav still belongs here in the host shell
        so the drawer is available from any Coded Values page. *@
-    @if (_currentModule == "settings" || _currentModule == "coded-values")
+    @if (_currentModule == "settings" || _currentModule == "coded-values" || _currentModule == "entity-code-rules")
     {
         <FluentNavGroup Title="Settings"
                        Expanded="true">
@@ -47,6 +47,12 @@
                           Icon="@FluentIcons.TextBulletList">
                 Coded Values
             </FluentNavLink>
+
+            <FluentNavLink Href="/entity-code-rules"
+                          Icon="@FluentIcons.Tag">
+                Generation Rules
+            </FluentNavLink>
+
             <FluentNavGroup Title="Coded Values"
                            Expanded="true"
                            Icon="@FluentIcons.Tag">
@@ -193,6 +199,8 @@
         var p when p.Equals("/settings", StringComparison.OrdinalIgnoreCase) => "settings",
         // /coded-values and its sub-pages → "coded-values" (a sub-module of Settings)
         var p when p.StartsWith("/coded-values", StringComparison.OrdinalIgnoreCase) => "coded-values",
+        // /entity-code-rules → "entity-code-rules" (a sub-module of Settings)
+        var p when p.StartsWith("/entity-code-rules", StringComparison.OrdinalIgnoreCase) => "entity-code-rules",
         var p when p.StartsWith("/assignments", StringComparison.OrdinalIgnoreCase) => "assignments",
         var p when p.StartsWith("/students", StringComparison.OrdinalIgnoreCase) => "students",
         _ => ""
