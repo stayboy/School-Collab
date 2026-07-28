@@ -1,0 +1,271 @@
+@* Reusable guardian grid (spec §4.7 / goal #5). Pre-binds the column
+   structure for guardian rows so the picker (search results) and the
+   per-student list share the same column ordering, header titles, and
+   cell formatting. Built on top of <EntityGrid> which owns the
+   FluentDataGrid wrapper, selection tracking, and search box.
+
+   Two column profiles are supported via <see cref="Mode"/>:
+     - <c>Picker</c> (4 columns): Name + up to 3 contact columns. The
+       first contact (C1) is the preferred one by DisplayOrder. The picker's
+       per-row "select" checkbox comes from the shared EntityGrid
+       selection machinery, not from this component.
+     - <c>Linked</c> (6 columns): Guardian (name + relationship in
+       parentheses + Emergency badge + optional "View all (N) contacts"
+       anchor), up to 3 contact columns titled C1, C2, C3 (same as
+       Picker — C1 is the lowest-DisplayOrder contact), Primary tick,
+       Actions. The Actions column is empty
+       unless <see cref="OnEdit"/> / <see cref="OnRemove"/> are wired
+       by the parent.
+
+   Both modes render the SAME contact columns (Name differs only by
+   the Emergency badge + the presence of Relationship / Primary / Actions
+   in Linked mode). The grid is "dumb" about data: the parent supplies the
+   rows (already projected) and the accessors that pull name /
+   relationship / contacts / role / emergency / title-id from each row.
+   This keeps the grid reusable for both <c>GuardianDto</c> (picker, has
+   no per-link data) and <c>StudentGuardianViewDto</c> (per-student list,
+   has all the per-link data). *@
+@typeparam TItem where TItem : class
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@{
+    var settings = Mode == GridMode.Picker ? PickerSettings : LinkedSettings;
+}
+
+<EntityGrid TItem="TItem"
+            Items="Items"
+            GridSettings="settings"
+            Loading="Loading"
+            EmptyMessage="@EmptyMessage"
+            Selected="Selected"
+            ShowChips="ShowChips"
+            ShowSearch="ShowSearch"
+            SearchPlaceholder="@SearchPlaceholder"
+            Search="@Search"
+            SearchChanged="@SearchChanged"
+            GetDisplayName="GetDisplayName"
+            GetKey="GetKey"
+            SelectedChanged="SelectedChanged">
+    <Columns>
+        @if (Mode == GridMode.Picker)
+        {
+            @* Picker mode: Name + 3 contact columns titled C1, C2, C3.
+               The first contact (C1) is the preferred one by DisplayOrder;
+               the header conveys this — no per-cell icon. Missing contacts
+               render an em-dash placeholder. *@
+            <TemplateColumn TGridItem="TItem" Title="Name" Context="row">
+                <span>@(GetName?.Invoke(row) ?? "")</span>
+            </TemplateColumn>
+            @for (var i = 0; i < 3; i++)
+            {
+                var index = i;
+                <TemplateColumn TGridItem="TItem" Title="@($"C{index + 1}")" Context="row">
+                    @{
+                        var contact = GetContact(row, index);
+                    }
+                    @if (contact is not null)
+                    {
+                        <span class="guardian-contact-cell">
+                            <span>@(string.IsNullOrWhiteSpace(contact.CountryCode) ? contact.Value : $"{contact.CountryCode} {contact.Value}")</span>
+                        </span>
+                        <div class="contact-channel muted">@contact.Channel</div>
+                    }
+                    else
+                    {
+                        <span class="muted">—</span>
+                    }
+                </TemplateColumn>
+            }
+        }
+        else
+        {
+            @* Linked mode: 6 columns (Guardian = name + relationship in
+               parentheses + Emergency badge + optional "View all (N)
+               contacts" anchor, up to 3 contact columns titled C1, C2, C3
+               (same as Picker — C1 is the lowest-DisplayOrder contact),
+               Primary tick, Actions). The Name+Relationship columns are
+               MERGED into the single "Guardian" column — the cell reads
+               `name (relationship)` (relationship omitted when unknown).
+               The "View all" anchor is shown ONLY when the guardian has
+               more than 3 contacts (TotalContactCount > 3) and the
+               parent wires OnViewAllContacts. It never appears in Picker
+               mode (the picker Name branch below is a bare span). *@
+            <TemplateColumn TGridItem="TItem" Title="Guardian" Context="row">
+                @{
+                    var totalContacts = GetTotalContactCount?.Invoke(row) ?? 0;
+                    var showViewAll = totalContacts > 3 && OnViewAllContacts.HasDelegate;
+                    var name = GetName?.Invoke(row) ?? "";
+                    var rel = GetRelationshipName?.Invoke(row);
+                    var label = string.IsNullOrWhiteSpace(rel) ? name : $"{name} ({rel})";
+                }
+                <div class="guardian-name-cell">
+                    <div class="guardian-name-line">
+                        <span>@label</span>
+                        @if (GetIsEmergencyContact?.Invoke(row) == true)
+                        {
+                            <FluentBadge Appearance="Appearance.Accent">Emergency</FluentBadge>
+                        }
+                    </div>
+                    @if (showViewAll)
+                    {
+                        <FluentButton Appearance="Appearance.Hypertext"
+                                      Size="ButtonSize.Small"
+                                      Class="guardian-view-all-contacts"
+                                      Title="@($"View all {totalContacts} contacts for {name}")"
+                                      OnClick="@(() => OnViewAllContacts.InvokeAsync(row))">
+                            View all (@totalContacts) contacts
+                        </FluentButton>
+                    }
+                </div>
+            </TemplateColumn>
+            @for (var i = 0; i < 3; i++)
+            {
+                var index = i;
+                <TemplateColumn TGridItem="TItem" Title="@($"C{index + 1}")" Context="row">
+                    @{
+                        var contact = GetContact(row, index);
+                    }
+                    @if (contact is not null)
+                    {
+                        <span class="guardian-contact-cell">
+                            <span>@(string.IsNullOrWhiteSpace(contact.CountryCode) ? contact.Value : $"{contact.CountryCode} {contact.Value}")</span>
+                        </span>
+                        <div class="contact-channel muted">@contact.Channel</div>
+                    }
+                    else
+                    {
+                        <span class="muted">—</span>
+                    }
+                </TemplateColumn>
+            }
+            <TemplateColumn TGridItem="TItem" Title="Primary" Context="row">
+                @if (GetIsPrimaryLink?.Invoke(row) == true)
+                {
+                    <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" Title="Primary guardian" />
+                }
+                else
+                {
+                    <span class="muted">—</span>
+                }
+            </TemplateColumn>
+            <TemplateColumn TGridItem="TItem" Title="Actions" Sortable="false" Context="row">
+                <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
+                    @if (OnEdit.HasDelegate)
+                    {
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      Title="Edit guardian link"
+                                      OnClick="@(() => OnEdit.InvokeAsync(row))">
+                            <FluentIcon Icon="@(Icons.Regular.Size20.Edit)" />
+                        </FluentButton>
+                    }
+                    <FluentButton Appearance="Appearance.Lightweight"
+                                  Title="Remove guardian link"
+                                  OnClick="@(() => OnRemove.InvokeAsync(row))">
+                        <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
+                    </FluentButton>
+                </FluentStack>
+            </TemplateColumn>
+        }
+    </Columns>
+</EntityGrid>
+
+@code {
+    /// <summary>Column profile. <c>Picker</c> renders 4 columns
+    /// (Name + up to 3 contacts, no per-row actions); <c>Linked</c>
+    /// renders 6 columns (Guardian = name + relationship merged, up to 3
+    /// contacts + Primary tick + per-row Edit/Remove actions).</summary>
+    public enum GridMode { Picker, Linked }
+
+    /// <summary>The rows to render. Already projected by the parent.</summary>
+    [Parameter, EditorRequired] public TItem[] Items { get; set; } = Array.Empty<TItem>();
+
+    /// <summary>Column profile (defaults to Picker).</summary>
+    [Parameter] public GridMode Mode { get; set; } = GridMode.Picker;
+
+    [Parameter] public string? EmptyMessage { get; set; } = "No guardians.";
+
+    // Selection (picker mode wires these; linked mode leaves them null).
+    [Parameter] public Dictionary<object, TItem>? Selected { get; set; }
+    [Parameter] public bool ShowChips { get; set; }
+    [Parameter] public bool ShowSearch { get; set; }
+
+    // Search (picker mode wires these; linked mode leaves them null).
+    [Parameter] public string? Search { get; set; }
+    [Parameter] public EventCallback<string?> SearchChanged { get; set; }
+
+    // Row accessors — the parent binds these to the specific TItem shape.
+    [Parameter] public Func<TItem, object>? GetKey { get; set; }
+    [Parameter] public Func<TItem, string>? GetDisplayName { get; set; }
+    [Parameter] public Func<TItem, string>? GetName { get; set; }
+    [Parameter] public Func<TItem, string?>? GetRelationshipName { get; set; }
+    /// <summary>All top contacts (up to 3) for each row, ordered by
+    /// display order (index 0 is the preferred contact). Used by BOTH
+    /// Picker and Linked modes to render Name + up to 3 contact columns
+    /// (index 0 is the preferred contact by DisplayOrder).
+    /// </summary>
+    [Parameter] public Func<TItem, IReadOnlyList<GuardianContactViewDto>>? GetContacts { get; set; }
+    [Parameter] public Func<TItem, bool>? GetIsPrimaryLink { get; set; }
+    [Parameter] public Func<TItem, bool>? GetIsEmergencyContact { get; set; }
+
+    /// <summary>Total non-deleted contacts for the row's guardian. Used by
+    /// the Linked-mode Name cell to decide whether to render the "View all
+    /// (N) contacts" anchor — shown ONLY when TotalContactCount > 3 and
+    /// <see cref="OnViewAllContacts"/> is wired. Null/0 = no anchor.
+    /// Picker mode never reads this (the picker Name cell has no anchor).
+    /// </summary>
+    [Parameter] public Func<TItem, int>? GetTotalContactCount { get; set; }
+
+    // Per-row actions (linked mode only).
+    [Parameter] public EventCallback<TItem> OnEdit { get; set; }
+    [Parameter] public EventCallback<TItem> OnRemove { get; set; }
+
+    /// <summary>Raised when the user clicks the per-row "View all (N)
+    /// contacts" anchor in the Linked-mode Name cell. The parent opens
+    /// <c>GuardianContactsDialog</c> for the row's guardian. Not delegated
+    /// to → the anchor is hidden. The grid does NOT open the dialog itself
+    /// — it stays a dumb presenter (no IDialogService injection),
+    /// consistent with OnEdit / OnRemove. Picker mode never wires this
+    /// (its Name cell has no anchor), so the anchor cannot leak into the
+    /// picker. Linked mode only.</summary>
+    [Parameter] public EventCallback<TItem> OnViewAllContacts { get; set; }
+
+    // Selection callback forwarded from EntityGrid.
+    [Parameter] public EventCallback<Dictionary<object, TItem>> SelectedChanged { get; set; }
+
+    /// <summary>Show the loading spinner even when <see cref="Items"/> is non-null.</summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>Placeholder text for the optional search box.</summary>
+    [Parameter] public string? SearchPlaceholder { get; set; } = "Search guardians...";
+
+    private static readonly LandingGridSettings PickerSettings = new()
+    {
+        // Name + up to 3 contact columns. The first column (C1) gets a
+        // little more room for the channel subtitle.
+        GridTemplateColumns = "minmax(150px,1.8fr) minmax(150px,1.4fr) minmax(140px,1.2fr) minmax(140px,1.2fr)"
+    };
+
+    private static readonly LandingGridSettings LinkedSettings = new()
+    {
+        // Guardian (name + relationship merged, wider for "Mr. John Smith
+        // (Father)" + the View-all anchor) + up to 3 contact columns +
+        // Primary tick + Actions (widened so the two icon buttons have
+        // breathing room on the student view page). 6 columns total.
+        GridTemplateColumns = "minmax(220px,2.2fr) minmax(130px,1.1fr) minmax(120px,1fr) minmax(120px,1fr) minmax(70px,0.5fr) minmax(120px,0.8fr)"
+    };
+
+    /// <summary>Gets the contact at the given index for a row, or null if
+    /// the row has fewer contacts. Used by both Picker and Linked modes'
+    /// 3-contact columns.</summary>
+    private GuardianContactViewDto? GetContact(TItem row, int index)
+    {
+        var contacts = GetContacts?.Invoke(row);
+        if (contacts is null || index >= contacts.Count) return null;
+        return contacts[index];
+    }
+}

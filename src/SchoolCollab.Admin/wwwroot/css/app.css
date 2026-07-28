@@ -27,3 +27,32 @@
     width: 200px;
     min-width: 120px;
 }
+
+/* ── Input width scale (W1–W9) — application-wide utility ───────────────
+   Single source of truth for field widths so every input across every
+   form/dialog uses the same ladder. Apply via the `Class` parameter on
+   any third-party FluentUI input:
+       <FluentTextField Class="w-9" ... />
+       <FluentSelect Class="w-3" ... />
+   The repo's dropdown wrappers (DropdownForEnum, CodedValueDropdown,
+   DropdownComponent) expose a strongly-typed `Width` parameter
+   (FieldWidth enum) that emits the SAME values as an inline style —
+   inline style beats Blazor scoped CSS, so the enum path is robust
+   against the wrappers' own scoped `width:100%`. Keep these pixel
+   values in sync with FieldWidthExtensions.ToCssStyle() in
+   src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs.
+
+   Every step sets `min-width: 0` so <fluent-select>/<fluent-combobox>
+   honor the width (defeats any intrinsic web-component min-width) and
+   `max-width: 100%` so a long value can't blow out its column. w-9 is
+   the "fill" step (flex grow) — matches the existing
+   .student-form-input--email / --name pattern. */
+.w-1 { width:  80px; min-width: 0; max-width: 100%; }
+.w-2 { width: 120px; min-width: 0; max-width: 100%; }
+.w-3 { width: 160px; min-width: 0; max-width: 100%; }
+.w-4 { width: 200px; min-width: 0; max-width: 100%; }
+.w-5 { width: 240px; min-width: 0; max-width: 100%; }
+.w-6 { width: 280px; min-width: 0; max-width: 100%; }
+.w-7 { width: 320px; min-width: 0; max-width: 100%; }
+.w-8 { width: 400px; min-width: 0; max-width: 100%; }
+.w-9 { width: 100%; min-width: 0; max-width: 100%; flex: 1 1 0; }

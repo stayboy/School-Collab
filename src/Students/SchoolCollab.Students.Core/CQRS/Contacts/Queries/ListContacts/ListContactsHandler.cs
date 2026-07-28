@@ -29,12 +29,19 @@ public sealed class ListContactsHandler(
                 var results = await db.Contacts
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(c => c.TenantId == tenantId && c.OwnerType == ownerType && c.OwnerId == ownerId)
-                    .OrderBy(c => c.Channel).ThenBy(c => c.Value)
+                    // Spec §4.9: order by DisplayOrder first (preferred contact
+                    // has the lowest order), then by Channel and Value for a
+                    // stable secondary sort.
+                    .OrderBy(c => c.DisplayOrder).ThenBy(c => c.Channel).ThenBy(c => c.Value)
                     .ToArrayAsync(ct);
 
                 return results.Select(c => new ContactDto(
-                    c.Id, c.OwnerType, c.OwnerId, c.Channel, c.Value, c.Label, c.IsPrimary, c.IsVerified, c.IsDeleted,
-                    c.CreatedAt, c.UpdatedAt) { CountryCode = c.CountryCode }).ToArray();
+                    c.Id, c.OwnerType, c.OwnerId, c.Channel, c.Value, c.Label, c.IsVerified, c.IsDeleted,
+                    c.CreatedAt, c.UpdatedAt)
+                {
+                    CountryCode = c.CountryCode,
+                    DisplayOrder = c.DisplayOrder
+                }).ToArray();
             },
             CacheOptions,
             tags: ["contacts"],

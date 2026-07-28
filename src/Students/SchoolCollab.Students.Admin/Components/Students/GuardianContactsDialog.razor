@@ -1,0 +1,219 @@
+@* Read-only dialog displaying every contact for ONE guardian. Opened by
+   the student view page's guardians grid when the user clicks the
+   "View all (N) contacts" anchor in a row that has more than 3 contacts
+   (spec 2026-07-27 §4.5 — replaces the legacy <GuardianContactsList>
+   section on the view page).
+
+   Data: loads via IContactsClient.ListContactsAsync(Guardian, guardianId)
+   on every OnParametersSetAsync, ordered by DisplayOrder ascending
+   (then CreatedAt as a stable tiebreaker). The shared <ContactsEditor>
+   on GuardianDetail.razor is still the editor; this dialog is
+   display-only.
+
+   Close mechanism: the dialog host (FluentUI) provides its
+   <FluentDialog> reference via a cascading parameter. The footer Close
+   button calls Dialog.CloseAsync(); the user can also click the dialog's
+   default close (X) affordance or click the overlay (Dismiss is enabled
+   by the standard BuildShellParameters defaults; this dialog has nothing
+   to lose on accidental dismiss).
+
+   This component is intentionally NOT a DialogShellBase (no model, no
+   OK/Cancel result, no form). It is opened via
+   DialogServiceExtensions.ShowReadonlyDialogAsync, which passes a
+   DialogParameters carrying the shell chrome (title + width + no
+   PrimaryAction/SecondaryAction + PreventDismissOnOverlayClick = true)
+   plus the content entries (GuardianId / GuardianName / Subtitle). The
+   dialog implements <c>IDialogContentComponent&lt;DialogParameters&gt;</c>
+   only as a compile-time marker required by the two-type-arg
+   <c>IDialogService.ShowDialogAsync&lt;TContent,TData&gt;</c> overload —
+   the dialog reads everything via <c>[Parameter]</c> properties and
+   ignores the assigned Content reference.
+
+   Test plan (spec §5): covered by GuardianContactsDialogTests
+   (source-level). Cancellation mirrors ContactsEditor / GuardianContactsList. *@
+@implements IDisposable
+@implements IDialogContentComponent<DialogParameters>
+@using Microsoft.Extensions.Logging
+@using Microsoft.AspNetCore.Components
+@using SchoolCollab.Students.Core.Contracts
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject IContactsClient ContactsApi
+@inject ILogger<GuardianContactsDialog> Logger
+
+@* The cascading <FluentDialog> reference comes from the FluentUI dialog
+   host that renders this component. It is the handle the footer Close
+   button (and any future in-dialog actions) use to dismiss the dialog.
+   <CascadingParameter> resolves for plain ComponentBase dialog content
+   in FluentUI 4.14.x — it does NOT require IDialogContentComponent<T>;
+   the marker interface only governs typed Content.Data binding.
+   Declared in the @code block below. *@
+
+<div class="guardian-contacts-dialog">
+    @if (!string.IsNullOrWhiteSpace(Subtitle))
+    {
+        <p class="guardian-contacts-subtitle muted">@Subtitle</p>
+    }
+
+    @if (_loading)
+    {
+        <div class="spinner-container"><FluentProgressRing /></div>
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+    else if (_contacts.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">
+            No contacts on file for this guardian.
+        </FluentMessageBar>
+    }
+    else
+    {
+        <ul class="guardian-contact-list">
+            @foreach (var c in _contacts)
+            {
+                <li class="@(c.DisplayOrder == 0 ? "guardian-contact-row guardian-contact-row--primary" : "guardian-contact-row")">
+                    <span class="guardian-contact-channel" title="@c.Channel">@ChannelGlyph(c.Channel) @c.Channel</span>
+                    <span class="guardian-contact-value">@(string.IsNullOrWhiteSpace(c.CountryCode) ? c.Value : $"{c.CountryCode} {c.Value}")</span>
+                    @if (!string.IsNullOrWhiteSpace(c.Label))
+                    {
+                        <span class="muted guardian-contact-label">(@c.Label)</span>
+                    }
+                    <span class="guardian-contact-badges">
+                        @if (c.DisplayOrder == 0)
+                        {
+                            <FluentBadge Appearance="Appearance.Accent" Class="guardian-contact-badge">Primary</FluentBadge>
+                        }
+                        @if (c.IsVerified)
+                        {
+                            <FluentBadge Appearance="Appearance.Accent" Class="guardian-contact-badge">Verified</FluentBadge>
+                        }
+                        else
+                        {
+                            <FluentBadge Appearance="Appearance.Neutral" Class="guardian-contact-badge">Unverified</FluentBadge>
+                        }
+                    </span>
+                </li>
+            }
+        </ul>
+    }
+
+    @* Footer — a single Close button. The dialog host has no
+       PrimaryAction/SecondaryAction (set by BuildShellParameters), so
+       the body must own the close affordance. The separator line above
+       mirrors the dialog-ui skill's content/actions split. *@
+    <div class="guardian-contacts-footer">
+        <FluentButton Appearance="Appearance.Accent"
+                      OnClick="CloseAsync">
+            Close
+        </FluentButton>
+    </div>
+</div>
+
+@code {
+    /// <summary>The guardian whose full contact list to display. Required —
+    /// no default. Changing it (e.g. re-opening for a different guardian)
+    /// triggers a reload.</summary>
+    [Parameter, EditorRequired] public Guid GuardianId { get; set; }
+
+    /// <summary>Dialog title (set by BuildShellParameters Title; this
+    /// parameter is for any case where the host additionally wants the
+    /// value available inside the body, e.g. to render in the subtitle).</summary>
+    [Parameter] public string? GuardianName { get; set; }
+
+    /// <summary>The hosting <see cref="FluentDialog"/> reference provided
+    /// by the dialog host as a cascading parameter. Used by the footer
+    /// Close button to dismiss the dialog. Nullable so unit tests that
+    /// render the component without a dialog host do not NRE
+    /// (<see cref="CloseAsync"/> short-circuits when null).</summary>
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+
+    /// <summary>Optional subtitle rendered under the dialog title — e.g.
+    /// <c>"Father · Primary"</c>.</summary>
+    [Parameter] public string? Subtitle { get; set; }
+
+    /// <summary>Required by the <c>IDialogContentComponent&lt;DialogParameters&gt;</c>
+    /// contract for the two-type-arg <c>IDialogService.ShowDialogAsync</c>
+    /// overload used by <c>ShowReadonlyDialogAsync</c>. The dialog ignores
+    /// the assigned reference and reads everything via <c>[Parameter]</c>.</summary>
+    public DialogParameters Content { get; set; } = default!;
+
+    private List<ContactDto> _contacts = new();
+    private bool _loading;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private Guid? _loadedFor;
+
+    /// <summary>Reload whenever GuardianId changes (re-opening for a
+    /// different guardian while the same component instance is reused).</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == GuardianId) return;
+        _loadedFor = GuardianId;
+
+        _disposed = false;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        _loading = true;
+        _error = null;
+        _contacts = new();
+        try
+        {
+            var result = await ContactsApi.ListContactsAsync(ContactOwnerType.Guardian, GuardianId, ct);
+            _contacts = (result ?? Array.Empty<ContactDto>())
+                .OrderBy(c => c.DisplayOrder)
+                .ThenBy(c => c.CreatedAt)
+                .ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on rapid re-open / dispose.
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                Logger.LogError(ex, "Failed to load contacts for guardian {GuardianId}", GuardianId);
+                _error = "Couldn't load contacts. Try again.";
+            }
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    /// <summary>Close the hosting <see cref="FluentDialog"/>. Safe to call
+    /// before the cascade is wired — the cascade is guaranteed by the
+    /// dialog host, but we guard so unit tests without a host don't NRE.</summary>
+    private Task CloseAsync()
+    {
+        return Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    }
+
+    /// <summary>Emoji glyph preceding each contact channel. Mirrors the
+    /// helper used by the (now-deleted) GuardianContactsList so the dialog
+    /// and the grid's contact cells read consistently.</summary>
+    private static string ChannelGlyph(ContactChannel channel) => channel switch
+    {
+        ContactChannel.Email => "✉",
+        ContactChannel.SMS => "📱",
+        ContactChannel.WhatsApp => "💬",
+        _ => "•",
+    };
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

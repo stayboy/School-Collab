@@ -15,22 +15,16 @@
     max-width: 600px;
 }
 
-/* ── Per-input widths ──
-   Each input's intrinsic width is sized to the expected value length.
-   The FormRow input cell is flex:1 (fills the column) but each input
-   claims only as much horizontal space as it needs, left-aligned. DOB
-   is narrow because a date picker only needs ~150px; student number is
-   a little wider so the placeholder "e.g. S-2026-001" is visible;
-   email takes the full input cell; phone sits between them. The
-   name pair splits the cell equally via flex:1 on each FluentTextField.
-   max-width: 100% is a safety net so an unexpectedly long value can't
-   blow out the column. */
-.student-form-input--student-number { width: 220px; max-width: 100%; }
-.student-form-input--dob { width: 160px; max-width: 100%; }
-.student-form-input--email { width: 100%; }
-.student-form-input--phone { width: 200px; max-width: 100%; }
-.student-form-input--gender { width: 260px; max-width: 100%; }
-.student-form-input--name { flex: 1 1 0; min-width: 0; }
+/* ── Per-input widths ── now driven by the repo-wide W1–W9 ladder.
+   Each input uses a `w-N` class (FluentTextField / FluentDatePicker) or
+   the `Width` enum (CodedValueDropdown — emits an inline style that beats
+   this scoped stylesheet) from src/SchoolCollab.Admin.Shared/Components/
+   FieldWidth.cs. The previous per-input fixed-width rules
+   (.student-form-input--student-number/dob/email/phone/gender/name)
+   were removed when the call sites switched to the ladder — do not
+   reintroduce them. See the `input-width-scale` skill for the map:
+     student-number → w-5 (240px), name (×2) → w-9 (fill),
+     dob → w-3 (160px), gender → Width=FieldWidth.W6 (280px). */
 
 /* ── Error message ──
    Sits between the last field and the action-row separator. A small
@@ -98,6 +92,30 @@
 .muted {
     color: var(--neutral-foreground-hint, #6b6b6b);
 }
+
+/* ── Linked mode (page-side, opt-in via Mode="Linked") ──
+   Compact "Guardians (N) — Manage" header + read-only grid +
+   per-row delete. Used by /students/{id}/edit (and any future page
+   that owns its own Save flow + DialogService). The modifier is
+   applied to the same .student-guardians wrapper the dialog
+   callers use, so the default styles don't need to be overridden —
+   this only adds the header row and tighter spacing. */
+.student-form-guardians--linked {
+    gap: 0.375rem;
+}
+.student-guardians-linked-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+}
+.student-guardians-linked-count {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.95rem;
+}
+
 /* ── Guardian add section (inline panel switch, no nested dialog) ── */
 .guardian-add-section {
     display: flex;

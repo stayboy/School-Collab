@@ -1456,20 +1456,52 @@
                                 d.TitleCodedValueId, d.FirstName, d.LastName, null, null, null), ct);
                         await Api.LinkGuardianAsync(new LinkGuardianRequest(
                             studentId, guardianId, d.RelationshipCodedValueId, d.Role, false, null), ct);
-                        if (d.ExistingGuardianId is null && d.ContactValue is not null)
+                        // Seed contacts for a newly-created guardian. The picker's
+                        // multi-contact editor (Buffered ContactsEditor) populates
+                        // d.Contacts; the legacy single-contact path (StudentFormFields
+                        // inline create) populates d.ContactChannel/ContactValue/
+                        // CountryCode. Prefer the multi-contact list when present;
+                        // fall back to the single-contact shortcut otherwise.
+                        if (d.ExistingGuardianId is null)
                         {
-                            try
+                            if (d.Contacts is { Count: > 0 })
                             {
-                                await Api.AddContactAsync(new AddContactRequest(
-                                    ContactOwnerType.Guardian, guardianId,
-                                    d.ContactChannel ?? ContactChannel.Email, d.ContactValue, null, true), ct);
+                                var ordered = d.Contacts.OrderBy(x => x.Order).ToList();
+                                for (var i = 0; i < ordered.Count; i++)
+                                {
+                                    var c = ordered[i];
+                                    try
+                                    {
+                                        await Api.AddContactAsync(new AddContactRequest(
+                                            ContactOwnerType.Guardian, guardianId,
+                                            c.Channel, c.Value, c.Label)
+                                            { CountryCode = c.CountryCode, DisplayOrder = i }, ct);
+                                    }
+                                    catch (OperationCanceledException) { throw; }
+                                    catch (Exception contactEx)
+                                    {
+                                        if (_disposed) return;
+                                        gContactFailures++;
+                                        Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                                    }
+                                }
                             }
-                            catch (OperationCanceledException) { throw; }
-                            catch (Exception contactEx)
+                            else if (d.ContactValue is not null)
                             {
-                                if (_disposed) return;
-                                gContactFailures++;
-                                Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                                try
+                                {
+                                    await Api.AddContactAsync(new AddContactRequest(
+                                        ContactOwnerType.Guardian, guardianId,
+                                        d.ContactChannel ?? ContactChannel.Email, d.ContactValue, null)
+                                        { CountryCode = d.CountryCode }, ct);
+                                }
+                                catch (OperationCanceledException) { throw; }
+                                catch (Exception contactEx)
+                                {
+                                    if (_disposed) return;
+                                    gContactFailures++;
+                                    Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                                }
                             }
                         }
                         gCreated++;
@@ -1602,7 +1634,13 @@
         => id is { } g && _codedValueNames.TryGetValue(g, out var n) ? n : null;
 
     private static string ContactLabel(GuardianAssignment g)
-        => g.ContactValue is null ? string.Empty : $" · {g.ContactChannel}: {g.ContactValue}";
+    {
+        if (g.ContactValue is null) return string.Empty;
+        var value = !string.IsNullOrWhiteSpace(g.CountryCode)
+            ? $"{g.CountryCode} {g.ContactValue}"
+            : g.ContactValue;
+        return $" · {g.ContactChannel}: {value}";
+    }
 
     private async Task RefreshCodedValueNamesAsync()
     {
@@ -1655,8 +1693,12 @@
 
     private async Task OnRequestAddGuardian(Guid studentId)
     {
+        // Pass the student id so the backend excludes guardians already
+        // linked to this student (prevents double-linking). When the
+        // student is not yet persisted the backend finds no links, so
+        // nothing is excluded — harmless.
         var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
-            new GuardianPickerModel(), "Add guardians", DialogSize.Large);
+            new GuardianPickerModel(studentId), "Add guardians", DialogSize.Large);
         if (results is null) return;
         foreach (var r in results) _guardianAssignmentList?.AddAssignment(studentId, r);
         await RefreshCodedValueNamesAsync();
@@ -1668,7 +1710,7 @@
         if (drafts is null || !drafts.TryGetValue(req.StudentId, out var list) || req.Index < 0 || req.Index >= list.Count)
             return;
         var result = await DialogService.ShowShellDialogAsync<GuardianFormDialog, GuardianAssignmentModel, GuardianAssignment>(
-            GuardianAssignmentModel.ForEdit(list[req.Index]), "Edit guardian", DialogSize.Medium);
+            GuardianAssignmentModel.ForEdit(list[req.Index]), "Edit guardian", DialogSize.Large);
         if (result is null) return;
         _guardianAssignmentList?.UpdateAssignment(req.StudentId, req.Index, result);
         await RefreshCodedValueNamesAsync();

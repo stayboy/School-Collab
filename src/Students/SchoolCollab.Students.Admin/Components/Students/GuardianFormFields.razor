@@ -1,28 +1,56 @@
 @* Reusable guardian detail form (presentational). Renders the Title / name /
    relationship / contact fields bound to a GuardianAssignmentModel. Used by
-   StudentFormFields (inline, no dialog) and GuardianFormDialog. This component
-   is intentionally NOT an <EditForm> — the owning form supplies validation and
-   the submit/footer, so it can be embedded without nesting <form> elements. *@
+   StudentFormFields (inline, no dialog), GuardianFormDialog, and the
+   GuardianPickerDialog's inline create panel. This component is
+   intentionally NOT an <EditForm> — the owning form supplies validation and
+   the submit/footer, so it can be embedded without nesting <form> elements.
+
+   Layout follows the repo-wide FormRow convention: every row has a fixed-
+   width 180px label cell on the left and a flex input cell on the right.
+   The name row is a single FormRow with the label "Name" and TWO
+   FluentTextField children in the input cell (first + last side-by-side,
+   each `flex: 1 1 0` so they split the cell equally). This matches the
+   same pattern <c>StudentFormFields</c> uses for the student's own
+   Name row — a single horizontal label + a flex pair of inputs — so the
+   school-collab form layout reads as a single uniform block down the
+   form, and the picker / dialog fits more fields in less vertical
+   space. The Required marker on the row covers both fields (the
+   `Required` parameter renders a red asterisk after the label, and
+   each FluentTextField also has its own `Required` HTML attribute for
+   browser-level validation).
+
+   Country calling codes: when the preferred contact channel is SMS or
+   WhatsApp, a <CodedValueDropdown> bound to the CNCODES coded-value
+   category is rendered in the Contact value row (before the value text
+   field) so the user can pick the dial prefix (e.g. +233). The selected
+   coded value's Name carries the dial code, which is resolved into
+   <c>Model.CountryCode</c> and threaded through <GuardianAssignment>
+   into <c>AddContactRequest.CountryCode</c> at create time. Email
+   contacts hide the dropdown and clear the country code. Mirrors the
+   same pattern <c>ContactsEditor</c> uses for student contacts (see
+   docs/plans/2026-07-17-country-codes-for-contacts.md). The default
+   selection is Ghana (+233) when the dropdown first appears. *@
 @using SchoolCollab.Students.Core.Domain
-@using SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Services
+@using Microsoft.Extensions.Logging
+@inject CodedValuesApiClient CodedValuesApi
+@inject ILogger<GuardianFormFields> Logger
 
 <FluentStack Orientation="Orientation.Vertical" Spacing="3">
     <FormRow Label="Title">
         <CodedValueDropdown Parent="CodedValueParent.Salutations"
                             @bind-SelectedId="Model.TitleCodedValueId"
-                            Placeholder="Optional" />
+                            Placeholder="Optional"
+                            Width="FieldWidth.W3" />
     </FormRow>
 
-    <FormRow Label="First name" Required For="guardianFormFirst">
+    <FormRow Label="Name" Required For="guardianFormFirst">
         <FluentTextField Id="guardianFormFirst"
                          @bind-Value="Model.FirstName"
                          Required Placeholder="First name"
                          class="guardian-field" />
-    </FormRow>
-
-    <FormRow Label="Last name" Required For="guardianFormLast">
         <FluentTextField Id="guardianFormLast"
                          @bind-Value="Model.LastName"
                          Required Placeholder="Last name"
@@ -32,25 +60,141 @@
     <FormRow Label="Relationship">
         <CodedValueDropdown Parent="CodedValueParent.Relationships"
                             @bind-SelectedId="Model.RelationshipCodedValueId"
-                            Placeholder="Select relationship" />
+                            Placeholder="Select relationship"
+                            Width="FieldWidth.W4" />
     </FormRow>
 
-    <FormRow Label="Preferred contact">
-        <DropdownForEnum TEnum="ContactChannel"
-                        @bind-SelectedValue="Model.ContactChannel"
-                        Placeholder="Select mode"
-                        Class="guardian-field" />
-    </FormRow>
+    @if (ShowContactFields)
+    {
+        <FormRow Label="Preferred contact">
+            <DropdownForEnum TEnum="ContactChannel"
+                            @bind-SelectedValue="Model.ContactChannel"
+                            @bind-SelectedValue:after="OnChannelChanged"
+                            Placeholder="Select mode"
+                            Class="guardian-field" />
+        </FormRow>
 
-    <FormRow Label="Contact value">
-        <FluentTextField Id="guardianFormContact"
-                         @bind-Value="Model.ContactValue"
-                         Placeholder="e.g. 0712345678"
-                         class="guardian-field" />
-    </FormRow>
+        <FormRow Label="Contact value">
+            @if (Model.ContactChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+            {
+                <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                    @bind-SelectedId="Model.CountryCodeCodedValueId"
+                                    @bind-SelectedId:after="OnCountryCodeChanged"
+                                    Placeholder="Code"
+                                    Class="guardian-country-code"
+                                    OptionText="@FormatCountryCodeOption" />
+            }
+            <FluentTextField Id="guardianFormContact"
+                             @bind-Value="Model.ContactValue"
+                             Placeholder="@ValuePlaceholder"
+                             class="guardian-field" />
+        </FormRow>
+    }
 </FluentStack>
 
 @code {
     /// <summary>The guardian being edited. Required.</summary>
     [Parameter, EditorRequired] public GuardianAssignmentModel Model { get; set; } = default!;
+
+    /// <summary>When true (default), renders the single-contact rows
+    /// (Preferred contact + Contact value) bound to
+    /// <c>Model.ContactChannel/ContactValue/CountryCode</c>. When false,
+    /// those rows are omitted. The picker's New panel sets this to false
+    /// and supplies a multi-contact editor (<c>&lt;ContactsEditor
+    /// Mode=Buffered&gt;</c>) so a guardian can be created with multiple
+    /// contacts (SMS + email + ...). <c>GuardianFormDialog</c> (edit) also
+    /// sets this to false — editing a guardian does not collect contacts
+    /// (contacts are managed on <c>GuardianDetail.razor</c> for existing
+    /// guardians, or captured at create time via the picker); the dialog
+    /// carries the model's <c>Contacts</c> through unchanged. Only
+    /// <c>StudentFormFields</c> inline create keeps the default and uses
+    /// the single-contact shortcut.</summary>
+    [Parameter] public bool ShowContactFields { get; set; } = true;
+
+    /// <summary>Country calling-code options (loaded lazily when a phone
+    /// channel is first selected). Cached for the component lifetime. The
+    /// selected coded value's <c>Name</c> carries the dial code (e.g.
+    /// "+233"); the <c>Code</c> identifies the Ghana default
+    /// ("CNCODES_GHA").</summary>
+    private CodedValueDto[]? _countryCodeOptions;
+    private bool _countryCodesLoading;
+
+    private string ValuePlaceholder => Model.ContactChannel switch
+    {
+        ContactChannel.SMS => "Phone number…",
+        ContactChannel.WhatsApp => "WhatsApp number…",
+        _ => "e.g. name@example.com"
+    };
+
+    /// <summary>Called when the channel dropdown changes. For SMS/WhatsApp,
+    /// loads the country calling codes (if not already loaded) and defaults
+    /// the selection to Ghana (+233). For Email, clears the country-code
+    /// selection + resolved dial code so no stale value is persisted on a
+    /// non-phone contact.</summary>
+    private async Task OnChannelChanged()
+    {
+        if (Model.ContactChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            await LoadCountryCodesAsync();
+        }
+        else
+        {
+            Model.CountryCodeCodedValueId = null;
+            Model.CountryCode = null;
+        }
+    }
+
+    private async Task LoadCountryCodesAsync()
+    {
+        if (_countryCodeOptions is not null || _countryCodesLoading) return;
+        _countryCodesLoading = true;
+        try
+        {
+            _countryCodeOptions = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.CountryCallingCodes.ToCode(), CancellationToken.None) ?? [];
+
+            // Default to Ghana (+233) when no selection is already present
+            // (e.g. a fresh create). Preserve an existing selection on edit
+            // round-trips.
+            Model.CountryCodeCodedValueId ??= _countryCodeOptions
+                .FirstOrDefault(x => x.Code.Equals("CNCODES_GHA", StringComparison.OrdinalIgnoreCase))?.Id
+                ?? _countryCodeOptions.FirstOrDefault()?.Id;
+            ResolveCountryCode();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load country calling codes for GuardianFormFields");
+        }
+        finally
+        {
+            _countryCodesLoading = false;
+        }
+    }
+
+    /// <summary>Called when the country-code dropdown selection changes.
+    /// Resolves the selected coded value's Name (the dial code) into
+    /// <see cref="GuardianAssignmentModel.CountryCode"/> so the create flow
+    /// can pass it to <c>AddContactRequest.CountryCode</c> without needing
+    /// access to the options list.</summary>
+    private void OnCountryCodeChanged()
+    {
+        ResolveCountryCode();
+    }
+
+    private void ResolveCountryCode()
+    {
+        if (Model.CountryCodeCodedValueId is null || _countryCodeOptions is null)
+        {
+            Model.CountryCode = null;
+            return;
+        }
+        var selected = _countryCodeOptions.FirstOrDefault(x => x.Id == Model.CountryCodeCodedValueId);
+        Model.CountryCode = selected?.Name;
+    }
+
+    private static string FormatCountryCodeOption(CodedValueDto o)
+    {
+        var country = o.Attributes.FirstOrDefault(a => a.Key == "COUNTRY")?.Value;
+        return string.IsNullOrWhiteSpace(country) ? o.Name : $"{o.Name} ({country})";
+    }
 }

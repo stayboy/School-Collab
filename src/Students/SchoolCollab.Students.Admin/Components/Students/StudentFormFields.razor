@@ -61,7 +61,7 @@
                              ReadOnly="@ReadOnlyStudentNumber"
                              Required="@(!ReadOnlyStudentNumber)"
                              Placeholder="e.g. S-2026-001"
-                             class="student-form-input--student-number" />
+                             class="w-5" />
         </FormRow>
 
         @* Name. First + last sit side-by-side inside the input cell. *@
@@ -70,11 +70,11 @@
                              @bind-Value="Model.FirstName"
                              Required
                              Placeholder="First name"
-                             class="student-form-input--name" />
+                             class="w-9" />
             <FluentTextField @bind-Value="Model.LastName"
                              Required
                              Placeholder="Last name"
-                             class="student-form-input--name" />
+                             class="w-9" />
         </FormRow>
 
         @* Date of birth. FluentDatePicker binds to DateTime?, so we
@@ -86,7 +86,7 @@
                               Value="@DateOfBirthAsDateTime"
                               ValueChanged="@OnDateOfBirthChanged"
                               Required
-                              class="student-form-input--dob" />
+                              class="w-3" />
         </FormRow>
 
         @* Gender. Required coded-value dropdown for the GENDER parent
@@ -98,23 +98,82 @@
             <CodedValueDropdown Parent="CodedValueParent.Genders"
                                 @bind-SelectedId="Model.GenderCodedValueId"
                                 Placeholder="Select gender"
-                                class="student-form-input--gender" />
+                                Width="FieldWidth.W4" />
         </FormRow>
 
-        @* Guardians. Create mode keeps a draft list on the model that the
-           parent links after the student is saved; edit mode loads the links
-           from the API and links/unlinks immediately. Adding a guardian is an
-           INLINE section switch (no nested dialog): "New guardian" reveals the
-           shared <GuardianFormFields> component; "Add existing" uses the shared
-           <EntityGrid> to search by contact or by student and select guardians.
-           The linked/draft list is also rendered with <EntityGrid>. *@
+        @* Guardians section. Two modes (gated by the Mode parameter):
+
+           - Inline (DEFAULT): the historical panel-switch UX. Create
+             mode keeps a draft list on the model that the parent links
+             after the student is saved; edit mode loads the links from
+             the API and links / unlinks immediately. Adding a guardian
+             is an INLINE section switch (no nested dialog): "New
+             guardian" reveals the shared GuardianFormFields component;
+             "Add existing" uses the shared EntityGrid to search by
+             contact or by student and select guardians. The
+             linked/draft list is also rendered with EntityGrid.
+
+             This is the right UX inside DIALOGS — the user is already
+             modal inside a wizard / picker flow, an in-place panel
+             keeps them oriented, and nested dialogs (a dialog opening
+             a dialog) is the anti-pattern the dialog-ui skill
+             explicitly warns against. The wizard's inline "new
+             student" form, the StudentPickerDialog's create flow, and
+             any future dialog that embeds StudentFormFields stay on
+             this mode.
+
+           - Linked: the page-side compact section. Used by
+             /students/{id}/edit (and any future page that owns its own
+             Save flow + DialogService). Instead of the panel switch,
+             renders a "Guardians (N) — Manage" header with a button
+             that fires OnManageGuardians. The parent page opens
+             GuardianPickerDialog on click, calls the link APIs on
+             confirm, and reloads. The per-row delete button fires
+             OnRemoveGuardian — the page calls UnlinkGuardianAsync +
+             reload. No inline create, no nested dialog, no per-form
+             EditForm (the owning page EditForm wraps this whole
+             component). *@
         @if (ShowGuardians)
         {
             <div class="">
                 <FluentDivider Orientation="Orientation.Horizontal" Style="width:100%" />
             </div>
             <FormRow Label="Guardians">
-                <div class="student-guardians">
+                @* Single container div for both modes (page-side and
+                   dialog-side). The Linked modifier (`.student-form-guardians--linked`)
+                   re-styles it as a compact "Manage" + read-only grid
+                   for the page-side caller; the default styling
+                   (`.student-guardians`) is the historical dialog
+                   panel-switch layout. Wrapping both in a single
+                   `<div class="student-guardians">` avoids the
+                   if/else that would otherwise need a paired open /
+                   close and is easier to reason about. *@
+                <div class="student-guardians @(Mode == StudentFormFieldsMode.Linked ? "student-form-guardians--linked" : null)">
+                    @if (Mode == StudentFormFieldsMode.Linked)
+                    {
+                        <div class="student-guardians-linked-header">
+                            <span class="student-guardians-linked-count">
+                                <strong>@GuardianCount</strong> @(GuardianCount == 1 ? "guardian" : "guardians")
+                            </span>
+                            <FluentButton Appearance="Appearance.Accent"
+                                          Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.PersonAdd"
+                                          Disabled="@_loadingGuardians"
+                                          OnClick="OnManageGuardians">
+                                Manage
+                            </FluentButton>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_guardianError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error">@_guardianError</FluentMessageBar>
+                        }
+                        <StudentGuardiansList Items="LinkedItems"
+                                               RelationshipNameLookup="ResolveRelName"
+                                               SalutationLookup="ResolveSalutation"
+                                               OnRemove="OnLinkedRemoveAsync" />
+                    }
+                    else
+                    {
                     @if (_loadingGuardians)
                     {
                         <FluentProgressRing />
@@ -257,16 +316,17 @@
                                         }
                                     }
 
-                                    <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
-                                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button"
-                                                      Disabled="@(_selectedRows.Count == 0)"
-                                                      OnClick="AddSelectedGuardiansAsync">Add selected</FluentButton>
-                                        <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
-                                    </FluentStack>
-                                }
-                            </div>
+                                        <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
+                                            <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button"
+                                                          Disabled="@(_selectedRows.Count == 0)"
+                                                          OnClick="AddSelectedGuardiansAsync">Add selected</FluentButton>
+                                            <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
+                                        </FluentStack>
+                                    }
+                                </div>
                         }
                     }
+                }
                 </div>
             </FormRow>
         }
@@ -446,6 +506,51 @@
     /// <summary>Student id for edit mode. Null (default) ⇒ create mode.</summary>
     [Parameter] public Guid? StudentId { get; set; }
 
+    /// <summary>How the guardians section is rendered. <see cref="StudentFormFieldsMode.Inline"/>
+    /// (default) is the historical panel-switch UX — used when this component is
+    /// embedded inside a DIALOG (the wizard's inline "new student" form,
+    /// StudentPickerDialog's create flow, etc.). <see cref="StudentFormFieldsMode.Linked"/>
+    /// is the compact page-side "Guardians (N) — Manage" section used by
+    /// <c>/students/{id}/edit</c> and any future page that owns its own Save
+    /// flow + <see cref="IDialogService"/>. The two modes share the same
+    /// underlying state (links, drafts, error) so the page can hand the
+    /// component the same data it loads itself; the page-side mode simply
+    /// suppresses the panel switch in favour of modal dialog opens.</summary>
+    [Parameter] public StudentFormFieldsMode Mode { get; set; } = StudentFormFieldsMode.Inline;
+
+    /// <summary>Mode enum for the <see cref="Mode"/> parameter — see
+    /// <see cref="Mode"/> for the rationale.</summary>
+    public enum StudentFormFieldsMode
+    {
+        /// <summary>Historical panel-switch UX (dialog callers; the default).</summary>
+        Inline,
+        /// <summary>Compact page-side section (page callers — Edit.razor, etc.).</summary>
+        Linked,
+    }
+
+    /// <summary>Linked-mode only: the current links for the student, as
+    /// projected by <c>GET /students/{id}/guardians</c>. Required when
+    /// <see cref="Mode"/> == <see cref="StudentFormFieldsMode.Linked"/>;
+    /// the page owns the load (it also calls the link APIs) and passes
+    /// the result down so the form is a pure presenter in this mode.
+    /// Ignored in <see cref="StudentFormFieldsMode.Inline"/> mode (the
+    /// form loads the links itself there).</summary>
+    [Parameter] public StudentGuardianViewDto[]? LinkedItems { get; set; }
+
+    /// <summary>Linked-mode only: fires when the user clicks the "Manage"
+    /// button. The page opens <c>GuardianPickerDialog</c> via
+    /// <c>ShowShellDialogAsync</c>, calls <c>LinkGuardianAsync</c> on
+    /// the returned <c>GuardianAssignment</c> array, and reloads. The
+    /// form does not own any dialog opens in Linked mode (per the
+    /// "no nested dialog" rule in the dialog-ui skill).</summary>
+    [Parameter] public EventCallback OnManageGuardians { get; set; }
+
+    /// <summary>Linked-mode only: fires when the user clicks the per-row
+    /// Remove button. The page calls <c>UnlinkGuardianAsync</c> and
+    /// reloads. The argument is the <see cref="StudentGuardianViewDto"/>
+    /// row so the page has the GuardianId for the API call.</summary>
+    [Parameter] public EventCallback<StudentGuardianViewDto> OnRemoveGuardian { get; set; }
+
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
     [Inject] private ILogger<StudentFormFields> Logger { get; set; } = default!;
@@ -455,6 +560,10 @@
     private string? _guardianError;
     private List<StudentGuardianViewDto> _links = new();
     private Dictionary<Guid, string> _relNames = new();
+    // Spec §4.8: salutation (title) lookup for the guardian Name cell.
+    // Loaded once per guardian-list refresh; covers Mr/Mrs/Ms across all
+    // linked guardians. Empty when salutations aren't configured.
+    private Dictionary<Guid, string> _salutations = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -484,6 +593,19 @@
             {
                 var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
                 if (cv is not null) _relNames[cv.Id] = cv.Name;
+            }
+            // Spec §4.8: batch-load salutations so the Name cell can prepend
+            // titles for any linked guardian without a per-row lookup. Failure
+            // is non-fatal — the cell falls back to FirstName + LastName.
+            try
+            {
+                var sals = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                    CodedValueParent.Salutations.ToCode(), ct) ?? [];
+                _salutations = sals.ToDictionary(s => s.Id, s => s.Name);
+            }
+            catch
+            {
+                _salutations = new Dictionary<Guid, string>();
             }
         }
         catch (Exception ex)
@@ -525,6 +647,53 @@
     {
         GridTemplateColumns = "minmax(120px,1fr) minmax(160px,2fr) minmax(160px,2fr) 80px"
     };
+
+    // ── Linked-mode helpers (page-side) ──
+    //
+    // In Linked mode the form is a pure presenter: the page owns the link
+    // load + API calls and passes <see cref="LinkedItems"/> down. The form
+    // surfaces a count + a Manage button + a read-only grid + a per-row
+    // delete that fires <see cref="OnRemoveGuardian"/>. No internal state
+    // machine, no search, no inline create — those live behind the
+    // GuardianPickerDialog / GuardianFormDialog the page opens.
+
+    /// <summary>The current guardian count surfaced in the Linked-mode
+    /// header. In <see cref="StudentFormFieldsMode.Linked"/> mode the
+    /// count is <see cref="LinkedItems"/>.<see cref="Array.Length"/>;
+    /// in Inline mode the form still owns its draft list, so the
+    /// count is <c>Model.GuardianLinks.Count + _links.Count</c> (drafts
+    /// for create, server links for edit) — but Inline mode doesn't
+    /// render the Linked header so the value is unused there.</summary>
+    private int GuardianCount => Mode == StudentFormFieldsMode.Linked
+        ? LinkedItems?.Length ?? 0
+        : (IsEditMode ? _links.Count : Model.GuardianLinks.Count);
+
+    /// <summary>Resolves a relationship coded-value id to its display name
+    /// using the already-loaded <c>_relNames</c> map. Returns null when
+    /// the id is unset or the name hasn't been resolved yet — the
+    /// <c>StudentGuardiansList</c> treats a null/empty result as "no
+    /// relationship to display" and renders the cell blank. The lookup
+    /// is synchronous (the map is loaded in <see cref="LoadGuardiansAsync"/>);
+    /// the <c>OnParametersSet</c> hook on the page keeps the map in sync
+    /// after every link / unlink.</summary>
+    private string? ResolveRelName(Guid? id)
+        => id is { } g && _relNames.TryGetValue(g, out var n) ? n : null;
+
+    private string? ResolveSalutation(Guid? id)
+        => id is { } g && _salutations.TryGetValue(g, out var n) ? n : null;
+
+    /// <summary>Linked-mode per-row delete handler. Fire-and-forget
+    /// the async <see cref="OnRemoveGuardian"/> callback; the form
+    /// doesn't await its own completion (the page owns the actual
+    /// unlink + reload). The current task is captured only so the
+    /// compiler doesn't warn about an unawaited async call inside
+    /// a synchronous handler — the EventCallback semantics ensure
+    /// the page is invoked synchronously even if the page's handler
+    /// is async.</summary>
+    private async Task OnLinkedRemoveAsync(StudentGuardianViewDto row)
+    {
+        await OnRemoveGuardian.InvokeAsync(row);
+    }
 
     /// <summary>Display row for the linked/draft guardian grid.</summary>
     private sealed record GuardianGridRow(
@@ -607,8 +776,11 @@
                 try
                 {
                     var contacts = await Api.ListContactsAsync(ContactOwnerType.Guardian, g.Id, ct);
-                    contact = contacts?.FirstOrDefault(c => c.IsPrimary)?.Value
-                           ?? contacts?.FirstOrDefault()?.Value;
+                    // Spec §4.9: preferred contact is the one with the
+                    // lowest DisplayOrder; fall back to the first contact.
+                    contact = contacts?
+                        .OrderBy(c => c.DisplayOrder)
+                        .FirstOrDefault()?.Value;
                 }
                 catch
                 {
@@ -700,7 +872,8 @@
                 _newGuardian.RelationshipCodedValueId,
                 _newGuardian.ContactChannel,
                 string.IsNullOrWhiteSpace(_newGuardian.ContactValue) ? null : _newGuardian.ContactValue.Trim(),
-                _newGuardian.TitleCodedValueId);
+                _newGuardian.TitleCodedValueId,
+                _newGuardian.CountryCode);
             await AddDraftAsync(assignment);
             _panelMode = GuardianPanelMode.List;
             _newGuardian = GuardianAssignmentModel.ForAdd();

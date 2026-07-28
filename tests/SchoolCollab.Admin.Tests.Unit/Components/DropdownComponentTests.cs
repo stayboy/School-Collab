@@ -158,6 +158,53 @@ public class DropdownComponentTests : BunitContext
     }
 
     [TestMethod]
+    public void DropdownComponent_Width_EmitsInlineStyle_OnFluentSelect()
+    {
+        // Arrange: the repo's W1–W9 FieldWidth enum emits an inline `style`
+        // on the underlying <fluent-select> so the width always wins over
+        // the wrapper's scoped `width:100%` default (inline style beats
+        // Blazor scoped CSS). W1 = 80px.
+        var items = new[] { new TestItem(Guid.NewGuid(), "Alpha") };
+
+        // Act
+        var cut = Render<DropdownComponent<TestItem, Guid?>>(parameters => parameters
+            .Add(p => p.Items, items)
+            .Add(p => p.OptionText, i => i.Name)
+            .Add(p => p.OptionValue, i => i.Id)
+            .Add(p => p.Width, FieldWidth.W1));
+
+        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+
+        // Assert: the style attribute carries the W1 width + the min-width:0
+        // / max-width:100% safety nets from FieldWidthExtensions.ToCssStyle.
+        var style = cut.Find("fluent-select").GetAttribute("style");
+        style.Should().Contain("width:80px");
+        style.Should().Contain("min-width:0");
+        style.Should().Contain("max-width:100%");
+    }
+
+    [TestMethod]
+    public void DropdownComponent_WidthNull_OmitsStyleAttribute()
+    {
+        // Arrange: when Width is not set, no inline style is emitted (so the
+        // wrapper's scoped default / consumer Class controls the width) and
+        // no empty style="" attribute leaks onto the element.
+        var items = new[] { new TestItem(Guid.NewGuid(), "Alpha") };
+
+        // Act
+        var cut = Render<DropdownComponent<TestItem, Guid?>>(parameters => parameters
+            .Add(p => p.Items, items)
+            .Add(p => p.OptionText, i => i.Name)
+            .Add(p => p.OptionValue, i => i.Id));
+
+        cut.WaitForState(() => cut.Find("fluent-select") is not null);
+
+        // Assert: no style attribute is rendered when Width is null.
+        var styleAttr = cut.Find("fluent-select").GetAttribute("style");
+        styleAttr.Should().BeNullOrEmpty();
+    }
+
+    [TestMethod]
     public async Task DropdownComponent_Refresh_TriggersRerender()
     {
         // Arrange: the parent mutates the Items list in place (without

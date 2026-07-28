@@ -34,3 +34,18 @@
     max-width: 320px;
     width: 100%;
 }
+
+/* Grid header titles never clip — wrap long titles instead of truncating.
+   FluentDataGrid renders the supplied Title (or TitleTemplate content) inside
+   a <th> cell; without white-space:normal the text clips when the column is
+   narrower than the label (e.g. a long relationship or status header).
+   `vertical-align: bottom` keeps the wrapped title pegged to the grid body
+   edge for a cleaner look. The rule targets the actual <th> elements so it
+   works whether the host renders as a native <table> or a <fluent-data-grid>
+   custom element. */
+.entity-grid-scroll thead th,
+.entity-grid-scroll fluent-data-grid thead th {
+    white-space: normal;
+    line-height: 1.3;
+    vertical-align: bottom;
+}

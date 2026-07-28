@@ -1,21 +1,33 @@
-@* Shared multi-channel contacts editor (spec §11). Owns add / remove /
-   verify / set-primary / subscribe for a single contact owner (a Student or a
-   Guardian). Reused by the student ContactsTab, the GuardianSetupWizard, and
-   the GradeLevelWizard guardian step — the same way <StudentFormFields>
-   centralises the student field set.
+@* Shared multi-channel contacts editor (spec §11 + §4.4 Option C). Owns
+   add / remove / reorder / verify / set-primary / subscribe for a single
+   contact owner (a Student or a Guardian). Supports TWO modes:
+
+     - <b>Live</b> (default): the owner already exists. Loads contacts on
+       mount and owns every mutation against the injected IContactsClient.
+       Parents only supply the owner identity. Used by the student
+       ContactsTab, GuardianDetail, GuardianSetupWizard, GradeLevelWizard.
+     - <b>Buffered</b>: the owner does NOT exist yet (e.g. creating a
+       guardian inside the picker). The parent hands in a
+       <see cref="Contacts"/> list + <see cref="ContactsChanged"/> and the
+       editor mutates it in memory — no API calls. The parent flushes the
+       list to /contacts after it persists the owner. Used by
+       GuardianPickerDialog's New panel.
 
    Usage:
      <ContactsEditor OwnerType="ContactOwnerType.Student" OwnerId="@studentId" />
-     <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@guardianId" />
+     <ContactsEditor Mode="EditorMode.Buffered" OwnerType="ContactOwnerType.Guardian"
+                     Contacts="_newContacts" ContactsChanged="..." />
 
-   The component loads the owner's contacts on mount (and whenever OwnerId
-   changes) and owns all mutations against the injected IContactsClient, so
-   parents only supply the owner identity. *@
+   The two modes share the add-row form (Channel + Country code + Value +
+   Label) and the country-code loading / formatting helpers. They differ
+   in: the list row actions (Buffered has no Verify / Subscribe / Primary
+   checkbox — contacts have no Primary/CC role during creation; priority is
+   expressed by Order via move-up / move-down / mark-preferred), and the
+   data shape (ContactDto in Live vs ContactModel in Buffered). *@
 @using SchoolCollab.Students.Core.Contracts
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Services
@@ -24,7 +36,7 @@
 @inject ILogger<ContactsEditor> Logger
 
 <div class="contacts-editor">
-    @if (_loading)
+    @if (Mode == EditorMode.Live && _loading)
     {
         <div class="contacts-editor-loading">
             <FluentProgressRing />
@@ -37,13 +49,13 @@
                               @bind-SelectedValue="_newChannel"
                               @bind-SelectedValue:after="OnChannelChanged"
                               Placeholder="Channel"
-                              Class="contacts-channel" />
+                              Width="FieldWidth.W2" />
             @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
             {
                 <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
                                     @bind-SelectedId="_newCountryCodeId"
                                     Placeholder="Code"
-                                    Class="contacts-country-code"
+                                    Width="FieldWidth.W3"
                                     OptionText="@FormatCountryCodeOption" />
             }
             <FluentTextField @bind-Value="_newValue"
@@ -52,9 +64,6 @@
             <FluentTextField @bind-Value="_newLabel"
                               Placeholder="Label (optional)"
                               class="contacts-label" />
-            <FluentCheckbox @bind-Value="_newIsPrimary" class="contacts-primary">
-                Primary
-            </FluentCheckbox>
             <FluentButton Appearance="Appearance.Accent"
                           IconStart="@FluentIcons.Add"
                           OnClick="AddAsync"
@@ -68,63 +77,74 @@
             <FluentMessageBar Intent="MessageIntent.Error" class="contacts-error">@_error</FluentMessageBar>
         }
 
-        @if (_contacts.Count == 0)
+        @if (RowSource.Count == 0)
         {
             <FluentMessageBar Intent="MessageIntent.Info" class="contacts-empty">No contacts yet.</FluentMessageBar>
         }
         else
         {
             <ul class="contacts-list">
-                @foreach (var c in _contacts)
+                @foreach (var c in RowSource)
                 {
-                    <li class="contact-item">
-                        <span class="contact-channel" title="@c.Channel">@ChannelGlyph(c.Channel) @c.Channel</span>
-                        <span class="contact-value">@FormatValue(c)</span>
+                    <li class="contact-item @(c.IsPreferred ? "contact-item--preferred" : null)">
+                        <span class="contact-channel" title="@c.Channel.ToString()">@ChannelGlyph(c.Channel) @c.Channel</span>
+                        <span class="contact-value">@FormatRowValue(c)</span>
                         @if (!string.IsNullOrWhiteSpace(c.Label))
                         {
-                            <span class="contact-label">@c.Label</span>
+                            <span class="contact-label">(@c.Label)</span>
                         }
-                        @if (c.IsPrimary)
+                        @if (c.IsPreferred)
                         {
-                            <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Primary</FluentBadge>
+                            <FluentBadge Appearance="Appearance.Accent" class="contact-badge">
+                                @(Mode == EditorMode.Live ? "Primary" : "Preferred")
+                            </FluentBadge>
                         }
-                        @if (c.IsVerified)
+                        @if (Mode == EditorMode.Live)
                         {
-                            <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Verified</FluentBadge>
-                        }
-                        else
-                        {
-                            <FluentBadge Appearance="Appearance.Neutral" class="contact-badge">Unverified</FluentBadge>
+                            if (c.IsVerified)
+                            {
+                                <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Verified</FluentBadge>
+                            }
+                            else
+                            {
+                                <FluentBadge Appearance="Appearance.Neutral" class="contact-badge">Unverified</FluentBadge>
+                            }
                         }
 
-                        @if (ShowSubscription)
+                        @if (Mode == EditorMode.Live && ShowSubscription)
                         {
-                            <FluentCheckbox Value="@_subscribed.Contains(c.Id)"
-                                            ValueChanged="@(v => ToggleSubscribeAsync(c.Id, v))"
+                            <FluentCheckbox Value="@_subscribed.Contains(c.Key)"
+                                            ValueChanged="@(v => ToggleSubscribeAsync(c.Key, v))"
                                             class="contact-subscribe">
                                 Subscribed
                             </FluentCheckbox>
                         }
 
                         <span class="contact-actions">
-                            @if (!c.IsVerified)
+                            @if (Mode == EditorMode.Live && !c.IsVerified)
                             {
                                 <FluentButton Appearance="Appearance.Lightweight"
                                               Title="Mark verified"
                                               IconStart="@FluentIcons.Checkmark"
-                                              OnClick="@(() => VerifyAsync(c.Id))" />
+                                              OnClick="@(() => VerifyAsync(c.Key))" />
                             }
-                            @if (!c.IsPrimary)
-                            {
-                                <FluentButton Appearance="Appearance.Lightweight"
-                                              Title="Set as primary"
-                                              IconStart="@FluentIcons.Star"
-                                              OnClick="@(() => SetPrimaryAsync(c.Id))" />
-                            }
+                            @* Move-up / move-down reorder. Live swaps ids
+                               and calls the reorder endpoint; Buffered swaps
+                               the in-memory list and raises ContactsChanged. *@
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          Title="Move up (higher priority)"
+                                          IconStart="@FluentIcons.ChevronUp"
+                                          Disabled="@(IsFirst(c))"
+                                          OnClick="@(() => MoveUpAsync(c.Key))" />
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          Title="Move down (lower priority)"
+                                          IconStart="@FluentIcons.ChevronDown"
+                                          Disabled="@(IsLast(c))"
+                                          OnClick="@(() => MoveDownAsync(c.Key))" />
                             <FluentButton Appearance="Appearance.Lightweight"
                                           Title="Remove contact"
                                           IconStart="@FluentIcons.Delete"
-                                          OnClick="@(() => RemoveAsync(c.Id))" />
+                                          OnClick="@(() => RemoveAsync(c.Key))" />
                         </span>
                     </li>
                 }
@@ -134,14 +154,42 @@
 </div>
 
 @code {
-    /// <summary>The contact owner type (Student or Guardian).</summary>
+    /// <summary>Editor mode. <see cref="Live"/> calls the API on every
+    /// mutation (owner already exists). <see cref="Buffered"/> mutates an
+    /// in-memory <see cref="Contacts"/> list and never calls the API —
+    /// the parent flushes after persisting the owner.</summary>
+    public enum EditorMode { Live, Buffered }
+
+    /// <summary>The contact owner type (Student or Guardian). Required in
+    /// both modes (drives the country-code context and, in Live mode, the
+    /// API load / persist calls).</summary>
     [Parameter, EditorRequired] public ContactOwnerType OwnerType { get; set; }
 
-    /// <summary>The owner's id.</summary>
-    [Parameter, EditorRequired] public Guid OwnerId { get; set; }
+    /// <summary>The owner's id. Required in <see cref="EditorMode.Live"/>
+    /// (the editor loads and mutates the owner's persisted contacts). Not
+    /// used in <see cref="EditorMode.Buffered"/> (the owner does not exist
+    /// yet). A runtime guard enforces this in Live mode.</summary>
+    [Parameter] public Guid OwnerId { get; set; }
 
-    /// <summary>When true (default), shows the subscribe/unsubscribe toggle.</summary>
+    /// <summary>Editor mode (defaults to <see cref="EditorMode.Live"/> so
+    /// every existing caller is unchanged).</summary>
+    [Parameter] public EditorMode Mode { get; set; } = EditorMode.Live;
+
+    /// <summary>When true (default, Live mode only), shows the
+    /// subscribe/unsubscribe toggle. Forced false in Buffered mode
+    /// (subscriptions need a persisted contact).</summary>
     [Parameter] public bool ShowSubscription { get; set; } = true;
+
+    /// <summary>In-memory contacts for <see cref="EditorMode.Buffered"/>.
+    /// The parent owns the list and passes it by reference; the editor
+    /// mutates it in place and raises <see cref="ContactsChanged"/> after
+    /// every mutation. Ignored in Live mode.</summary>
+    [Parameter] public List<ContactModel>? Contacts { get; set; }
+
+    /// <summary>Raised after every Buffered mutation so the parent can
+    /// re-render / persist. Not raised in Live mode (the reload handles
+    /// re-rendering).</summary>
+    [Parameter] public EventCallback ContactsChanged { get; set; }
 
     private List<ContactDto> _contacts = new();
     private HashSet<Guid> _subscribed = new();
@@ -150,24 +198,19 @@
     private string? _error;
     private Guid? _loadedOwnerId;
 
-    // Cancellation: separate CTSes for loads and mutations.
-    // _loadCts is recreated per load and disposed when the load finishes or
-    // is superseded, so it must NOT be reused by later mutation calls.
-    // _mutationCts lives for the component lifetime and is disposed in
-    // Dispose(), cancelling any in-flight add/remove/verify/etc. calls.
+    // Cancellation: separate CTSes for loads and mutations (Live mode only).
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _mutationCts = new();
     private volatile bool _disposed;
     private CancellationToken LoadToken => _loadCts?.Token ?? CancellationToken.None;
     private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
 
-    // New-contact form state.
+    // Shared add-row form state.
     private ContactChannel _newChannel = ContactChannel.Email;
     private Guid? _newCountryCodeId;
     private CodedValueDto[]? _countryCodeOptions;
     private string _newValue = string.Empty;
     private string _newLabel = string.Empty;
-    private bool _newIsPrimary;
 
     private string ValuePlaceholder => _newChannel switch
     {
@@ -179,8 +222,6 @@
     public void Dispose()
     {
         _disposed = true;
-        // Cancel any in-flight load or mutation so awaited Api calls don't
-        // try to touch component state on a torn-down component.
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
@@ -191,20 +232,69 @@
 
     protected override async Task OnParametersSetAsync()
     {
-        // Reload whenever the owner changes (e.g. navigating between students
-        // that reuse the same component instance).
-        if (_loadedOwnerId != OwnerId)
+        if (Mode == EditorMode.Live)
         {
-            _loadedOwnerId = OwnerId;
-            await LoadAsync();
+            // Reload whenever the owner changes (e.g. navigating between
+            // students that reuse the same component instance).
+            if (_loadedOwnerId != OwnerId)
+            {
+                _loadedOwnerId = OwnerId;
+                await LoadAsync();
+            }
+        }
+        // Buffered mode: nothing to load — the parent owns the list.
+    }
+
+    // ─── Unified row view for rendering ────────────────────────────────
+    // Both ContactDto (Live) and ContactModel (Buffered) project into this
+    // so the @foreach markup is shared. The action handlers map the Key
+    // back to the underlying object per mode.
+    private sealed record ContactRow(
+        Guid Key,
+        ContactChannel Channel,
+        string Value,
+        string? Label,
+        string? CountryCode,
+        bool IsPreferred,
+        bool IsVerified,
+        int Order);
+
+    private List<ContactRow> RowSource
+    {
+        get
+        {
+            if (Mode == EditorMode.Buffered)
+            {
+                var list = Contacts ?? new List<ContactModel>();
+                return list.OrderBy(x => x.Order)
+                           .Select(x => new ContactRow(
+                               x.TempId, x.Channel, x.Value, x.Label,
+                               x.CountryCode, x.Order == 0, false, x.Order))
+                           .ToList();
+            }
+            return _contacts.Select(x => new ContactRow(
+                               x.Id, x.Channel, x.Value, x.Label,
+                               x.CountryCode, x.DisplayOrder == 0, x.IsVerified,
+                               x.DisplayOrder))
+                            .ToList();
         }
     }
 
+    private bool IsFirst(ContactRow c)
+    {
+        var rows = RowSource;
+        return rows.Count > 0 && rows[0].Key == c.Key;
+    }
+
+    private bool IsLast(ContactRow c)
+    {
+        var rows = RowSource;
+        return rows.Count > 0 && rows[^1].Key == c.Key;
+    }
+
+    // ─── Live-mode load ────────────────────────────────────────────────
     private async Task LoadAsync()
     {
-        // Each load gets its own CTS so a stale load doesn't tear down a
-        // newer one (e.g. navigating rapidly between owners). The previous
-        // CTS is cancelled before being replaced.
         var previousCts = _loadCts;
         var cts = new CancellationTokenSource();
         _loadCts = cts;
@@ -226,11 +316,7 @@
                 _subscribed = new HashSet<Guid>(subscribed?.Select(s => s.Id) ?? []);
             }
         }
-        catch (OperationCanceledException)
-        {
-            // Load was superseded by a newer load, or the component was
-            // disposed; either way, do not touch state.
-        }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
@@ -240,8 +326,6 @@
         }
         finally
         {
-            // A newer LoadAsync has replaced us; don't reset _loading (the
-            // newer load owns it) and don't fire StateHasChanged.
             superseded = !ReferenceEquals(_loadCts, cts);
             cts.Dispose();
             previousCts?.Dispose();
@@ -252,6 +336,7 @@
         await InvokeAsync(StateHasChanged);
     }
 
+    // ─── Shared add-row helpers ────────────────────────────────────────
     private async Task OnChannelChanged()
     {
         if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
@@ -269,10 +354,10 @@
         if (_countryCodeOptions is not null) return;
         try
         {
+            var token = Mode == EditorMode.Live ? MutationToken : CancellationToken.None;
             _countryCodeOptions = await CodedValuesApi.GetChildrenByParentCodeAsync(
-                CodedValueParent.CountryCallingCodes.ToCode(), MutationToken) ?? [];
+                CodedValueParent.CountryCallingCodes.ToCode(), token) ?? [];
 
-            // Default to Ghana (+233) when available.
             _newCountryCodeId ??= _countryCodeOptions
                 .FirstOrDefault(x => x.Code.Equals("CNCODES_GHA", StringComparison.OrdinalIgnoreCase))?.Id
                 ?? _countryCodeOptions.FirstOrDefault()?.Id;
@@ -292,28 +377,43 @@
         return selected?.Name;
     }
 
+    // ─── Add ───────────────────────────────────────────────────────────
     private async Task AddAsync()
     {
         if (string.IsNullOrWhiteSpace(_newValue)) return;
 
+        var countryCode = _newChannel is ContactChannel.SMS or ContactChannel.WhatsApp
+            ? ResolveCountryCode()
+            : null;
+
+        if (Mode == EditorMode.Buffered)
+        {
+            var list = Contacts ??= new List<ContactModel>();
+            list.Add(new ContactModel
+            {
+                Channel = _newChannel,
+                Value = _newValue.Trim(),
+                Label = string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
+                CountryCode = countryCode,
+                // Append at the tail (Order = current count). The first
+                // added contact is Order 0 = preferred.
+                Order = list.Count
+            });
+            ResetAddForm();
+            await NotifyChangedAsync();
+            return;
+        }
+
+        // Live mode
         _adding = true;
         _error = null;
         try
         {
-            var countryCode = _newChannel is ContactChannel.SMS or ContactChannel.WhatsApp
-                ? ResolveCountryCode()
-                : null;
-
             await Api.AddContactAsync(new AddContactRequest(
                 OwnerType, OwnerId, _newChannel, _newValue.Trim(),
-                string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
-                _newIsPrimary) { CountryCode = countryCode }, MutationToken);
-
-            _newValue = string.Empty;
-            _newLabel = string.Empty;
-            _newIsPrimary = false;
-            _newChannel = ContactChannel.Email;
-            _newCountryCodeId = null;
+                string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim())
+                { CountryCode = countryCode, DisplayOrder = _contacts.Count }, MutationToken);
+            ResetAddForm();
             await LoadAsync();
         }
         catch (OperationCanceledException) { }
@@ -326,35 +426,114 @@
         finally
         {
             _adding = false;
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+            if (!_disposed) await InvokeAsync(StateHasChanged);
         }
     }
 
-    private async Task RemoveAsync(Guid id)
+    private void ResetAddForm()
     {
+        _newValue = string.Empty;
+        _newLabel = string.Empty;
+        _newChannel = ContactChannel.Email;
+        _newCountryCodeId = null;
+    }
+
+    // ─── Remove ────────────────────────────────────────────────────────
+    private async Task RemoveAsync(Guid key)
+    {
+        if (Mode == EditorMode.Buffered)
+        {
+            var list = Contacts;
+            if (list is null) return;
+            var target = list.FirstOrDefault(x => x.TempId == key);
+            if (target is null) return;
+            list.Remove(target);
+            RestampOrders(list);
+            await NotifyChangedAsync();
+            return;
+        }
+
         _error = null;
         try
         {
-            await Api.DeleteContactAsync(id, MutationToken);
-            _subscribed.Remove(id);
+            await Api.DeleteContactAsync(key, MutationToken);
+            _subscribed.Remove(key);
             await LoadAsync();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to remove contact {ContactId}", id);
+            Logger.LogError(ex, "Failed to remove contact {ContactId}", key);
             _error = ex.Message;
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+            if (!_disposed) await InvokeAsync(StateHasChanged);
         }
     }
 
+    // ─── Reorder (move-up / move-down) ─────────────────────────────────
+    private async Task MoveUpAsync(Guid key)
+    {
+        if (Mode == EditorMode.Buffered)
+        {
+            var list = Contacts;
+            if (list is null) return;
+            var ordered = list.OrderBy(x => x.Order).ToList();
+            var idx = ordered.FindIndex(x => x.TempId == key);
+            if (idx <= 0) return;
+            (ordered[idx - 1], ordered[idx]) = (ordered[idx], ordered[idx - 1]);
+            RestampOrders(ordered);
+            await NotifyChangedAsync();
+            return;
+        }
+
+        var orderedIds = _contacts.Select(x => x.Id).ToList();
+        var i = orderedIds.IndexOf(key);
+        if (i <= 0) return;
+        (orderedIds[i - 1], orderedIds[i]) = (orderedIds[i], orderedIds[i - 1]);
+        await ReorderLiveAsync(orderedIds);
+    }
+
+    private async Task MoveDownAsync(Guid key)
+    {
+        if (Mode == EditorMode.Buffered)
+        {
+            var list = Contacts;
+            if (list is null) return;
+            var ordered = list.OrderBy(x => x.Order).ToList();
+            var idx = ordered.FindIndex(x => x.TempId == key);
+            if (idx < 0 || idx >= ordered.Count - 1) return;
+            (ordered[idx + 1], ordered[idx]) = (ordered[idx], ordered[idx + 1]);
+            RestampOrders(ordered);
+            await NotifyChangedAsync();
+            return;
+        }
+
+        var orderedIds = _contacts.Select(x => x.Id).ToList();
+        var i = orderedIds.IndexOf(key);
+        if (i < 0 || i >= orderedIds.Count - 1) return;
+        (orderedIds[i + 1], orderedIds[i]) = (orderedIds[i], orderedIds[i + 1]);
+        await ReorderLiveAsync(orderedIds);
+    }
+
+    private async Task ReorderLiveAsync(IReadOnlyList<Guid> orderedIds)
+    {
+        _error = null;
+        try
+        {
+            await Api.ReorderContactsAsync(OwnerType, OwnerId, orderedIds, MutationToken);
+            await LoadAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reorder contacts for {OwnerType} {OwnerId}", OwnerType, OwnerId);
+            _error = ex.Message;
+            if (!_disposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ─── Live-only: verify + subscribe ─────────────────────────────────
     private async Task VerifyAsync(Guid id)
     {
         _error = null;
@@ -369,31 +548,7 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to verify contact {ContactId}", id);
             _error = ex.Message;
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
-        }
-    }
-
-    private async Task SetPrimaryAsync(Guid id)
-    {
-        _error = null;
-        try
-        {
-            await Api.SetPrimaryContactAsync(id, MutationToken);
-            await LoadAsync();
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to set primary contact {ContactId}", id);
-            _error = ex.Message;
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+            if (!_disposed) await InvokeAsync(StateHasChanged);
         }
     }
 
@@ -407,15 +562,8 @@
             else
                 await Api.UnsubscribeAsync(id, ct: MutationToken);
 
-            if (subscribe)
-                _subscribed.Add(id);
-            else
-                _subscribed.Remove(id);
-
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+            if (subscribe) _subscribed.Add(id); else _subscribed.Remove(id);
+            if (!_disposed) await InvokeAsync(StateHasChanged);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -423,14 +571,26 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to toggle subscription for contact {ContactId}", id);
             _error = ex.Message;
-            if (!_disposed)
-            {
-                await InvokeAsync(StateHasChanged);
-            }
+            if (!_disposed) await InvokeAsync(StateHasChanged);
         }
     }
 
-    private static string FormatValue(ContactDto c) => c.Channel switch
+    // ─── Buffered helpers ──────────────────────────────────────────────
+    private static void RestampOrders(List<ContactModel> ordered)
+    {
+        for (var i = 0; i < ordered.Count; i++) ordered[i].Order = i;
+    }
+
+    private async Task NotifyChangedAsync()
+    {
+        if (ContactsChanged.HasDelegate)
+            await ContactsChanged.InvokeAsync();
+        else
+            await InvokeAsync(StateHasChanged);
+    }
+
+    // ─── Formatting ────────────────────────────────────────────────────
+    private static string FormatRowValue(ContactRow c) => c.Channel switch
     {
         ContactChannel.SMS or ContactChannel.WhatsApp when !string.IsNullOrWhiteSpace(c.CountryCode)
             => $"{c.CountryCode} {c.Value}",

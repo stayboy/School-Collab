@@ -24,7 +24,7 @@ public sealed class AddContactHandler(
                 command.Value,
                 command.Label,
                 command.CountryCode,
-                command.IsPrimary)
+                command.DisplayOrder)
             .WithTenant(tenantProvider);
 
         await repository.AddAsync(contact, cancellationToken);

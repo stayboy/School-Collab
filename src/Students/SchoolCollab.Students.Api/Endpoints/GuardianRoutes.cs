@@ -30,8 +30,9 @@ public static class GuardianRoutes
         group.MapGet("/", async (
             [FromServices] IQueryHandler<ListGuardians, GuardianDto[]> handler,
             CancellationToken ct,
-            [FromQuery] string? search = null) =>
-            Results.Ok(await handler.HandleAsync(new ListGuardians(search), ct)));
+            [FromQuery] string? search = null,
+            [FromQuery] Guid? excludeStudentId = null) =>
+            Results.Ok(await handler.HandleAsync(new ListGuardians(search, excludeStudentId), ct)));
 
         group.MapGet("/{id:guid}", async (
             Guid id,

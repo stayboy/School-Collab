@@ -497,8 +497,23 @@ Use FluentUI's own layout components for edit/create forms:
   `margin-bottom` to labels; let the control render its normal label spacing.
 - Use `full-width` only for controls that should span the available form width (text
   fields, text areas, selects). Short controls such as dates, numbers, and
-  display-order fields should use a narrower width, either with the component `Style`
-  parameter or a small helper class such as `narrow-field`.
+  display-order fields should use a narrower width via the **W1–W9 input width
+  ladder** (the repo's consistent sizing scale) rather than ad-hoc `Style`
+  strings or `narrow-field`:
+  - **Repo dropdown wrappers** (`CodedValueDropdown`, `DropdownForEnum`,
+    `DropdownComponent`): set the strongly-typed `Width` parameter —
+    `Width="FieldWidth.W3"`. The wrapper emits an inline `style` on the
+    underlying `<FluentSelect>` that beats its scoped `width:100%` default.
+  - **Third-party inputs** (`FluentTextField`, `FluentSelect`,
+    `FluentDatePicker`, `FluentNumberField`, `FluentTextArea`): apply the
+    matching CSS class — `Class="w-3"`.
+  - The ladder lives in `src/SchoolCollab.Admin.Shared/Components/FieldWidth.cs`
+    (enum + `ToCssStyle()`) and the `w-1`…`w-9` classes in
+    `src/SchoolCollab.Admin/wwwroot/css/app.css`. Both share one pixel
+    ladder — keep them in sync. See the `input-width-scale` skill for the
+    full step→width→use map and the scoped-CSS specificity gotcha.
+  - `narrow-field` and `full-width` remain for legacy call sites; prefer the
+    W1–W9 ladder for new code.
 - Required labels must include the asterisk in the label text, for example
   `Label="Title *"`, and required fields should use a helper class such as
   `required-field` so the label can be styled bold.
@@ -508,8 +523,8 @@ Use FluentUI's own layout components for edit/create forms:
     <FluentStack Orientation="Orientation.Vertical" Gap="1rem" class="details-form-fields">
         <FluentTextField @bind-Value="_model.Title" Label="Title *" class="full-width required-field" Required />
         <FluentTextArea @bind-Value="_model.Description" Label="Description" Rows="4" class="full-width" />
-        <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" Style="width: 12rem;" />
-        <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" Style="width: 12rem;" />
+        <FluentDatePicker @bind-Value="_model.DueDate" Label="Due Date" Class="w-3" />
+        <FluentNumberField @bind-Value="_model.MaxScore" Label="Max Score" Class="w-4" />
     </FluentStack>
 </FluentEditForm>
 ```

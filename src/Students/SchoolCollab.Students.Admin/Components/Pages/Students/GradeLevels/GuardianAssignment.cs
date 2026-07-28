@@ -1,4 +1,5 @@
 using SchoolCollab.Students.Core.Domain;
+using SchoolCollab.Admin.Shared.Components;
 
 namespace SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels;
 
@@ -17,4 +18,6 @@ public sealed record GuardianAssignment(
     ContactChannel? ContactChannel,
     string? ContactValue,
     Guid? TitleCodedValueId,
-    GuardianRole Role = GuardianRole.Primary);
+    string? CountryCode = null,
+    GuardianRole Role = GuardianRole.Primary,
+    IReadOnlyList<ContactModel>? Contacts = null);

@@ -1,3 +1,14 @@
 .guardian-field {
     width: 100%;
 }
+
+/* Country calling-code dropdown in the Contact value row (shown only for
+   SMS / WhatsApp channels). Sits side-by-side with the contact-value text
+   field inside the FormRow input cell (which is display:flex, gap:8px).
+   Fixed basis so the dial-prefix picker stays compact while the text field
+   flexes to fill the remaining cell width. */
+.guardian-country-code {
+    flex: 0 0 150px;
+    max-width: 180px;
+    min-width: 120px;
+}

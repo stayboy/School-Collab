@@ -1,0 +1,47 @@
+/* GuardianGrid (spec §4.7 / goal #5): the shared column structure for
+   guardian lists (picker + per-student). The .guardian-name-cell class is
+   the visual anchor of the linked-mode Name column: it stacks the
+   guardian name + Emergency badge on one line and, beneath it, the
+   optional "View all (N) contacts" anchor (shown only when the guardian
+   has more than 3 contacts). The picker Name cell is a bare <span> and
+   does not use this class. */
+
+.guardian-name-cell {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+}
+
+.guardian-name-line {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* "View all (N) contacts" anchor — a hypertext button rendered as a link,
+   shown only when TotalContactCount > 3 (guarded in the razor). Kept
+   compact so it sits neatly under the name without inflating the row. */
+.guardian-view-all-contacts {
+    min-height: 0;
+    padding: 0;
+    font-size: 0.8rem;
+}
+
+.muted {
+    color: var(--neutral-foreground-hint, #666);
+}
+
+/* Picker-mode contact cells: value on one line, channel subtitle
+   below. */
+.guardian-contact-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.contact-channel {
+    font-size: 0.75rem;
+    line-height: 1.2;
+}

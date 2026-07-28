@@ -1,48 +1,17 @@
-/* ── Guardian contacts list (read-only) ─────────────────────────────
-   Used in the student detail view's "Contacts" section. Each card
-   represents one linked guardian, with all their contact channels
-   listed inside. Primary contacts are visually anchored; non-primary
-   rows use a quieter style so the eye lands on the primary first. */
+/* Read-only guardian-contacts dialog (spec 2026-07-27 §4.5). One dialog
+   per guardian; renders every contact channel in display order. Same
+   row visual language as the (now-removed) GuardianContactsList so the
+   dialog and the student-view guardians grid read as one design. */
 
-.guardian-contacts {
+.guardian-contacts-dialog {
     display: flex;
     flex-direction: column;
     gap: 12px;
+    min-width: 0;
 }
 
-.guardian-contact-card {
-    border: 1px solid var(--neutral-stroke-rest, #e0e0e0);
-    border-radius: 6px;
-    padding: 12px 16px;
-    background: var(--neutral-layer-1, #ffffff);
-}
-
-.guardian-contact-header {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-
-.guardian-contact-name {
-    font-size: 1rem;
-}
-
-.guardian-contact-role {
-    font-size: 0.7rem;
-}
-
-.guardian-contact-emergency {
-    font-size: 0.7rem;
-}
-
-.guardian-contact-relationship {
-    font-size: 0.9rem;
-}
-
-.guardian-contact-empty {
-    margin: 4px 0 0;
+.guardian-contacts-subtitle {
+    margin: 0;
     font-size: 0.9rem;
 }
 
@@ -102,6 +71,20 @@
 
 .guardian-contact-badge {
     font-size: 0.7rem;
+}
+
+/* Footer separator + Close button. The dialog host has no
+   PrimaryAction/SecondaryAction (BuildShellParameters sets both null),
+   so the body must own the close affordance. The top border is the
+   content/actions separator line mandated by the dialog-ui skill. */
+.guardian-contacts-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding-top: 12px;
+    margin-top: 4px;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
 }
 
 .muted { color: var(--neutral-foreground-hint); }

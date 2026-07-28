@@ -86,9 +86,9 @@ public class StudentsApiClientRoutesTests
     }
 
     [TestMethod]
-    public void Contacts_Paths_Cover_All_Nine_Endpoints()
+    public void Contacts_Paths_Cover_All_Endpoints()
     {
-        // The 9 contacts/subscription endpoints documented in
+        // The contacts/subscription endpoints documented in
         // ContactRoutes.cs + SubscriptionRoutes.cs. Asserting by
         // presence of each path guards against a missing one being
         // silently dropped during refactors.
@@ -104,8 +104,10 @@ public class StudentsApiClientRoutesTests
             "UpdateContactAsync must PUT /contacts/{id} AND DeleteContactAsync must DELETE /contacts/{id}");
         joined.Should().Contain("/contacts/{id}/verify",
             "VerifyContactAsync must POST /contacts/{id}/verify");
-        joined.Should().Contain("/contacts/{id}/set-primary",
-            "SetPrimaryContactAsync must POST /contacts/{id}/set-primary");
+        joined.Should().Contain("/contacts/{id}/order",
+            "SetContactOrderAsync must POST /contacts/{id}/order");
+        joined.Should().Contain("/contacts/reorder",
+            "ReorderContactsAsync must POST /contacts/reorder");
         joined.Should().Contain("/contacts/subscribed?ownerType={ownerType}&scope={scope}",
             "ListSubscribedContactsAsync must GET /contacts/subscribed?ownerType=...&scope=... when scope is provided");
         joined.Should().Contain("/contacts/subscribed?ownerType={ownerType}{(ownerId",

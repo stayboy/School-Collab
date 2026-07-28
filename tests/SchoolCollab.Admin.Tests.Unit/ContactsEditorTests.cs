@@ -53,14 +53,12 @@ public class ContactsEditorTests : BunitContext
         public Func<AddContactRequest, Task<Guid>>? OnAddContact { get; set; }
         public Func<Guid, Task>? OnDeleteContact { get; set; }
         public Func<Guid, Task>? OnVerifyContact { get; set; }
-        public Func<Guid, Task>? OnSetPrimaryContact { get; set; }
         public Func<Task<SubscribedContactDto[]?>>? OnListSubscribed { get; set; }
         public Func<Guid, Task>? OnSubscribe { get; set; }
         public Func<Guid, Task>? OnUnsubscribe { get; set; }
 
         public int ListContactsCalls;
         public int AddContactCalls;
-        public bool? LastRequestedPrimary;
         public string? LastRequestedValue;
         public string? LastRequestedCountryCode;
 
@@ -74,7 +72,6 @@ public class ContactsEditorTests : BunitContext
         public Task<Guid> AddContactAsync(AddContactRequest req, CancellationToken ct = default)
         {
             AddContactCalls++;
-            LastRequestedPrimary = req.IsPrimary;
             LastRequestedValue = req.Value;
             LastRequestedCountryCode = req.CountryCode;
             if (OnAddContact is not null) return OnAddContact(req);
@@ -86,7 +83,6 @@ public class ContactsEditorTests : BunitContext
                 Channel: req.Channel,
                 Value: req.Value,
                 Label: req.Label,
-                IsPrimary: req.IsPrimary,
                 IsVerified: false,
                 IsDeleted: false,
                 CreatedAt: DateTimeOffset.UtcNow,
@@ -110,9 +106,21 @@ public class ContactsEditorTests : BunitContext
             return Task.CompletedTask;
         }
 
-        public Task SetPrimaryContactAsync(Guid id, CancellationToken ct = default)
+        // Spec §4.9: contact display-order surface. The fake no-ops so
+        // existing tests aren't affected; new tests can hook OnReorder /
+        // OnSetOrder to assert behaviour.
+        public Func<ContactOwnerType, Guid, IReadOnlyList<Guid>, Task>? OnReorder { get; set; }
+        public Func<Guid, int, Task>? OnSetOrder { get; set; }
+
+        public Task SetContactOrderAsync(Guid id, int order, CancellationToken ct = default)
         {
-            if (OnSetPrimaryContact is not null) return OnSetPrimaryContact(id);
+            if (OnSetOrder is not null) return OnSetOrder(id, order);
+            return Task.CompletedTask;
+        }
+
+        public Task ReorderContactsAsync(ContactOwnerType ownerType, Guid ownerId, IReadOnlyList<Guid> orderedIds, CancellationToken ct = default)
+        {
+            if (OnReorder is not null) return OnReorder(ownerType, ownerId, orderedIds);
             return Task.CompletedTask;
         }
 
@@ -296,7 +304,12 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.contacts-country-code").Should().BeEmpty();
+            // The country-code dropdown is a <CodedValueDropdown> whose
+            // underlying <fluent-select> carries the `coded-value-dropdown`
+            // base class (it used to carry a `contacts-country-code` width
+            // class before the FieldWidth enum migration — see Width="W2"
+            // on the call site). For the Email channel it is not rendered.
+            cut.FindAll("fluent-select.coded-value-dropdown").Should().BeEmpty();
         });
     }
 
@@ -310,7 +323,7 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.contacts-country-code").Should().ContainSingle();
+            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle();
         });
     }
 
@@ -324,7 +337,7 @@ public class ContactsEditorTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.FindAll("fluent-select.contacts-country-code").Should().ContainSingle();
+            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle();
         });
     }
 
@@ -382,5 +395,108 @@ public class ContactsEditorTests : BunitContext
 
         optionText!(ghana).Should().Be("+233 (Ghana)");
         optionText!(usa).Should().Be("+1 (United States)");
+    }
+
+    // ─── Buffered mode (create-time, in-memory) ─────────────────────────
+    // Spec §4.4 Option C: ContactsEditor gains a Buffered mode so the
+    // picker can capture multiple contacts for a guardian that has not
+    // been persisted yet. No API calls; the parent flushes on save.
+
+    private IRenderedComponent<ContactsEditor> RenderBuffered(
+        List<ContactModel>? contacts = null,
+        ContactOwnerType ownerType = ContactOwnerType.Guardian)
+    {
+        contacts ??= new List<ContactModel>();
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        // A fake that THROWs on AddContactAsync — Buffered mode must never
+        // call the API. If it does, the test fails loudly.
+        var fake = new FakeContactsClient
+        {
+            OnAddContact = _ => throw new InvalidOperationException("Buffered mode must not call AddContactAsync")
+        };
+        Services.AddSingleton<IContactsClient>(fake);
+        Services.AddSingleton(new CodedValuesApiClient(http));
+        Services.AddSingleton(NullLogger<ContactsEditor>.Instance);
+        return Render<ContactsEditor>(parameters => parameters
+            .Add(p => p.Mode, ContactsEditor.EditorMode.Buffered)
+            .Add(p => p.OwnerType, ownerType)
+            .Add(p => p.Contacts, contacts)
+            .Add(p => p.ShowSubscription, false));
+    }
+
+    [TestMethod]
+    public void BufferedMode_RendersEmptyState()
+    {
+        var contacts = new List<ContactModel>();
+        var cut = RenderBuffered(contacts);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find(".contacts-empty").TextContent.Should().Contain("No contacts yet.");
+        });
+    }
+
+    [TestMethod]
+    public void BufferedMode_HidesSubscriptionToggle()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "a@x.com", Order = 0 }
+        };
+        var cut = RenderBuffered(contacts);
+
+        // Subscriptions need a persisted contact, so the subscribe toggle is
+        // Live-only. The preferred contact is simply the first (lowest Order)
+        // row; there is no per-contact Primary/CC role during creation.
+        cut.FindAll(".contact-subscribe").Should().BeEmpty("subscribe toggle is Live-only");
+    }
+
+    [TestMethod]
+    public void BufferedMode_Add_AppendsInMemory_WithoutApiCall()
+    {
+        var contacts = new List<ContactModel>();
+        var cut = RenderBuffered(contacts);
+
+        var valueInput = cut.Find("fluent-text-field.contacts-value");
+        valueInput.Change("parent@example.com");
+
+        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        addButton.Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            contacts.Should().HaveCount(1, "Buffered Add appends to the in-memory list");
+            contacts[0].Value.Should().Be("parent@example.com");
+            contacts[0].Channel.Should().Be(ContactChannel.Email);
+            contacts[0].Order.Should().Be(0, "the first contact is Order 0 = preferred");
+            // No error bar — the API was never called.
+            cut.FindAll(".contacts-error").Should().BeEmpty();
+        });
+    }
+
+    [TestMethod]
+    public void BufferedMode_PreferredRow_ShowsPreferredBadgeAndHighlight()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "preferred@x.com", Order = 0 },
+            new() { Channel = ContactChannel.SMS, Value = "5551234", CountryCode = "+233", Order = 1 },
+        };
+        var cut = RenderBuffered(contacts);
+
+        cut.WaitForAssertion(() =>
+        {
+            var rows = cut.FindAll(".contact-item");
+            rows.Should().HaveCount(2);
+            // The first (lowest Order) row is the preferred one: tinted
+            // highlight + "Preferred" badge (not "Primary").
+            rows[0].ClassList.Should().Contain("contact-item--preferred");
+            rows[0].TextContent.Should().Contain("Preferred");
+            rows[0].TextContent.Should().Contain("preferred@x.com");
+            // The second row is not preferred and shows no Preferred badge.
+            rows[1].ClassList.Should().NotContain("contact-item--preferred");
+            rows[1].TextContent.Should().NotContain("Preferred");
+        });
     }
 }

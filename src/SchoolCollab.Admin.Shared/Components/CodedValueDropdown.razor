@@ -66,6 +66,7 @@
               Label="@Label"              
               Placeholder="@EffectivePlaceholder"              
               Disabled="@IsDisabled"
+              Style="@EffectiveStyle"
               class="@EffectiveClass" />
 
 @code {
@@ -97,6 +98,20 @@
     /// </summary>
     [Parameter]
     public string? Class { get; set; }
+
+    /// <summary>
+    /// Fixed input width from the repo's W1–W9 ladder
+    /// (see <see cref="FieldWidth"/>). When set, emits an inline
+    /// <c>style</c> on the underlying <see
+    /// cref="Microsoft.FluentUI.AspNetCore.Components.FluentSelect"/> so the
+    /// width always wins over this wrapper's scoped
+    /// <c>.coded-value-dropdown { width: 100% }</c> default (inline style
+    /// beats Blazor scoped CSS). Takes precedence over any width set via
+    /// <see cref="Class"/>. Leave null to keep the default
+    /// <c>fill-the-cell</c> behavior.
+    /// </summary>
+    [Parameter]
+    public FieldWidth? Width { get; set; }
 
     /// <summary>
     /// Optional override for the function that produces the display text
@@ -153,6 +168,12 @@
     private string EffectiveClass => string.IsNullOrWhiteSpace(Class) 
         ? "coded-value-dropdown" 
         : $"{Class} coded-value-dropdown";
+
+    /// <summary>
+    /// Inline <c>style</c> emitted when <see cref="Width"/> is set; null
+    /// otherwise (so no empty <c>style=""</c> attribute is rendered).
+    /// </summary>
+    private string? EffectiveStyle => Width?.ToCssStyle();
 
     private Func<CodedValueDto, string> EffectiveOptionText => OptionText ?? (o => o.Name);
 
