@@ -7,6 +7,7 @@ using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.Services;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Tenancy;
@@ -43,6 +44,11 @@ public static class Extensions
         // CodedValues aggregate services
         services.AddScoped<ICodedValueRepository, CodedValueRepository>();
         services.AddScoped<ICodedValueResolver, CodedValueResolver>();
+
+        // EntityCodeRule aggregate services (auto-generated entity codes — spec §3.1)
+        services.AddScoped<IEntityCodeRuleRepository, EntityCodeRuleRepository>();
+        services.AddScoped<ITenantEntityCodeRuleOverrideRepository, TenantEntityCodeRuleOverrideRepository>();
+        services.AddScoped<IEntityCodeGenerator, EntityCodeGenerator>();
 
         // Cross-context tenant directory (FR-16): lets workers enumerate tenants
         // without a direct SettingsDbContext dependency at the DbContext level.

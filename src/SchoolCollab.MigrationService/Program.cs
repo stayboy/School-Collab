@@ -67,6 +67,7 @@ OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromCon
 builder.Services.AddScoped<CodedValueSeeder>();
 builder.Services.AddScoped<TenantSeeder>();
 builder.Services.AddScoped<AssignmentBackfillService>();
+builder.Services.AddScoped<EntityCodeRuleSeeder>();
 
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
@@ -93,6 +94,11 @@ try
             await seeder.SeedAsync();
             await SeedEnableCodedValuesAiChatAsync(settingsDb, logger);
             await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);
+
+            // Seed the default EntityCodeRule blueprints (student/staff/assignment
+            // auto-generation rules) — spec §3.7. Idempotent; NULL-tenant shared rows.
+            var entityCodeRuleSeeder = scope.ServiceProvider.GetRequiredService<EntityCodeRuleSeeder>();
+            await entityCodeRuleSeeder.SeedAsync();
 
             // Seed the real Tenant registry ('Hydeson School' + 'Little Legends') so
             // tenancy overrides have a target tenant. Idempotent by Name. See

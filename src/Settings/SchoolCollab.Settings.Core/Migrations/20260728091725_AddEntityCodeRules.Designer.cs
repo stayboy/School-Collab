@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.Settings.Core.Data;
@@ -11,9 +12,11 @@ using SchoolCollab.Settings.Core.Data;
 namespace SchoolCollab.Settings.Core.Migrations
 {
     [DbContext(typeof(SettingsDbContext))]
-    partial class SettingsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260728091725_AddEntityCodeRules")]
+    partial class AddEntityCodeRules
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -526,55 +529,6 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasDatabaseName("ix_tenant_coded_value_overrides_unique");
 
                     b.ToTable("tenant_coded_value_overrides", (string)null);
-                });
-
-            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantEntityCodeRuleOverride", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<Guid>("EntityCodeSegmentId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("entity_code_segment_id");
-
-                    b.Property<int>("Field")
-                        .HasColumnType("integer")
-                        .HasColumnName("field");
-
-                    b.Property<Guid>("GenerationRuleId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("generation_rule_id");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.Property<string>("Value")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("value");
-
-                    b.HasKey("Id")
-                        .HasName("pk_tenant_entity_code_rule_overrides");
-
-                    b.HasIndex("TenantId", "GenerationRuleId")
-                        .HasDatabaseName("ix_tenant_entity_code_rule_overrides_rule");
-
-                    b.HasIndex("TenantId", "GenerationRuleId", "EntityCodeSegmentId", "Field")
-                        .IsUnique()
-                        .HasDatabaseName("ix_tenant_entity_code_rule_overrides_unique");
-
-                    b.ToTable("tenant_entity_code_rule_overrides", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantFeatureFlagOverride", b =>

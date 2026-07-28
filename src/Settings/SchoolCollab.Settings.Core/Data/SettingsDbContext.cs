@@ -28,6 +28,10 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     public DbSet<TenantCodedValueAttributeOverride> TenantCodedValueAttributeOverrides => Set<TenantCodedValueAttributeOverride>();
     public DbSet<User> Users => Set<User>();
 
+    // ── EntityCodeRule aggregate (auto-generated entity codes — spec §3.1) ──
+    public DbSet<EntityCodeRule> EntityCodeRules => Set<EntityCodeRule>();
+    public DbSet<TenantEntityCodeRuleOverride> TenantEntityCodeRuleOverrides => Set<TenantEntityCodeRuleOverride>();
+
     // ── FeatureFlag aggregate ──
     public DbSet<FeatureFlag> FeatureFlags => Set<FeatureFlag>();
     public DbSet<TenantFeatureFlagOverride> TenantFlagOverrides => Set<TenantFeatureFlagOverride>();
@@ -71,6 +75,10 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
         modelBuilder.ApplyConfiguration(new CodedValueConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantCodedValueOverrideConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantCodedValueAttributeOverrideConfiguration(() => CurrentTenantId));
+
+        // EntityCodeRule configuration (hybrid tenant, owns segments)
+        modelBuilder.ApplyConfiguration(new EntityCodeRuleConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TenantEntityCodeRuleOverrideConfiguration(() => CurrentTenantId));
 
         // FeatureFlag configurations
         modelBuilder.ApplyConfiguration(new FeatureFlagConfiguration());
