@@ -38,6 +38,19 @@ public static class ModuleServices
         services.AddHttpClient<TenantsApiClient>(client =>
             client.BaseAddress = new Uri("https+http://settings-api"));
 
+        // EntityCodeRulesApiClient (auto-generation rule CRUD UI) — same pattern,
+        // same settings-api base address. Spec §4.11 / §4.7.
+        services.AddHttpClient<EntityCodeRulesApiClient>(client =>
+            client.BaseAddress = new Uri("https+http://settings-api"));
+
+        // VisibleTenantService: read tenant_id claim to decide whether the
+        // signed-in user has a real tenant (used by the Edit page to gate
+        // the per-tenant override UI). The Students module also registers
+        // this service; the duplicate AddScoped is benign because both
+        // registrations target the same concrete type with the same
+        // constructor — the DI container resolves to a single instance.
+        services.AddScoped<VisibleTenantService>();
+
         return services;
     }
 }

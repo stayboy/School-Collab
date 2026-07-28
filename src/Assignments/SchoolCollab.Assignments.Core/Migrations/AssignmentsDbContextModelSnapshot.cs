@@ -28,6 +28,11 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<string>("AssignmentNumber")
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("assignment_number");
+
                     b.Property<int>("AssignmentType")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")

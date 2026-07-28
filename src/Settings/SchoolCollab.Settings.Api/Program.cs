@@ -66,6 +66,8 @@ var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
 app.MapCodedValueEndpoints(featureFlags);
 app.MapTenantEndpoints(featureFlags);
 app.MapConfigEndpoints(featureFlags);
+// Phase 3: EntityCodeRule admin endpoints (spec §4.7).
+app.MapEntityCodeRuleEndpoints(featureFlags);
 
 app.Run();
 

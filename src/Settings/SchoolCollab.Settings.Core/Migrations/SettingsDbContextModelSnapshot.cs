@@ -189,6 +189,73 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.ToTable("coded_values", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.EntityCodeRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("code");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("description");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_active");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid?>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_entity_code_rules");
+
+                    b.HasIndex("Code")
+                        .IsUnique()
+                        .HasDatabaseName("ix_entity_code_rules_code_unique");
+
+                    b.ToTable("entity_code_rules", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.FeatureFlag", b =>
                 {
                     b.Property<Guid>("Id")
@@ -461,6 +528,55 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.ToTable("tenant_coded_value_overrides", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantEntityCodeRuleOverride", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("EntityCodeSegmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("entity_code_segment_id");
+
+                    b.Property<int>("Field")
+                        .HasColumnType("integer")
+                        .HasColumnName("field");
+
+                    b.Property<Guid>("GenerationRuleId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("generation_rule_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("value");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tenant_entity_code_rule_overrides");
+
+                    b.HasIndex("TenantId", "GenerationRuleId")
+                        .HasDatabaseName("ix_tenant_entity_code_rule_overrides_rule");
+
+                    b.HasIndex("TenantId", "GenerationRuleId", "EntityCodeSegmentId", "Field")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_entity_code_rule_overrides_unique");
+
+                    b.ToTable("tenant_entity_code_rule_overrides", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantFeatureFlagOverride", b =>
                 {
                     b.Property<Guid>("Id")
@@ -637,6 +753,90 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.Navigation("AttributeDefinitions");
 
                     b.Navigation("Attributes");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.EntityCodeRule", b =>
+                {
+                    b.OwnsMany("SchoolCollab.Settings.Core.Domain.EntityCodeSegment", "Segments", b1 =>
+                        {
+                            b1.Property<Guid>("Id")
+                                .HasColumnType("uuid")
+                                .HasColumnName("id");
+
+                            b1.Property<Guid>("EntityCodeRuleId")
+                                .HasColumnType("uuid")
+                                .HasColumnName("entity_code_rule_id");
+
+                            b1.Property<string>("FixedText")
+                                .HasMaxLength(200)
+                                .HasColumnType("character varying(200)")
+                                .HasColumnName("fixed_text");
+
+                            b1.Property<int>("Index")
+                                .HasColumnType("integer")
+                                .HasColumnName("index");
+
+                            b1.Property<string>("LastPeriodBucket")
+                                .HasMaxLength(20)
+                                .HasColumnType("character varying(20)")
+                                .HasColumnName("last_period_bucket");
+
+                            b1.Property<string>("LastPrefix")
+                                .HasMaxLength(10)
+                                .HasColumnType("character varying(10)")
+                                .HasColumnName("last_prefix");
+
+                            b1.Property<int>("LastSequence")
+                                .HasColumnType("integer")
+                                .HasColumnName("last_sequence");
+
+                            b1.Property<int>("MinWidth")
+                                .HasColumnType("integer")
+                                .HasColumnName("min_width");
+
+                            b1.Property<string>("Prefix")
+                                .HasMaxLength(50)
+                                .HasColumnType("character varying(50)")
+                                .HasColumnName("prefix");
+
+                            b1.Property<int>("ResetPeriod")
+                                .HasColumnType("integer")
+                                .HasColumnName("reset_period");
+
+                            b1.Property<string>("Role")
+                                .HasMaxLength(50)
+                                .HasColumnType("character varying(50)")
+                                .HasColumnName("role");
+
+                            b1.Property<string>("Suffix")
+                                .HasMaxLength(50)
+                                .HasColumnType("character varying(50)")
+                                .HasColumnName("suffix");
+
+                            b1.Property<int>("Type")
+                                .HasColumnType("integer")
+                                .HasColumnName("type");
+
+                            b1.Property<string>("UpperLimit")
+                                .HasMaxLength(20)
+                                .HasColumnType("character varying(20)")
+                                .HasColumnName("upper_limit");
+
+                            b1.HasKey("Id")
+                                .HasName("pk_entity_code_segments");
+
+                            b1.HasIndex("EntityCodeRuleId", "Index")
+                                .IsUnique()
+                                .HasDatabaseName("ix_entity_code_segments_rule_index_unique");
+
+                            b1.ToTable("entity_code_segments", (string)null);
+
+                            b1.WithOwner()
+                                .HasForeignKey("EntityCodeRuleId")
+                                .HasConstraintName("fk_entity_code_segments_entity_code_rules_entity_code_rule_id");
+                        });
+
+                    b.Navigation("Segments");
                 });
 
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantFeatureFlagOverride", b =>

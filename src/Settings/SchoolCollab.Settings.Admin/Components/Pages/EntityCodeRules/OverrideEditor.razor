@@ -1,0 +1,278 @@
+@* Per-tenant override editor for a shared-blueprint EntityCodeRule (spec §4.12).
+   - Self-contained: loads the current tenant's overrides for the rule on init,
+     renders one row per override (Segment dropdown + Field dropdown + Value
+     input + Remove), and saves the full set atomically via PUT.
+   - Only shown when the rule is the shared blueprint (TenantId == null) —
+     tenant-owned rules don't take overrides (the generator skips them).
+   - Segment dropdown is keyed by the rule's segments (loaded by the parent
+     and passed in so we don't re-fetch). SegmentIndex is the human label. *@
+
+@using SchoolCollab.Admin.Shared.Services
+@inject EntityCodeRulesApiClient Api
+@inject ILogger<OverrideEditor> Logger
+@implements IDisposable
+
+@if (_visible)
+{
+    <hr class="my-4" />
+
+    <div class="override-editor">
+        <div class="override-editor-header">
+            <h5 class="override-editor-title">Tenant overrides</h5>
+            <p class="override-editor-help">
+                Override individual segment fields for <strong>this tenant only</strong> —
+                e.g. change the FixedText stamp from "STU" to "ABC" without redefining the
+                whole template. The shared sequence counter is <em>not</em> overridable
+                (all tenants on a rule share it in v1). Leave a row's value blank to drop it
+                on save.
+            </p>
+        </div>
+
+        @if (_overrides.Count == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info" class="mb-2">
+                No tenant overrides configured. This tenant sees the shared blueprint's format.
+            </FluentMessageBar>
+        }
+
+        @for (var i = 0; i < _overrides.Count; i++)
+        {
+            var idx = i;
+            var row = _overrides[idx];
+            var valueError = string.IsNullOrWhiteSpace(row.Value)
+                ? "Value is required."
+                : (string?)null;
+
+            <div class="override-row">
+                <FluentSelect TOption="OverrideOption"
+                              Items="@_segmentOptions"
+                              @bind-SelectedOption="@row.SelectedSegment"
+                              OptionText="@(o => o.Label)"
+                              OptionValue="@(o => o.SegmentId.ToString())"
+                              Label="Segment"
+                              class="ov-segment" />
+                <FluentSelect TOption="OverrideFieldDto"
+                              Items="@_fieldOptions"
+                              @bind-SelectedOption="row.Field"
+                              OptionText="@(f => f.ToString())"
+                              OptionValue="@(f => ((int)f).ToString())"
+                              Label="Field"
+                              class="ov-field" />
+                <FluentTextField @bind-Value="row.Value"
+                                 Label="Value"
+                                 Placeholder="e.g. ABC (FixedText), X (Prefix), 4 (MinWidth)"
+                                 class="ov-value" />
+                <FluentButton Appearance="Appearance.Neutral"
+                              IconStart="@FluentIcons.Delete"
+                              Title="Remove override"
+                              OnClick="@(() => RemoveAt(idx))" />
+                @if (valueError is not null)
+                {
+                    <span class="override-row-error">@valueError</span>
+                }
+            </div>
+        }
+
+        <div class="override-actions">
+            <FluentButton Appearance="Appearance.Accent"
+                          IconStart="@FluentIcons.Add"
+                          OnClick="Add"
+                          Disabled="@(_segmentOptions.Count == 0)">
+                Add override
+            </FluentButton>
+            <FluentButton Appearance="Appearance.Outline"
+                          OnClick="SaveAsync"
+                          Disabled="@(_saving || _segmentOptions.Count == 0)">
+                @(_saving ? "Saving…" : "Save overrides")
+            </FluentButton>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_status))
+        {
+            <FluentMessageBar Intent="@_statusIntent" class="mt-2">@_status</FluentMessageBar>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>The rule being edited.</summary>
+    [Parameter, EditorRequired]
+    public EntityCodeRuleDto? Rule { get; set; }
+
+    /// <summary>Reload signal — when the parent re-loads the rule, we re-load overrides.</summary>
+    [Parameter]
+    public bool Reload { get; set; }
+
+    [Parameter]
+    public EventCallback<bool> ReloadChanged { get; set; }
+
+    private bool _visible;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _status;
+    private MessageIntent _statusIntent = MessageIntent.Info;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private List<OverrideRow> _overrides = [];
+    private List<OverrideOption> _segmentOptions = [];
+
+    private static readonly OverrideFieldDto[] _fieldOptions = Enum.GetValues<OverrideFieldDto>();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Show only when the rule is the shared blueprint (TenantId == null).
+        // Tenant-owned rules don't take overrides (generator skips them).
+        var shouldShow = Rule is { TenantId: null };
+        if (shouldShow != _visible)
+        {
+            _visible = shouldShow;
+            if (_visible) await LoadAsync();
+        }
+        else if (_visible && Reload)
+        {
+            await LoadAsync();
+            if (!_disposed) await ReloadChanged.InvokeAsync(false);
+        }
+    }
+
+    private async Task LoadAsync()
+    {
+        if (Rule is null) return;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        _loading = true;
+        _status = null;
+        try
+        {
+            // Build the segment dropdown from the rule's segments (already loaded).
+            _segmentOptions = Rule.Segments
+                .OrderBy(s => s.Index)
+                .Select(s => new OverrideOption(s.Id, s.Index, $"#{s.Index} ({(SegmentTypeDto)s.Type})"))
+                .ToList();
+
+            var rows = await Api.GetOverridesAsync(Rule.Id, ct);
+            if (_disposed) return;
+
+            _overrides = rows
+                .OrderBy(r => r.SegmentIndex)
+                .ThenBy(r => r.Field)
+                .Select(r => new OverrideRow
+                {
+                    Id = r.Id,
+                    EntityCodeSegmentId = r.EntityCodeSegmentId,
+                    SelectedSegment = _segmentOptions.FirstOrDefault(o => o.SegmentId == r.EntityCodeSegmentId)
+                        ?? new OverrideOption(r.EntityCodeSegmentId, r.SegmentIndex, $"#{r.SegmentIndex} (removed)"),
+                    Field = (OverrideFieldDto)r.Field,
+                    Value = r.Value
+                })
+                .ToList();
+            _loading = false;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load overrides for rule {Id}", Rule.Id);
+            _status = $"Failed to load overrides: {ex.Message}";
+            _statusIntent = MessageIntent.Error;
+            _loading = false;
+        }
+    }
+
+    private void Add()
+    {
+        if (_segmentOptions.Count == 0) return;
+        _overrides.Add(new OverrideRow
+        {
+            SelectedSegment = _segmentOptions[0],
+            Field = OverrideFieldDto.FixedText,
+            Value = ""
+        });
+    }
+
+    private void RemoveAt(int idx)
+    {
+        if (idx < 0 || idx >= _overrides.Count) return;
+        _overrides.RemoveAt(idx);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Rule is null || _disposed) return;
+        _saving = true;
+        _status = null;
+
+        // Client-side validation: drop blank rows, reject missing segment/value.
+        var valid = _overrides
+            .Where(o => o.SelectedSegment is not null && !string.IsNullOrWhiteSpace(o.Value))
+            .ToList();
+        if (valid.Count != _overrides.Count)
+        {
+            _status = "Some rows are missing a segment or value. Fix or remove them before saving.";
+            _statusIntent = MessageIntent.Error;
+            _saving = false;
+            return;
+        }
+
+        try
+        {
+            var payload = valid
+                .Select(o => new EntityCodeRuleOverrideInputDto(o.Id, o.SelectedSegment!.SegmentId, (int)o.Field, o.Value.Trim()))
+                .ToList();
+            await Api.ReplaceOverridesAsync(Rule.Id, payload);
+            if (_disposed) return;
+            _status = $"Saved {payload.Count} override(s).";
+            _statusIntent = MessageIntent.Success;
+            // Reload so the rows carry their server-assigned ids.
+            await LoadAsync();
+        }
+        catch (ArgumentException ex)
+        {
+            if (_disposed) return;
+            _status = ex.Message;
+            _statusIntent = MessageIntent.Error;
+        }
+        catch (KeyNotFoundException)
+        {
+            if (_disposed) return;
+            _status = "This rule was deleted by someone else. Reload the list.";
+            _statusIntent = MessageIntent.Error;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save overrides for rule {Id}", Rule.Id);
+            _status = $"Failed to save: {ex.Message}";
+            _statusIntent = MessageIntent.Error;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+
+    /// <summary>One override row in the editor.</summary>
+    private sealed class OverrideRow
+    {
+        public Guid Id { get; set; }
+        public Guid EntityCodeSegmentId { get; set; }
+        public OverrideOption? SelectedSegment { get; set; }
+        public OverrideFieldDto Field { get; set; } = OverrideFieldDto.FixedText;
+        public string Value { get; set; } = "";
+    }
+
+    /// <summary>Dropdown option for the segment select.</summary>
+    private sealed record OverrideOption(Guid SegmentId, int Index, string Label);
+}

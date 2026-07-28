@@ -3,6 +3,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.CreateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
@@ -26,7 +28,14 @@ public class TeacherCqrsTests
 {
     private static TeacherRepository TeacherRepo(StudentsTestScope s) => new(s.Db);
     private static CreateTeacherHandler NewCreate(StudentsTestScope s) =>
-        new(TeacherRepo(s), s.Cache, s.Tenants, NullLogger<CreateTeacherHandler>.Instance);
+        new(TeacherRepo(s), NewEntityCodeGenerator(), s.Cache, s.Tenants, NullLogger<CreateTeacherHandler>.Instance);
+    private static IEntityCodeGenerator NewEntityCodeGenerator()
+    {
+        var mock = new Mock<IEntityCodeGenerator>();
+        mock.Setup(g => g.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("STFA01");
+        return mock.Object;
+    }
     private static UpdateTeacherHandler NewUpdate(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<UpdateTeacherHandler>.Instance);
     private static DeleteTeacherHandler NewDelete(StudentsTestScope s) =>

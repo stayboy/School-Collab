@@ -30,6 +30,7 @@ internal sealed class TeacherConfiguration : TenantEntityTypeConfigurationBase<T
         builder.Property(x => x.Email).IsRequired();
         builder.Property(x => x.ContactPhone);
         builder.Property(x => x.StaffUserId);
+        builder.Property(x => x.StaffNumber).HasMaxLength(50);
 
         builder.HasIndex(x => new { x.TenantId, x.LastName })
             .HasDatabaseName("ix_teachers_tenant_last_name");

@@ -1,5 +1,6 @@
 using Serilog;
 using SchoolCollab.Students.Core;
+using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Api;
@@ -24,6 +25,9 @@ else
 }
 
 builder.Services.AddStudentsCore(builder.Configuration);
+// Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
+// is resolvable by the Student/Teacher creation handlers.
+builder.Services.AddSettingsCore(builder.Configuration);
 // Audit actor for student transfer audit rows — reads the authenticated user's claims.
 builder.Services.AddSingleton<IActorAccessor, ClaimsPrincipalActorAccessor>();
 builder.Services.AddOpenApi();

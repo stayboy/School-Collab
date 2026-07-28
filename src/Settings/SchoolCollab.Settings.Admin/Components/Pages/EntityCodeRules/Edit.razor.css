@@ -1,0 +1,208 @@
+/* EntityCodeRules Edit page layout.
+   - .edit-layout splits the top section into a form (left) and an actions
+     sidebar (right), so the form fields + Add Segment / Preview buttons
+     stay in view together (avoids the page being "pulled down" by the
+     vertical stacking of separate sections).
+   - Below the layout: the SegmentsGrid + tenant overrides card run
+     full-width.
+   - ::deep pierces the FluentButton child web-component DOM so the scope
+     attribute reaches <fluent-button> elements. */
+
+.form-container {
+    max-width: 1100px;
+}
+
+.edit-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 280px;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+.edit-layout-left {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    min-width: 0; /* allow FluentTextField flex children to shrink */
+}
+
+.edit-layout-right {
+    position: sticky;
+    top: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 1rem;
+    background: var(--neutral-layer-2, #f5f5f5);
+    border: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    border-radius: 6px;
+}
+
+.edit-sidebar-title {
+    margin: 0;
+    font-weight: 600;
+    font-size: 0.95rem;
+}
+
+.edit-sidebar-help {
+    margin: 0;
+    color: var(--neutral-foreground-3, #616161);
+    font-size: 0.85rem;
+}
+
+.edit-sidebar-buttons {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Preview result lives beneath the form fields, displayed horizontally
+   so the admin can read the rule metadata and the format samples in one
+   glance. The Preview button stays in the right sidebar; this is just
+   the result rendering. */
+.edit-preview-row {
+    margin-top: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: var(--neutral-layer-2, #f5f5f5);
+    border: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    border-radius: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+}
+
+.edit-preview-label {
+    font-weight: 600;
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.edit-preview-codes {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.edit-preview-codes li {
+    margin: 0;
+}
+
+.edit-preview-codes code {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    background: var(--neutral-layer-1, #ffffff);
+    border: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 0.9rem;
+}
+
+.edit-preview-note {
+    flex-basis: 100%;
+    margin: 0;
+    color: var(--neutral-foreground-3, #616161);
+    font-size: 0.75rem;
+}
+
+.full-width {
+    width: 100%;
+}
+
+.text-muted {
+    color: var(--neutral-foreground-3, #616161);
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+    display: block;
+}
+
+/* Responsive: collapse to single column on narrow viewports. */
+@media (max-width: 900px) {
+    .edit-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .edit-layout-right {
+        position: static;
+    }
+}
+
+/* ── Tenant overrides summary card ── */
+.overrides-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.overrides-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.overrides-card-title {
+    margin: 0;
+    font-weight: 600;
+}
+
+.overrides-card-help {
+    margin: 0;
+    color: var(--neutral-foreground-3, #616161);
+    font-size: 0.85rem;
+}
+
+.overrides-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.overrides-table thead th {
+    background: var(--neutral-layer-2, #f5f5f5);
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    font-weight: 600;
+    font-size: 0.85rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+}
+
+.overrides-table tbody td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    vertical-align: middle;
+}
+
+.overrides-actions-col {
+    width: 100px;
+    text-align: right;
+    white-space: nowrap;
+}
+
+/* Icon-only FluentButton collapses to ~0px without text — enforce a square.
+   ::deep pierces the FluentButton child component so the rule reaches the
+   rendered <fluent-button> element. */
+.overrides-table ::deep fluent-button {
+    min-width: 2rem;
+    min-height: 2rem;
+    padding: 0;
+    margin-left: 0.25rem;
+}
+
+.overrides-card-footer {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+}
+
+.overrides-card-footer ::deep fluent-button {
+    min-width: 2rem;
+    min-height: 2rem;
+}

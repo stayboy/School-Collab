@@ -1,0 +1,266 @@
+@* Interactive segment builder used by the Create/Edit rule forms (spec §4.11).
+   - Owns a List<SegmentFormModel> with two-way binding via EventCallback.
+   - Supports add, remove, and reorder (↑/↓ buttons; drag-and-drop skipped for v1).
+   - Per-row controls adapt to SegmentType:
+       Fixed               : FixedText, Suffix
+       NumericSequence     : Prefix, Suffix, ResetPeriod, MinWidth, UpperLimit
+       AlphabeticSequence  : Prefix, Suffix, ResetPeriod, UpperLimit (MinWidth hidden)
+       AlphanumericSequence: Prefix, Suffix, ResetPeriod, MinWidth, UpperLimit
+   - Role dropdown uses the conventional prefix/stamp/suffix labels; optional.
+   - Validation hints are shown next to rows that fail the spec §4.11 checks. *@
+
+@using SchoolCollab.Admin.Shared.Services
+@implements IDisposable
+
+<div class="segment-editor">
+    <div class="segment-editor-header">
+        <h5 class="segment-editor-title">Segments</h5>
+        <p class="segment-editor-help">
+            The generated code is the concatenation of every segment in order.
+            Use <strong>Fixed</strong> for static text (stamps like "STU"),
+            <strong>NumericSequence</strong> / <strong>AlphabeticSequence</strong> /
+            <strong>AlphanumericSequence</strong> for the incrementing part.
+        </p>
+    </div>
+
+    @if (Segments.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+            A rule must have at least one segment. Click <strong>Add segment</strong> to start.
+        </FluentMessageBar>
+    }
+
+    @for (var i = 0; i < Segments.Count; i++)
+    {
+        var idx = i;
+        var seg = Segments[idx];
+        var typeLabel = seg.Type.ToString();
+        var showFixedFields = seg.Type == SegmentTypeDto.Fixed;
+        var showNumericFields = seg.Type is SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence;
+        var showAlphaFields = seg.Type is SegmentTypeDto.AlphabeticSequence or SegmentTypeDto.AlphanumericSequence;
+        var fixedTextError = showFixedFields && string.IsNullOrWhiteSpace(seg.FixedText)
+            ? "FixedText is required for Fixed segments."
+            : (string?)null;
+        var prefixError = seg.Type == SegmentTypeDto.AlphanumericSequence && string.IsNullOrWhiteSpace(seg.Prefix)
+            ? "Prefix is required for AlphanumericSequence (the initial letter, e.g. \"A\")."
+            : (string?)null;
+        var minWidthError = showNumericFields && seg.MinWidth < 1
+            ? "MinWidth must be at least 1."
+            : (string?)null;
+        var upperLimitError = ValidateUpperLimit(seg);
+        var indexDup = Segments.Count(s => s.Index == seg.Index) > 1
+            ? $"Duplicate index {seg.Index}. Indices must be unique."
+            : (string?)null;
+
+        <div class="segment-row">
+            <div class="segment-row-toolbar">
+                <span class="segment-index-badge" title="Row position (drag-and-drop skipped for v1)">@seg.Index</span>
+                <FluentButton Appearance="Appearance.Neutral"
+                              IconStart="@FluentIcons.ChevronUp"
+                              Title="Move up"
+                              Disabled="@(idx == 0)"
+                              OnClick="@(() => MoveUp(idx))" />
+                <FluentButton Appearance="Appearance.Neutral"
+                              IconStart="@FluentIcons.ChevronDown"
+                              Title="Move down"
+                              Disabled="@(idx == Segments.Count - 1)"
+                              OnClick="@(() => MoveDown(idx))" />
+                <FluentButton Appearance="Appearance.Neutral"
+                              IconStart="@FluentIcons.Delete"
+                              Title="Remove segment"
+                              OnClick="@(() => RemoveAt(idx))" />
+            </div>
+
+            <div class="segment-row-fields">
+                <FluentSelect TOption="string"
+                              Items="@_roleOptions"
+                              @bind-SelectedOption="seg.Role"
+                              OptionText="@(r => r)"
+                              OptionValue="@(r => r)"
+                              Label="Role"
+                              Placeholder="(none)"
+                              class="seg-role" />
+                <FluentSelect TOption="SegmentTypeDto"
+                              Items="@_segmentTypeOptions"
+                              @bind-SelectedOption="seg.Type"
+                              OptionText="@(t => t.ToString())"
+                              OptionValue="@(t => t.ToString())"
+                              Label="Type"
+                              class="seg-type" />
+
+                @if (showFixedFields)
+                {
+                    <FluentTextField @bind-Value="seg.FixedText"
+                                     Label="FixedText"
+                                     Placeholder="e.g. STU"
+                                     Required="true"
+                                     class="seg-fixedtext" />
+                }
+                else
+                {
+                    <FluentTextField @bind-Value="seg.FixedText"
+                                     Label="FixedText (unused)"
+                                     Placeholder="—"
+                                     Disabled="true"
+                                     class="seg-fixedtext" />
+                }
+
+                @if (!showFixedFields)
+                {
+                    <FluentTextField @bind-Value="seg.Prefix"
+                                     Label="@(seg.Type == SegmentTypeDto.AlphanumericSequence ? "Prefix *" : "Prefix")"
+                                     Placeholder="@(seg.Type == SegmentTypeDto.AlphanumericSequence ? "A" : "")"
+                                     Required="@(seg.Type == SegmentTypeDto.AlphanumericSequence)"
+                                     class="seg-prefix" />
+                    <FluentNumberField @bind-Value="seg.MinWidth"
+                                       Label="MinWidth"
+                                       Min="1"
+                                       Disabled="@(!showNumericFields)"
+                                       class="seg-minwidth" />
+                }
+                else
+                {
+                    <FluentTextField Value="" Label="Prefix (unused)" Disabled="true" class="seg-prefix" />
+                    <FluentTextField Value="" Label="MinWidth (unused)" Disabled="true" class="seg-minwidth" />
+                }
+
+                <FluentTextField @bind-Value="seg.Suffix"
+                                 Label="Suffix"
+                                 Placeholder=""
+                                 Disabled="false"
+                                 class="seg-suffix" />
+
+                <FluentSelect TOption="ResetPeriodDto"
+                              Items="@_resetPeriodOptions"
+                              @bind-SelectedOption="seg.ResetPeriod"
+                              OptionText="@(r => r.ToString())"
+                              OptionValue="@(r => r.ToString())"
+                              Label="Reset"
+                              Disabled="showFixedFields"
+                              class="seg-reset" />
+
+                @if (showAlphaFields)
+                {
+                    <FluentTextField @bind-Value="seg.UpperLimit"
+                                     Label="UpperLimit"
+                                     Placeholder="Z"
+                                     class="seg-upperlimit" />
+                }
+                else
+                {
+                    <FluentTextField @bind-Value="seg.UpperLimit"
+                                     Label="UpperLimit"
+                                     Placeholder="(numeric)"
+                                     Disabled="@(!showNumericFields)"
+                                     class="seg-upperlimit" />
+                }
+            </div>
+
+            @if (fixedTextError is not null || prefixError is not null || minWidthError is not null || upperLimitError is not null || indexDup is not null)
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="segment-row-error">
+                    @(fixedTextError) @(prefixError) @(minWidthError) @(upperLimitError) @(indexDup)
+                </FluentMessageBar>
+            }
+        </div>
+    }
+
+    <FluentButton Appearance="Appearance.Accent"
+                  IconStart="@FluentIcons.Add"
+                  OnClick="Add"
+                  class="mt-2">
+        Add segment
+    </FluentButton>
+</div>
+
+@code {
+    /// <summary>
+    /// The segments being edited. Two-way bound via
+    /// <see cref="SegmentsChanged"/>; the parent owns the list.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public List<SegmentFormModel> Segments { get; set; } = new();
+
+    [Parameter]
+    public EventCallback<List<SegmentFormModel>> SegmentsChanged { get; set; }
+
+    /// <summary>Stable options for the role select.</summary>
+    private static readonly string[] _roleOptions = ["(none)", "prefix", "stamp", "suffix"];
+
+    /// <summary>Stable options for the segment-type select.</summary>
+    private static readonly SegmentTypeDto[] _segmentTypeOptions = Enum
+        .GetValues<SegmentTypeDto>();
+
+    /// <summary>Stable options for the reset-period select.</summary>
+    private static readonly ResetPeriodDto[] _resetPeriodOptions = Enum
+        .GetValues<ResetPeriodDto>();
+
+    private void Add()
+    {
+        Segments.Add(new SegmentFormModel
+        {
+            Index = Segments.Count,
+            Type = SegmentTypeDto.Fixed,
+            FixedText = "",
+            Prefix = "",
+            Suffix = "",
+            Role = null,
+            ResetPeriod = ResetPeriodDto.None,
+            MinWidth = 2,
+            UpperLimit = null
+        });
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void RemoveAt(int idx)
+    {
+        if (idx < 0 || idx >= Segments.Count) return;
+        Segments.RemoveAt(idx);
+        // Re-number remaining segments so Index matches position 0..N-1.
+        for (var i = 0; i < Segments.Count; i++)
+            Segments[i].Index = i;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void MoveUp(int idx)
+    {
+        if (idx <= 0) return;
+        (Segments[idx - 1], Segments[idx]) = (Segments[idx], Segments[idx - 1]);
+        (Segments[idx - 1].Index, Segments[idx].Index) = (Segments[idx - 1].Index, Segments[idx].Index);
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void MoveDown(int idx)
+    {
+        if (idx >= Segments.Count - 1) return;
+        (Segments[idx + 1], Segments[idx]) = (Segments[idx], Segments[idx + 1]);
+        (Segments[idx + 1].Index, Segments[idx].Index) = (Segments[idx + 1].Index, Segments[idx].Index);
+        InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Validates the UpperLimit field per spec §4.11 ("UpperLimit format checks"):
+    /// - NumericSequence / AlphanumericSequence: must be a positive integer
+    ///   (e.g. "09", "99") — the rollover ceiling for the numeric portion.
+    /// - AlphabeticSequence: must be a single A-Z letter (e.g. "Z").
+    /// - Fixed: UpperLimit is unused; no check.
+    /// Empty is allowed (no ceiling). Returns null when valid.
+    /// </summary>
+    private static string? ValidateUpperLimit(SegmentFormModel seg)
+    {
+        if (string.IsNullOrWhiteSpace(seg.UpperLimit)) return null;
+        var raw = seg.UpperLimit.Trim();
+        return seg.Type switch
+        {
+            SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence
+                when !int.TryParse(raw, out var n) || n < 1
+                => "UpperLimit must be a positive integer (e.g. 99) for numeric sequences.",
+            SegmentTypeDto.AlphabeticSequence
+                when raw.Length != 1 || raw[0] < 'A' || raw[0] > 'Z'
+                => "UpperLimit must be a single A-Z letter (e.g. Z) for alphabetic sequences.",
+            _ => null
+        };
+    }
+
+    public void Dispose() { }
+}

@@ -1,0 +1,98 @@
+@* Add / Edit per-tenant override dialog (spec §4.12).
+   Inherits DialogShellBase so the saving/error/Cancel/Close plumbing and the
+   Cancel/Save footer are shared (see dialog-ui skill). The dialog is pure-form:
+   it does NOT touch the API. The parent (Edit page) handles
+   load-existing → merge → PUT /{id}/overrides after a successful submit.
+
+   Segment is read-only on Edit (you cannot change which segment an existing
+   override targets; delete + re-add). On Add, the first segment is
+   pre-selected. *@
+
+@inherits DialogShellBase<OverrideFormModel, OverrideResult>
+
+<div class="override-dialog">
+    <p class="override-dialog-hint">
+        Override one segment field for <strong>this tenant only</strong>. The shared
+        sequence counter is <em>not</em> overridable — all tenants on a rule share it
+        in v1.
+    </p>
+
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FluentSelect TOption="SegmentOption"
+                      Items="@_segmentOptions"
+                      @bind-SelectedOption="@Model.SelectedSegment"
+                      Label="Segment"
+                      Disabled="@Model.IsEdit"
+                      OptionText="@(o => o.Label)"
+                      OptionValue="@(o => o.SegmentId.ToString())"
+                      class="full-width mb-3" />
+
+        <FluentSelect TOption="OverrideFieldDto"
+                      Items="@_fieldOptions"
+                      @bind-SelectedOption="Model.Field"
+                      Label="Field"
+                      OptionText="@(f => f.ToString())"
+                      OptionValue="@(f => ((int)f).ToString())"
+                      class="full-width mb-3" />
+
+        <FluentTextField @bind-Value="Model.Value"
+                         Label="Value *"
+                         Placeholder="e.g. ABC (FixedText), X (Prefix), 4 (MinWidth)"
+                         Required
+                         class="full-width mb-3" />
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@(Model.IsEdit ? "Save" : "Add")"
+                           SavingText="@(Model.IsEdit ? "Saving…" : "Adding…")"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    /// <summary>
+    /// Segment dropdown options, supplied by the parent (Edit page) from the
+    /// rule's segments. Passed as a parameter so the dialog does not need
+    /// to re-fetch the rule.
+    /// </summary>
+    [Parameter]
+    public IReadOnlyList<SegmentOption> SegmentOptions { get; set; } = Array.Empty<SegmentOption>();
+
+    private List<SegmentOption> _segmentOptions = [];
+    private static readonly OverrideFieldDto[] _fieldOptions = Enum.GetValues<OverrideFieldDto>();
+
+    protected override void OnModelInitialized(OverrideFormModel model)
+    {
+        _segmentOptions = SegmentOptions.ToList();
+        if (model.IsEdit)
+        {
+            // Pre-select the row's segment.
+            model.SelectedSegment = _segmentOptions.FirstOrDefault(o => o.SegmentId == model.EntityCodeSegmentId);
+        }
+        else if (model.SelectedSegment is null && _segmentOptions.Count > 0)
+        {
+            // Add mode — default to the first segment.
+            model.SelectedSegment = _segmentOptions[0];
+        }
+    }
+
+    protected override Task<OverrideResult?> SubmitAsync(OverrideFormModel model)
+    {
+        if (model.SelectedSegment is null)
+        {
+            Error = "Pick a segment to override.";
+            return Task.FromResult<OverrideResult?>(null);
+        }
+        if (string.IsNullOrWhiteSpace(model.Value))
+        {
+            Error = "Value is required.";
+            return Task.FromResult<OverrideResult?>(null);
+        }
+        model.EntityCodeSegmentId = model.SelectedSegment.SegmentId;
+        model.SegmentIndex = model.SelectedSegment.Index;
+        model.Value = model.Value.Trim();
+        return Task.FromResult<OverrideResult?>(new OverrideResult(model));
+    }
+}

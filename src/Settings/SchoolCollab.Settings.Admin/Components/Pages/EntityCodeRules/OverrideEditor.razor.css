@@ -1,0 +1,65 @@
+.override-editor {
+    margin-top: 0.5rem;
+}
+
+.override-editor-header {
+    margin-bottom: 0.75rem;
+}
+
+.override-editor-title {
+    margin: 0 0 0.25rem 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+.override-editor-help {
+    margin: 0;
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-secondary);
+    max-width: 70ch;
+}
+
+.override-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--neutral-stroke-subtle);
+}
+
+/* Icon-only FluentButton collapses to ~0px without text — enforce a square.
+   ::deep pierces the FluentButton child component so the rule reaches the
+   rendered <fluent-button> element. */
+.override-row ::deep fluent-button {
+    min-width: 2rem;
+    min-height: 2rem;
+    padding: 0;
+    margin-bottom: 0.25rem;
+}
+
+.override-row-error {
+    color: var(--status-danger-foreground);
+    font-size: 0.8rem;
+    width: 100%;
+}
+
+.ov-segment {
+    min-width: 180px;
+}
+
+.ov-field {
+    min-width: 140px;
+}
+
+.ov-value {
+    min-width: 240px;
+    flex: 1 1 240px;
+}
+
+.override-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+    flex-wrap: wrap;
+}

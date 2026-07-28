@@ -7,8 +7,10 @@ namespace SchoolCollab.Assignments.Contracts.Events;
 /// </summary>
 /// <param name="AssignmentId">The new assignment's id.</param>
 /// <param name="Title">The assignment title.</param>
+/// <param name="AssignmentNumber">The auto-generated assignment code (e.g. ASGA01) — spec §5.4.</param>
 /// <param name="CreatedAt">The server timestamp of the create.</param>
 public sealed record AssignmentCreatedIntegrationEvent(
     Guid AssignmentId,
     string Title,
+    string? AssignmentNumber,
     DateTimeOffset CreatedAt);

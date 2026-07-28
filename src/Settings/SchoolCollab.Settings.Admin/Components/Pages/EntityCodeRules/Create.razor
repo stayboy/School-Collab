@@ -1,0 +1,230 @@
+@page "/entity-code-rules/new"
+@using SchoolCollab.Admin.Shared.Services
+@inject EntityCodeRulesApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Create> Logger
+@implements IDisposable
+
+<PageTitle>New Generation Rule</PageTitle>
+<h2>New Generation Rule</h2>
+
+<ErrorBoundary>
+    <ChildContent>
+        <EditForm Model="_model" OnValidSubmit="SubmitAsync" class="form-container">
+            <DataAnnotationsValidator />
+            <ValidationSummary />
+
+            <div class="form-fields">
+                <div class="form-field required-field">
+                    <FluentTextField @bind-Value="_model.Code"
+                                     Label="Code *"
+                                     Placeholder="e.g. STUDENT_CODE"
+                                     class="full-width"
+                                     Required />
+                </div>
+                <div class="form-field required-field">
+                    <FluentTextField @bind-Value="_model.Name"
+                                     Label="Name *"
+                                     Placeholder="e.g. Student numbers"
+                                     class="full-width"
+                                     Required />
+                </div>
+                <div class="form-field">
+                    <FluentTextArea @bind-Value="_model.Description"
+                                    Label="Description"
+                                    Rows="2"
+                                    class="full-width" />
+                </div>
+                <div class="form-field">
+                    <FluentCheckbox @bind-Value="_model.IsActive" Label="Active" />
+                </div>
+            </div>
+
+            <hr class="my-4" />
+
+            <SegmentEditor @bind-Segments="_model.Segments" />
+
+            <hr class="my-4" />
+
+            <SegmentsList Segments="_model.Segments" />
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+            }
+
+            <div class="mt-3">
+                <FluentButton Type="ButtonType.Submit" Appearance="Appearance.Accent" Disabled="@_saving">
+                    @(_saving ? "Saving…" : "Save")
+                </FluentButton>
+                <FluentButton Appearance="Appearance.Outline" OnClick="Cancel" class="ms-2">Cancel</FluentButton>
+            </div>
+        </EditForm>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private readonly FormModel _model = new();
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _mutationCts = new();
+    private volatile bool _disposed;
+    private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
+
+    protected override void OnInitialized()
+    {
+        // Seed with the conventional "STU stamp + numeric width 3" template so
+        // the admin can see a complete example immediately. They can delete
+        // these and start over.
+        if (_model.Segments.Count == 0)
+        {
+            _model.Segments.Add(new SegmentFormModel
+            {
+                Index = 0,
+                Type = SegmentTypeDto.Fixed,
+                Role = "stamp",
+                FixedText = "STU",
+                Suffix = ""
+            });
+            _model.Segments.Add(new SegmentFormModel
+            {
+                Index = 1,
+                Type = SegmentTypeDto.NumericSequence,
+                Role = null,
+                Prefix = "",
+                Suffix = "",
+                ResetPeriod = ResetPeriodDto.Yearly,
+                MinWidth = 3,
+                UpperLimit = null
+            });
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_mutationCts is null) return;
+        _saving = true;
+        _error = null;
+        var ct = MutationToken;
+
+        // Client-side validation per spec §4.11. The server already enforces
+        // these in EntityCodeSegment factories; we surface the same checks up
+        // front so the admin sees the exact issue without a round-trip.
+        if (_model.Segments.Count == 0)
+        {
+            _error = "A rule must have at least one segment.";
+            _saving = false;
+            return;
+        }
+        var dupIndices = _model.Segments.GroupBy(s => s.Index).Where(g => g.Count() > 1).Select(g => g.Key).ToList();
+        if (dupIndices.Count > 0)
+        {
+            _error = $"Duplicate segment indices: {string.Join(", ", dupIndices)}. Each segment must have a unique index.";
+            _saving = false;
+            return;
+        }
+        var fixedMissing = _model.Segments.FirstOrDefault(s => s.Type == SegmentTypeDto.Fixed && string.IsNullOrWhiteSpace(s.FixedText));
+        if (fixedMissing is not null)
+        {
+            _error = $"Segment {fixedMissing.Index}: FixedText is required for Fixed segments.";
+            _saving = false;
+            return;
+        }
+        var alphaMissing = _model.Segments.FirstOrDefault(s => s.Type == SegmentTypeDto.AlphanumericSequence && string.IsNullOrWhiteSpace(s.Prefix));
+        if (alphaMissing is not null)
+        {
+            _error = $"Segment {alphaMissing.Index}: Prefix is required for AlphanumericSequence (initial letter, e.g. \"A\").";
+            _saving = false;
+            return;
+        }
+        if (_model.Segments.Any(s => s.Type is SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence && s.MinWidth < 1))
+        {
+            _error = "Numeric / Alphanumeric segments must have MinWidth >= 1.";
+            _saving = false;
+            return;
+        }
+        var upperLimitBad = _model.Segments.FirstOrDefault(s => !string.IsNullOrWhiteSpace(s.UpperLimit)
+            && ((s.Type is SegmentTypeDto.NumericSequence or SegmentTypeDto.AlphanumericSequence && (!int.TryParse(s.UpperLimit, out var n) || n < 1))
+                 || (s.Type == SegmentTypeDto.AlphabeticSequence && (s.UpperLimit.Trim().Length != 1 || s.UpperLimit.Trim()[0] < 'A' || s.UpperLimit.Trim()[0] > 'Z'))));
+        if (upperLimitBad is not null)
+        {
+            _error = $"Segment {upperLimitBad.Index}: UpperLimit format is invalid (numeric → positive int; alphabetic → single A-Z letter).";
+            _saving = false;
+            return;
+        }
+
+        try
+        {
+            Logger.LogInformation("User initiated create for entity code rule {Code}", _model.Code);
+            var request = new CreateEntityCodeRuleRequest(
+                Code: _model.Code!.Trim().ToUpperInvariant(),
+                Name: _model.Name!,
+                Description: _model.Description,
+                IsActive: _model.IsActive,
+                Segments: _model.Segments.Select(ToDto).ToList());
+            var id = await Api.CreateAsync(request, ct);
+            if (_disposed) return;
+            Logger.LogInformation("Created entity code rule {Id}", id);
+            Nav.NavigateTo("/entity-code-rules");
+        }
+        catch (EntityCodeRuleCodeConflictException ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        catch (ArgumentException ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create entity code rule {Code}", _model.Code);
+            _error = $"Failed to save: {ex.Message}";
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    /// <summary>Project a form-model segment to the wire DTO.</summary>
+    private static EntityCodeSegmentInputDto ToDto(SegmentFormModel s) => new(
+        Index: s.Index,
+        Role: string.IsNullOrWhiteSpace(s.Role) || s.Role == "(none)" ? null : s.Role,
+        Type: (int)s.Type,
+        FixedText: s.Type == SegmentTypeDto.Fixed ? s.FixedText : null,
+        Prefix: s.Type == SegmentTypeDto.Fixed ? null : s.Prefix,
+        Suffix: string.IsNullOrEmpty(s.Suffix) ? null : s.Suffix,
+        ResetPeriod: (int)s.ResetPeriod,
+        MinWidth: s.Type == SegmentTypeDto.Fixed ? 0 : s.MinWidth,
+        UpperLimit: string.IsNullOrWhiteSpace(s.UpperLimit) ? null : s.UpperLimit);
+
+    private void Cancel() => Nav.NavigateTo("/entity-code-rules");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _mutationCts?.Cancel();
+        _mutationCts?.Dispose();
+        _mutationCts = null;
+    }
+
+    private sealed class FormModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Code { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string? Name { get; set; }
+
+        public string? Description { get; set; }
+        public bool IsActive { get; set; }
+        public List<SegmentFormModel> Segments { get; set; } = new();
+    }
+}

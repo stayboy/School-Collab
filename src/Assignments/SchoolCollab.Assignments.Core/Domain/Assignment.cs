@@ -25,6 +25,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     // resolved client-side from tenant-resolved coded values (spec §5.7).
     public Guid SubjectId { get; private set; }
     public Guid? GradeLevelId { get; private set; }
+    /// <summary>Auto-generated assignment code (e.g. ASGA01) — spec §3.6.</summary>
+    public string? AssignmentNumber { get; private set; }
 
     // Multi-tenancy: all assignments belong to a tenant (e.g., school or organization)
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
@@ -61,7 +63,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         DateTimeOffset? dueDate,
         decimal? maxScore,
         Guid createdByTeacherId = default,
-        bool mandatoryReview = true)
+        bool mandatoryReview = true,
+        string? assignmentNumber = null)
     {
         if (subjectId == Guid.Empty)
             throw new ArgumentException("Subject is required.", nameof(subjectId));
@@ -83,6 +86,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             CreatedByTeacherId = createdByTeacherId,
             // Mandatory review is the default (spec §4.7); callers may opt out.
             MandatoryReview = mandatoryReview,
+            AssignmentNumber = assignmentNumber?.Trim(),
             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             CreatedAt = now,
             UpdatedAt = now

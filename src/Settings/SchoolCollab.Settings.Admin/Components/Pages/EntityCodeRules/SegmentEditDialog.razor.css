@@ -1,0 +1,29 @@
+/* Segment-edit dialog body layout. Two-column grid keeps the 8 fields
+   compact; <DialogShellFooter> renders its own row below the grid. */
+.segment-edit-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.segment-edit-dialog-hint {
+    margin: 0 0 0.25rem;
+    font-size: 0.9rem;
+    color: var(--neutral-foreground-2);
+}
+
+.segment-edit-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.75rem 1rem;
+    /* Allow the inputs (FluentTextField etc.) to shrink/wrap as the dialog
+       width changes — without this the right column overflows the dialog
+       body on narrower viewports. */
+    min-width: 0;
+}
+
+.segment-edit-grid ::deep fluent-text-field,
+.segment-edit-grid ::deep fluent-select {
+    min-width: 0;
+    width: 100%;
+}

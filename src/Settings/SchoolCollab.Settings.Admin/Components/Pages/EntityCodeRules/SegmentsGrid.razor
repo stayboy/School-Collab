@@ -1,0 +1,228 @@
+@* Inline-readable segments grid used by the Edit page. Every row is
+   view-mode only — the Edit icon opens a modal SegmentEditDialog so the
+   table columns stay aligned, the user can see other segments' state, and
+   validation errors live in a contained scrollable dialog body.
+
+   - ↑ / ↓ reorder; Delete removes the row.
+   - The "Add segment" + "Preview next 5 codes" buttons + preview list live
+     in the parent Edit page's right-hand sidebar (they were moved out of
+     the grid footer so the page reads top-down as: form / sidebar / grid /
+     overrides, with the actions always in reach). Parent calls
+     gridRef.AddRow() to append; parent owns _preview state.
+   - Two-way bound via Segments / SegmentsChanged.
+   - Validation is now done inside the SegmentEditDialog, not here. *@
+
+@using SchoolCollab.Admin.Shared.Services
+@inject IDialogService DialogService
+
+<div class="segments-grid">
+    <div class="segments-grid-header">
+        <h5 class="segments-grid-title">Segments</h5>
+        <p class="segments-grid-help">
+            The generated code is the concatenation of every segment in order.
+            Click a row's <strong>Edit</strong> icon to change its fields, or use
+            <strong>Add segment</strong> in the sidebar to append a new one.
+        </p>
+    </div>
+
+    @if (Segments.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+            A rule must have at least one segment. Click <strong>Add segment</strong> in the sidebar to start.
+        </FluentMessageBar>
+    }
+    else
+    {
+        <table class="segments-table">
+            <thead>
+                <tr>
+                    <th class="col-index">#</th>
+                    <th class="col-role">Role</th>
+                    <th class="col-type">Type</th>
+                    <th class="col-static">Static / Sequence</th>
+                    <th class="col-reset">Reset</th>
+                    <th class="col-actions">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (var i = 0; i < Segments.Count; i++)
+                {
+                    var idx = i;
+                    var seg = Segments[idx];
+
+                    <tr class="segments-row">
+                        <td class="col-index"><span class="seg-index-badge">@seg.Index</span></td>
+                        <td class="col-role">@(string.IsNullOrWhiteSpace(seg.Role) ? "—" : seg.Role!)</td>
+                        <td class="col-type">@seg.Type.ToString()</td>
+                        <td class="col-static">
+                            @RenderSummary(seg)
+                        </td>
+                        <td class="col-reset">@seg.ResetPeriod.ToString()</td>
+                        <td class="col-actions">
+                            <FluentButton Appearance="Appearance.Neutral"
+                                          IconStart="@FluentIcons.Edit"
+                                          Title="Edit segment"
+                                          OnClick="@(() => OpenEditDialogAsync(idx))" />
+                            <FluentButton Appearance="Appearance.Neutral"
+                                          IconStart="@FluentIcons.ChevronUp"
+                                          Title="Move up"
+                                          Disabled="@(idx == 0)"
+                                          OnClick="@(() => MoveUp(idx))" />
+                            <FluentButton Appearance="Appearance.Neutral"
+                                          IconStart="@FluentIcons.ChevronDown"
+                                          Title="Move down"
+                                          Disabled="@(idx == Segments.Count - 1)"
+                                          OnClick="@(() => MoveDown(idx))" />
+                            <FluentButton Appearance="Appearance.Neutral"
+                                          IconStart="@FluentIcons.Delete"
+                                          Title="Remove segment"
+                                          OnClick="@(() => DeleteRow(idx))" />
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired]
+    public List<SegmentFormModel> Segments { get; set; } = new();
+
+    [Parameter]
+    public EventCallback<List<SegmentFormModel>> SegmentsChanged { get; set; }
+
+    private void NotifyChanged() => InvokeAsync(() => SegmentsChanged.InvokeAsync(Segments));
+
+    /// <summary>
+    /// Appends a new Fixed segment. Public so the parent (Edit page sidebar)
+    /// can trigger it via @ref. The new row is appended with default values
+    /// and the parent is expected to open the SegmentEditDialog against it
+    /// so the user fills in the fields immediately — but the append itself
+    /// is non-modal so the user can also leave it for later.
+    /// </summary>
+    public void AddRow()
+    {
+        Segments.Add(new SegmentFormModel
+        {
+            Index = Segments.Count,
+            Type = SegmentTypeDto.Fixed,
+            FixedText = "",
+            Prefix = "",
+            Suffix = "",
+            Role = null,
+            ResetPeriod = ResetPeriodDto.None,
+            MinWidth = 2,
+            UpperLimit = null
+        });
+        NotifyChanged();
+    }
+
+    /// <summary>
+    /// Opens the edit dialog for the segment at <paramref name="idx"/>. On
+    /// success the matching row's fields are overwritten with the dialog's
+    /// mutated model (we copy field-by-field rather than replacing the row
+    /// reference, so the grid's @bind-Segments doesn't get a new list and
+    /// any caller holding a SegmentFormModel reference still points at it).
+    /// </summary>
+    private async Task OpenEditDialogAsync(int idx)
+    {
+        if (idx < 0 || idx >= Segments.Count) return;
+        var original = Segments[idx];
+
+        // Defensive copy: if the dialog is cancelled (or errors), the
+        // original row is untouched. Without this, two-way bindings on the
+        // input controls would have mutated `original` already.
+        var draft = CloneSegment(original);
+
+        var model = new SegmentEditFormModel
+        {
+            OriginalIndex = original.Index,
+            Segment = draft,
+        };
+
+        var result = await DialogService.ShowShellDialogAsync<SegmentEditDialog, SegmentEditFormModel, SegmentEditResult>(
+            model, $"Edit segment #{original.Index}", DialogSize.Medium);
+
+        if (result is null) return; // cancelled
+
+        // Re-locate the row by the snapshot index. The user could not have
+        // reordered while the dialog was open (it is modal), so the index
+        // is still correct — but guard anyway.
+        var liveIdx = Segments.FindIndex(s => s.Index == result.OriginalIndex);
+        if (liveIdx < 0) return;
+
+        var target = Segments[liveIdx];
+        target.Role = result.Segment.Role;
+        target.Type = result.Segment.Type;
+        target.FixedText = result.Segment.FixedText;
+        target.Prefix = result.Segment.Prefix;
+        target.Suffix = result.Segment.Suffix;
+        target.ResetPeriod = result.Segment.ResetPeriod;
+        target.MinWidth = result.Segment.MinWidth;
+        target.UpperLimit = result.Segment.UpperLimit;
+        // Index intentionally NOT copied — index is positional, owned by
+        // MoveUp/MoveDown/AddRow/DeleteRow.
+
+        NotifyChanged();
+    }
+
+    /// <summary>
+    /// Shallow-copy a segment so the dialog's bindings don't mutate the
+    /// grid's row in place while the dialog is open. (C# records would
+    /// give us this for free; SegmentFormModel is a class for two-way
+    /// binding compatibility.)
+    /// </summary>
+    private static SegmentFormModel CloneSegment(SegmentFormModel s) => new()
+    {
+        Index = s.Index,
+        Role = s.Role,
+        Type = s.Type,
+        FixedText = s.FixedText,
+        Prefix = s.Prefix,
+        Suffix = s.Suffix,
+        ResetPeriod = s.ResetPeriod,
+        MinWidth = s.MinWidth,
+        UpperLimit = s.UpperLimit,
+    };
+
+    private void MoveUp(int idx)
+    {
+        if (idx <= 0) return;
+        (Segments[idx - 1], Segments[idx]) = (Segments[idx], Segments[idx - 1]);
+        (Segments[idx - 1].Index, Segments[idx].Index) = (Segments[idx - 1].Index, Segments[idx].Index);
+        NotifyChanged();
+    }
+
+    private void MoveDown(int idx)
+    {
+        if (idx >= Segments.Count - 1) return;
+        (Segments[idx + 1], Segments[idx]) = (Segments[idx], Segments[idx + 1]);
+        (Segments[idx + 1].Index, Segments[idx].Index) = (Segments[idx + 1].Index, Segments[idx].Index);
+        NotifyChanged();
+    }
+
+    private void DeleteRow(int idx)
+    {
+        if (idx < 0 || idx >= Segments.Count) return;
+        Segments.RemoveAt(idx);
+        for (var i = 0; i < Segments.Count; i++) Segments[i].Index = i;
+        NotifyChanged();
+    }
+
+    /// <summary>
+    /// Compact summary used in view mode. Mirrors the read-only SegmentsList
+    /// cells: type-dependent rendering of static text or sequence shape.
+    /// </summary>
+    private static string RenderSummary(SegmentFormModel s) => s.Type switch
+    {
+        SegmentTypeDto.Fixed => string.IsNullOrWhiteSpace(s.FixedText) ? "—" : s.FixedText!,
+        SegmentTypeDto.NumericSequence
+            => $"{(string.IsNullOrEmpty(s.Prefix) ? "" : s.Prefix)}{new string('0', Math.Max(1, s.MinWidth))}…",
+        SegmentTypeDto.AlphabeticSequence
+            => $"{(string.IsNullOrEmpty(s.Prefix) ? "" : s.Prefix)}A…",
+        SegmentTypeDto.AlphanumericSequence
+            => $"{(string.IsNullOrEmpty(s.Prefix) ? "A" : s.Prefix)}{new string('0', Math.Max(1, s.MinWidth))}…",
+        _ => "—"
+    };
+}
