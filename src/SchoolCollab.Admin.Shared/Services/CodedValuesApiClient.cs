@@ -78,6 +78,25 @@ public sealed class CodedValuesApiClient(HttpClient http)
     public Task<CodedValueDto[]?> GetChildrenByParentCodeAsync(string parentCode, CancellationToken ct = default) =>
         http.GetFromJsonAsync<CodedValueDto[]>($"/api/coded-values/by-parent?parentCode={Uri.EscapeDataString(parentCode)}", ct);
 
+    /// <summary>
+    /// Fetches children of the given parent coded value filtered by an
+    /// attribute key/value pair. Backed by the Settings
+    /// <c>GET /api/coded-values/by-parent?parentCode=...&amp;attributeKey=...&amp;attributeValue=...</c>
+    /// endpoint. Used by the strand picker to show only strands whose
+    /// <c>gradeLevel</c> attribute references the currently selected grade.
+    /// </summary>
+    public async Task<CodedValueDto[]?> GetChildrenByParentCodeFilteredByAttributeAsync(
+        string parentCode,
+        string attributeKey,
+        string attributeValue,
+        CancellationToken ct = default)
+    {
+        var url = $"/api/coded-values/by-parent?parentCode={Uri.EscapeDataString(parentCode)}" +
+                  $"&attributeKey={Uri.EscapeDataString(attributeKey)}" +
+                  $"&attributeValue={Uri.EscapeDataString(attributeValue)}";
+        return await http.GetFromJsonAsync<CodedValueDto[]>(url, ct);
+    }
+
     public async Task<CodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var response = await http.GetAsync($"/api/coded-values/{id}", ct);

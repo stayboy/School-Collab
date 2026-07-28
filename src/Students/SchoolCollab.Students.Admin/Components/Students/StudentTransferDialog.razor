@@ -3,6 +3,8 @@
    and an equal level is a lateral move. Records a reason and an audit entry. *@
 @inherits DialogShellBase<StudentTransferModel, StudentTransferResult>
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject ILogger<StudentTransferDialog> Logger
@@ -46,6 +48,13 @@
                               OptionValue="@(g => g.Id.ToString())"
                               Label="Transfer to grade"
                               Required="true" />
+
+                <CodedValueDropdown Parent="CodedValueParent.GradeStrands"
+                                    AttributeFilter="@(_selectedGrade is null ? null : ("gradeLevel", _selectedGrade.CodedValueId.ToString()))"
+                                    EmptyFilterPlaceholder="No strands for this grade"
+                                    Placeholder="Select strand…"
+                                    Label="Transfer to strand"
+                                    @bind-SelectedId="_selectedStrand" />
 
                 <FluentTextArea @bind-Value="_model.Reason" Label="Reason" Required="true" />
             </FluentStack>

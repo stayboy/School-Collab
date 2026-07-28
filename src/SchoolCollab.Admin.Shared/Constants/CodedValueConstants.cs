@@ -12,7 +12,11 @@ public enum CodedValueParent
     Communities = 7,
     Cities = 8,
     Countries = 9,
-    CountryCallingCodes = 10
+    CountryCallingCodes = 10,
+    /// <summary>Grade strands (children of <c>GRSTRNDS</c>). Each strand
+    /// has a <c>gradeLevel</c> attribute referencing its parent grade's
+    /// coded value. Picker filters by attribute when a grade is selected.</summary>
+    GradeStrands = 11
 }
 
 public static class CodedValueParentExtensions
@@ -30,6 +34,7 @@ public static class CodedValueParentExtensions
         CodedValueParent.Cities => "CITIES",
         CodedValueParent.Countries => "COUNTRYS",
         CodedValueParent.CountryCallingCodes => "CNCODES",
+        CodedValueParent.GradeStrands => "GRSTRNDS",
         _ => throw new ArgumentOutOfRangeException(nameof(parent))
     };
 }

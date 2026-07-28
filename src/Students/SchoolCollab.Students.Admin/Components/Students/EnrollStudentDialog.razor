@@ -346,6 +346,20 @@
                     </div>
                 </FormRow>
 
+                @* Grade strand picker. Filtered by the selected grade's
+                   CodedValueId so it shows only strands whose gradeLevel
+                   attribute matches the chosen grade. The picker is
+                   disabled until a grade is picked. Uses the standard
+                   CodedValueDropdown augmented with an attribute filter
+                   (key=gradeLevel, value=selectedGradeCodedValueId). *@
+                <FormRow Label="Strand" For="enroll-strand">
+                    <CodedValueDropdown Parent="CodedValueParent.GradeStrands"
+                                        AttributeFilter="@(GradeCodedValueIdForFilter is null ? null : ("gradeLevel", GradeCodedValueIdForFilter.Value.ToString()))"
+                                        EmptyFilterPlaceholder="No strands for this grade"
+                                        Placeholder="Select strand…"
+                                        @bind-SelectedId="_selectedStrand" />
+                </FormRow>
+
                 <FormRow Label="Enrolled on" Required>
                     @* FluentDatePicker binds to DateTime?; we convert
                        from the model's DateOnly? on the way in and back
@@ -508,6 +522,16 @@
     /// dropdown IS a GradeLevelDto).</summary>
     private GradeLevelDto? _selectedGrade;
     private Guid? _selectedStrand;
+
+    /// <summary>The coded value id of the selected grade, used as the
+    /// strand picker's <c>AttributeFilter</c> value. Resolves the
+    /// flag-ON path (where the CodedValueId comes from the coded-value
+    /// dropdown before a GradeLevel row is materialized) and the
+    /// flag-OFF path (where the GradeLevelDto already has CodedValueId)
+    /// to a single value. Null when no grade is selected yet — the
+    /// strand picker disables itself in that case.</summary>
+    private Guid? GradeCodedValueIdForFilter =>
+        _selectedGrade?.CodedValueId ?? _selectedGradeCodedValueId;
 
     /// <summary>Selection state for the flag-OFF GradeLevel dropdown (the
     /// generic <see cref="DropdownComponent{TItem, TValue}"/> of
