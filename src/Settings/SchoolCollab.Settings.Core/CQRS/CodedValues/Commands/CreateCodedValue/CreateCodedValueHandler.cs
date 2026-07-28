@@ -65,6 +65,22 @@ public sealed class CreateCodedValueHandler(
                 existingIsSharedBlueprint: conflicting.TenantId == null);
         }
 
+        // FR-6: DisplayOrder uniqueness for GRADE children. DisplayOrder IS the grade
+        // level (no separate Level column), so siblings must not share the same value.
+        if (command.ParentId is not null)
+        {
+            var parent = await repository.GetAsync(command.ParentId.Value, cancellationToken);
+            if (parent is not null && parent.Code == "GRADE")
+            {
+                var duplicateLevel = await repository.FindSiblingByDisplayOrderAsync(
+                    command.ParentId.Value, command.DisplayOrder, cancellationToken);
+                if (duplicateLevel is not null)
+                {
+                    throw new DuplicateGradeLevelException(command.DisplayOrder, duplicateLevel.Id);
+                }
+            }
+        }
+
         var codedValue = CodedValue.Create(
             command.Code,
             command.Name,
