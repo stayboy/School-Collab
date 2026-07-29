@@ -19,13 +19,15 @@ namespace SchoolCollab.Settings.Core.Migrations
             migrationBuilder.Sql("""
                 UPDATE coded_value_attributes AS attr
                 SET value = ref.id::text
-                FROM coded_values AS cv
-                JOIN coded_values AS parent ON cv.parent_id = parent.id
-                JOIN coded_value_attribute_definitions AS def
-                    ON def.coded_value_id = parent.id
-                    AND def.key = attr.key
-                JOIN coded_values AS ref ON ref.code = attr.value
-                WHERE attr.coded_value_id = cv.id
+                FROM coded_values AS cv,
+                     coded_values AS parent,
+                     coded_value_attribute_definitions AS def,
+                     coded_values AS ref
+                WHERE cv.parent_id = parent.id
+                  AND def.coded_value_id = parent.id
+                  AND ref.code = attr.value
+                  AND attr.coded_value_id = cv.id
+                  AND def.key = attr.key
                   AND def.data_type = 7
                   AND attr.value !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$';
             """);
