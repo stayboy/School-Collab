@@ -91,6 +91,22 @@ internal sealed class CodedValueRepository(SettingsDbContext db) : ICodedValueRe
     public async Task<int> CountChildrenAsync(Guid parentId, CancellationToken cancellationToken = default) =>
         await db.CodedValues.CountAsync(x => x.ParentId == parentId, cancellationToken);
 
+    public async Task<CodedValue?> FindSiblingByDisplayOrderAsync(Guid parentId, int displayOrder, CancellationToken cancellationToken = default) =>
+        await db.CodedValues.FirstOrDefaultAsync(x => x.ParentId == parentId && x.DisplayOrder == displayOrder, cancellationToken);
+
+    public async Task<CodedValue?> FindStrandSiblingAsync(
+        Guid parentId,
+        string gradeLevelValue,
+        string strandVersionValue,
+        CancellationToken cancellationToken = default) =>
+        await db.CodedValues
+            .Include(x => x.Attributes)
+            .FirstOrDefaultAsync(x =>
+                x.ParentId == parentId
+                && x.Attributes.Any(a => a.Key == "gradeLevel" && a.Value == gradeLevelValue)
+                && x.Attributes.Any(a => a.Key == "strandVersion" && a.Value == strandVersionValue),
+                cancellationToken);
+
     public async Task<List<string>> GetReferencingSourceCodesAsync(Guid codedValueId, CancellationToken cancellationToken = default)
     {
         var code = await db.CodedValues

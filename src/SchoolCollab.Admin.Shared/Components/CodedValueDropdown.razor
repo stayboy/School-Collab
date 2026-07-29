@@ -75,11 +75,37 @@
     /// Changing this value after initialization will reload the dropdown items.
     /// Values are resolved through the tenant-aware coded-value API, so any
     /// tenant-specific overrides are applied automatically.
+    /// <para>
+    /// Optional when <see cref="AttributeFilter"/> is supplied — the filter
+    /// call still needs a parent (resolved from the filter's key context) but
+    /// the dropdown does not require the caller to set the enum. When both
+    /// <see cref="AttributeFilter"/> and <see cref="Parent"/> are set the
+    /// filter takes precedence (used by the strand picker, where the parent
+    /// is <c>GRSTRNDS</c> and the filter is <c>gradeLevel=&lt;selectedGrade&gt;</c>).
+    /// </para>
     /// </summary>
-    [Parameter, EditorRequired]
+    [Parameter]
     public CodedValueParent Parent { get; set; }
 
     private string ParentCode => Parent.ToCode();
+
+    /// <summary>
+    /// Optional attribute key/value filter. When set, the dropdown loads its
+    /// items via the <c>attributeKey</c>/<c>attributeValue</c> query params
+    /// on the Settings <c>GET /api/coded-values/by-parent</c> endpoint
+    /// instead of the unfiltered parent lookup. Used by the grade-strand
+    /// picker to show only strands whose <c>gradeLevel</c> attribute
+    /// references the currently selected grade.
+    /// </summary>
+    [Parameter]
+    public (string Key, string Value)? AttributeFilter { get; set; }
+
+    /// <summary>
+    /// Placeholder text shown when an attribute filter is set but no items
+    /// match. Defaults to <c>"No matches"</c>.
+    /// </summary>
+    [Parameter]
+    public string? EmptyFilterPlaceholder { get; set; } = "No matches";
 
     /// <summary>
     /// Label shown above the dropdown.
@@ -162,7 +188,9 @@
         : _items is null
             ? "Loading…"
             : _items.Length == 0
-                ? "No options available"
+                ? (AttributeFilter is not null
+                    ? (EmptyFilterPlaceholder ?? "No matches")
+                    : "No options available")
                 : (Placeholder ?? "Select…");
 
     private string EffectiveClass => string.IsNullOrWhiteSpace(Class) 
@@ -176,6 +204,18 @@
     private string? EffectiveStyle => Width?.ToCssStyle();
 
     private Func<CodedValueDto, string> EffectiveOptionText => OptionText ?? (o => o.Name);
+
+    /// <summary>
+    /// Stable identity of the current load: parent code + the attribute
+    /// filter (if any). A change to either triggers a reload. When the
+    /// filter is set the parent code is still part of the key so a parent
+    /// change with a stable filter still reloads.
+    /// </summary>
+    private string LoadKey => string.IsNullOrEmpty(ParentCode)
+        ? string.Empty
+        : AttributeFilter is { } f
+            ? $"{ParentCode}|{f.Key}={f.Value}"
+            : ParentCode;
 
     protected override async Task OnInitializedAsync()
     {
@@ -200,7 +240,7 @@
             return;
         }
 
-        if (ParentCode != _loadedParentCode)
+        if (LoadKey != _loadedParentCode)
         {
             await LoadAsync(ParentCode);
         }
@@ -295,7 +335,14 @@
 
         try
         {
-            var items = await Api.GetChildrenByParentCodeAsync(parentCode, ct) ?? [];
+            // AttributeFilter takes precedence: when set we call the
+            // attribute-filtered endpoint so the dropdown shows only items
+            // that match the filter (e.g. strands whose gradeLevel attribute
+            // references the currently selected grade). Otherwise we fall
+            // back to the unfiltered parent-children lookup.
+            var items = AttributeFilter is { } f
+                ? await Api.GetChildrenByParentCodeFilteredByAttributeAsync(parentCode, f.Key, f.Value, ct) ?? []
+                : await Api.GetChildrenByParentCodeAsync(parentCode, ct) ?? [];
             if (_disposed || ct.IsCancellationRequested) return;
 
             // Render the items BEFORE applying the selection. FluentSelect does

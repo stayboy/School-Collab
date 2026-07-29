@@ -22,6 +22,22 @@ public sealed class UpdateCodedValueHandler(
         var codedValue = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new CodedValueNotFoundException(command.Id);
 
+        // FR-6: DisplayOrder uniqueness for GRADE children. If the parent is GRADE
+        // and the DisplayOrder changed, check that no sibling already uses it.
+        if (codedValue.ParentId is not null)
+        {
+            var parent = await repository.GetAsync(codedValue.ParentId.Value, cancellationToken);
+            if (parent is not null && parent.Code == "GRADE")
+            {
+                var duplicateLevel = await repository.FindSiblingByDisplayOrderAsync(
+                    codedValue.ParentId.Value, command.DisplayOrder, cancellationToken);
+                if (duplicateLevel is not null && duplicateLevel.Id != codedValue.Id)
+                {
+                    throw new DuplicateGradeLevelException(command.DisplayOrder, duplicateLevel.Id);
+                }
+            }
+        }
+
         codedValue.Update(command.Name, command.Description, command.DisplayOrder);
         await repository.UpdateAsync(codedValue, cancellationToken);
         await cache.RemoveByTagAsync("coded-values", cancellationToken);

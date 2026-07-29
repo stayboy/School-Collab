@@ -1,0 +1,48 @@
+using System.Net;
+using System.Net.Http.Json;
+
+namespace SchoolCollab.Students.Core.Services;
+
+/// <summary>
+/// Lightweight CodedValue DTO used by the Students module to call the Settings
+/// REST API for strand validation. Mirrors the contract from
+/// <c>SchoolCollab.Admin.Shared.Services.CodedValueDto</c>.
+/// </summary>
+public record StrandCodedValueDto(
+    Guid Id,
+    string Code,
+    string Name,
+    string? Description,
+    Guid? ParentId,
+    string? ParentCode,
+    bool IsDisabled,
+    int DisplayOrder,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt,
+    IReadOnlyCollection<StrandAttributeDto> Attributes);
+
+public record StrandAttributeDto(string Key, string Value);
+
+/// <summary>
+/// HTTP client for calling the Settings Coded Values REST API from Students
+/// handlers. Used to validate grade-strand references (cross-module).
+/// </summary>
+public interface ICodedValuesApiClient
+{
+    /// <summary>
+    /// Fetches a coded value by its ID. Returns <c>null</c> if not found.
+    /// </summary>
+    Task<StrandCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
+}
+
+public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClient
+{
+    public async Task<StrandCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await http.GetAsync($"/api/coded-values/{id}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<StrandCodedValueDto>(ct);
+    }
+}

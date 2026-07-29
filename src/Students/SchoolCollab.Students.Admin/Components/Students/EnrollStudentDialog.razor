@@ -336,6 +336,7 @@
                                                   @ref="_gradeLevelDropdown"
                                                   Items="@_gradeLevels"
                                                   @bind-SelectedValue="_selectedGradeLevelId"
+                                                  @bind-SelectedValue:after="OnGradeLevelSelectedValueChanged"
                                                   OptionText="@(g => g.Name)"
                                                   OptionValue="@(g => g.Id)"
                                                   Placeholder="Select a grade"
@@ -344,6 +345,20 @@
                             </Fallback>
                         </FeatureFlagGate>
                     </div>
+                </FormRow>
+
+                @* Grade strand picker. Filtered by the selected grade's
+                   CodedValueId so it shows only strands whose gradeLevel
+                   attribute matches the chosen grade. The picker is
+                   disabled until a grade is picked. Uses the standard
+                   CodedValueDropdown augmented with an attribute filter
+                   (key=gradeLevel, value=selectedGradeCodedValueId). *@
+                <FormRow Label="Strand" For="enroll-strand">
+                    <CodedValueDropdown Parent="CodedValueParent.GradeStrands"
+                                        AttributeFilter="@(GradeCodedValueIdForFilter is null ? null : ("gradeLevel", GradeCodedValueIdForFilter.Value.ToString()))"
+                                        EmptyFilterPlaceholder="No strands for this grade"
+                                        Placeholder="Select strand…"
+                                        @bind-SelectedId="_selectedStrand" />
                 </FormRow>
 
                 <FormRow Label="Enrolled on" Required>
@@ -507,6 +522,17 @@
     /// (unreachable in the flag-OFF path because every item in that
     /// dropdown IS a GradeLevelDto).</summary>
     private GradeLevelDto? _selectedGrade;
+    private Guid? _selectedStrand;
+
+    /// <summary>The coded value id of the selected grade, used as the
+    /// strand picker's <c>AttributeFilter</c> value. Resolves the
+    /// flag-ON path (where the CodedValueId comes from the coded-value
+    /// dropdown before a GradeLevel row is materialized) and the
+    /// flag-OFF path (where the GradeLevelDto already has CodedValueId)
+    /// to a single value. Null when no grade is selected yet — the
+    /// strand picker disables itself in that case.</summary>
+    private Guid? GradeCodedValueIdForFilter =>
+        _selectedGrade?.CodedValueId ?? _selectedGradeCodedValueId;
 
     /// <summary>Selection state for the flag-OFF GradeLevel dropdown (the
     /// generic <see cref="DropdownComponent{TItem, TValue}"/> of
@@ -596,25 +622,40 @@
     /// <see cref="GradeLevelDto"/> for the actual enrollment submit.
     /// Fire-and-forget the async helper (we never want the
     /// <c>:after</c> binder to wait on our lookup).
+    /// Also clears the strand selection — a strand from the previous
+    /// grade is no longer valid (the strand's gradeLevel attribute must
+    /// match the enrollment's grade; spec §4.3 / FR-9). The CodedValueDropdown
+    /// will reload its items because the strand picker's AttributeFilter
+    /// value (GradeCodedValueIdForFilter) changed.
     /// </summary>
     private void OnGradeCodedValueChanged()
-        => _ = ResolveSelectedGradeAsync();
+    {
+        _selectedStrand = null;
+        _ = ResolveSelectedGradeAsync();
+    }
 
     /// <summary>
     /// Flag-OFF path: the <see cref="DropdownComponent{TItem, TValue}"/> of
     /// <see cref="_gradeLevels"/> is bound to a PRIMITIVE KEY (<see cref="Guid"/>?).
-    /// The picked id is looked up in <see cref="_gradeLevels"/> to resolve the
-    /// full <see cref="GradeLevelDto"/> for <see cref="_selectedGrade"/> (no
-    /// CodedValueId resolution needed, no auto-materialize possible — every
-    /// item in the flag-OFF dropdown IS a <see cref="GradeLevelDto"/> by
-    /// construction). A null id (user cleared the dropdown) clears
+    /// <see cref="OnGradeLevelSelectedValueChanged"/> keeps <see cref="_selectedGrade"/>
+    /// in sync via the picked <see cref="_selectedGradeLevelId"/> (linker reading).
+    /// Null <see cref="_selectedGradeLevelId"/> (user cleared the dropdown) clears
     /// <see cref="_selectedGrade"/>.
+    /// Also clears the strand selection on grade change:
+    /// strands are filtered by the selected grade's <see cref="GradeLevelDto.CodedValueId"/>
+    /// so a strand from a previous grade is no longer valid (spec §4.3 / FR-9).
+    /// <para>
+    /// The :after version of <c>@bind-SelectedValue="_selectedGradeLevelId"</c>
+    /// is "side-effect only" — the binder owns <see cref="DropdownComponent{TItem, TValue}.SelectedValueChanged"/>
+    /// and should not be passed directly.
+    /// </para>
     /// </summary>
-    private void OnGradeLevelSelectedValueChanged(Guid? id)
+    private void OnGradeLevelSelectedValueChanged()
     {
-        _selectedGrade = id is null
+        _selectedStrand = null;
+        _selectedGrade = _selectedGradeLevelId is null
             ? null
-            : _gradeLevels.FirstOrDefault(g => g.Id == id);
+            : _gradeLevels.FirstOrDefault(g => g.Id == _selectedGradeLevelId);
     }
 
     /// <summary>Resolves <see cref="_selectedGradeCodedValueId"/> to a
@@ -725,6 +766,7 @@
                 model.StudentId,
                 _activePeriod.Id,
                 _selectedGrade.Id,
+                _selectedStrand,
                 enrolledOn));
             return new EnrollStudentResult(true);
         }

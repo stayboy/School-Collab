@@ -28,13 +28,14 @@ public static class EnrollmentRoutes
             Results.Ok(await handler.HandleAsync(new ListEnrollmentsByPeriod(periodId), ct)));
 
         group.MapPost("/enrollments", async (
-            [FromBody] EnrollStudent command,
+            [FromBody] EnrollStudentRequest req,
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<EnrollStudent, Guid> handler,
             CancellationToken ct) =>
         {
             try
             {
-                var id = await handler.HandleAsync(command, ct);
+                var id = await handler.HandleAsync(
+                    new EnrollStudent(req.StudentId, req.PeriodId, req.GradeLevelId, req.GradeStrandCodedValueId, req.EnrolledOn), ct);
                 return Results.Created($"/enrollments/{id}", new { id });
             }
             catch (StudentNotFoundException)
@@ -43,19 +44,15 @@ public static class EnrollmentRoutes
             }
             catch (PeriodNotOpenException ex)
             {
-                // The enroll handler throws PeriodNotOpenException when
-                // the tenant has no active period or when the request's
-                // PeriodId does not match the active one (FR-A3 in
-                // active-period-per-tenancy.md). Surface the full
-                // exception message in a 400 response body so the
-                // client's <EnrollStudentAsync> can include it in
-                // the tracing detail the user sees in the dialog's
-                // per-field error MessageBar. Without this catch the
-                // exception bubbles up as a 500 with no body, and the
-                // client only sees the generic "Response status code
-                // does not indicate success: 500" text — useless for
-                // tracing WHAT went wrong.
                 return Results.BadRequest(new { ex.Message });
+            }
+            catch (GradeStrandGradeMismatchException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (GradeLevelNotFoundException ex)
+            {
+                return Results.NotFound(new { ex.Message });
             }
             catch (ConcurrencyException ex)
             {
@@ -71,10 +68,18 @@ public static class EnrollmentRoutes
         {
             try
             {
-                await handler.HandleAsync(new TransferStudent(id, req.NewGradeLevelId, req.TransferDate, req.Reason), ct);
+                await handler.HandleAsync(new TransferStudent(id, req.NewGradeLevelId, req.NewGradeStrandCodedValueId, req.TransferDate, req.Reason), ct);
                 return Results.NoContent();
             }
             catch (InvalidOperationException ex)
+            {
+                return Results.NotFound(new { ex.Message });
+            }
+            catch (GradeStrandGradeMismatchException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (GradeLevelNotFoundException ex)
             {
                 return Results.NotFound(new { ex.Message });
             }
@@ -109,5 +114,6 @@ public static class EnrollmentRoutes
     }
 }
 
-internal record TransferStudentRequest(Guid NewGradeLevelId, DateOnly? TransferDate, string Reason);
+internal record EnrollStudentRequest(Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? GradeStrandCodedValueId, DateOnly? EnrolledOn);
+internal record TransferStudentRequest(Guid NewGradeLevelId, Guid? NewGradeStrandCodedValueId, DateOnly? TransferDate, string Reason);
 internal record WithdrawStudentRequest(DateOnly? ExitDate);

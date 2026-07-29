@@ -178,6 +178,18 @@ public sealed class CodedValueSeeder(
         var rows = CsvSeedReader.ReadAttributes(filePath);
         logger.LogDebug("Read {Count} attribute value rows", rows.Count);
 
+        // Pre-load definitions + code→id map so CodedValue-typed attributes can be
+        // resolved from their human-readable code (e.g. "GRADE_R") to the stored
+        // CodedValueId GUID that filters and APIs expect.
+        var parents = await db.CodedValues
+            .AsNoTracking()
+            .Include(c => c.AttributeDefinitions)
+            .ToDictionaryAsync(c => c.Id, ct);
+
+        var codeToId = await db.CodedValues
+            .AsNoTracking()
+            .ToDictionaryAsync(c => c.Code, c => c.Id, ct);
+
         foreach (var row in rows)
         {
             var codedValue = await db.CodedValues
@@ -198,10 +210,35 @@ public sealed class CodedValueSeeder(
                 continue;
             }
 
-            codedValue.SetAttribute(row.Key, row.Value);
+            var valueToStore = row.Value;
+
+            if (codedValue.ParentId is { } parentId &&
+                parents.TryGetValue(parentId, out var parent))
+            {
+                var definition = parent.AttributeDefinitions
+                    .FirstOrDefault(d => d.Key == row.Key);
+
+                if (definition?.DataType == AttributeDataType.CodedValue)
+                {
+                    if (!codeToId.TryGetValue(row.Value, out var referencedId))
+                    {
+                        logger.LogWarning(
+                            "Attribute {Key} on {Code} is CodedValue-typed but referenced code {ReferencedCode} was not found. Skipping",
+                            row.Key, row.Code, row.Value);
+                        continue;
+                    }
+
+                    valueToStore = referencedId.ToString();
+                    logger.LogDebug(
+                        "Resolved CodedValue attribute {Key} on {Code}: {ReferencedCode} -> {ReferencedId}",
+                        row.Key, row.Code, row.Value, referencedId);
+                }
+            }
+
+            codedValue.SetAttribute(row.Key, valueToStore);
 
             logger.LogDebug("Added attribute {Key}={Value} on {Code}",
-                row.Key, row.Value, row.Code);
+                row.Key, valueToStore, row.Code);
         }
 
         await db.SaveChangesAsync(ct);

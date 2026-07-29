@@ -30,6 +30,26 @@ public interface ICodedValueRepository
     Task AddRangeAsync(IEnumerable<CodedValue> codedValues, CancellationToken cancellationToken = default);
     Task UpdateAsync(CodedValue codedValue, CancellationToken cancellationToken = default);
     Task<int> CountChildrenAsync(Guid parentId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finds a sibling coded value under the given parent with the specified
+    /// <paramref name="displayOrder"/>. Returns <see langword="null"/> if no
+    /// sibling matches. Used for grade-level DisplayOrder uniqueness.
+    /// </summary>
+    Task<CodedValue?> FindSiblingByDisplayOrderAsync(Guid parentId, int displayOrder, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finds a sibling coded value under the given parent that has a
+    /// <c>gradeLevel</c> attribute with <paramref name="gradeLevelValue"/>
+    /// AND a <c>strandVersion</c> attribute with
+    /// <paramref name="strandVersionValue"/>. Returns <see langword="null"/>
+    /// if no sibling matches. Used for per-grade strand uniqueness.
+    /// </summary>
+    Task<CodedValue?> FindStrandSiblingAsync(
+        Guid parentId,
+        string gradeLevelValue,
+        string strandVersionValue,
+        CancellationToken cancellationToken = default);
     Task<List<string>> GetReferencingSourceCodesAsync(Guid codedValueId, CancellationToken cancellationToken = default);
     Task<CodedValueDto[]> ListDeletedAsync(CancellationToken cancellationToken = default);
 
