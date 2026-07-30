@@ -1,5 +1,7 @@
 @page "/students/grade-levels"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -17,6 +19,7 @@
              CreateRoute="/students/grade-levels/create"
              CreateEnabled="@_isRealTenant"
              SearchEnabled="@_isRealTenant"
+             OnCreate="@OpenCreateDialogAsync"
              EmptyMessage="@CurrentEmptyMessage"
              Items="@_filteredItems"
              Loading="@(_items is null)"
@@ -116,6 +119,14 @@
     private volatile bool _disposed;
     private bool _isRealTenant;
 
+    /// <summary>
+    /// Cached current-period id from the most recent landing load. Passed into
+    /// the Create dialog so it knows which period to assign subjects to.
+    /// Null when there is no current period (Create dialog then hides the
+    /// Subjects section).
+    /// </summary>
+    private Guid? _currentPeriodId;
+
     private static readonly LandingGridSettings _gridSettings = new()
     {
         // 2fr Name | 80px Age range | 90px Gender | 80px Subjects | 80px Students | 140px Period | auto Actions
@@ -158,6 +169,17 @@
 
     protected override async Task OnInitializedAsync()
     {
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// (Re)loads the landing data — called on initial mount and again after
+    /// the Create dialog reports success so the new row shows up. Always
+    /// re-reads the tenant scope so a tenant switch mid-session is honored
+    /// (the same as the original OnInitializedAsync).
+    /// </summary>
+    private async Task ReloadAsync()
+    {
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
 
@@ -166,6 +188,7 @@
         if (!_isRealTenant)
         {
             _items = [];
+            _currentPeriodId = null;
             return;
         }
 
@@ -176,6 +199,8 @@
             _items = await Api.ListGradeLevelsForLandingAsync(token);
 
             if (_disposed) return;
+
+            _currentPeriodId = _items?.FirstOrDefault()?.CurrentPeriodId;
 
             // Load tenant-resolved names for display
             var gradeCodedValues = await CodedValuesApi.GetChildrenByParentCodeAsync("GRADE", token);
@@ -218,6 +243,36 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load grade levels");
             _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Opens the Create dialog (DialogShellBase-derived) and refreshes the
+    /// landing on success. Wired into LandingPage.OnCreate so the + New
+    /// button invokes this instead of navigating to a dedicated route.
+    /// <see cref="CreateRoute"/> is left set as a fallback for any deep link
+    /// / browser refresh that bypasses the LandingPage chrome.
+    /// </summary>
+    private async Task OpenCreateDialogAsync()
+    {
+        if (_disposed) return;
+
+        var model = new GradeLevelCreateDialog.GradeLevelCreateModel
+        {
+            CurrentPeriodId = _currentPeriodId,
+        };
+
+        var created = await DialogService.ShowShellDialogAsync<
+            GradeLevelCreateDialog,
+            GradeLevelCreateDialog.GradeLevelCreateModel,
+            GradeLevelDto>(
+            model, "Create grade level", DialogSize.Medium);
+
+        if (_disposed) return;
+        if (created is not null)
+        {
+            // Refresh the landing so the new (or reused) grade row appears.
+            await ReloadAsync();
         }
     }
 
