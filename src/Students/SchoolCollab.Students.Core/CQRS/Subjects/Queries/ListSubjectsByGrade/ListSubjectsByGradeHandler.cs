@@ -41,23 +41,45 @@ public sealed class ListSubjectsByGradeHandler(StudentsDbContext db)
             assignments = assignments.Where(ga => ga.PeriodId == periodId);
         }
 
+        // Translation note (PostgreSQL / EF Core 10):
+        //
+        // The original shape was
+        //   assignments.Join(db.Subjects, ...).Select(new SubjectDto(...))
+        //              .Distinct().OrderBy(s => s.DisplayOrder)
+        // which fails to translate when both sides carry a tenant query
+        // filter (the predicate `s.TenantId == @__ef_filter_CurrentTenantId`
+        // is pushed down inside the JOIN's SELECT). The translation
+        // exception ("could not be translated") was the root cause of the
+        // production "throws an error for fetching" complaint surfaced by
+        // the Subjects landing - the InMemory provider used in unit tests
+        // does not enforce query filters, so it slipped past the unit
+        // tests and only failed against real Postgres.
+        //
+        // Fix: project the JOIN to the Subject entity (no DTO), Distinct
+        // on the entity (which EF translates to DISTINCT ON columns the
+        // tenant filter has already constrained), then OrderBy on a
+        // Subject column, then ToArrayAsync, then project to the DTO on
+        // the client side. The DTO projection is a tiny per-row map so
+        // client evaluation is fine here.
         var subjects = await assignments
             .Join(
                 db.Subjects.AsNoTracking(),
                 ga => ga.SubjectId,
                 s => s.Id,
-                (ga, s) => new SubjectDto(
-                    s.Id,
-                    s.CodedValueId,
-                    s.Code,
-                    s.Name,
-                    s.DisplayOrder,
-                    s.CreatedAt,
-                    s.UpdatedAt))
+                (ga, s) => s)
             .Distinct()
             .OrderBy(s => s.DisplayOrder)
             .ToArrayAsync(cancellationToken);
 
-        return subjects;
+        return subjects
+            .Select(s => new SubjectDto(
+                s.Id,
+                s.CodedValueId,
+                s.Code,
+                s.Name,
+                s.DisplayOrder,
+                s.CreatedAt,
+                s.UpdatedAt))
+            .ToArray();
     }
 }
