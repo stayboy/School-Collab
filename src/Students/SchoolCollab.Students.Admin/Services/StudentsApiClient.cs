@@ -51,7 +51,13 @@ public sealed record GradeLevelLandingDto(
     Guid? CurrentPeriodId,
     string? CurrentPeriodName,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    // Enrollment validation guard clauses (plan §2/§9). Mirrors the
+    // Core DTO so the landing page can render the same age-range +
+    // allowed-gender chips without opening the edit form.
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null);
 
 public sealed record SubjectDto(
     Guid Id,

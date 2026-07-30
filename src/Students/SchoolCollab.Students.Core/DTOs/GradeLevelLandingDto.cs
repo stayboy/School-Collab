@@ -17,6 +17,13 @@ namespace SchoolCollab.Students.Core.DTOs;
 /// <c>Student.TenantId</c>. When there is no current period, both counts are
 /// <c>0</c> and <see cref="CurrentPeriodId"/>/<see cref="CurrentPeriodName"/> are
 /// <see langword="null"/>.</para>
+/// <para><see cref="MinAge"/>, <see cref="MaxAge"/>, and
+/// <see cref="AllowedGenderCodedValueId"/> mirror the enrollment-validation guard
+/// clauses on <see cref="Domain.GradeLevel"/> (plan §2 / §9). All three are
+/// nullable — <c>null</c> means "no restriction" so the landing row can render
+/// the dash placeholder rather than a fake default age/gender. The landing page
+/// surfaces them as two compact columns ("Age range" and "Gender") so the rules
+/// are visible without opening the edit form.</para>
 /// </remarks>
 public sealed record GradeLevelLandingDto(
     Guid Id,
@@ -29,4 +36,7 @@ public sealed record GradeLevelLandingDto(
     Guid? CurrentPeriodId,
     string? CurrentPeriodName,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null);

@@ -29,6 +29,31 @@
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Name" Sortable="true" SortBy="@_sortByName">
             @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
         </TemplateColumn>
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Age range">
+            @if (context.MinAge.HasValue || context.MaxAge.HasValue)
+            {
+                <span class="age-range">@FormatAgeRange(context.MinAge, context.MaxAge)</span>
+            }
+            else
+            {
+                <span class="muted" title="No age restriction set">Any age</span>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Gender">
+            @if (context.AllowedGenderCodedValueId is { } gid
+                 && _resolvedGenderNames.TryGetValue(gid, out var gname))
+            {
+                <FluentBadge Appearance="Appearance.Neutral">@gname</FluentBadge>
+            }
+            else if (context.AllowedGenderCodedValueId is not null)
+            {
+                <span class="muted" title="Gender id @(context.AllowedGenderCodedValueId) — name not resolved">—</span>
+            }
+            else
+            {
+                <span class="muted" title="No gender restriction set">Co-ed</span>
+            }
+        </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Subjects">
             @if (context.CurrentPeriodId.HasValue)
             {
@@ -76,11 +101,16 @@
     .muted {
         color: var(--neutral-foreground-hint);
     }
+    .age-range {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
 </style>
 
 @code {
     private GradeLevelLandingDto[]? _items;
     private Dictionary<Guid, string> _resolvedNames = new();
+    private Dictionary<Guid, string> _resolvedGenderNames = new();
     private string _searchText = string.Empty;
     private string? _error;
     private CancellationTokenSource? _loadCts;
@@ -89,7 +119,8 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "80px minmax(200px,2fr) 100px 100px 140px auto"
+        // 80px Level | 2fr Name | 80px Age range | 90px Gender | 80px Subjects | 80px Students | 140px Period | auto Actions
+        GridTemplateColumns = "80px minmax(200px,2fr) 80px 90px 80px 80px 140px auto"
     };
 
     private static readonly GridSort<GradeLevelLandingDto> _sortByName =
@@ -113,6 +144,18 @@
         var name = _resolvedNames.TryGetValue(g.Id, out var resolved) ? resolved : g.Name;
         return name.Contains(search, StringComparison.OrdinalIgnoreCase)
             || g.Level.ToString().Contains(search);
+    }
+
+    /// <summary>
+    /// Renders the Min/Max age range as a compact "min–max" string. Three shapes:
+    /// min + max → "10–12"; min only → "10+"; max only → "≤12". A null/blank
+    /// pair is handled by the caller (renders "Any age").
+    /// </summary>
+    private static string FormatAgeRange(int? min, int? max)
+    {
+        if (min.HasValue && max.HasValue) return $"{min}–{max}";
+        if (min.HasValue) return $"{min}+";
+        return $"≤{max}";
     }
 
     protected override async Task OnInitializedAsync()
@@ -149,6 +192,23 @@
                             _resolvedNames[gl.Id] = cv.Name; // tenant-resolved name
                         }
                     }
+                }
+            }
+
+            // Resolve gender names for the AllowedGenderCodedValueId chips. We
+            // batch all referenced gender ids into one round-trip via
+            // GetByIdsAsync instead of one GetByIdAsync per row.
+            var genderIds = (_items ?? [])
+                .Select(g => g.AllowedGenderCodedValueId)
+                .OfType<Guid>()
+                .Distinct()
+                .ToArray();
+            if (genderIds.Length > 0)
+            {
+                var genders = await CodedValuesApi.GetByIdsAsync(genderIds, token);
+                foreach (var g in genders)
+                {
+                    _resolvedGenderNames[g.Id] = g.Name;
                 }
             }
 
