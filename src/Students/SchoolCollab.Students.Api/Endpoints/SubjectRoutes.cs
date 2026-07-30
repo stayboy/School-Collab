@@ -55,7 +55,51 @@ public static class SubjectRoutes
             Guid? periodId,
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListSubjectsByGrade, SchoolCollab.Students.Core.DTOs.SubjectDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListSubjectsByGrade(gradeLevelId, periodId), ct)));
+        {
+            // Wrapped in try/catch so a database transient (e.g. dropped
+            // connection mid-fetch, EF's DbUpdateException, an in-flight
+            // cancellation from a closed client) surfaces as a typed
+            // response instead of an empty ASP.NET 500. Mirrors the
+            // catch blocks in ContactRoutes / EnrollmentRoutes — command
+            // endpoints do this for validation; this GET does it for the
+            // I/O failure modes listed below.
+            //
+            // Pin: a pre-cancelled token (client disconnect) must NOT be
+            // reported as a 500. OperationCanceledException is caught and
+            // returned as 499 Client Closed Request so the upstream proxy
+            // / load balancer can distinguish it from a real failure.
+            try
+            {
+                var subjects = await handler.HandleAsync(
+                    new ListSubjectsByGrade(gradeLevelId, periodId), ct);
+                return Results.Ok(subjects);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Client closed the connection before the query finished.
+                return Results.StatusCode(StatusCodes.Status499ClientClosedRequest);
+            }
+            catch (Microsoft.EntityFrameworkCore.DbUpdateException ex)
+            {
+                // EF Core surfaces update/transaction errors here. For a
+                // read-only query this typically means the connection was
+                // dropped mid-fetch. Return 503 so the client knows the
+                // upstream data store is the problem and can retry.
+                return Results.Json(
+                    new { Message = "Subjects by grade: database error", Detail = ex.Message },
+                    statusCode: StatusCodes.Status503ServiceUnavailable);
+            }
+            catch (Exception ex)
+            {
+                // Last-resort: log + typed 500 with the message body so the
+                // caller can surface a meaningful error. The handler does
+                // no validation, so any uncaught exception here is a real
+                // bug — not user input.
+                return Results.Json(
+                    new { Message = "Subjects by grade: unexpected error", Detail = ex.Message },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+        });
 
         group.MapPost("/subjects", async (
             [FromBody] CreateSubject command,
