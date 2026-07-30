@@ -1,6 +1,7 @@
 @page "/students/grade-levels"
 @using SchoolCollab.Students.Admin.Services
 @using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
@@ -93,8 +94,9 @@
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Actions">
-            <FluentAnchor Href="@($"/students/grade-levels/{context.Id}/edit")">Edit</FluentAnchor>
-            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Name))" class="ms-2">Delete</FluentAnchor>
+            <RowActionsMenu AriaLabel="Grade actions"
+                            UseMenuService="false"
+                            Actions="@BuildRowActions(context)" />
         </TemplateColumn>
     </Columns>
 </LandingPage>
@@ -272,6 +274,56 @@
         if (created is not null)
         {
             // Refresh the landing so the new (or reused) grade row appears.
+            await ReloadAsync();
+        }
+    }
+
+    /// <summary>
+    /// Builds the kebab-menu actions for a single grade row. Edit opens the
+    /// Edit dialog (which carries the validation rules + subject multi-select
+    /// + tenant override pencil icon — see plan §4); Delete keeps the existing
+    /// confirmation pattern. No system-wide coded-value edit surfaces from
+    /// this menu (all edits target tenancy override, per the plan).
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildRowActions(GradeLevelLandingDto row)
+    {
+        var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
+        return new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => OpenEditDialogAsync(row), FluentIcons.Edit),
+            RowAction.Callback("Delete", () => OnDeleteAsync(row.Id, name), FluentIcons.Delete),
+        };
+    }
+
+    /// <summary>
+    /// Opens the Edit dialog (DialogShellBase-derived) pre-seeded with the
+    /// grade's current validation rules + subject assignments for the current
+    /// period. Refreshes the landing on success.
+    /// </summary>
+    private async Task OpenEditDialogAsync(GradeLevelLandingDto row)
+    {
+        if (_disposed) return;
+
+        var model = new GradeLevelEditDialog.GradeLevelEditModel
+        {
+            Id = row.Id,
+            CodedValueId = row.CodedValueId,
+            CurrentName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name,
+            MinAge = row.MinAge,
+            MaxAge = row.MaxAge,
+            AllowedGenderCodedValueId = row.AllowedGenderCodedValueId,
+            CurrentPeriodId = _currentPeriodId,
+        };
+
+        var updated = await DialogService.ShowShellDialogAsync<
+            GradeLevelEditDialog,
+            GradeLevelEditDialog.GradeLevelEditModel,
+            GradeLevelDto>(
+            model, $"Edit grade — {model.CurrentName}", DialogSize.Medium);
+
+        if (_disposed) return;
+        if (updated is not null)
+        {
             await ReloadAsync();
         }
     }
