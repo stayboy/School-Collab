@@ -28,7 +28,8 @@ public class StudentLandingColumnsTests : BunitContext
         string last = "Doe",
         int? age = 12,
         string? gender = "Female",
-        string? currentGradeName = "Grade 5") =>
+        string? currentGradeName = "Grade 5",
+        bool isDeleted = false) =>
         new(
             Id: Guid.NewGuid(),
             StudentNumber: "S0001",
@@ -36,7 +37,7 @@ public class StudentLandingColumnsTests : BunitContext
             LastName: last,
             DateOfBirth: null,
             GenderCodedValueId: null,
-            IsDeleted: false,
+            IsDeleted: isDeleted,
             CreatedAt: default,
             UpdatedAt: default,
             Age: age,
@@ -108,5 +109,51 @@ public class StudentLandingColumnsTests : BunitContext
         // When no grade is enrolled, the cell shows "—" instead of an empty
         // badge so the row doesn't collapse.
         cut.Markup.Should().Contain("—");
+    }
+
+    [TestMethod]
+    public void Actions_Menu_Button_Has_Accessibility_Attributes()
+    {
+        var cut = Render<TestStudentColumnsGrid>(p => p
+            .Add(x => x.Items, new[] { MakeStudent() }));
+
+        // The kebab trigger renders as a FluentButton with aria-haspopup and a
+        // title/aria-label for screen readers.
+        cut.Markup.Should().Contain("aria-haspopup=\"true\"");
+        cut.Markup.Should().Contain("Student actions");
+    }
+
+    [TestMethod]
+    public void Actions_Menu_Renders_View_Edit_Transfer_Delete_For_Active_Student()
+    {
+        var cut = Render<TestStudentColumnsGrid>(p => p
+            .Add(x => x.Items, new[] { MakeStudent() }));
+
+        // Open the kebab menu by clicking the trigger button.
+        cut.Find("fluent-button[title='Student actions']").Click();
+
+        // Active student: View, Edit, Transfer, Delete — no Recover.
+        cut.Markup.Should().Contain("View");
+        cut.Markup.Should().Contain("Edit");
+        cut.Markup.Should().Contain("Transfer");
+        cut.Markup.Should().Contain("Delete");
+        cut.Markup.Should().NotContain("Recover");
+    }
+
+    [TestMethod]
+    public void Actions_Menu_Renders_View_Edit_Recover_For_Deleted_Student()
+    {
+        var cut = Render<TestStudentColumnsGrid>(p => p
+            .Add(x => x.Items, new[] { MakeStudent(isDeleted: true) }));
+
+        // Open the kebab menu.
+        cut.Find("fluent-button[title='Student actions']").Click();
+
+        // Deleted student: View, Edit, Recover — no Transfer, no Delete action.
+        cut.Markup.Should().Contain("View");
+        cut.Markup.Should().Contain("Edit");
+        cut.Markup.Should().Contain("Recover");
+        cut.Markup.Should().NotContain("Transfer");
+        cut.Markup.Should().NotContain("Delete");
     }
 }

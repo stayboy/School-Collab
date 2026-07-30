@@ -42,4 +42,8 @@ public static class FluentIcons
     public static readonly Icon Checkmark = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Checkmark();
     public static readonly Icon Star = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Star();
     public static readonly Icon Delete = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Delete();
+
+    /// <summary>Vertical "kebab" (⋮) icon — the standard overflow / row-actions
+    /// trigger. Used by <see cref="Components.RowActionsMenu"/>.</summary>
+    public static readonly Icon MoreVertical = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.MoreVertical();
 }
