@@ -25,7 +25,6 @@
              SearchTextChanged="@OnSearchValueChanged"
              SearchPlaceholder="Search grade levels…">
     <Columns>
-        <PropertyColumn TGridItem="GradeLevelLandingDto" TProp="int" Property="@(x => x.Level)" Sortable="true" Title="Level" />
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Name" Sortable="true" SortBy="@_sortByName">
             @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
         </TemplateColumn>
@@ -119,8 +118,8 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        // 80px Level | 2fr Name | 80px Age range | 90px Gender | 80px Subjects | 80px Students | 140px Period | auto Actions
-        GridTemplateColumns = "80px minmax(200px,2fr) 80px 90px 80px 80px 140px auto"
+        // 2fr Name | 80px Age range | 90px Gender | 80px Subjects | 80px Students | 140px Period | auto Actions
+        GridTemplateColumns = "minmax(200px,2fr) 80px 90px 80px 80px 140px auto"
     };
 
     private static readonly GridSort<GradeLevelLandingDto> _sortByName =
@@ -142,8 +141,7 @@
     {
         var search = _searchText.Trim();
         var name = _resolvedNames.TryGetValue(g.Id, out var resolved) ? resolved : g.Name;
-        return name.Contains(search, StringComparison.OrdinalIgnoreCase)
-            || g.Level.ToString().Contains(search);
+        return name.Contains(search, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

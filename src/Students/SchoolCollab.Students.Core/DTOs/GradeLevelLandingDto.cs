@@ -28,9 +28,7 @@ namespace SchoolCollab.Students.Core.DTOs;
 public sealed record GradeLevelLandingDto(
     Guid Id,
     Guid CodedValueId,
-    int Level,
     string Name,
-    int DisplayOrder,
     int SubjectCount,
     int StudentCount,
     Guid? CurrentPeriodId,

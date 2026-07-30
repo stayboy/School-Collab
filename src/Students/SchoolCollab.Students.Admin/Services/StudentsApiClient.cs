@@ -43,9 +43,7 @@ public sealed record GradeLevelDto(
 public sealed record GradeLevelLandingDto(
     Guid Id,
     Guid CodedValueId,
-    int Level,
     string Name,
-    int DisplayOrder,
     int SubjectCount,
     int StudentCount,
     Guid? CurrentPeriodId,

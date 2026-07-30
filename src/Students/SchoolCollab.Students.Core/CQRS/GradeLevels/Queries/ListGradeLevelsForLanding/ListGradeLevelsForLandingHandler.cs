@@ -63,9 +63,7 @@ public sealed class ListGradeLevelsForLandingHandler(
                     {
                         gl.Id,
                         gl.CodedValueId,
-                        gl.Level,
                         gl.Name,
-                        gl.DisplayOrder,
                         gl.MinAge,
                         gl.MaxAge,
                         gl.AllowedGenderCodedValueId,
@@ -97,9 +95,7 @@ public sealed class ListGradeLevelsForLandingHandler(
                     .Select(gl => new GradeLevelLandingDto(
                         gl.Id,
                         gl.CodedValueId,
-                        gl.Level,
                         gl.Name,
-                        gl.DisplayOrder,
                         gl.SubjectCount,
                         gl.StudentCount,
                         currentPeriodId,
