@@ -6,4 +6,7 @@ public sealed record UpdateGradeLevel(
     Guid Id,
     int Level,
     string Name,
-    int DisplayOrder) : ICommand;
+    int DisplayOrder,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null) : ICommand;

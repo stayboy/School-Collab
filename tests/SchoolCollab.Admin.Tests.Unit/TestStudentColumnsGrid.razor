@@ -7,6 +7,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Students.Admin.Services
 
 <EntityGrid TItem="StudentDto"
@@ -35,13 +36,18 @@
                 <FluentBadge Value="@(context.CurrentGrade?.Name ?? "—")" Appearance="Appearance.Neutral" Primary="true" />
             </ChildContent>
         </TemplateColumn>
+        <TemplateColumn TGridItem="StudentDto" Title="Actions">
+            <RowActionsMenu AriaLabel="Student actions"
+                            UseMenuService="false"
+                            Actions="@BuildActions(context)" />
+        </TemplateColumn>
     </Columns>
 </EntityGrid>
 
 @code {
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "120px minmax(260px,3fr) 200px"
+        GridTemplateColumns = "120px minmax(260px,3fr) 200px 72px"
     };
 
     private static readonly GridSort<StudentDto> _sortByStudentNumber =
@@ -51,4 +57,31 @@
         GridSort<StudentDto>.ByAscending(x => x.LastName).ThenAscending(x => x.FirstName);
 
     [Parameter] public StudentDto[]? Items { get; set; }
+
+    /// <summary>
+    /// Mirrors <c>Students/Index.razor</c>'s <c>BuildStudentActions</c> so the
+    /// test grid exercises the same kebab-menu action set. Callbacks are no-ops
+    /// — the tests only assert on the rendered labels, not on side effects.
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildActions(StudentDto s)
+    {
+        var actions = new List<RowAction>
+        {
+            RowAction.Navigate("View", $"/students/{s.Id}"),
+            RowAction.Navigate("Edit", $"/students/{s.Id}/edit"),
+            RowAction.Separator(),
+        };
+
+        if (!s.IsDeleted)
+        {
+            actions.Add(RowAction.Callback("Transfer", () => Task.CompletedTask));
+            actions.Add(RowAction.Callback("Delete", () => Task.CompletedTask));
+        }
+        else
+        {
+            actions.Add(RowAction.Callback("Recover", () => Task.CompletedTask));
+        }
+
+        return actions;
+    }
 }

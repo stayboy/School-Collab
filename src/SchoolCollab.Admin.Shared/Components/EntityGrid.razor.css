@@ -15,6 +15,15 @@
     overflow-x: auto;
 }
 
+/* Force the FluentDataGrid to fill its container width instead of sizing to
+   its content. FluentDataGrid's scoped CSS sets width:auto (specificity 0,2,0)
+   which beats the global app.css width:100% (0,0,1). The ::deep combinator
+   pierces this component's CSS-isolation scope, and the .fluent-data-grid class
+   selector raises specificity to 0,2,1 so it overrides the scoped rule. */
+.entity-grid-scroll ::deep fluent-data-grid.fluent-data-grid {
+    width: 100%;
+}
+
 /* Chip list of selected items, rendered above the grid. Individual chips are
    the shared <Chip> component, which owns its own styling. */
 .entity-grid-chips {

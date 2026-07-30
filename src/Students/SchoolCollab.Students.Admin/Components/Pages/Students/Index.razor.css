@@ -51,3 +51,13 @@
 ::deep fluent-badge[primary="true"] {
     max-width: 100%;
 }
+
+/* Actions column — compact the kebab (⋮) trigger button so the 72px column
+   holds the icon button without overflow. The ::deep combinator escapes the
+   Blazor scope marker so the rule reaches the FluentButton rendered by
+   RowActionsMenu inside the FluentDataGrid cell. */
+::deep .row-actions-menu fluent-button {
+    min-height: 32px;
+    min-width: 32px;
+    padding: 0;
+}

@@ -1,0 +1,106 @@
+@* Reusable kebab (⋮) overflow menu for row actions in a FluentDataGrid.
+   Renders a FluentButton trigger + a FluentMenu anchored to it. Each RowAction
+   in <Actions> becomes a FluentMenuItem (or a FluentDivider when IsSeparator).
+
+   By default the menu is rendered through FluentMenuProvider (UseMenuService=true)
+   — the menu's content is lifted to the document root via the provider so it is
+   never clipped by the grid's scroll container. The trigger button's Id and the
+   menu's Id are auto-generated per instance so multiple rows each get a unique
+   anchor pair. Set UseMenuService="false" in bUnit tests so items render inline
+   and are assertable in the rendered markup. *@
+@using SchoolCollab.Admin.Shared.Constants
+@inject NavigationManager Nav
+
+<span class="row-actions-menu">
+    <FluentButton Id="@_buttonId"
+              Appearance="Appearance.Stealth"
+              Title="@(AriaLabel ?? "More actions")"
+              aria-haspopup="true"
+              aria-expanded="@_open"
+              OnClick="ToggleMenu">
+    <FluentIcon Value="@(KebabIcon ?? FluentIcons.MoreVertical)" />
+</FluentButton>
+
+<FluentMenu Id="@_menuId"
+            Anchor="@_buttonId"
+            UseMenuService="@UseMenuService"
+            @bind-Open="@_open">
+    @foreach (var action in Actions)
+    {
+        @if (action.IsSeparator)
+        {
+            <FluentDivider />
+        }
+        else
+        {
+            <FluentMenuItem Label="@action.Label"
+                            Disabled="@action.Disabled"
+                            OnClick="@(async () => await InvokeActionAsync(action))">
+                @if (action.Icon is not null)
+                {
+                    <FluentIcon Value="@action.Icon" Slot="start" />
+                }
+            </FluentMenuItem>
+        }
+    }
+</FluentMenu>
+</span>
+
+@code {
+    /// <summary>
+    /// The ordered list of actions to render. Separator entries render a
+    /// <c>&lt;FluentDivider&gt;</c>; all others render a <c>&lt;FluentMenuItem&gt;</c>.
+    /// </summary>
+    [Parameter, EditorRequired]
+    public IReadOnlyList<RowAction> Actions { get; set; } = Array.Empty<RowAction>();
+
+    /// <summary>
+    /// Accessibility label / tooltip for the kebab trigger button.
+    /// Default: "More actions".
+    /// </summary>
+    [Parameter]
+    public string? AriaLabel { get; set; }
+
+    /// <summary>
+    /// When true (default) the menu is rendered via <c>FluentMenuProvider</c>
+    /// so it floats above any scroll container. Set false in bUnit tests
+    /// so the items render inline and are assertable.
+    /// </summary>
+    [Parameter]
+    public bool UseMenuService { get; set; } = true;
+
+    /// <summary>Icon for the kebab trigger button. Defaults to MoreVertical (⋮).</summary>
+    [Parameter]
+    public Icon? KebabIcon { get; set; }
+
+    private string _buttonId = string.Empty;
+    private string _menuId = string.Empty;
+    private bool _open;
+
+    protected override void OnInitialized()
+    {
+        // Unique ids per instance so every row's menu anchors to its own button.
+        var suffix = Guid.NewGuid().ToString("N");
+        _buttonId = $"row-actions-btn-{suffix}";
+        _menuId = $"row-actions-menu-{suffix}";
+    }
+
+    private void ToggleMenu()
+    {
+        _open = !_open;
+    }
+
+    private async Task InvokeActionAsync(RowAction action)
+    {
+        if (action.Disabled) return;
+        if (action.Href is not null)
+        {
+            Nav.NavigateTo(action.Href);
+            return;
+        }
+        if (action.OnClick is not null)
+        {
+            await action.OnClick.Invoke();
+        }
+    }
+}

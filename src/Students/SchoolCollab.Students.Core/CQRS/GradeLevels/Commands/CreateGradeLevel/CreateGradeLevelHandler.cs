@@ -24,7 +24,10 @@ public sealed class CreateGradeLevelHandler(
             command.CodedValueId,
             command.Level,
             command.Name,
-            command.DisplayOrder)
+            command.DisplayOrder,
+            command.MinAge,
+            command.MaxAge,
+            command.AllowedGenderCodedValueId)
             .WithTenant(tenantProvider);
 
         await repository.AddAsync(gradeLevel, cancellationToken);

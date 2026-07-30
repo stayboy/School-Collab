@@ -30,6 +30,19 @@ internal sealed class GradeLevelConfiguration : TenantEntityTypeConfigurationBas
             .HasMaxLength(200);
         builder.Property(x => x.DisplayOrder).IsRequired();
 
+        // Enrollment validation guard clauses (§2 of plan):
+        builder.Property(x => x.MinAge)
+            .HasColumnName("min_age")
+            .IsRequired(false);
+
+        builder.Property(x => x.MaxAge)
+            .HasColumnName("max_age")
+            .IsRequired(false);
+
+        builder.Property(x => x.AllowedGenderCodedValueId)
+            .HasColumnName("allowed_gender_coded_value_id")
+            .IsRequired(false);
+
         // FR-7: unique per (tenant, coded_value) — was globally unique on CodedValueId.
         builder.HasIndex(x => new { x.TenantId, x.CodedValueId })
             .IsUnique()

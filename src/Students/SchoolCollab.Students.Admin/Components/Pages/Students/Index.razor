@@ -79,18 +79,8 @@
         </TemplateColumn>
 
         <TemplateColumn TGridItem="StudentDto" Title="Actions">
-            <div class="MS-FluentGainLayout-1">
-                <FluentAnchor Href="@($"/students/{context.Id}")">View</FluentAnchor>
-                @if (!context.IsDeleted)
-                {
-                    <FluentAnchor Href="#" OnClick="@(() => OnTransferAsync(context.Id))" class="ms-3 ms-BackgroundColor-Primary">Transfer</FluentAnchor>
-                    <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.StudentNumber))" class="ms-3">Delete</FluentAnchor>
-                }
-                else
-                {
-                    <FluentAnchor Href="#" OnClick="@(() => OnRecoverAsync(context.Id, context.StudentNumber))" class="ms-3 ms-BackgroundColor-Primary">Recover</FluentAnchor>
-                }
-            </div>
+            <RowActionsMenu AriaLabel="Student actions"
+                            Actions="@BuildStudentActions(context)" />
         </TemplateColumn>
     </Columns>
 </LandingPage>
@@ -115,7 +105,7 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "120px minmax(260px,3fr) minmax(180px,2fr) 110px 200px auto"
+        GridTemplateColumns = "80px minmax(120px,2fr) minmax(100px,1fr) 120px 180px 102px"
     };
 
     private StudentDto[] _filteredItems
@@ -167,6 +157,34 @@
         var age = s.Age.HasValue ? s.Age.Value.ToString() : "—";
         // Always show both slots (with em-dashes) so the column shape is stable.
         return $"{gender}, {age}";
+    }
+
+    /// <summary>
+    /// Builds the kebab-menu actions for a single student row. Active students
+    /// get View / Edit / Transfer / Delete; deleted students get View / Edit /
+    /// Recover. A separator divides the navigation actions from the data-mutation
+    /// actions. Each menu item carries a matching FluentUI icon.
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildStudentActions(StudentDto s)
+    {
+        var actions = new List<RowAction>
+        {
+            RowAction.Navigate("View", $"/students/{s.Id}", FluentIcons.Open),
+            RowAction.Navigate("Edit", $"/students/{s.Id}/edit", FluentIcons.Edit),
+            RowAction.Separator(),
+        };
+
+        if (!s.IsDeleted)
+        {
+            actions.Add(RowAction.Callback("Transfer", () => OnTransferAsync(s.Id), FluentIcons.ArrowExportUp));
+            actions.Add(RowAction.Callback("Delete", () => OnDeleteAsync(s.Id, s.StudentNumber), FluentIcons.Delete));
+        }
+        else
+        {
+            actions.Add(RowAction.Callback("Recover", () => OnRecoverAsync(s.Id, s.StudentNumber), FluentIcons.ArrowClockwise));
+        }
+
+        return actions;
     }
 
     private bool MatchesSearch(StudentDto s)

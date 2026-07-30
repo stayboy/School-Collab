@@ -72,6 +72,39 @@
                                Style="width: 100%;"
                                Title="Mirrors the grade's coded value DisplayOrder. Read-only." />
         </FormRow>
+
+        @* ── Enrollment validation guard clauses (plan §2/§10) ──
+           Optional. Age range and Allowed Gender restrict which students can
+           enroll in this grade level; both default to no restriction. The age
+           range is presented as a single "range" row (Min–Max), mirroring the
+           two-input "Dates *" row pattern from PeriodForm. These rules are
+           enforced by EnrollStudentHandler when FEATURE:EnableEnrollmentValidation
+           is on (default off); the domain (GradeLevel.Create/Update) also
+           rejects MinAge > MaxAge. *@
+        <FormRow Label="Age range" AlignTop>
+            <FluentNumberField @bind-Value="Model.MinAge"
+                               Id="grade-level-min-age"
+                               Min="0"
+                               Max="150"
+                               Placeholder="No minimum"
+                               Style="flex:1; min-width:0"
+                               Title="Minimum age (inclusive) for enrolling in this grade. Leave blank for no minimum." />
+            <span aria-hidden="true" style="opacity:0.6; padding:0 6px;">–</span>
+            <FluentNumberField @bind-Value="Model.MaxAge"
+                               Id="grade-level-max-age"
+                               Min="0"
+                               Max="150"
+                               Placeholder="No maximum"
+                               Style="flex:1; min-width:0"
+                               Title="Maximum age (inclusive) for enrolling in this grade. Leave blank for no maximum." />
+        </FormRow>
+
+        <FormRow Label="Allowed Gender" Id="grade-level-allowed-gender">
+            <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                @bind-SelectedId="Model.AllowedGenderCodedValueId"
+                                Placeholder="No restriction (co-ed)"
+                                Style="width: 100%;" />
+        </FormRow>
     </FluentStack>
 
     @if (!string.IsNullOrEmpty(ErrorMessage))
@@ -146,5 +179,10 @@
 
         public int Level { get; set; }
         public int DisplayOrder { get; set; }
+
+        // Enrollment validation guard clauses (plan §2/§10).
+        public int? MinAge { get; set; }
+        public int? MaxAge { get; set; }
+        public Guid? AllowedGenderCodedValueId { get; set; }
     }
 }

@@ -48,7 +48,8 @@ public static class GradeLevelRoutes
             try
             {
                 var dto = await handler.HandleAsync(
-                    new GetOrCreateGradeLevel(req.CodedValueId, req.Level, req.Name, req.DisplayOrder), ct);
+                    new GetOrCreateGradeLevel(req.CodedValueId, req.Level, req.Name, req.DisplayOrder,
+                        req.MinAge, req.MaxAge, req.AllowedGenderCodedValueId), ct);
                 return Results.Ok(dto);
             }
             catch (ConcurrencyException ex)
@@ -83,7 +84,8 @@ public static class GradeLevelRoutes
         {
             try
             {
-                await handler.HandleAsync(new UpdateGradeLevel(id, req.Level, req.Name, req.DisplayOrder), ct);
+                await handler.HandleAsync(new UpdateGradeLevel(id, req.Level, req.Name, req.DisplayOrder,
+                    req.MinAge, req.MaxAge, req.AllowedGenderCodedValueId), ct);
                 return Results.NoContent();
             }
             catch (GradeLevelNotFoundException)
@@ -120,5 +122,7 @@ public static class GradeLevelRoutes
     }
 }
 
-internal record UpdateGradeLevelRequest(int Level, string Name, int DisplayOrder);
-internal record GetOrCreateGradeLevelRequest(Guid CodedValueId, int Level, string Name, int DisplayOrder);
+internal record UpdateGradeLevelRequest(int Level, string Name, int DisplayOrder,
+    int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);
+internal record GetOrCreateGradeLevelRequest(Guid CodedValueId, int Level, string Name, int DisplayOrder,
+    int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);

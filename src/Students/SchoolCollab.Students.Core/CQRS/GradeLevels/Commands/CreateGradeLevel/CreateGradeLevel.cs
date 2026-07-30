@@ -6,4 +6,7 @@ public sealed record CreateGradeLevel(
     Guid CodedValueId,
     int Level,
     string Name,
-    int DisplayOrder) : ICommand;
+    int DisplayOrder,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null) : ICommand;

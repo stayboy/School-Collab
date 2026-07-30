@@ -11,4 +11,5 @@ public interface IStudentEnrollmentRepository
     Task<StudentEnrollmentDto[]> ListByPeriodAsync(Guid periodId, CancellationToken cancellationToken = default);
     Task<StudentEnrollmentDto[]> ListByStudentAsync(Guid studentId, CancellationToken cancellationToken = default);
     Task<StudentEnrollment[]> GetActiveEnrollmentsForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default);
+    Task<StudentEnrollment[]> GetActiveEnrollmentsByStudentAsync(Guid studentId, CancellationToken cancellationToken = default);
 }

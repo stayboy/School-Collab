@@ -44,7 +44,13 @@ internal sealed class StudentEnrollmentRepository(StudentsDbContext db)
             .ToArrayAsync(cancellationToken);
 
     public async Task<StudentEnrollment[]> GetActiveEnrollmentsForPeriodAsync(Guid periodId, CancellationToken cancellationToken = default) =>
+    await Db.StudentEnrollments
+        .Where(x => x.PeriodId == periodId && x.Status == EnrollmentStatus.Active)
+        .ToArrayAsync(cancellationToken);
+
+    public async Task<StudentEnrollment[]> GetActiveEnrollmentsByStudentAsync(
+        Guid studentId, CancellationToken cancellationToken = default) =>
         await Db.StudentEnrollments
-            .Where(x => x.PeriodId == periodId && x.Status == EnrollmentStatus.Active)
+            .Where(x => x.StudentId == studentId && x.Status == EnrollmentStatus.Active)
             .ToArrayAsync(cancellationToken);
 }
