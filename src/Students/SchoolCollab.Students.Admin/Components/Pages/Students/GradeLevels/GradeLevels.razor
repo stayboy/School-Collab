@@ -1,5 +1,8 @@
 @page "/students/grade-levels"
 @using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -17,6 +20,7 @@
              CreateRoute="/students/grade-levels/create"
              CreateEnabled="@_isRealTenant"
              SearchEnabled="@_isRealTenant"
+             OnCreate="@OpenCreateDialogAsync"
              EmptyMessage="@CurrentEmptyMessage"
              Items="@_filteredItems"
              Loading="@(_items is null)"
@@ -25,9 +29,33 @@
              SearchTextChanged="@OnSearchValueChanged"
              SearchPlaceholder="Search grade levels…">
     <Columns>
-        <PropertyColumn TGridItem="GradeLevelLandingDto" TProp="int" Property="@(x => x.Level)" Sortable="true" Title="Level" />
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Name" Sortable="true" SortBy="@_sortByName">
             @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Age range">
+            @if (context.MinAge.HasValue || context.MaxAge.HasValue)
+            {
+                <span class="age-range">@FormatAgeRange(context.MinAge, context.MaxAge)</span>
+            }
+            else
+            {
+                <span class="muted" title="No age restriction set">Any age</span>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Gender">
+            @if (context.AllowedGenderCodedValueId is { } gid
+                 && _resolvedGenderNames.TryGetValue(gid, out var gname))
+            {
+                <FluentBadge Appearance="Appearance.Neutral">@gname</FluentBadge>
+            }
+            else if (context.AllowedGenderCodedValueId is not null)
+            {
+                <span class="muted" title="Gender id @(context.AllowedGenderCodedValueId) — name not resolved">—</span>
+            }
+            else
+            {
+                <span class="muted" title="No gender restriction set">Co-ed</span>
+            }
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Subjects">
             @if (context.CurrentPeriodId.HasValue)
@@ -66,8 +94,9 @@
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Actions">
-            <FluentAnchor Href="@($"/students/grade-levels/{context.Id}/edit")">Edit</FluentAnchor>
-            <FluentAnchor Href="#" OnClick="@(() => OnDeleteAsync(context.Id, context.Name))" class="ms-2">Delete</FluentAnchor>
+            <RowActionsMenu AriaLabel="Grade actions"
+                            UseMenuService="false"
+                            Actions="@BuildRowActions(context)" />
         </TemplateColumn>
     </Columns>
 </LandingPage>
@@ -76,20 +105,34 @@
     .muted {
         color: var(--neutral-foreground-hint);
     }
+    .age-range {
+        font-variant-numeric: tabular-nums;
+        white-space: nowrap;
+    }
 </style>
 
 @code {
     private GradeLevelLandingDto[]? _items;
     private Dictionary<Guid, string> _resolvedNames = new();
+    private Dictionary<Guid, string> _resolvedGenderNames = new();
     private string _searchText = string.Empty;
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
     private bool _isRealTenant;
 
+    /// <summary>
+    /// Cached current-period id from the most recent landing load. Passed into
+    /// the Create dialog so it knows which period to assign subjects to.
+    /// Null when there is no current period (Create dialog then hides the
+    /// Subjects section).
+    /// </summary>
+    private Guid? _currentPeriodId;
+
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "80px minmax(200px,2fr) 100px 100px 140px auto"
+        // 2fr Name | 80px Age range | 90px Gender | 80px Subjects | 80px Students | 140px Period | auto Actions
+        GridTemplateColumns = "minmax(200px,2fr) 80px 90px 80px 80px 140px auto"
     };
 
     private static readonly GridSort<GradeLevelLandingDto> _sortByName =
@@ -111,11 +154,33 @@
     {
         var search = _searchText.Trim();
         var name = _resolvedNames.TryGetValue(g.Id, out var resolved) ? resolved : g.Name;
-        return name.Contains(search, StringComparison.OrdinalIgnoreCase)
-            || g.Level.ToString().Contains(search);
+        return name.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Renders the Min/Max age range as a compact "min–max" string. Three shapes:
+    /// min + max → "10–12"; min only → "10+"; max only → "≤12". A null/blank
+    /// pair is handled by the caller (renders "Any age").
+    /// </summary>
+    private static string FormatAgeRange(int? min, int? max)
+    {
+        if (min.HasValue && max.HasValue) return $"{min}–{max}";
+        if (min.HasValue) return $"{min}+";
+        return $"≤{max}";
     }
 
     protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+    }
+
+    /// <summary>
+    /// (Re)loads the landing data — called on initial mount and again after
+    /// the Create dialog reports success so the new row shows up. Always
+    /// re-reads the tenant scope so a tenant switch mid-session is honored
+    /// (the same as the original OnInitializedAsync).
+    /// </summary>
+    private async Task ReloadAsync()
     {
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
@@ -125,6 +190,7 @@
         if (!_isRealTenant)
         {
             _items = [];
+            _currentPeriodId = null;
             return;
         }
 
@@ -135,6 +201,8 @@
             _items = await Api.ListGradeLevelsForLandingAsync(token);
 
             if (_disposed) return;
+
+            _currentPeriodId = _items?.FirstOrDefault()?.CurrentPeriodId;
 
             // Load tenant-resolved names for display
             var gradeCodedValues = await CodedValuesApi.GetChildrenByParentCodeAsync("GRADE", token);
@@ -152,6 +220,23 @@
                 }
             }
 
+            // Resolve gender names for the AllowedGenderCodedValueId chips. We
+            // batch all referenced gender ids into one round-trip via
+            // GetByIdsAsync instead of one GetByIdAsync per row.
+            var genderIds = (_items ?? [])
+                .Select(g => g.AllowedGenderCodedValueId)
+                .OfType<Guid>()
+                .Distinct()
+                .ToArray();
+            if (genderIds.Length > 0)
+            {
+                var genders = await CodedValuesApi.GetByIdsAsync(genderIds, token);
+                foreach (var g in genders)
+                {
+                    _resolvedGenderNames[g.Id] = g.Name;
+                }
+            }
+
             Logger.LogInformation("Loaded {Count} grade levels", _items?.Length ?? 0);
         }
         catch (OperationCanceledException) { }
@@ -160,6 +245,86 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load grade levels");
             _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Opens the Create dialog (DialogShellBase-derived) and refreshes the
+    /// landing on success. Wired into LandingPage.OnCreate so the + New
+    /// button invokes this instead of navigating to a dedicated route.
+    /// <see cref="CreateRoute"/> is left set as a fallback for any deep link
+    /// / browser refresh that bypasses the LandingPage chrome.
+    /// </summary>
+    private async Task OpenCreateDialogAsync()
+    {
+        if (_disposed) return;
+
+        var model = new GradeLevelCreateDialog.GradeLevelCreateModel
+        {
+            CurrentPeriodId = _currentPeriodId,
+        };
+
+        var created = await DialogService.ShowShellDialogAsync<
+            GradeLevelCreateDialog,
+            GradeLevelCreateDialog.GradeLevelCreateModel,
+            GradeLevelDto>(
+            model, "Create grade level", DialogSize.Medium);
+
+        if (_disposed) return;
+        if (created is not null)
+        {
+            // Refresh the landing so the new (or reused) grade row appears.
+            await ReloadAsync();
+        }
+    }
+
+    /// <summary>
+    /// Builds the kebab-menu actions for a single grade row. Edit opens the
+    /// Edit dialog (which carries the validation rules + subject multi-select
+    /// + tenant override pencil icon — see plan §4); Delete keeps the existing
+    /// confirmation pattern. No system-wide coded-value edit surfaces from
+    /// this menu (all edits target tenancy override, per the plan).
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildRowActions(GradeLevelLandingDto row)
+    {
+        var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
+        return new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => OpenEditDialogAsync(row), FluentIcons.Edit),
+            RowAction.Callback("Delete", () => OnDeleteAsync(row.Id, name), FluentIcons.Delete),
+        };
+    }
+
+    /// <summary>
+    /// Opens the Edit dialog (DialogShellBase-derived) pre-seeded with the
+    /// grade's current validation rules + subject assignments for the current
+    /// period. Refreshes the landing on success.
+    /// </summary>
+    private async Task OpenEditDialogAsync(GradeLevelLandingDto row)
+    {
+        if (_disposed) return;
+
+        var model = new GradeLevelEditDialog.GradeLevelEditModel
+        {
+            Id = row.Id,
+            CodedValueId = row.CodedValueId,
+            CurrentName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name,
+            MinAge = row.MinAge,
+            MaxAge = row.MaxAge,
+            AllowedGenderCodedValueId = row.AllowedGenderCodedValueId,
+            CurrentPeriodId = _currentPeriodId,
+        };
+
+        var updated = await DialogService.ShowShellDialogAsync<
+            GradeLevelEditDialog,
+            GradeLevelEditDialog.GradeLevelEditModel,
+            GradeLevelDto>(
+            model, $"Edit grade — {model.CurrentName}", DialogSize.Medium);
+
+        if (_disposed) return;
+        if (updated is not null)
+        {
+            await ReloadAsync();
         }
     }
 

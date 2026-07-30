@@ -43,13 +43,13 @@
     <DataAnnotationsValidator />
 
     <FluentStack Orientation="Orientation.Vertical" VerticalGap="12">
-        <FormRow Label="Grade" Id="grade-level-coded-value" Required="true">
+        <FormRow Label="Grade" For="grade-level-coded-value" Required="true">
             <CodedValueDropdown Parent="CodedValueParent.Grades"
                                 @bind-SelectedId="Model.CodedValueId"
                                 @bind-SelectedId:after="OnCodedValueChanged" />
         </FormRow>
 
-        <FormRow Label="Name" Id="grade-level-name" Required="true">
+        <FormRow Label="Name" For="grade-level-name" Required="true">
             <FluentTextField @bind-Value="Model.Name"
                              Id="grade-level-name"
                              Required="true"
@@ -57,7 +57,7 @@
                              Style="width: 100%;" />
         </FormRow>
 
-        <FormRow Label="Level" Id="grade-level-level">
+        <FormRow Label="Level" For="grade-level-level">
             <FluentNumberField @bind-Value="Model.Level"
                                Id="grade-level-level"
                                ReadOnly="true"
@@ -65,7 +65,7 @@
                                Title="Mirrors the grade's coded value DisplayOrder. Read-only." />
         </FormRow>
 
-        <FormRow Label="Display Order" Id="grade-level-display-order">
+        <FormRow Label="Display Order" For="grade-level-display-order">
             <FluentNumberField @bind-Value="Model.DisplayOrder"
                                Id="grade-level-display-order"
                                ReadOnly="true"
@@ -99,11 +99,10 @@
                                Title="Maximum age (inclusive) for enrolling in this grade. Leave blank for no maximum." />
         </FormRow>
 
-        <FormRow Label="Allowed Gender" Id="grade-level-allowed-gender">
+        <FormRow Label="Allowed Gender" For="grade-level-allowed-gender">
             <CodedValueDropdown Parent="CodedValueParent.Genders"
                                 @bind-SelectedId="Model.AllowedGenderCodedValueId"
-                                Placeholder="No restriction (co-ed)"
-                                Style="width: 100%;" />
+                                Placeholder="No restriction (co-ed)" />
         </FormRow>
     </FluentStack>
 

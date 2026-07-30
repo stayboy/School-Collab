@@ -17,9 +17,11 @@ public class ListGradeLevelsForLandingHandlerTests
         await SeedGradeLevelAsync(s, codedValueId, level, name, level);
 
     private static async Task<Guid> SeedGradeLevelAsync(
-        StudentsTestScope s, Guid codedValueId, int level, string name, int displayOrder)
+        StudentsTestScope s, Guid codedValueId, int level, string name, int displayOrder,
+        int? minAge = null, int? maxAge = null, Guid? allowedGenderCodedValueId = null)
     {
-        var gl = GradeLevel.Create(codedValueId, level, name, displayOrder);
+        var gl = GradeLevel.Create(codedValueId, level, name, displayOrder,
+            minAge, maxAge, allowedGenderCodedValueId);
         s.Db.GradeLevels.Add(gl);
         await s.Db.SaveChangesAsync();
         return gl.Id;
@@ -130,5 +132,42 @@ public class ListGradeLevelsForLandingHandlerTests
 
         result.Should().ContainSingle();
         result[0].StudentCount.Should().Be(0, "only Active enrollments are counted");
+    }
+
+    // Projection regression: PR #94 added MinAge/MaxAge/AllowedGenderCodedValueId
+    // to GradeLevelLandingDto but the original handler projection never selected
+    // the new columns — the landing page was rendering all-null validation rules
+    // (the bug the user reported). These tests pin the projection so the regression
+    // cannot return without the handler test failing.
+    [TestMethod]
+    public async Task Landing_ProjectsValidationRules_AllThreeSet()
+    {
+        using var s = new StudentsTestScope("landing-validation-projection-all");
+        var genderId = Guid.NewGuid();
+        await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1", displayOrder: 1,
+            minAge: 10, maxAge: 12, allowedGenderCodedValueId: genderId);
+
+        var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
+
+        result.Should().ContainSingle();
+        var row = result[0];
+        row.MinAge.Should().Be(10);
+        row.MaxAge.Should().Be(12);
+        row.AllowedGenderCodedValueId.Should().Be(genderId);
+    }
+
+    [TestMethod]
+    public async Task Landing_ProjectsValidationRules_NullWhenNoRestriction()
+    {
+        using var s = new StudentsTestScope("landing-validation-projection-null");
+        await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1"); // no validation fields
+
+        var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
+
+        result.Should().ContainSingle();
+        var row = result[0];
+        row.MinAge.Should().BeNull("the grade has no minimum-age restriction");
+        row.MaxAge.Should().BeNull("the grade has no maximum-age restriction");
+        row.AllowedGenderCodedValueId.Should().BeNull("the grade is co-ed");
     }
 }
