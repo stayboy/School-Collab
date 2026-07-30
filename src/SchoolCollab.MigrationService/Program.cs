@@ -94,6 +94,7 @@ try
             await seeder.SeedAsync();
             await SeedEnableCodedValuesAiChatAsync(settingsDb, logger);
             await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);
+            await SeedEnableEnrollmentValidationAsync(settingsDb, logger);
 
             // Seed the default EntityCodeRule blueprints (student/staff/assignment
             // auto-generation rules) — spec §3.7. Idempotent; NULL-tenant shared rows.
@@ -253,6 +254,50 @@ static async Task SeedEnableGradeLevelSetupOnEnrollDialogAsync(SettingsDbContext
         "Enable inline grade-level setup (\"+\" button) on the Enroll Student dialog",
         null,
         isEnabled: true);
+    db.FeatureFlags.Add(flag);
+    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
+        tenantId: null,
+        featureFlagId: flag.Id,
+        featureFlagKey: flag.Key,
+        changeKind: FlagChangeKind.Created,
+        previousIsEnabled: null,
+        newIsEnabled: flag.IsEnabled,
+        reason: "Initial seed by migration service",
+        actorId: actorId,
+        actorDisplayName: actorName));
+
+    await db.SaveChangesAsync();
+    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
+}
+
+// ── Settings seed: FEATURE:EnableEnrollmentValidation ──
+// Seeds the runtime feature flag that gates the demographic (age, gender) and
+// single-active-enrollment validation in EnrollStudentHandler. Default false
+// (disabled) for gradual rollout — existing active enrollments are grandfathered
+// (validation applies to new enrollments only while the flag is on). Idempotent
+// — re-runs no-op on a pre-existing row. Records an audit row with a system
+// actor so the seed is traceable. Consumed in EnrollStudentHandler via
+// IFeatureFlagService.IsEnabledAsync(FeatureFlagKeys.EnableEnrollmentValidation).
+// See plan §5 / documents/plans/2026-07-29-enrollment-validation-guard-clauses.md.
+static async Task SeedEnableEnrollmentValidationAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
+{
+    const string actorId = "system:migrator";
+    const string actorName = "Migration Service";
+
+    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableEnrollmentValidation);
+
+    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
+    if (exists)
+    {
+        logger.LogInformation("Seed flag {Key} already present; skipping", key);
+        return;
+    }
+
+    var flag = FeatureFlag.Create(
+        key,
+        "Enable demographic (age, gender) and single-active-enrollment validation in EnrollStudentHandler",
+        null,
+        isEnabled: false);
     db.FeatureFlags.Add(flag);
     db.FlagAuditEntries.Add(FlagAuditEntry.Create(
         tenantId: null,

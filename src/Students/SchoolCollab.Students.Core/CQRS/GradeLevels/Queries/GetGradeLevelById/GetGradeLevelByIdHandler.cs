@@ -43,7 +43,10 @@ public sealed class GetGradeLevelByIdHandler(
                     0,
                     0,
                     gradeLevel.CreatedAt,
-                    gradeLevel.UpdatedAt);
+                    gradeLevel.UpdatedAt,
+                    gradeLevel.MinAge,
+                    gradeLevel.MaxAge,
+                    gradeLevel.AllowedGenderCodedValueId);
             },
             CacheOptions,
             tags: ["students"],

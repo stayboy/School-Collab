@@ -36,7 +36,12 @@ public sealed class GetOrCreateGradeLevelHandler(
 
         if (existing is not null)
         {
-            existing.Update(command.Level, command.Name, command.DisplayOrder);
+            // Preserve the existing enrollment-validation fields on reuse — the
+            // find-or-create syncs only the mirrored Name/Level/DisplayOrder from
+            // the coded value. Validation rules (MinAge/MaxAge/AllowedGender) are
+            // managed via the Edit page (UpdateGradeLevel), not the wizard.
+            existing.Update(command.Level, command.Name, command.DisplayOrder,
+                existing.MinAge, existing.MaxAge, existing.AllowedGenderCodedValueId);
             await repository.UpdateAsync(existing, cancellationToken);
             gradeLevel = existing;
             created = false;
@@ -45,7 +50,9 @@ public sealed class GetOrCreateGradeLevelHandler(
         }
         else
         {
-            gradeLevel = GradeLevel.Create(command.CodedValueId, command.Level, command.Name, command.DisplayOrder)
+            gradeLevel = GradeLevel.Create(
+                command.CodedValueId, command.Level, command.Name, command.DisplayOrder,
+                command.MinAge, command.MaxAge, command.AllowedGenderCodedValueId)
                 .WithTenant(tenantProvider);
             await repository.AddAsync(gradeLevel, cancellationToken);
             created = true;
@@ -65,6 +72,9 @@ public sealed class GetOrCreateGradeLevelHandler(
             SubjectCount: 0,
             StudentCount: 0,
             gradeLevel.CreatedAt,
-            gradeLevel.UpdatedAt);
+            gradeLevel.UpdatedAt,
+            gradeLevel.MinAge,
+            gradeLevel.MaxAge,
+            gradeLevel.AllowedGenderCodedValueId);
     }
 }

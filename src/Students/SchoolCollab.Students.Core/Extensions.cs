@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
+using SchoolCollab.Students.Core.Domain.Specifications;
 using SchoolCollab.Students.Core.Tenancy;
 using SchoolCollab.Students.Core.Services;
 using SchoolCollab.Core.CQRS;
@@ -40,6 +41,19 @@ public static class Extensions
         services.AddScoped<IGuardianRepository, GuardianRepository>();
         services.AddScoped<IContactRepository, ContactRepository>();
         services.AddScoped<ITeacherRepository, TeacherRepository>();
+
+        // Enrollment validation specifications (plan §3). The three leaf rules are
+        // registered as ILeafEnrollmentSpecification so the composite receives them via
+        // IEnumerable<ILeafEnrollmentSpecification>; the marker interface keeps the composite
+        // (registered as ICompositeEnrollmentSpecification) out of its own
+        // dependency set, avoiding a circular resolution. The handler depends on
+        // ICompositeEnrollmentSpecification (the gateway) and maps the failing
+        // rule to its typed exception — no concrete spec is injected into the
+        // handler, and each spec is instantiated once per scope.
+        services.AddScoped<ILeafEnrollmentSpecification, AgeRangeSpecification>();
+        services.AddScoped<ILeafEnrollmentSpecification, GenderRestrictionSpecification>();
+        services.AddScoped<ILeafEnrollmentSpecification, SingleActiveEnrollmentSpecification>();
+        services.AddScoped<ICompositeEnrollmentSpecification, CompositeEnrollmentSpecification>();
 
         // Default audit actor; the API host overrides this with ClaimsPrincipalActorAccessor.
         services.AddSingleton<IActorAccessor>(_ => new SystemActorAccessor("system:students", "Students System"));

@@ -2,8 +2,10 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Students.Core.Domain.Specifications;
 using SchoolCollab.Students.Contracts.Events;
 using SchoolCollab.Students.Core.CQRS.Enrollments.Commands.EnrollStudent;
 using SchoolCollab.Students.Core.Data;
@@ -58,6 +60,8 @@ public class EnrollStudentHandlerTests
 {
     private static readonly Guid StudentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid ActivePeriodId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+    private static readonly Guid GenderMale = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid GenderFemale = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
 
     /// <summary>Stub <see cref="IActivePeriodProvider"/> with a mutable
     /// <see cref="Active"/> property so each test controls the resolution
@@ -82,6 +86,15 @@ public class EnrollStudentHandlerTests
         }
     }
 
+    /// <summary>Stub <see cref="IFeatureFlagService"/> with a fixed verdict so each
+    /// handler test controls whether the enrollment-validation guard runs. Default
+    /// (<c>false</c>) preserves the pre-flag behaviour the existing tests pin.</summary>
+    private sealed class StubFeatureFlagService(bool enabled) : IFeatureFlagService
+    {
+        public bool IsEnabled(string featureKey) => enabled;
+        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
+    }
+
     private static ActivePeriod ActivePeriod() => new(
         ActivePeriodId, "2025/2026",
         new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), "Active");
@@ -89,7 +102,11 @@ public class EnrollStudentHandlerTests
     private static async Task<EnrollStudentHandler> NewHandler(
         StudentsTestScope s,
         StubActivePeriodProvider periods,
-        RecordingPublisher publisher)
+        RecordingPublisher publisher,
+        bool flagEnabled = false,
+        int? minAge = null,
+        int? maxAge = null,
+        Guid? allowedGender = null)
     {
         // Seed a GradeLevel for strand validation. The handler resolves the
         // enrollment's GradeLevelId → GradeLevel → CodedValueId, and the
@@ -102,7 +119,10 @@ public class EnrollStudentHandlerTests
             gradeCodedValueId,
             level: 1,
             name: "Grade 1",
-            displayOrder: 1);
+            displayOrder: 1,
+            minAge,
+            maxAge,
+            allowedGender);
         s.Db.GradeLevels.Add(gradeLevel);
         s.Db.SaveChanges();
         // The stub strand references this specific CodedValueId; the handler
@@ -117,7 +137,15 @@ public class EnrollStudentHandlerTests
             new StubCodedValuesApiClient(),
             publisher,
             s.Cache,
-            NullLogger<EnrollStudentHandler>.Instance);
+            NullLogger<EnrollStudentHandler>.Instance,
+            new StubFeatureFlagService(flagEnabled),
+            new StudentRepository(s.Db),
+            new CompositeEnrollmentSpecification(new ILeafEnrollmentSpecification[]
+            {
+                new AgeRangeSpecification(),
+                new GenderRestrictionSpecification(),
+                new SingleActiveEnrollmentSpecification()
+            }));
     }
 
     // ── FR-A3: active-period enforcement ────────────────────────────────────
@@ -254,6 +282,178 @@ public class EnrollStudentHandlerTests
             "both rows are Active — the handler does not auto-withdraw the prior enrollment");
     }
 
+    // ── Phase 5: Feature-flagged enrollment validation (plan §11) ───────────
+
+    [TestMethod]
+    public async Task AgeValidation_TooYoung_ThrowsStudentAgeViolationException()
+    {
+        using var s = new StudentsTestScope("enroll-age-young");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher, flagEnabled: true, minAge: 6, maxAge: 8);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2020, 1, 15), GenderMale); // 5 yrs, below min 6
+
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+
+        (await act.Should().ThrowAsync<StudentAgeViolationException>())
+            .Which.Message.Should().Contain("is 5 years old").And.Contain("requires age within");
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0,
+            "no enrollment row must be persisted when the age guard rejects the command");
+    }
+
+    [TestMethod]
+    public async Task AgeValidation_TooOld_ThrowsStudentAgeViolationException()
+    {
+        using var s = new StudentsTestScope("enroll-age-old");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher, flagEnabled: true, minAge: 6, maxAge: 8);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2014, 1, 15), GenderMale); // 11 yrs, above max 8
+
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+
+        (await act.Should().ThrowAsync<StudentAgeViolationException>())
+            .Which.Message.Should().Contain("is 11 years old").And.Contain("requires age within");
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0,
+            "no enrollment row must be persisted when the age guard rejects the command");
+    }
+
+    [TestMethod]
+    public async Task AgeValidation_WithinRange_Persists()
+    {
+        using var s = new StudentsTestScope("enroll-age-ok");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher, flagEnabled: true, minAge: 6, maxAge: 8);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale); // 7 yrs, within [6,8]
+
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+
+        id.Should().NotBeEmpty();
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
+            "the enrollment persists when the student's age is within the grade level's range");
+    }
+
+    [TestMethod]
+    public async Task GenderValidation_Mismatch_ThrowsStudentGenderViolationException()
+    {
+        using var s = new StudentsTestScope("enroll-gender-mismatch");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher, flagEnabled: true, allowedGender: GenderMale);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderFemale);
+
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+
+        (await act.Should().ThrowAsync<StudentGenderViolationException>())
+            .Which.Message.Should().Contain("does not match the allowed gender");
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0,
+            "no enrollment row must be persisted when the gender guard rejects the command");
+    }
+
+    [TestMethod]
+    public async Task GenderValidation_NullAllowed_Persists()
+    {
+        using var s = new StudentsTestScope("enroll-gender-coed");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher, flagEnabled: true, allowedGender: null);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderFemale);
+
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+
+        id.Should().NotBeEmpty();
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
+            "the enrollment persists when the grade level has no gender restriction (co-ed)");
+    }
+
+    [TestMethod]
+    public async Task MultipleActiveEnrollments_ThrowsMultipleActiveEnrollmentsException()
+    {
+        using var s = new StudentsTestScope("enroll-multi-active");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher, flagEnabled: true);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale);
+
+        // First enrollment succeeds (no existing active enrollment)
+        await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1);
+
+        // Second enrollment for the same student → blocked by single-active rule
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 2)));
+
+        (await act.Should().ThrowAsync<MultipleActiveEnrollmentsException>())
+            .Which.Message.Should().Contain("already has");
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
+            "no second enrollment row must be persisted when the single-active guard rejects the command");
+    }
+
+    [TestMethod]
+    public async Task FeatureFlag_Disabled_SkipsValidation_AndPersists()
+    {
+        using var s = new StudentsTestScope("enroll-flag-off");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        // Flag OFF — grade level has rules, student violates them, but validation
+        // is skipped so the enrollment persists (backward-compatible default).
+        var h = await NewHandler(s, periods, publisher, flagEnabled: false, minAge: 6, maxAge: 8);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2020, 1, 15), GenderMale); // 5 yrs, below min
+
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+
+        id.Should().NotBeEmpty();
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
+            "with the flag off, validation is skipped and the enrollment persists even though the student violates the age rule");
+    }
+
+    [TestMethod]
+    public async Task FeatureFlag_Enabled_NoGradeLevelRules_Persists()
+    {
+        using var s = new StudentsTestScope("enroll-flag-on-no-rules");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        // Flag ON but grade level has no rules (all null) → no restriction.
+        var h = await NewHandler(s, periods, publisher, flagEnabled: true);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var student = SeedStudent(s, new DateOnly(2010, 1, 15), GenderFemale);
+
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+
+        id.Should().NotBeEmpty();
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
+            "with the flag on but no grade-level rules, the enrollment persists (null rules = no restriction)");
+    }
+
+    /// <summary>Seeds a <see cref="Student"/> with the given demographics directly
+    /// into the test's in-memory DbContext. The DbContext's tenant interceptor
+    /// stamps the entity with the scope's tenant so the StudentRepository's
+    /// tenant-scoped query filter can find it. Returns the entity so the test
+    /// can use its generated <see cref="Domain.Student.Id"/> in the enrollment
+    /// command.</summary>
+    private static Student SeedStudent(StudentsTestScope s, DateOnly dateOfBirth, Guid genderCodedValueId)
+    {
+        var student = Student.Create("STU-TEST", "Test", "Student", dateOfBirth, genderCodedValueId);
+        s.Db.Students.Add(student);
+        s.Db.SaveChanges();
+        return student;
+    }
+
     /// <summary>Stub <see cref="ICodedValuesApiClient"/> that returns a
     /// strand whose <c>gradeLevel</c> attribute value matches the
     /// GradeLevel's CodedValueId seeded by the test. Strand validation
@@ -291,7 +491,7 @@ public class EnrollStudentHandlerTests
             await db.GradeLevels
                 .AsNoTracking()
                 .OrderBy(x => x.Level)
-                .Select(x => new GradeLevelDto(x.Id, x.CodedValueId, x.Level, x.Name, x.DisplayOrder, 0, 0, x.CreatedAt, x.UpdatedAt))
+                .Select(x => new GradeLevelDto(x.Id, x.CodedValueId, x.Level, x.Name, x.DisplayOrder, 0, 0, x.CreatedAt, x.UpdatedAt, x.MinAge, x.MaxAge, x.AllowedGenderCodedValueId))
                 .ToArrayAsync(ct);
 
         public async Task AddAsync(GradeLevel gradeLevel, CancellationToken ct = default)

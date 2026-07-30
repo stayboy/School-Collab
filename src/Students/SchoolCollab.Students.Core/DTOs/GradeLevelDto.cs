@@ -9,4 +9,7 @@ public sealed record GradeLevelDto(
     int SubjectCount,
     int StudentCount,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null);

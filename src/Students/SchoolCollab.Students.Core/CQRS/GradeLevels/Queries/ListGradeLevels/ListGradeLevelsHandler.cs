@@ -44,6 +44,9 @@ public sealed class ListGradeLevelsHandler(
                         gl.Level,
                         gl.Name,
                         gl.DisplayOrder,
+                        gl.MinAge,
+                        gl.MaxAge,
+                        gl.AllowedGenderCodedValueId,
                         gl.CreatedAt,
                         gl.UpdatedAt,
                         SubjectCount = db.GradeSubjectAssignments
@@ -64,7 +67,10 @@ public sealed class ListGradeLevelsHandler(
                     gl.SubjectCount,
                     gl.StudentCount,
                     gl.CreatedAt,
-                    gl.UpdatedAt)).ToArray();
+                    gl.UpdatedAt,
+                    gl.MinAge,
+                    gl.MaxAge,
+                    gl.AllowedGenderCodedValueId)).ToArray();
             },
             CacheOptions,
             tags: ["students"],

@@ -31,4 +31,12 @@ public static class FeatureFlagKeys
     /// GradeLevel row), so tenants can opt out via the ConfigFlags page.
     /// </summary>
     public const string EnableGradeLevelSetupOnEnrollDialog = "FEATURE:EnableGradeLevelSetupOnEnrollDialog";
+
+    /// <summary>
+    /// Enables demographic (age, gender) and single-active-enrollment validation
+    /// in EnrollStudentHandler. Disabled by default for gradual rollout; existing
+    /// active enrollments are grandfathered (validation applies to new enrollments
+    /// only).
+    /// </summary>
+    public const string EnableEnrollmentValidation = "FEATURE:EnableEnrollmentValidation";
 }

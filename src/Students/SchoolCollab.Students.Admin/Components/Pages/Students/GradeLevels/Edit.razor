@@ -94,6 +94,9 @@
                 _model.Name = _item.Name;
                 _model.Level = _item.Level;
                 _model.DisplayOrder = _item.DisplayOrder;
+                _model.MinAge = _item.MinAge;
+                _model.MaxAge = _item.MaxAge;
+                _model.AllowedGenderCodedValueId = _item.AllowedGenderCodedValueId;
             }
 
             Logger.LogInformation("Loaded grade level {Id} for edit", Id);
@@ -122,7 +125,8 @@
             if (_item is null || !_isRealTenant) return;
 
             Logger.LogInformation("Updating grade level {Id}", Id);
-            await Api.UpdateGradeLevelAsync(Id, new UpdateGradeLevelRequest(_model.Level, _model.Name!, _model.DisplayOrder), ct);
+            await Api.UpdateGradeLevelAsync(Id, new UpdateGradeLevelRequest(_model.Level, _model.Name!, _model.DisplayOrder,
+                _model.MinAge, _model.MaxAge, _model.AllowedGenderCodedValueId), ct);
             Nav.NavigateTo("/students/grade-levels");
         }
         catch (OperationCanceledException) { }

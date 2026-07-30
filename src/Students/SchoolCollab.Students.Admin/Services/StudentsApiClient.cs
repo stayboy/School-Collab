@@ -35,7 +35,10 @@ public sealed record GradeLevelDto(
     int SubjectCount,
     int StudentCount,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null);
 
 public sealed record GradeLevelLandingDto(
     Guid Id,
@@ -119,18 +122,27 @@ public record CreateGradeLevelRequest(
     Guid CodedValueId,
     int Level,
     string Name,
-    int DisplayOrder);
+    int DisplayOrder,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null);
 
 public record GetOrCreateGradeLevelRequest(
     Guid CodedValueId,
     int Level,
     string Name,
-    int DisplayOrder);
+    int DisplayOrder,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null);
 
 public record UpdateGradeLevelRequest(
     int Level,
     string Name,
-    int DisplayOrder);
+    int DisplayOrder,
+    int? MinAge = null,
+    int? MaxAge = null,
+    Guid? AllowedGenderCodedValueId = null);
 
 public record CreateSubjectRequest(
     Guid CodedValueId,

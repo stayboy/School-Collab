@@ -86,7 +86,10 @@
                     _model.CodedValueId.Value,
                     codedValue.DisplayOrder,
                     _model.Name ?? codedValue.Name,
-                    codedValue.DisplayOrder),
+                    codedValue.DisplayOrder,
+                    _model.MinAge,
+                    _model.MaxAge,
+                    _model.AllowedGenderCodedValueId),
                 ct);
 
             Logger.LogInformation("Grade level {Id} created from coded value {CodedValueId}", result.Id, _model.CodedValueId);

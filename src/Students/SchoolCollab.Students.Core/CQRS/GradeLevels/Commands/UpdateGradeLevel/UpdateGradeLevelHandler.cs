@@ -19,7 +19,8 @@ public sealed class UpdateGradeLevelHandler(
         var gradeLevel = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new GradeLevelNotFoundException(command.Id);
 
-        gradeLevel.Update(command.Level, command.Name, command.DisplayOrder);
+        gradeLevel.Update(command.Level, command.Name, command.DisplayOrder,
+            command.MinAge, command.MaxAge, command.AllowedGenderCodedValueId);
 
         try
         {
