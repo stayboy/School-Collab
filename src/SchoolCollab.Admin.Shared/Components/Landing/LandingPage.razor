@@ -17,7 +17,7 @@
                 @if (CreateEnabled)
                 {
                     <FluentButton Appearance="Appearance.Accent"
-                                  OnClick="@(() => Nav.NavigateTo(CreateRoute))">
+                                  OnClick="@HandleCreateClicked">
                         @CreateLabel
                     </FluentButton>
                 }
@@ -183,6 +183,16 @@
     public bool CreateEnabled { get; set; } = true;
 
     /// <summary>
+    /// Optional click handler for the New button. When set, takes precedence
+    /// over <see cref="CreateRoute"/> and the New button invokes this callback
+    /// instead of navigating. Use this for dialog-based Create flows where
+    /// the New button should open a <c>DialogShellBase</c>-derived dialog
+    /// rather than navigate to a dedicated <c>/create</c> route.
+    /// </summary>
+    [Parameter]
+    public EventCallback OnCreate { get; set; }
+
+    /// <summary>
     /// Optional pinned-footer content, published into the layout's
     /// <c>page-footer</c> section slot (e.g. an inline chat launcher).
     /// </summary>
@@ -198,4 +208,21 @@
 
     private Task OnSearchChanged(string? text)
         => SearchTextChanged.InvokeAsync(text ?? string.Empty);
+
+    /// <summary>
+    /// Routes the New button click: prefers <see cref="OnCreate"/> when a
+    /// delegate is supplied, otherwise falls back to the legacy
+    /// <see cref="CreateRoute"/> navigation. The fallback keeps every existing
+    /// call site working unchanged; pages that opt into dialog-based Create
+    /// just supply <c>OnCreate</c> and may leave <c>CreateRoute</c> empty.
+    /// </summary>
+    private async Task HandleCreateClicked()
+    {
+        if (OnCreate.HasDelegate)
+        {
+            await OnCreate.InvokeAsync();
+            return;
+        }
+        Nav.NavigateTo(CreateRoute);
+    }
 }

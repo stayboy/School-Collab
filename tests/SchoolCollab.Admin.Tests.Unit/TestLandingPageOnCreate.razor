@@ -1,0 +1,41 @@
+@* Test wrapper for LandingPageOnCreateTests. Carries the Razor markup
+   (Columns child content) that cannot live in a .cs file; the .cs test
+   class toggles CreateRoute vs OnCreate and asserts on navigation vs
+   invocation. *@
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Sections
+
+<SectionOutlet SectionName="page-toolbar" />
+
+<LandingPage TItem="Widget"
+             Title="Widgets"
+             CreateLabel="@CreateLabel"
+             CreateRoute="@CreateRoute"
+             OnCreate="@OnCreate"
+             EmptyMessage="none"
+             Items="@Items"
+             GridSettings="@_gridSettings"
+             CreateEnabled="@CreateEnabled">
+    <Columns>
+        <TemplateColumn TGridItem="Widget" Title="Name">
+            @context.Name
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
+
+@code {
+    public sealed record Widget(Guid Id, string Name);
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(180px,2fr) auto"
+    };
+
+    [Parameter] public string CreateLabel { get; set; } = "+ New";
+    [Parameter] public string CreateRoute { get; set; } = string.Empty;
+    [Parameter] public EventCallback OnCreate { get; set; }
+    [Parameter] public bool CreateEnabled { get; set; } = true;
+    [Parameter] public Widget[]? Items { get; set; }
+}
