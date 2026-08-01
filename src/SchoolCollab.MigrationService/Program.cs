@@ -95,6 +95,7 @@ try
             await SeedEnableCodedValuesAiChatAsync(settingsDb, logger);
             await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);
             await SeedEnableEnrollmentValidationAsync(settingsDb, logger);
+            await SeedEnableActivityGroupsAsync(settingsDb, logger);
 
             // Seed the default EntityCodeRule blueprints (student/staff/assignment
             // auto-generation rules) — spec §3.7. Idempotent; NULL-tenant shared rows.
@@ -296,6 +297,48 @@ static async Task SeedEnableEnrollmentValidationAsync(SettingsDbContext db, Micr
     var flag = FeatureFlag.Create(
         key,
         "Enable demographic (age, gender) and single-active-enrollment validation in EnrollStudentHandler",
+        null,
+        isEnabled: false);
+    db.FeatureFlags.Add(flag);
+    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
+        tenantId: null,
+        featureFlagId: flag.Id,
+        featureFlagKey: flag.Key,
+        changeKind: FlagChangeKind.Created,
+        previousIsEnabled: null,
+        newIsEnabled: flag.IsEnabled,
+        reason: "Initial seed by migration service",
+        actorId: actorId,
+        actorDisplayName: actorName));
+
+    await db.SaveChangesAsync();
+    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
+}
+
+// ── Settings seed: FEATURE:EnableActivityGroups ──
+// Seeds the runtime feature flag that gates the activity-group management
+// surface (groups, memberships, SelectedGroups assignment targeting). Default
+// false (disabled) so the feature ships dark — spec activity-group-enrollment.md
+// NFR-11. Idempotent — re-runs no-op on a pre-existing row. Records an audit
+// row with a system actor so the seed is traceable. Consumed in API endpoints
+// and Admin UI via IFeatureFlagService.IsEnabledAsync / <FeatureFlagGate>.
+static async Task SeedEnableActivityGroupsAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
+{
+    const string actorId = "system:migrator";
+    const string actorName = "Migration Service";
+
+    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.EnableActivityGroups);
+
+    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
+    if (exists)
+    {
+        logger.LogInformation("Seed flag {Key} already present; skipping", key);
+        return;
+    }
+
+    var flag = FeatureFlag.Create(
+        key,
+        "Enable activity-group management (groups, memberships, SelectedGroups assignment targeting)",
         null,
         isEnabled: false);
     db.FeatureFlags.Add(flag);
