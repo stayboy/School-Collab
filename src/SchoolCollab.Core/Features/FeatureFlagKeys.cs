@@ -39,4 +39,13 @@ public static class FeatureFlagKeys
     /// only).
     /// </summary>
     public const string EnableEnrollmentValidation = "FEATURE:EnableEnrollmentValidation";
+
+    /// <summary>
+    /// Enables the activity-group management surface (groups, memberships,
+    /// assignment targeting via SelectedGroups). Disabled by default so the
+    /// feature ships dark behind the flag (spec activity-group-enrollment.md
+    /// NFR-11). Gated in API endpoints and Admin UI via
+    /// <c>IFeatureFlagService.IsEnabledAsync</c> / <c>&lt;FeatureFlagGate&gt;</c>.
+    /// </summary>
+    public const string EnableActivityGroups = "FEATURE:EnableActivityGroups";
 }
