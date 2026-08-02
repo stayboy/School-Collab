@@ -14,6 +14,8 @@ public sealed class PublishAssignmentCommandHandler(
     IAssignmentRepository repository,
     ISubmissionRepository submissionRepository,
     IContactResolver contactResolver,
+    IAssignmentActivityGroupRepository linkRepository,
+    IActivityGroupLookup groupLookup,
     ITenantProvider tenantProvider,
     IAssignmentNotificationBroadcaster broadcaster,
     HybridCache cache,
@@ -41,8 +43,8 @@ public sealed class PublishAssignmentCommandHandler(
 
         assignment.ClearDomainEvents();
 
-        logger.LogInformation("Assignment {Id} published (recipients resolved for grade {GradeLevelId})",
-            assignment.Id, assignment.GradeLevelId);
+        logger.LogInformation("Assignment {Id} published (audience {AudienceType})",
+            assignment.Id, assignment.TargetAudienceType);
     }
 
     /// <summary>
@@ -51,13 +53,36 @@ public sealed class PublishAssignmentCommandHandler(
     /// contact selection subset per spec §8). When the assignment mandates
     /// guardian review, also ensure a <see cref="GuardianSubmissionGate"/> exists
     /// for every student who has a Primary guardian subscriber (spec §4.6 / §4.10).
+    /// For <see cref="TargetAudienceType.SelectedGroups"/> the cohort is the active
+    /// members of the linked groups (FR-20), archived groups excluded (EC-4); a
+    /// SelectedGroups assignment with zero links cannot be published (FR-23).
     /// </summary>
     private async Task<List<AssignmentRecipient>> ResolveRecipientsAndGatesAsync(
         Assignment assignment, Guid tenantId, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
     {
-        var subscribers = await contactResolver.ResolveSubscribersAsync(
-            new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, assignment.GradeLevelId),
-            cancellationToken);
+        ResolveSubscribersRequest request;
+        if (assignment.TargetAudienceType == TargetAudienceType.SelectedGroups)
+        {
+            // FR-18 / FR-20: target the active members of the linked groups.
+            var groupIds = await linkRepository.GetGroupIdsForAssignmentAsync(assignment.Id, cancellationToken);
+
+            // FR-23 / EC-7: an assignment targeting groups must have at least one
+            // linked group before it can be published.
+            if (groupIds.Length == 0)
+                throw new InvalidOperationException(
+                    $"Assignment '{assignment.Id}' targets SelectedGroups but has no linked activity groups; link at least one group before publishing.");
+
+            // EC-4: archived groups are excluded from recipient resolution.
+            var memberIds = await groupLookup.GetActiveMemberIdsAsync(groupIds, cancellationToken);
+            request = new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, StudentIds: memberIds);
+        }
+        else
+        {
+            // AllStudents / SelectedGrades keep the existing grade-level path.
+            request = new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, assignment.GradeLevelId);
+        }
+
+        var subscribers = await contactResolver.ResolveSubscribersAsync(request, cancellationToken);
 
         var recipients = new List<AssignmentRecipient>();
         foreach (var s in subscribers)

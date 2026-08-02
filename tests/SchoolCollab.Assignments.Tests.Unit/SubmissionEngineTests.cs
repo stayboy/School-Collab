@@ -11,6 +11,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssignmen
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.DTOs;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -136,6 +137,7 @@ public class SubmissionEngineTests
 
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -163,6 +165,7 @@ public class SubmissionEngineTests
         var submissionRepo = new FakeSubmissionRepository();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             TenantProvider(), new FakeBroadcaster(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -289,6 +292,7 @@ public class SubmissionEngineTests
         var broadcaster = new FakeBroadcaster();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -381,6 +385,7 @@ public class SubmissionEngineTests
         var broadcaster = new FakeBroadcaster();
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
+            new FakeLinkRepository(), new FakeActivityGroupLookup(),
             TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         // Select only the guardian contact (spec §8).
@@ -508,6 +513,25 @@ public class SubmissionEngineTests
         public Task EnqueueAsync<T>(T message, CancellationToken ct = default) where T : class { Count++; return Task.CompletedTask; }
     }
 
+    private sealed class FakeActivityGroupLookup : IActivityGroupLookup
+    {
+        public Task<ActivityGroupRefDto[]> GetByIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<ActivityGroupRefDto>());
+        public Task<Guid[]> GetActiveMemberIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<Guid>());
+    }
+
+    private sealed class FakeLinkRepository : IAssignmentActivityGroupRepository
+    {
+        public Task<Guid[]> GetGroupIdsForAssignmentAsync(Guid assignmentId, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<Guid>());
+        public Task ReplaceForAssignmentAsync(Guid assignmentId, Guid tenantId, IReadOnlyList<Guid> activityGroupIds, CancellationToken ct = default)
+            => Task.CompletedTask;
+        public Task<Guid[]> GetAssignmentIdsByGroupAsync(Guid activityGroupId, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<Guid>());
+        public Task<AssignmentGroupSummaryDto[]> GetAssignmentsByGroupAsync(Guid activityGroupId, CancellationToken ct = default)
+            => Task.FromResult(Array.Empty<AssignmentGroupSummaryDto>());
+    }
     private sealed class FakeAssignmentRepository : IAssignmentRepository
     {
         public Assignment? Assignment;

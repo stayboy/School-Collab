@@ -43,6 +43,11 @@ builder.Services.AddSettingsCore(builder.Configuration);
 builder.Services.AddHttpClient("students-api");
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolver, SchoolCollab.Assignments.Api.Services.StudentsContactResolver>();
 
+// Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
+// port (Assignments → Students) for the link command and SelectedGroups publish.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,
+    SchoolCollab.Assignments.Api.Services.ActivityGroupLookupHttpClient>();
+
 builder.Services.AddOpenApi();
 
 // Auth + tenancy (OIDC via Keycloak)

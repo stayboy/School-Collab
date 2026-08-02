@@ -2,7 +2,11 @@
 
 > Tracked checklist for `activity-group-enrollment.md` (post-review, dated 2026-07-29).
 > One PR per step, each shippable behind `FEATURE:EnableActivityGroups` (flag OFF until Phase 6).
-> Update each box to `[x]` when the PR merges; add a PR link/SHA in the **PR** column or a note line.
+> **Workflow (adopted repo-wide for spec-driven effort): stacked PRs.** Each phase branches from the
+> previous phase's branch (not main) and its PR's base is the previous PR's head. Merges are deferred
+> until the whole spec is complete, then merged bottom-up (Phase 2 -> main, Phase 3 -> main, ...).
+> PR #99 (Phase 2) is the bottom of the stack. Update each box to `[x]` when the phase is built; the
+> PR link/SHA is tracked in the Notes / change log below.
 
 **Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -43,11 +47,11 @@
 
 ## Phase 3 — Assignment↔group link + publish wiring (dark, flag OFF)
 
-- [ ] **3.1** Create `AssignmentActivityGroup` link entity + config + `AssignmentsDbContext` DbSet + additive migration `<ts>_AddAssignmentActivityLinks.cs`. Update `NoUncommittedModelChanges` test for `AssignmentsDbContext`. — *FR-17, §8.3, NFR-9*
-- [ ] **3.2** `LinkAssignmentGroups` command handler — replace-set semantics; enforce same-tenant, non-archived; reject archived-group links. — *FR-18, FR-19, AC-20, AC-21*
-- [ ] **3.3** Add Assignments API link endpoints: `PUT`/`GET /api/assignments/{assignmentId}/groups` and `GET /api/activity-groups/{groupId}/assignments` (§7.3). The last is what step 2.2's port consumes. — *§7.3, AC-20*
-- [ ] **3.4** Extend publish recipient resolution for `SelectedGroups`: in `PublishAssignmentCommandHandler`, when `TargetAudienceType = SelectedGroups` (enum `2`), call `IContactResolver.ResolveSubscribersRequest` with the **`StudentIds` roster of active members of linked groups** (the `StudentIds` param already exists in `IContactResolver`). Stop hardwiring `assignment.GradeLevelId` for this audience. Generate `AssignmentRecipient` rows. — *FR-20..23, AC-22..26*
-- [ ] **3.5** Unit-test: link-set replace, cross-tenant rejection, archived-group exclusion, publish-resolves-only-active-members. — *AC-22..26, EC-7..14*
+- [x] **3.1** Create `AssignmentActivityGroup` link entity + config + `AssignmentsDbContext` DbSet + additive migration `<ts>_AddAssignmentActivityLinks.cs`. Update `NoUncommittedModelChanges` test for `AssignmentsDbContext`. — *FR-17, §8.3, NFR-9*
+- [x] **3.2** `LinkAssignmentGroups` command handler — replace-set semantics; enforce same-tenant, non-archived; reject archived-group links. — *FR-18, FR-19, AC-20, AC-21*
+- [x] **3.3** Add Assignments API link endpoints: `PUT`/`GET /api/assignments/{assignmentId}/groups` and `GET /api/activity-groups/{groupId}/assignments` (§7.3). The last is what step 2.2's port consumes. — *§7.3, AC-20*
+- [x] **3.4** Extend publish recipient resolution for `SelectedGroups`: in `PublishAssignmentCommandHandler`, when `TargetAudienceType = SelectedGroups` (enum `2`), call `IContactResolver.ResolveSubscribersRequest` with the **`StudentIds` roster of active members of linked groups** (the `StudentIds` param already exists in `IContactResolver`). Stop hardwiring `assignment.GradeLevelId` for this audience. Generate `AssignmentRecipient` rows. — *FR-20..23, AC-22..26*
+- [x] **3.5** Unit-test: link-set replace, cross-tenant rejection, archived-group exclusion, publish-resolves-only-active-members. — *AC-22..26, EC-7..14*
 
 ---
 
@@ -87,3 +91,5 @@
 ## Notes / change log
 
 - _Checklist generated from spec review (post-edit of items 1–7 + FR-35 cleanup). Spec source of truth: `activity-group-enrollment.md`._
+
+- _2026-08-02: Adopted stacked-PR workflow repo-wide (see header). Phase 2 = PR #99 (stack bottom, base: main). Phase 3 built on feat/activity-groups-phase3 (branched from phase2; PR base = phase2 branch) - AssignmentActivityGroup link entity/migration, LinkAssignmentGroups handler + IActivityGroupLookup port, Assignments link endpoints (PUT/GET /assignments/{id}/groups, GET /activity-groups/{id}/assignments), SelectedGroups publish wiring (FR-20/23/EC-4), 10 new tests. 88 Assignments tests + 156 Students tests pass._
