@@ -1,0 +1,61 @@
+@*
+    ActivityGroupEditDialog — opens from the Activity Groups landing's Edit
+    row action. Pre-seeds the group fields and posts to PUT /activity-groups/{id}
+    (spec §7.1).
+*@
+@inherits DialogShellBase<ActivityGroupEditDialog.ActivityGroupEditModel, ActivityGroupDto>
+@using System.ComponentModel.DataAnnotations
+@using SchoolCollab.Students.Admin.Services
+@inject StudentsApiClient Api
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Name" For="ag-edit-name" Required="true">
+            <FluentTextField @bind-Value="Model.Name"
+                             Id="ag-edit-name"
+                             MaxLength="200" />
+        </FormRow>
+
+        <FormRow Label="Category" For="ag-edit-category">
+            <FluentTextField @bind-Value="Model.Category"
+                             Id="ag-edit-category"
+                             MaxLength="100" />
+        </FormRow>
+
+        <FormRow Label="Description" For="ag-edit-description" AlignTop>
+            <FluentTextArea @bind-Value="Model.Description"
+                            Id="ag-edit-description"
+                            MaxLength="2000"
+                            Style="min-height:90px;" />
+        </FormRow>
+
+        <FormRow Label="Capacity" For="ag-edit-capacity">
+            <FluentNumberField @bind-Value="Model.Capacity"
+                               Id="ag-edit-capacity"
+                               Min="1"
+                               Title="Maximum number of active members. Leave blank for no limit." />
+        </FormRow>
+
+        <DialogShellFooter />
+    </EditForm>
+</div>
+
+@code {
+    public sealed class ActivityGroupEditModel
+    {
+        public Guid Id { get; set; }
+        [Required] [StringLength(200)] public string Name { get; set; } = "";
+        [StringLength(100)] public string? Category { get; set; }
+        [StringLength(2000)] public string? Description { get; set; }
+        [Range(1, int.MaxValue)] public int? Capacity { get; set; }
+    }
+
+    protected override async Task<ActivityGroupDto?> SubmitAsync(ActivityGroupEditModel model)
+    {
+        await Api.UpdateActivityGroupAsync(model.Id, new UpdateActivityGroupRequest(
+            model.Name, model.Description, model.Category, null, model.Capacity));
+        return await Api.GetActivityGroupByIdAsync(model.Id);
+    }
+}

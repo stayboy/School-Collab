@@ -57,6 +57,29 @@ public sealed record GradeLevelLandingDto(
     int? MaxAge = null,
     Guid? AllowedGenderCodedValueId = null);
 
+public sealed record ActivityGroupDto(
+    Guid Id,
+    string Name,
+    string? Description,
+    string? Category,
+    Guid? PeriodId,
+    int? Capacity,
+    string Status,
+    int ActiveMemberCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record MembershipDto(
+    Guid Id,
+    Guid ActivityGroupId,
+    Guid StudentId,
+    string StudentName,
+    DateOnly JoinedOn,
+    DateOnly? ExitedOn,
+    string Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
 public sealed record SubjectDto(
     Guid Id,
     Guid CodedValueId,
@@ -147,6 +170,24 @@ public record UpdateGradeLevelRequest(
     int? MinAge = null,
     int? MaxAge = null,
     Guid? AllowedGenderCodedValueId = null);
+
+public record CreateActivityGroupRequest(
+    string Name,
+    string? Description = null,
+    string? Category = null,
+    Guid? PeriodId = null,
+    int? Capacity = null);
+
+public record UpdateActivityGroupRequest(
+    string Name,
+    string? Description = null,
+    string? Category = null,
+    Guid? PeriodId = null,
+    int? Capacity = null);
+
+public record AddActivityGroupMemberRequest(
+    Guid StudentId,
+    DateOnly? JoinedOn = null);
 
 public record CreateSubjectRequest(
     Guid CodedValueId,
@@ -479,6 +520,51 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task DeleteGradeLevelAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/grade-levels/{id}", ct)).EnsureSuccessStatusCode();
+
+    // ── Activity groups (Phase 2 API, spec §7.1/§7.2) ────────────────────────
+
+    public async Task<ActivityGroupDto[]?> ListActivityGroupsAsync(CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<ActivityGroupDto[]>("/activity-groups", ct);
+
+    public async Task<ActivityGroupDto?> GetActivityGroupByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/activity-groups/{id}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ActivityGroupDto>(ct);
+    }
+
+    public async Task<Guid> CreateActivityGroupAsync(CreateActivityGroupRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/activity-groups", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    public async Task UpdateActivityGroupAsync(Guid id, UpdateActivityGroupRequest req, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/activity-groups/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteActivityGroupAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/activity-groups/{id}", ct)).EnsureSuccessStatusCode();
+
+    public async Task ArchiveActivityGroupAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/activity-groups/{id}/archive", null, ct)).EnsureSuccessStatusCode();
+
+    public async Task SuspendActivityGroupAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/activity-groups/{id}/suspend", null, ct)).EnsureSuccessStatusCode();
+
+    public async Task<MembershipDto[]?> ListGroupMembersAsync(Guid groupId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<MembershipDto[]>($"/activity-groups/{groupId}/members", ct);
+
+    public async Task AddGroupMemberAsync(Guid groupId, AddActivityGroupMemberRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync($"/activity-groups/{groupId}/members", req, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task RemoveGroupMemberAsync(Guid groupId, Guid studentId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/activity-groups/{groupId}/members/{studentId}", ct)).EnsureSuccessStatusCode();
 
     // ── Subjects ─────────────────────────────────────────────────────────────
 

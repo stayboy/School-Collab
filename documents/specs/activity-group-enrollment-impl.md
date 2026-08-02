@@ -57,10 +57,10 @@
 
 ## Phase 4 — Admin UI: ActivityGroups pages (dark, flag OFF)
 
-- [ ] **4.1** `ActivityGroups` list page in `Students.Admin/Components/Pages/ActivityGroups/*`, mirror `GradeLevels` (FluentUI, keyboard nav, ARIA — NFR-10). — *FR-24..27*
-- [ ] **4.2** `ActivityGroupCreateEditDialog` + `ActivityGroupDetails` page with members tab. Follow repo `fluentui-dialog-shell` / `dialog-ui` skill conventions for modal forms. — *FR-24..27*
-- [ ] **4.3** Gate all UI by `FEATURE:EnableActivityGroups` (repo tenant-gate / feature-flag pattern per `featureflags-tenant-gates` skill). — *NFR-11*
-- [ ] **4.4** bUnit tests: CRUD + members tab. — *AC-12..19*
+- [x] **4.1** `ActivityGroups` list page in `Students.Admin/Components/Pages/ActivityGroups/*`, mirror `GradeLevels` (FluentUI, keyboard nav, ARIA — NFR-10). — *FR-24..27*
+- [x] **4.2** `ActivityGroupCreateEditDialog` + `ActivityGroupDetails` page with members tab. Follow repo `fluentui-dialog-shell` / `dialog-ui` skill conventions for modal forms. — *FR-24..27*
+- [x] **4.3** Gate all UI by `FEATURE:EnableActivityGroups` (repo tenant-gate / feature-flag pattern per `featureflags-tenant-gates` skill). — *NFR-11*
+- [x] **4.4** bUnit tests: CRUD + members tab. — *AC-12..19*
 
 ---
 
@@ -93,3 +93,5 @@
 - _Checklist generated from spec review (post-edit of items 1–7 + FR-35 cleanup). Spec source of truth: `activity-group-enrollment.md`._
 
 - _2026-08-02: Adopted stacked-PR workflow repo-wide (see header). Phase 2 = PR #99 (stack bottom, base: main). Phase 3 built on feat/activity-groups-phase3 (branched from phase2; PR base = phase2 branch) - AssignmentActivityGroup link entity/migration, LinkAssignmentGroups handler + IActivityGroupLookup port, Assignments link endpoints (PUT/GET /assignments/{id}/groups, GET /activity-groups/{id}/assignments), SelectedGroups publish wiring (FR-20/23/EC-4), 10 new tests. 88 Assignments tests + 156 Students tests pass._
+
+- _2026-08-02: Phase 4 built on feat/activity-groups-phase4 (branched from phase3; PR base = phase3 branch). Admin UI: ActivityGroups list page (LandingPage + grid mirroring GradeLevels), ActivityGroupCreateDialog/EditDialog (DialogShellBase), ActivityGroupDetails page with members tab (StudentPickerDialog add + remove), flag-gated nav link (FEATURE:EnableActivityGroups). 3 new bUnit tests pass (list render, flag-off hidden, members tab). 2 pre-existing GuardianGrid test failures on the stack base are unrelated to this phase._
