@@ -1,4 +1,4 @@
-# Activity Group Enrollment — Implementation Checklist
+﻿# Activity Group Enrollment — Implementation Checklist
 
 > Tracked checklist for `activity-group-enrollment.md` (post-review, dated 2026-07-29).
 > One PR per step, each shippable behind `FEATURE:EnableActivityGroups` (flag OFF until Phase 6).
@@ -28,16 +28,16 @@
 
 ## Phase 2 — Membership commands/queries + APIs (dark, flag OFF)
 
-- [ ] **2.1** Group CQRS commands: `CreateActivityGroup`, `UpdateActivityGroup`, `ArchiveActivityGroup`, `SuspendActivityGroup`, `DeleteActivityGroup` (`Students.Core/CQRS/ActivityGroups/Commands/`). — *FR-1..6*
-- [ ] **2.2** Wire cross-context delete-guard port into `DeleteActivityGroupHandler`:
+- [x] **2.1** Group CQRS commands: `CreateActivityGroup`, `UpdateActivityGroup`, `ArchiveActivityGroup`, `SuspendActivityGroup`, `DeleteActivityGroup` (`Students.Core/CQRS/ActivityGroups/Commands/`). — *FR-1..6*
+- [x] **2.2** Wire cross-context delete-guard port into `DeleteActivityGroupHandler`:
   - create `Students.Core/Services/IActivityGroupAssignmentQuery.cs`
   - implement `Students.Api/Services/ActivityGroupAssignmentQueryHttpClient.cs` as HTTP client calling Assignments API `GET /api/activity-groups/{id}/assignments` (mirror existing `Assignments.Api/Services/StudentsContactResolver.cs`, reversed direction)
   - handler rejects delete on (a) any membership row, or (b) any returned `Draft`/`Published` assignment → `ActivityGroupReferencedException`
   - **fail-closed** if Assignments API unreachable
   - **confirm `AssignmentSummary` DTO carries `Status`** before wiring — *FR-6, AC-17, AC-18, EC-1*
-- [ ] **2.3** Membership CQRS: `AddMembership`, `RemoveMembership`, `ExitMembership` commands; `GetGroupMembers`, `GetStudentGroups` queries (`Students.Core/CQRS/ActivityGroups/`). — *FR-7..16*
-- [ ] **2.4** Students API endpoints: `Students.Api/Endpoints/MapActivityGroupEndpoints` (mirror `GradeLevelRoutes.cs`). Gate every endpoint behind `FEATURE:EnableActivityGroups`. — *§7.1, §7.2, NFR-11*
-- [ ] **2.5** Unit-test all handlers (AC-12..19, AC-17, AC-18, EC-1..6). — *AC-12..19, EC-1..6*
+- [x] **2.3** Membership CQRS: `AddMembership`, `RemoveMembership`, `ExitMembership` commands; `GetGroupMembers`, `GetStudentGroups` queries (`Students.Core/CQRS/ActivityGroups/`). — *FR-7..16*
+- [x] **2.4** Students API endpoints: `Students.Api/Endpoints/MapActivityGroupEndpoints` (mirror `GradeLevelRoutes.cs`). Gate every endpoint behind `FEATURE:EnableActivityGroups`. — *§7.1, §7.2, NFR-11*
+- [x] **2.5** Unit-test all handlers (AC-12..19, AC-17, AC-18, EC-1..6). — *AC-12..19, EC-1..6*
 
 ---
 

@@ -41,6 +41,8 @@ public static class Extensions
         services.AddScoped<IGuardianRepository, GuardianRepository>();
         services.AddScoped<IContactRepository, ContactRepository>();
         services.AddScoped<ITeacherRepository, TeacherRepository>();
+        services.AddScoped<IActivityGroupRepository, ActivityGroupRepository>();
+        services.AddScoped<IActivityGroupMembershipRepository, ActivityGroupMembershipRepository>();
 
         // Enrollment validation specifications (plan §3). The three leaf rules are
         // registered as ILeafEnrollmentSpecification so the composite receives them via

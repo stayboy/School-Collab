@@ -24,6 +24,9 @@ internal sealed class StudentsTestScope : IDisposable
     public GradeLevelRepository GradeLevels { get; }
     public SubjectRepository Subjects { get; }
     public GradeSubjectAssignmentRepository GradeSubjectAssignments { get; }
+    public ActivityGroupRepository ActivityGroups { get; }
+    public ActivityGroupMembershipRepository Memberships { get; }
+    public StudentRepository Students { get; }
 
     public StudentsTestScope(string name)
     {
@@ -51,6 +54,9 @@ internal sealed class StudentsTestScope : IDisposable
         GradeLevels = new GradeLevelRepository(Db);
         Subjects = new SubjectRepository(Db);
         GradeSubjectAssignments = new GradeSubjectAssignmentRepository(Db);
+        ActivityGroups = new ActivityGroupRepository(Db);
+        Memberships = new ActivityGroupMembershipRepository(Db);
+        Students = new StudentRepository(Db);
     }
 
     public void Dispose() => Db.Dispose();
