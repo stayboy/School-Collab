@@ -1,3 +1,4 @@
+using System;
 using System.Reflection;
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
@@ -433,5 +434,55 @@ public class StudentDetailSectionsTests
         css.Should().Contain(".title-row");
         css.Should().Contain(".action-bar");
         css.Should().Contain(".spinner-container");
+    }
+
+    // --- Activity Groups section (spec: activity-group-enrollment.md) ---
+
+    // AC-27 (FR-28): detail page shows Activity Groups section
+    [TestMethod]
+    public void Detail_Has_ActivityGroups_Section()
+    {
+        var source = ReadDetailSource();
+        source.Should().MatchRegex(@"<h3>\s*Activity Groups\s*</h3>",
+            "the student Detail page must have an Activity Groups section heading");
+    }
+
+    // AC-27 (FR-28): Activity Groups section appears after Enrollments
+    [TestMethod]
+    public void Detail_ActivityGroups_Section_After_Enrollments()
+    {
+        var source = ReadDetailSource();
+        var enrollmentsIdx = source.IndexOf("<h3>Enrollments</h3>", StringComparison.OrdinalIgnoreCase);
+        var activityGroupsIdx = source.IndexOf("<h3>Activity Groups</h3>", StringComparison.OrdinalIgnoreCase);
+        enrollmentsIdx.Should().BeGreaterThan(0, "Enrollments section must exist");
+        activityGroupsIdx.Should().BeGreaterThan(enrollmentsIdx,
+            "Activity Groups section must appear after Enrollments");
+    }
+
+    // AC-28 (FR-29): Join Group button in section header
+    [TestMethod]
+    public void Detail_ActivityGroups_Has_JoinGroup_Button()
+    {
+        var source = ReadDetailSource();
+        source.Should().Contain("Join Group",
+            "the Activity Groups section header must contain a Join Group button");
+    }
+
+    // AC-30 (FR-31): Leave button per membership row
+    [TestMethod]
+    public void Detail_ActivityGroups_Has_Leave_Action()
+    {
+        var source = ReadDetailSource();
+        source.Should().Contain("Leave",
+            "each active membership row must have a Leave button");
+    }
+
+    // AC-31 (FR-32, NFR-11): section hidden when feature flag is OFF
+    [TestMethod]
+    public void Detail_ActivityGroups_Section_Gated_By_FeatureFlag()
+    {
+        var source = ReadDetailSource();
+        source.Should().Contain("EnableActivityGroups",
+            "the Activity Groups section must be gated behind FEATURE:EnableActivityGroups");
     }
 }

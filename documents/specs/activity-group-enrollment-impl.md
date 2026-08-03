@@ -66,10 +66,10 @@
 
 ## Phase 5 — Student Detail page UI (dark, flag OFF)
 
-- [ ] **5.1** Add "Activity Groups" section to `Students.Admin/Components/Pages/Students/Detail.razor` (FR-28). `StudentDetailSectionsTests.cs` already has red-phase tests asserting Join Group/Leave buttons gated on `EnableActivityGroups` — make them pass. — *FR-28, AC-27*
-- [ ] **5.2** `JoinGroupDialog` (`Students.Admin/Components/ActivityGroups/JoinGroupDialog.razor`), searchable multi-select, using `dialog-ui` skill conventions. — *FR-29, FR-30, AC-28, AC-29*
-- [ ] **5.3** "Leave" action button per membership row + empty-state message when no memberships. — *FR-31, FR-32, AC-30, AC-31*
-- [ ] **5.4** bUnit tests (AC-27..31). — *AC-27..31*
+- [x] **5.1** Add "Activity Groups" section to `Students.Admin/Components/Pages/Students/Detail.razor` (FR-28). `StudentDetailSectionsTests.cs` already has red-phase tests asserting Join Group/Leave buttons gated on `EnableActivityGroups` — make them pass. — *FR-28, AC-27*
+- [x] **5.2** `JoinGroupDialog` (`Students.Admin/Components/ActivityGroups/JoinGroupDialog.razor`), searchable multi-select, using `dialog-ui` skill conventions. — *FR-29, FR-30, AC-28, AC-29*
+- [x] **5.3** "Leave" action button per membership row + empty-state message when no memberships. — *FR-31, FR-32, AC-30, AC-31*
+- [x] **5.4** bUnit tests (AC-27..31). — *AC-27..31*
 
 ---
 
@@ -95,3 +95,6 @@
 - _2026-08-02: Adopted stacked-PR workflow repo-wide (see header). Phase 2 = PR #99 (stack bottom, base: main). Phase 3 built on feat/activity-groups-phase3 (branched from phase2; PR base = phase2 branch) - AssignmentActivityGroup link entity/migration, LinkAssignmentGroups handler + IActivityGroupLookup port, Assignments link endpoints (PUT/GET /assignments/{id}/groups, GET /activity-groups/{id}/assignments), SelectedGroups publish wiring (FR-20/23/EC-4), 10 new tests. 88 Assignments tests + 156 Students tests pass._
 
 - _2026-08-02: Phase 4 built on feat/activity-groups-phase4 (branched from phase3; PR base = phase3 branch). Admin UI: ActivityGroups list page (LandingPage + grid mirroring GradeLevels), ActivityGroupCreateDialog/EditDialog (DialogShellBase), ActivityGroupDetails page with members tab (StudentPickerDialog add + remove), flag-gated nav link (FEATURE:EnableActivityGroups). 3 new bUnit tests pass (list render, flag-off hidden, members tab). 2 pre-existing GuardianGrid test failures on the stack base are unrelated to this phase._
+
+- _2026-08-02: Phase 5 built on feat/activity-groups-phase5 (branched from phase4; PR base = phase4 branch). Student Detail page "Activity Groups" section (FR-28..32): heading below Enrollments, Join Group accent button opening new JoinGroupsDialog (searchable multi-select of available groups — Active/not-at-capacity/excluding current memberships — with per-group partial-failure reporting), per-row Leave button, empty state, all gated behind FEATURE:EnableActivityGroups. Added `ListStudentGroupsAsync` to StudentsApiClient (GET /students/{id}/activity-groups). The 5 red-phase tests in StudentDetailSectionsTests.cs (AC-27..31) now pass → Admin suite 226/228 (2 pre-existing GuardianGrid failures)._
+

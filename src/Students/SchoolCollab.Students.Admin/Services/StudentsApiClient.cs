@@ -566,6 +566,14 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task RemoveGroupMemberAsync(Guid groupId, Guid studentId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/activity-groups/{groupId}/members/{studentId}", ct)).EnsureSuccessStatusCode();
 
+    /// <summary>
+    /// Lists the activity groups a student is an active member of (spec §7.2,
+    /// <c>GET /api/students/{studentId}/activity-groups</c>). Returns the
+    /// groups the student currently belongs to, ordered by name.
+    /// </summary>
+    public async Task<ActivityGroupDto[]?> ListStudentGroupsAsync(Guid studentId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<ActivityGroupDto[]>($"/students/{studentId}/activity-groups", ct);
+
     // ── Subjects ─────────────────────────────────────────────────────────────
 
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
