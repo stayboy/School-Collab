@@ -57,12 +57,12 @@
                 <span class="muted" title="No gender restriction set">Co-ed</span>
             }
         </TemplateColumn>
-        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Subjects">
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Topics">
             @if (context.CurrentPeriodId.HasValue)
             {
                 <FluentAnchor Appearance="Appearance.Lightweight"
                               Href="@($"/students/subjects?gradeLevelId={context.Id}&periodId={context.CurrentPeriodId}")">
-                    @context.SubjectCount
+                    @context.TopicCount
                 </FluentAnchor>
             }
             else
@@ -123,15 +123,15 @@
 
     /// <summary>
     /// Cached current-period id from the most recent landing load. Passed into
-    /// the Create dialog so it knows which period to assign subjects to.
+    /// the Create dialog so it knows which period to assign topics to.
     /// Null when there is no current period (Create dialog then hides the
-    /// Subjects section).
+    /// Topics section).
     /// </summary>
     private Guid? _currentPeriodId;
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        // 2fr Name | 80px Age range | 90px Gender | 80px Subjects | 80px Students | 140px Period | auto Actions
+        // 2fr Name | 80px Age range | 90px Gender | 80px Topics | 80px Students | 140px Period | auto Actions
         GridTemplateColumns = "minmax(200px,2fr) 80px 90px 80px 80px 140px auto"
     };
 
@@ -279,7 +279,7 @@
 
     /// <summary>
     /// Builds the kebab-menu actions for a single grade row. Edit opens the
-    /// Edit dialog (which carries the validation rules + subject multi-select
+    /// Edit dialog (which carries the validation rules + topic multi-select
     /// + tenant override pencil icon — see plan §4); Delete keeps the existing
     /// confirmation pattern. No system-wide coded-value edit surfaces from
     /// this menu (all edits target tenancy override, per the plan).
@@ -296,7 +296,7 @@
 
     /// <summary>
     /// Opens the Edit dialog (DialogShellBase-derived) pre-seeded with the
-    /// grade's current validation rules + subject assignments for the current
+    /// grade's current validation rules + topic assignments for the current
     /// period. Refreshes the landing on success.
     /// </summary>
     private async Task OpenEditDialogAsync(GradeLevelLandingDto row)
@@ -331,7 +331,7 @@
         if (_disposed) return;
 
         var dialog = await DialogService.ShowConfirmationAsync(
-            $"Are you sure you want to delete grade level '{name}'? This cannot be undone if students or subjects are assigned.",
+            $"Are you sure you want to delete grade level '{name}'? This cannot be undone if students or topics are assigned.",
             "Delete",
             "Cancel");
         var result = await dialog.Result;
@@ -353,7 +353,7 @@
             Logger.LogError(ex, "Failed to delete grade level {Id}", id);
             _items = previous;
             _error = ex.Message.Contains("referenced", StringComparison.OrdinalIgnoreCase)
-                ? "Cannot delete: students or subjects are assigned to this grade level."
+                ? "Cannot delete: students or topics are assigned to this grade level."
                 : ex.Message;
             StateHasChanged();
         }

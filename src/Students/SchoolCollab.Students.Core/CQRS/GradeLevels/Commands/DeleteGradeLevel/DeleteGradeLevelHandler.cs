@@ -24,14 +24,14 @@ public sealed class DeleteGradeLevelHandler(
         var hasEnrollments = await db.StudentEnrollments
             .AnyAsync(se => se.GradeLevelId == command.Id, cancellationToken);
 
-        var hasTopicAssignments = await db.GradeSubjectAssignments
+        var hasTopicAssignments = await db.GradeTopicAssignments
             .AnyAsync(gsa => gsa.GradeLevelId == command.Id, cancellationToken);
 
         if (hasEnrollments || hasTopicAssignments)
         {
             var references = new List<string>();
             if (hasEnrollments) references.Add("StudentEnrollments");
-            if (hasTopicAssignments) references.Add("GradeSubjectAssignments");
+            if (hasTopicAssignments) references.Add("GradeTopicAssignments");
             throw new GradeLevelReferencedException(command.Id, references.ToArray());
         }
 

@@ -11,7 +11,7 @@ namespace SchoolCollab.Students.Tests.Unit;
 public class GetOrCreateTopicHandlerTests
 {
     private static GetOrCreateTopicHandler NewHandler(StudentsTestScope s) =>
-        new(s.Topics, s.GradeSubjectAssignments, s.GradeLevels, s.Cache, s.Tenants, NullLogger<GetOrCreateTopicHandler>.Instance);
+        new(s.Topics, s.GradeTopicAssignments, s.GradeLevels, s.Cache, s.Tenants, NullLogger<GetOrCreateTopicHandler>.Instance);
 
     [TestMethod]
     public async Task GetOrCreate_CreatesWhenAbsent()

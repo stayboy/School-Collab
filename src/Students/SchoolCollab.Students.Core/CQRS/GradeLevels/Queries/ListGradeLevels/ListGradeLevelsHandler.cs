@@ -49,7 +49,7 @@ public sealed class ListGradeLevelsHandler(
                         gl.AllowedGenderCodedValueId,
                         gl.CreatedAt,
                         gl.UpdatedAt,
-                        TopicCount = db.GradeSubjectAssignments
+                        TopicCount = db.GradeTopicAssignments
                             .IgnoreQueryFilters(new[] { "Tenant" })
                             .Count(ga => ga.GradeLevelId == gl.Id && ga.TenantId == tenantId),
                         StudentCount = db.StudentEnrollments

@@ -418,77 +418,6 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("grade_levels", (string)null);
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeSubjectAssignment", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<Guid?>("ActivityGroupId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("activity_group_id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date")
-                        .HasColumnName("end_date");
-
-                    b.Property<Guid?>("GradeLevelId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("grade_level_id");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<DateOnly>("StartDate")
-                        .HasColumnType("date")
-                        .HasColumnName("start_date");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<Guid>("TopicId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("topic_id");
-
-                    b.Property<Guid?>("TopicLessonId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("topic_lesson_id");
-
-                    b.Property<Guid?>("TopicStrandId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("topic_strand_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_grade_subject_assignments");
-
-                    b.HasIndex("TopicLessonId")
-                        .HasDatabaseName("ix_grade_subject_assignments_topic_lesson_id");
-
-                    b.HasIndex("TopicStrandId")
-                        .HasDatabaseName("ix_grade_subject_assignments_topic_strand_id");
-
-                    b.HasIndex("TenantId", "StartDate", "EndDate")
-                        .HasDatabaseName("ix_grade_subject_assignments_tenant_effective_dates");
-
-                    b.HasIndex("TenantId", "GradeLevelId", "ActivityGroupId", "TopicId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_grade_subject_assignments_tenant_unique");
-
-                    b.ToTable("grade_subject_assignments", (string)null);
-                });
-
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Guardian", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1241,6 +1170,75 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("subjects", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
+
+                    b.Property<Guid?>("TopicLessonId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_lesson_id");
+
+                    b.Property<Guid?>("TopicStrandId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_strand_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("topic_assignment_type")
+                        .IsRequired()
+                        .HasMaxLength(21)
+                        .HasColumnType("character varying(21)")
+                        .HasColumnName("topic_assignment_type");
+
+                    b.HasKey("Id")
+                        .HasName("pk_topic_assignments");
+
+                    b.HasIndex("TopicLessonId")
+                        .HasDatabaseName("ix_topic_assignments_topic_lesson_id");
+
+                    b.HasIndex("TopicStrandId")
+                        .HasDatabaseName("ix_topic_assignments_topic_strand_id");
+
+                    b.HasIndex("TenantId", "StartDate", "EndDate")
+                        .HasDatabaseName("ix_topic_assignments_tenant_effective_dates");
+
+                    b.ToTable("topic_assignments", (string)null);
+
+                    b.HasDiscriminator<string>("topic_assignment_type").HasValue("TopicAssignment");
+
+                    b.UseTphMappingStrategy();
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicLesson", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1366,6 +1364,44 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("subject_strands", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroupTopicAssignment", b =>
+                {
+                    b.HasBaseType("SchoolCollab.Students.Core.Domain.TopicAssignment");
+
+                    b.Property<Guid>("ActivityGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_group_id");
+
+                    b.HasIndex("ActivityGroupId")
+                        .HasDatabaseName("ix_topic_assignments_activity_group_id");
+
+                    b.HasIndex("TenantId", "ActivityGroupId", "TopicId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_topic_assignments_tenant_group_topic_unique")
+                        .HasFilter("\"topic_assignment_type\" = 'activity_group'");
+
+                    b.HasDiscriminator().HasValue("activity_group");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeTopicAssignment", b =>
+                {
+                    b.HasBaseType("SchoolCollab.Students.Core.Domain.TopicAssignment");
+
+                    b.Property<Guid>("GradeLevelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("grade_level_id");
+
+                    b.HasIndex("GradeLevelId")
+                        .HasDatabaseName("ix_topic_assignments_grade_level_id");
+
+                    b.HasIndex("TenantId", "GradeLevelId", "TopicId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_topic_assignments_tenant_grade_topic_unique")
+                        .HasFilter("\"topic_assignment_type\" = 'grade'");
+
+                    b.HasDiscriminator().HasValue("grade");
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroup", b =>
                 {
                     b.HasOne("SchoolCollab.Students.Core.Domain.Period", null)
@@ -1392,19 +1428,19 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasConstraintName("fk_activity_group_memberships_students_student_id");
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeSubjectAssignment", b =>
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicAssignment", b =>
                 {
                     b.HasOne("SchoolCollab.Students.Core.Domain.TopicLesson", null)
                         .WithMany()
                         .HasForeignKey("TopicLessonId")
                         .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_grade_subject_assignments_topic_lessons_topic_lesson_id");
+                        .HasConstraintName("fk_topic_assignments_topic_lessons_topic_lesson_id");
 
                     b.HasOne("SchoolCollab.Students.Core.Domain.TopicStrand", null)
                         .WithMany()
                         .HasForeignKey("TopicStrandId")
                         .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_grade_subject_assignments_topic_strands_topic_strand_id");
+                        .HasConstraintName("fk_topic_assignments_topic_strands_topic_strand_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicLesson", b =>
@@ -1437,6 +1473,26 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasConstraintName("fk_subject_strands_subjects_topic_id");
 
                     b.Navigation("Topic");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroupTopicAssignment", b =>
+                {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.ActivityGroup", null)
+                        .WithMany()
+                        .HasForeignKey("ActivityGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_topic_assignments_activity_groups_activity_group_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeTopicAssignment", b =>
+                {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.GradeLevel", null)
+                        .WithMany()
+                        .HasForeignKey("GradeLevelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_topic_assignments_grade_levels_grade_level_id");
                 });
 #pragma warning restore 612, 618
         }

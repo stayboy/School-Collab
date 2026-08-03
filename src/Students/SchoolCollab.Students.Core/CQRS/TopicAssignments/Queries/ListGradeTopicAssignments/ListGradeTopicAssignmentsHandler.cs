@@ -4,11 +4,11 @@ using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.DTOs;
 
-namespace SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Queries.ListGradeSubjectAssignmentsByGradeLevel;
+namespace SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicAssignments;
 
-public sealed class ListGradeSubjectAssignmentsByGradeLevelHandler(
+public sealed class ListGradeTopicAssignmentsHandler(
     StudentsDbContext db,
-    HybridCache cache) : IQueryHandler<ListGradeSubjectAssignmentsByGradeLevel, GradeSubjectAssignmentDto[]>
+    HybridCache cache) : IQueryHandler<ListGradeTopicAssignments, TopicAssignmentDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -16,8 +16,8 @@ public sealed class ListGradeSubjectAssignmentsByGradeLevelHandler(
         LocalCacheExpiration = TimeSpan.FromMinutes(1)
     };
 
-    public async Task<GradeSubjectAssignmentDto[]> HandleAsync(
-        ListGradeSubjectAssignmentsByGradeLevel query,
+    public async Task<TopicAssignmentDto[]> HandleAsync(
+        ListGradeTopicAssignments query,
         CancellationToken cancellationToken = default)
     {
         // Capture the tenant in the request scope: db.CurrentTenantId is lost
@@ -26,12 +26,12 @@ public sealed class ListGradeSubjectAssignmentsByGradeLevelHandler(
         var tenantId = db.CurrentTenantId;
 
         return await cache.GetOrCreateAsync(
-            $"grade-level:{query.GradeLevelId}:effective:{query.EffectiveDate:yyyyMMdd}:grade-subject-assignments",
+            $"grade-level:{query.GradeLevelId}:effective:{query.EffectiveDate:yyyyMMdd}:grade-topic-assignments",
             (db, query.GradeLevelId, query.EffectiveDate, tenantId),
             static async (state, ct) =>
             {
                 var (db, gradeLevelId, effectiveDate, tenantId) = state;
-                var results = await db.GradeSubjectAssignments
+                var results = await db.GradeTopicAssignments
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(x => x.GradeLevelId == gradeLevelId && x.TenantId == tenantId
                         && x.StartDate <= effectiveDate
@@ -39,10 +39,11 @@ public sealed class ListGradeSubjectAssignmentsByGradeLevelHandler(
                     .OrderBy(x => x.TopicId)
                     .ToArrayAsync(ct);
 
-                return results.Select(a => new GradeSubjectAssignmentDto(
+                return results.Select(a => new TopicAssignmentDto(
                     a.Id,
+                    "grade",
                     a.GradeLevelId,
-                    a.ActivityGroupId,
+                    null,
                     a.TopicId,
                     a.StartDate,
                     a.EndDate,

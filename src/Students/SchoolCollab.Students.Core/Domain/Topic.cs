@@ -8,7 +8,7 @@ namespace SchoolCollab.Students.Core.Domain;
 /// <summary>
 /// A shared, global topic (subject) definition. A topic is a tenant-scoped
 /// catalog entry assigned to grades/groups via the M:N
-/// <see cref="GradeSubjectAssignment"/> bridge. Per-grade/group strand and
+/// <see cref="TopicAssignment"/> bridge. Per-grade/group strand and
 /// lesson selection is expressed by the bridge's <c>TopicStrandId</c> and
 /// <c>TopicLessonId</c> columns, not by duplicating the topic.
 /// </summary>

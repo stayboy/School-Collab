@@ -101,7 +101,7 @@ public sealed class GradeLevel : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public void Delete()
     {
         // Delete is a hard delete. The repository enforces referential integrity
-        // by checking for StudentEnrollments and GradeSubjectAssignments before
+        // by checking for StudentEnrollments and GradeTopicAssignments before
         // allowing the delete. See DeleteGradeLevelHandler.
         _domainEvents.Add(new GradeLevelDeletedEvent(Id, Name));
     }

@@ -29,12 +29,12 @@ public sealed class DeleteTopicHandler(
             throw new TopicReferencedException(command.Id, ["StudentTopicAssignments"]);
         }
 
-        var hasBridgeAssignments = await db.GradeSubjectAssignments
-            .AnyAsync(gsa => gsa.TopicId == command.Id, cancellationToken);
+        var hasBridgeAssignments = await db.TopicAssignments
+            .AnyAsync(ta => ta.TopicId == command.Id, cancellationToken);
 
         if (hasBridgeAssignments)
         {
-            throw new TopicReferencedException(command.Id, ["GradeSubjectAssignments"]);
+            throw new TopicReferencedException(command.Id, ["TopicAssignments"]);
         }
 
         topic.Delete();

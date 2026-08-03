@@ -170,6 +170,14 @@ public abstract class ModuleDbContext : DbContext
                 continue;
             }
 
+            // TPH/TPC derived types inherit the filter declared on the mapped
+            // root (EF Core disallows a filter on a derived type). The audit
+            // walks the root, so derived types are covered transitively.
+            if (entityType.BaseType is not null)
+            {
+                continue;
+            }
+
             if (allowList.Contains(entityType.ClrType))
             {
                 continue;

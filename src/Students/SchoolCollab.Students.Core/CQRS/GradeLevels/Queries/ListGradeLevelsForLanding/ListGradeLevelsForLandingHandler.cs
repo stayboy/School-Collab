@@ -72,7 +72,7 @@ public sealed class ListGradeLevelsForLandingHandler(
                         // TopicCount is date-effective, not period-bound: a grade's
                         // topic spans multiple years unless blocked/archived (an
                         // EndDate). It is not gated on a current period existing.
-                        TopicCount = db.GradeSubjectAssignments
+                        TopicCount = db.GradeTopicAssignments
                             .IgnoreQueryFilters(new[] { "Tenant" })
                             .Count(ga =>
                                 ga.GradeLevelId == gl.Id

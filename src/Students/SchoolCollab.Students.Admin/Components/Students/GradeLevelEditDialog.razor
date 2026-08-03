@@ -6,21 +6,22 @@
         the system-wide coded value is NEVER edited from this surface).
       - The enrollment-validation guard clauses (MinAge / MaxAge /
         AllowedGender) â€” the only fields the Edit PUT actually persists.
-      - The Subjects multi-select (current-period baseline + diff).
+      - The Topics multi-select (current-period baseline + diff).
 
     No GRADE dropdown â€” the coded value id is set at Create time and is
     immutable on Edit; renaming goes through the tenant override.
 
     Submit flow:
       1. PUT /students/grade-levels/{id} with the validation fields.
-      2. Apply the subject diff via AssignGradeSubjectAsync /
-         RemoveGradeSubjectAsync.
+      2. Apply the topic diff via AssignGradeTopicAsync /
+         RemoveTopicAssignmentAsync.
 *@
 @inherits DialogShellBase<GradeLevelEditDialog.GradeLevelEditModel, GradeLevelDto>
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Admin.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Constants
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject CodedValuesApiClient CodedValuesApi
@@ -66,27 +67,27 @@
                                 Placeholder="No restriction (co-ed)" />
         </FormRow>
 
-        @if (_allSubjects.Length > 0)
+        @if (_allTopics.Length > 0)
         {
-            <FormRow Label="@($"Subjects ({Model.SubjectIds.Count})")" AlignTop>
-                <FluentListbox Items="@_allSubjects"
-                               @bind-SelectedValues="Model.SubjectIds"
+            <FormRow Label="@($"Topics ({Model.TopicIds.Count})")" AlignTop>
+                <FluentListbox Items="@_allTopics"
+                               @bind-SelectedValues="Model.TopicIds"
                                OptionText="@(s => s.Name)"
                                OptionValue="@(s => s.Id.ToString())"
                                Multiple="true"
                                Style="width: 100%; min-height: 160px;" />
             </FormRow>
         }
-        else if (_allSubjects.Length == 0)
+        else if (_allTopics.Length == 0)
         {
             <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
-                No subjects exist yet.
+                No topics exist yet.
             </FluentMessageBar>
         }
         else
         {
             <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
-                Could not load subjects for this grade.
+                Could not load topics for this grade.
             </FluentMessageBar>
         }
 
@@ -106,7 +107,7 @@
 </style>
 
 @code {
-    private SubjectDto[] _allSubjects = [];
+    private TopicDto[] _allTopics = [];
     private CodedValueDto? _codedValue;
     private bool _resolvingOverride;
 
@@ -135,14 +136,14 @@
         public int? MaxAge { get; set; }
         public Guid? AllowedGenderCodedValueId { get; set; }
 
-        /// <summary>Picked subject ids; bound to the FluentListbox.</summary>
-        public IReadOnlyList<Guid> SubjectIds { get; set; } = [];
+        /// <summary>Picked topic ids; bound to the FluentListbox.</summary>
+        public IReadOnlyList<Guid> TopicIds { get; set; } = [];
 
         /// <summary>
-        /// subject id -> grade-subject-assignment id for already-assigned
-        /// subjects (used by RemoveGradeSubjectAsync on Edit).
+        /// topic id -> grade-topic-assignment id for already-assigned
+        /// topics (used by RemoveTopicAssignmentAsync on Edit).
         /// </summary>
-        public IReadOnlyDictionary<Guid, Guid> SubjectIdToAssignmentId { get; set; }
+        public IReadOnlyDictionary<Guid, Guid> TopicIdToAssignmentId { get; set; }
             = new Dictionary<Guid, Guid>();
     }
 
@@ -169,8 +170,8 @@
     {
         try
         {
-            var all = await Api.ListSubjectsAsync();
-            _allSubjects = all ?? [];
+            var all = await Api.ListTopicsAsync();
+            _allTopics = all ?? [];
 
             _codedValue = await CodedValuesApi.GetByIdAsync(Model.CodedValueId);
             if (_codedValue is not null)
@@ -185,11 +186,11 @@
                 }
             }
 
-            var existing = await Api.ListGradeSubjectsByGradeAsync(Model.Id) ?? [];
-            var ids = existing.Select(a => a.SubjectId).ToList();
-            var map = existing.ToDictionary(a => a.SubjectId, a => a.Id);
-            Model.SubjectIds = ids;
-            Model.SubjectIdToAssignmentId = map;
+            var existing = await Api.ListGradeTopicsByGradeAsync(Model.Id) ?? [];
+            var ids = existing.Select(a => a.TopicId).ToList();
+            var map = existing.ToDictionary(a => a.TopicId, a => a.Id);
+            Model.TopicIds = ids;
+            Model.TopicIdToAssignmentId = map;
         }
         catch (Exception ex)
         {
@@ -252,10 +253,10 @@
             model.MaxAge,
             model.AllowedGenderCodedValueId));
 
-        // 2. Subject diff. Assignments are date-based and open-ended (start
-        // today, no end) — a picked subject stays assigned across years until
+        // 2. Topic diff. Assignments are date-based and open-ended (start
+        // today, no end) — a picked topic stays assigned across years until
         // removed.
-        var warnings = await ApplySubjectDiffAsync(model.Id, model);
+        var warnings = await ApplyTopicDiffAsync(model.Id, model);
         if (!string.IsNullOrEmpty(warnings))
         {
             Error = warnings;
@@ -267,49 +268,49 @@
             model.Level,
             model.CurrentName,
             model.DisplayOrder,
-            0, 0, // SubjectCount / StudentCount - landing reloads, not used here
+            0, 0, // TopicCount / StudentCount - landing reloads, not used here
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
             model.MinAge, model.MaxAge, model.AllowedGenderCodedValueId);
     }
 
     /// <summary>
-    /// Applies the picked subject set against the grade's currently-effective
-    /// assignments. Returns a non-empty string with any non-fatal per-subject
+    /// Applies the picked topic set against the grade's currently-effective
+    /// assignments. Returns a non-empty string with any non-fatal per-topic
     /// failure messages (so the dialog footer can show them).
     /// </summary>
-    private async Task<string?> ApplySubjectDiffAsync(
+    private async Task<string?> ApplyTopicDiffAsync(
         Guid gradeLevelId, GradeLevelEditModel model)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var baseline = await Api.ListGradeSubjectsByGradeAsync(gradeLevelId) ?? [];
-        var assignedSubjectIds = new HashSet<Guid>(baseline.Select(a => a.SubjectId));
-        var desiredIds = new HashSet<Guid>(model.SubjectIds);
+        var baseline = await Api.ListGradeTopicsByGradeAsync(gradeLevelId) ?? [];
+        var assignedTopicIds = new HashSet<Guid>(baseline.Select(a => a.TopicId));
+        var desiredIds = new HashSet<Guid>(model.TopicIds);
 
         var warnings = new List<string>();
 
-        foreach (var sid in desiredIds.Except(assignedSubjectIds))
+        foreach (var sid in desiredIds.Except(assignedTopicIds))
         {
             try
             {
-                await Api.AssignGradeSubjectAsync(
-                    new AssignGradeSubjectRequest(gradeLevelId, sid, today));
+                await Api.AssignGradeTopicAsync(
+                    new AssignGradeTopicRequest(gradeLevelId, sid, today));
             }
             catch (Exception ex)
             {
-                warnings.Add($"Could not assign subject {sid}: {ex.Message}");
+                warnings.Add($"Could not assign topic {sid}: {ex.Message}");
             }
         }
 
-        foreach (var sid in assignedSubjectIds.Except(desiredIds))
+        foreach (var sid in assignedTopicIds.Except(desiredIds))
         {
-            if (!model.SubjectIdToAssignmentId.TryGetValue(sid, out var assignmentId)) continue;
+            if (!model.TopicIdToAssignmentId.TryGetValue(sid, out var assignmentId)) continue;
             try
             {
-                await Api.RemoveGradeSubjectAsync(assignmentId);
+                await Api.RemoveTopicAssignmentAsync(assignmentId);
             }
             catch (Exception ex)
             {
-                warnings.Add($"Could not unassign subject {sid}: {ex.Message}");
+                warnings.Add($"Could not unassign topic {sid}: {ex.Message}");
             }
         }
 

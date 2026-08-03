@@ -103,11 +103,11 @@ public class GradeLevelCreateDialogTests : BunitContext
     {
         var handler = new ScriptedHandler();
 
-        // CodedValueDropdown parent lookups + Subjects catalog - empty. Keyed
+        // CodedValueDropdown parent lookups + Topics catalog - empty. Keyed
         // off the parent-code endpoint so it does NOT shadow the per-id
         // GetByIdAsync registration below.
         handler.Map("/api/coded-values/by-parent", HttpStatusCode.OK, "[]");
-        handler.Map("/students/subjects", HttpStatusCode.OK, "[]");
+        handler.Map("/students/topics", HttpStatusCode.OK, "[]");
 
         // GetByIdAsync for the picked coded value - exact-match on the
         // /api/coded-values/{id} path. The dictionary's exact-match lookup
@@ -148,31 +148,35 @@ public class GradeLevelCreateDialogTests : BunitContext
                 ["level"] = 5,
                 ["name"] = "Grade 5",
                 ["displayOrder"] = 5,
-                ["subjectCount"] = 0,
+                ["topicCount"] = 0,
                 ["studentCount"] = 0,
                 ["createdAt"] = DateTimeOffset.UnixEpoch,
                 ["updatedAt"] = DateTimeOffset.UnixEpoch,
             }));
 
-        // ListGradeSubjectsByGradeAsync -> GET /students/grade-subjects/by-grade/{id}.
+        // ListGradeTopicsByGradeAsync -> GET /students/topic-assignments/by-grade/{id}.
         var seeded = (seededAssignments ?? []).Select(a => new Dictionary<string, object?>
         {
             ["id"] = a.AssignmentId,
+            ["audience"] = "grade",
             ["gradeLevelId"] = gradeId,
-            ["subjectId"] = a.SubjectId,
+            ["activityGroupId"] = (Guid?)null,
+            ["topicId"] = a.SubjectId,
             ["startDate"] = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
             ["endDate"] = (string?)null,
+            ["topicStrandId"] = (Guid?)null,
+            ["topicLessonId"] = (Guid?)null,
             ["createdAt"] = DateTimeOffset.UnixEpoch,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         }).ToArray();
-        handler.Map("GET", "/students/grade-subjects/by-grade/", HttpStatusCode.OK,
+        handler.Map("GET", "/students/topic-assignments/by-grade/", HttpStatusCode.OK,
             JsonSerializer.Serialize(seeded));
 
-        // AssignGradeSubjectAsync -> POST /students/grade-subjects.
-        handler.Map("POST", "/students/grade-subjects", HttpStatusCode.Created,
+        // AssignGradeTopicAsync -> POST /students/topic-assignments/grade.
+        handler.Map("POST", "/students/topic-assignments/grade", HttpStatusCode.Created,
             JsonSerializer.Serialize(new Dictionary<string, object?> { ["id"] = Guid.NewGuid() }));
-        // RemoveGradeSubjectAsync -> DELETE /students/grade-subjects/{id}.
-        handler.Map("DELETE", "/students/grade-subjects/", HttpStatusCode.NoContent, "");
+        // RemoveTopicAssignmentAsync -> DELETE /students/topic-assignments/{id}.
+        handler.Map("DELETE", "/students/topic-assignments/", HttpStatusCode.NoContent, "");
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         var codedValuesClient = new CodedValuesApiClient(http);
@@ -213,8 +217,8 @@ public class GradeLevelCreateDialogTests : BunitContext
     [TestMethod]
     public async Task Create_Dialog_Submit_BrandNewGrade_AssignsAllPickedSubjects()
     {
-        // Plan §5.2: brand-new grade (baseline empty) -> N AssignGradeSubject
-        // calls, no RemoveGradeSubject calls.
+        // Plan §5.2: brand-new grade (baseline empty) -> N AssignGradeTopic
+        // calls, no RemoveTopicAssignment calls.
         var gradeId = Guid.NewGuid();
         var codedValueId = Guid.NewGuid();
         var subjectIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
@@ -224,7 +228,7 @@ public class GradeLevelCreateDialogTests : BunitContext
             codedValueId: codedValueId,
             seededAssignments: null); // empty baseline
 
-        // Seed the subject catalog so the dialog's ListSubjectsAsync returns
+        // Seed the topic catalog so the dialog's ListTopicsAsync returns
         // options. The dialog stores picked ids on the model; the test
         // sets them directly before submitting.
         var catalog = subjectIds
@@ -240,7 +244,7 @@ public class GradeLevelCreateDialogTests : BunitContext
                 ["updatedAt"] = DateTimeOffset.UnixEpoch,
             })
             .ToArray();
-        handler.Map("/students/subjects", HttpStatusCode.OK, JsonSerializer.Serialize(catalog));
+        handler.Map("/students/topics", HttpStatusCode.OK, JsonSerializer.Serialize(catalog));
 
         var cut = RenderProvider();
         var model = new GradeLevelCreateDialog.GradeLevelCreateModel
@@ -248,7 +252,7 @@ public class GradeLevelCreateDialogTests : BunitContext
             CodedValueId = codedValueId,
             MinAge = 10,
             MaxAge = 12,
-            SubjectIds = subjectIds.ToList(),
+            TopicIds = subjectIds.ToList(),
         };
 
         var task = DialogService.ShowShellDialogAsync<
