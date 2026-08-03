@@ -25,6 +25,21 @@ public static class StudentEndpoints
             .MapStudentSubjectAssignmentRoutes()
             .MapStudentGuardianRoutes();   // G2: inherits RequireAuthorization from studentsGroup
 
+        // Phase 2 (spec activity-group-enrollment.md §7.1/§7.2): activity-group
+        // CRUD + membership endpoints. Gated behind FEATURE:EnableActivityGroups
+        // (flag OFF by default — dark launch). Routes are root-level
+        // (/activity-groups/*) except the student→groups query which is
+        // /students/{id}/activity-groups.
+        if (featureFlags.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
+        {
+            var activityGroupsGroup = app.MapGroup("");
+            if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+            {
+                activityGroupsGroup.RequireAuthorization();
+            }
+            activityGroupsGroup.MapActivityGroupRoutes();
+        }
+
         // Phase 3 (spec §9): guardians + contacts + subscriptions.
         // G2: management endpoints are admin/teacher-only (not student/anonymous) —
         // they require authorization. Role-based gating (Primary vs CC) is a later

@@ -27,7 +27,10 @@ internal sealed class ActivityGroupRepository(StudentsDbContext db)
             .OrderBy(x => x.Name)
             .Select(x => new ActivityGroupDto(
                 x.Id, x.Name, x.Description, x.Category, x.PeriodId,
-                x.Capacity, x.Status.ToString(), 0, x.CreatedAt, x.UpdatedAt))
+                x.Capacity, x.Status.ToString(),
+                Db.ActivityGroupMemberships
+                    .Count(m => m.ActivityGroupId == x.Id && m.Status == MembershipStatus.Active),
+                x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 
     public Task<int> CountActiveMembersAsync(Guid activityGroupId, CancellationToken cancellationToken = default) =>

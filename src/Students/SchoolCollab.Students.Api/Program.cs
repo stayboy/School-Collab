@@ -30,6 +30,13 @@ builder.Services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(clie
     client.BaseAddress = new Uri("http://settings-api");
 });
 
+// Phase 2 (spec activity-group-enrollment.md FR-6): HTTP client for the
+// Assignments API delete-guard check. The named client is resolved via
+// Aspire service discovery once the AppHost references assignments-api.
+builder.Services.AddHttpClient("assignments-api");
+builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IActivityGroupAssignmentQuery,
+    SchoolCollab.Students.Api.Services.ActivityGroupAssignmentQueryHttpClient>();
+
 builder.Services.AddStudentsCore(builder.Configuration);
 // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
 // is resolvable by the Student/Teacher creation handlers.

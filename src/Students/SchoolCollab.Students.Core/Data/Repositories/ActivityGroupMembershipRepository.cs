@@ -32,8 +32,9 @@ internal sealed class ActivityGroupMembershipRepository(StudentsDbContext db)
             .AsNoTracking()
             .Where(m => m.ActivityGroupId == activityGroupId)
             .OrderByDescending(m => m.JoinedOn)
-            .Select(m => new MembershipDto(
-                m.Id, m.ActivityGroupId, m.StudentId, string.Empty,
+            .Join(Db.Students, m => m.StudentId, s => s.Id, (m, s) => new MembershipDto(
+                m.Id, m.ActivityGroupId, m.StudentId,
+                (s.FirstName + " " + s.LastName).Trim(),
                 m.JoinedOn, m.ExitedOn, m.Status.ToString(),
                 m.CreatedAt, m.UpdatedAt))
             .ToArrayAsync(cancellationToken);
@@ -43,8 +44,9 @@ internal sealed class ActivityGroupMembershipRepository(StudentsDbContext db)
             .AsNoTracking()
             .Where(m => m.StudentId == studentId)
             .OrderByDescending(m => m.JoinedOn)
-            .Select(m => new MembershipDto(
-                m.Id, m.ActivityGroupId, m.StudentId, string.Empty,
+            .Join(Db.Students, m => m.StudentId, s => s.Id, (m, s) => new MembershipDto(
+                m.Id, m.ActivityGroupId, m.StudentId,
+                (s.FirstName + " " + s.LastName).Trim(),
                 m.JoinedOn, m.ExitedOn, m.Status.ToString(),
                 m.CreatedAt, m.UpdatedAt))
             .ToArrayAsync(cancellationToken);
