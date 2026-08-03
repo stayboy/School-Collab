@@ -13,11 +13,11 @@ public sealed class AssignStudentSubjectHandler(
 {
     public async Task<Guid> HandleAsync(AssignStudentSubject command, CancellationToken cancellationToken = default)
     {
-        logger.LogDebug("Handling AssignStudentSubject for student {StudentId} subject {SubjectId}", command.StudentId, command.SubjectId);
+        logger.LogDebug("Handling AssignStudentSubject for student {StudentId} subject {TopicId}", command.StudentId, command.TopicId);
 
         var assignment = StudentSubjectAssignment.Create(
             command.StudentId,
-            command.SubjectId,
+            command.TopicId,
             command.PeriodId,
             command.IsOverride,
             command.SourceType);

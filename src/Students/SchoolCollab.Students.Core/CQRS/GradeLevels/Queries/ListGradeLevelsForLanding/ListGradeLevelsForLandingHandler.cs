@@ -14,7 +14,7 @@ namespace SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevelsFor
 /// EndDate &gt;= today</c>) - there is no period parameter, so the UI can't get out
 /// of sync. <see cref="GradeLevelLandingDto.StudentCount"/> is tenant-scoped via
 /// the <c>Student</c> global query filter (which uses <see cref="ITenantProvider"/>);
-/// <see cref="GradeLevelLandingDto.SubjectCount"/> is global. See spec 5.3.
+/// <see cref="GradeLevelLandingDto.TopicCount"/> is global. See spec 5.3.
 /// </summary>
 public sealed class ListGradeLevelsForLandingHandler(
     StudentsDbContext db,
@@ -48,10 +48,10 @@ public sealed class ListGradeLevelsForLandingHandler(
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, currentPeriodId, currentPeriod?.Name, tenantId),
+            (db, currentPeriodId, currentPeriod?.Name, tenantId, today),
             static async (state, ct) =>
             {
-                var (db, currentPeriodId, currentPeriodName, tenantId) = state;
+                var (db, currentPeriodId, currentPeriodName, tenantId, today) = state;
                 var hasPeriod = currentPeriodId is not null;
 
                 var rows = await db.GradeLevels
@@ -69,14 +69,16 @@ public sealed class ListGradeLevelsForLandingHandler(
                         gl.AllowedGenderCodedValueId,
                         gl.CreatedAt,
                         gl.UpdatedAt,
-                        SubjectCount = hasPeriod
-                            ? db.GradeSubjectAssignments
-                                .IgnoreQueryFilters(new[] { "Tenant" })
-                                .Count(ga =>
-                                    ga.GradeLevelId == gl.Id
-                                    && ga.PeriodId == currentPeriodId!.Value
-                                    && ga.TenantId == tenantId)
-                            : 0,
+                        // TopicCount is date-effective, not period-bound: a grade's
+                        // topic spans multiple years unless blocked/archived (an
+                        // EndDate). It is not gated on a current period existing.
+                        TopicCount = db.GradeSubjectAssignments
+                            .IgnoreQueryFilters(new[] { "Tenant" })
+                            .Count(ga =>
+                                ga.GradeLevelId == gl.Id
+                                && ga.TenantId == tenantId
+                                && ga.StartDate <= today
+                                && (ga.EndDate == null || ga.EndDate >= today)),
                         StudentCount = hasPeriod
                             ? db.StudentEnrollments
                                 .IgnoreQueryFilters(new[] { "Tenant" })
@@ -96,7 +98,7 @@ public sealed class ListGradeLevelsForLandingHandler(
                         gl.Id,
                         gl.CodedValueId,
                         gl.Name,
-                        gl.SubjectCount,
+                        gl.TopicCount,
                         gl.StudentCount,
                         currentPeriodId,
                         currentPeriodName,

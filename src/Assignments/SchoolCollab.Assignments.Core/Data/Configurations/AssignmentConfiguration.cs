@@ -36,7 +36,7 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             .IsRequired()
             .HasDefaultValue(TargetAudienceType.AllStudents);
 
-        builder.Property(x => x.SubjectId);
+        builder.Property(x => x.TopicId);
         builder.Property(x => x.GradeLevelId);
         builder.Property(x => x.AssignmentNumber).HasMaxLength(50);
 
@@ -59,8 +59,8 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Property(x => x.PublishedAt);
 
 
-        builder.HasIndex(x => x.SubjectId)
-            .HasDatabaseName("ix_assignments_subject_id");
+        builder.HasIndex(x => x.TopicId)
+            .HasDatabaseName("ix_assignments_topic_id");
 
         builder.HasIndex(x => x.GradeLevelId)
             .HasDatabaseName("ix_assignments_grade_level_id");

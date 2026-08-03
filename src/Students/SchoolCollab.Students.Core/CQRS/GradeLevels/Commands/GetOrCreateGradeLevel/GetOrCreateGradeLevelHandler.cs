@@ -69,7 +69,7 @@ public sealed class GetOrCreateGradeLevelHandler(
             gradeLevel.Level,
             gradeLevel.Name,
             gradeLevel.DisplayOrder,
-            SubjectCount: 0,
+            TopicCount: 0,
             StudentCount: 0,
             gradeLevel.CreatedAt,
             gradeLevel.UpdatedAt,

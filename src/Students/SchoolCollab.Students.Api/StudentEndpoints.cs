@@ -18,7 +18,7 @@ public static class StudentEndpoints
         studentsGroup
             .MapStudentRoutes()
             .MapGradeLevelRoutes()
-            .MapSubjectRoutes()
+            .MapTopicRoutes()
             .MapPeriodRoutes()
             .MapEnrollmentRoutes()
             .MapGradeSubjectAssignmentRoutes()

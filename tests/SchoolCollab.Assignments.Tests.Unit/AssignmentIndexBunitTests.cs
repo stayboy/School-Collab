@@ -107,7 +107,7 @@ public class AssignmentIndexBunitTests : BunitContext
     [TestMethod]
     public void Index_JsonOptions_DeserializeStringsToEnums()
     {
-        var json = """{"id":"00000000-0000-0000-0000-000000000001","title":"Test","description":null,"assignmentType":"SemiManual","gradingFormat":"TeacherGraded","targetAudienceType":"AllStudents","subjectCodedValueId":"00000000-0000-0000-0000-000000000002","subjectName":"Math","gradeCodedValueId":null,"gradeName":null,"status":"Published","dueDate":null,"maxScore":null,"createdByTeacherId":"00000000-0000-0000-0000-000000000003","createdAt":"2026-01-01T00:00:00+00:00","updatedAt":"2026-01-01T00:00:00+00:00"}""";
+        var json = """{"id":"00000000-0000-0000-0000-000000000001","title":"Test","description":null,"assignmentType":"SemiManual","gradingFormat":"TeacherGraded","targetAudienceType":"AllStudents","topicId":"00000000-0000-0000-0000-000000000002","topicName":"Math","gradeLevelId":null,"gradeName":null,"status":"Published","dueDate":null,"maxScore":null,"createdByTeacherId":"00000000-0000-0000-0000-000000000003","createdAt":"2026-01-01T00:00:00+00:00","updatedAt":"2026-01-01T00:00:00+00:00"}""";
 
         var dto = JsonSerializer.Deserialize<AssignmentSummaryDto>(json, _apiJsonOptions);
 

@@ -424,17 +424,21 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<Guid?>("ActivityGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_group_id");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<Guid>("GradeLevelId")
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<Guid?>("GradeLevelId")
                         .HasColumnType("uuid")
                         .HasColumnName("grade_level_id");
-
-                    b.Property<Guid>("PeriodId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("period_id");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -442,21 +446,25 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
-                    b.Property<Guid?>("SubjectLessonId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_lesson_id");
-
-                    b.Property<Guid?>("SubjectStrandId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_strand_id");
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
+
+                    b.Property<Guid?>("TopicLessonId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_lesson_id");
+
+                    b.Property<Guid?>("TopicStrandId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_strand_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -465,16 +473,16 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_grade_subject_assignments");
 
-                    b.HasIndex("SubjectLessonId")
-                        .HasDatabaseName("ix_grade_subject_assignments_subject_lesson_id");
+                    b.HasIndex("TopicLessonId")
+                        .HasDatabaseName("ix_grade_subject_assignments_topic_lesson_id");
 
-                    b.HasIndex("SubjectStrandId")
-                        .HasDatabaseName("ix_grade_subject_assignments_subject_strand_id");
+                    b.HasIndex("TopicStrandId")
+                        .HasDatabaseName("ix_grade_subject_assignments_topic_strand_id");
 
-                    b.HasIndex("TenantId", "PeriodId")
-                        .HasDatabaseName("ix_grade_subject_assignments_tenant_period");
+                    b.HasIndex("TenantId", "StartDate", "EndDate")
+                        .HasDatabaseName("ix_grade_subject_assignments_tenant_effective_dates");
 
-                    b.HasIndex("TenantId", "GradeLevelId", "SubjectId", "PeriodId")
+                    b.HasIndex("TenantId", "GradeLevelId", "ActivityGroupId", "TopicId")
                         .IsUnique()
                         .HasDatabaseName("ix_grade_subject_assignments_tenant_unique");
 
@@ -913,13 +921,13 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("student_id");
 
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -931,7 +939,7 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasIndex("TenantId", "PeriodId")
                         .HasDatabaseName("ix_student_subject_assignments_tenant_period");
 
-                    b.HasIndex("TenantId", "StudentId", "SubjectId", "PeriodId")
+                    b.HasIndex("TenantId", "StudentId", "TopicId", "PeriodId")
                         .IsUnique()
                         .HasDatabaseName("ix_student_subject_assignments_tenant_unique");
 
@@ -1006,189 +1014,6 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasDatabaseName("ix_student_transfer_audit_tenant_to_grade");
 
                     b.ToTable("student_transfer_audit_entries", (string)null);
-                });
-
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Subject", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<string>("Code")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)")
-                        .HasColumnName("code");
-
-                    b.Property<Guid>("CodedValueId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("coded_value_id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("integer")
-                        .HasColumnName("display_order");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("name");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_subjects");
-
-                    b.HasIndex("TenantId", "Code")
-                        .IsUnique()
-                        .HasDatabaseName("ix_subjects_tenant_code");
-
-                    b.HasIndex("TenantId", "CodedValueId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_subjects_tenant_coded_value_id");
-
-                    b.ToTable("subjects", (string)null);
-                });
-
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.SubjectLesson", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("description");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("integer")
-                        .HasColumnName("display_order");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date")
-                        .HasColumnName("end_date");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("name");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<DateOnly?>("StartDate")
-                        .HasColumnType("date")
-                        .HasColumnName("start_date");
-
-                    b.Property<Guid?>("StrandId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("strand_id");
-
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_subject_lessons");
-
-                    b.HasIndex("StrandId")
-                        .HasDatabaseName("ix_subject_lessons_strand");
-
-                    b.HasIndex("SubjectId")
-                        .HasDatabaseName("ix_subject_lessons_subject_id");
-
-                    b.HasIndex("TenantId", "SubjectId")
-                        .HasDatabaseName("ix_subject_lessons_tenant_subject");
-
-                    b.ToTable("subject_lessons", (string)null);
-                });
-
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.SubjectStrand", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<string>("Description")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)")
-                        .HasColumnName("description");
-
-                    b.Property<int>("DisplayOrder")
-                        .HasColumnType("integer")
-                        .HasColumnName("display_order");
-
-                    b.Property<string>("Name")
-                        .IsRequired()
-                        .HasMaxLength(200)
-                        .HasColumnType("character varying(200)")
-                        .HasColumnName("name");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_subject_strands");
-
-                    b.HasIndex("SubjectId")
-                        .HasDatabaseName("ix_subject_strands_subject_id");
-
-                    b.HasIndex("TenantId", "SubjectId")
-                        .HasDatabaseName("ix_subject_strands_tenant_subject");
-
-                    b.ToTable("subject_strands", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Teacher", b =>
@@ -1328,13 +1153,71 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
                     b.Property<Guid>("TeacherId")
                         .HasColumnType("uuid")
                         .HasColumnName("teacher_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_teacher_subjects");
+
+                    b.HasIndex("TenantId", "TeacherId", "TopicId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_teacher_subjects_tenant_teacher_subject");
+
+                    b.ToTable("teacher_subjects", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Topic", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasColumnName("code");
+
+                    b.Property<Guid>("CodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("coded_value_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text")
+                        .HasColumnName("description");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("display_order");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -1345,13 +1228,142 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnName("updated_at");
 
                     b.HasKey("Id")
-                        .HasName("pk_teacher_subjects");
+                        .HasName("pk_subjects");
 
-                    b.HasIndex("TenantId", "TeacherId", "SubjectId")
+                    b.HasIndex("TenantId", "Code")
                         .IsUnique()
-                        .HasDatabaseName("ix_teacher_subjects_tenant_teacher_subject");
+                        .HasDatabaseName("ix_subjects_tenant_code");
 
-                    b.ToTable("teacher_subjects", (string)null);
+                    b.HasIndex("TenantId", "CodedValueId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_subjects_tenant_coded_value_id");
+
+                    b.ToTable("subjects", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicLesson", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("display_order");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("end_date");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<DateOnly?>("StartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("start_date");
+
+                    b.Property<Guid?>("StrandId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("strand_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_subject_lessons");
+
+                    b.HasIndex("StrandId")
+                        .HasDatabaseName("ix_subject_lessons_strand");
+
+                    b.HasIndex("TopicId")
+                        .HasDatabaseName("ix_subject_lessons_topic_id");
+
+                    b.HasIndex("TenantId", "TopicId")
+                        .HasDatabaseName("ix_subject_lessons_tenant_subject");
+
+                    b.ToTable("subject_lessons", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicStrand", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)")
+                        .HasColumnName("description");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("integer")
+                        .HasColumnName("display_order");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("name");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_subject_strands");
+
+                    b.HasIndex("TopicId")
+                        .HasDatabaseName("ix_subject_strands_topic_id");
+
+                    b.HasIndex("TenantId", "TopicId")
+                        .HasDatabaseName("ix_subject_strands_tenant_subject");
+
+                    b.ToTable("subject_strands", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroup", b =>
@@ -1382,49 +1394,49 @@ namespace SchoolCollab.Students.Core.Migrations
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeSubjectAssignment", b =>
                 {
-                    b.HasOne("SchoolCollab.Students.Core.Domain.SubjectLesson", null)
+                    b.HasOne("SchoolCollab.Students.Core.Domain.TopicLesson", null)
                         .WithMany()
-                        .HasForeignKey("SubjectLessonId")
+                        .HasForeignKey("TopicLessonId")
                         .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_grade_subject_assignments_subject_lessons_subject_lesson_id");
+                        .HasConstraintName("fk_grade_subject_assignments_topic_lessons_topic_lesson_id");
 
-                    b.HasOne("SchoolCollab.Students.Core.Domain.SubjectStrand", null)
+                    b.HasOne("SchoolCollab.Students.Core.Domain.TopicStrand", null)
                         .WithMany()
-                        .HasForeignKey("SubjectStrandId")
+                        .HasForeignKey("TopicStrandId")
                         .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_grade_subject_assignments_subject_strands_subject_strand_id");
+                        .HasConstraintName("fk_grade_subject_assignments_topic_strands_topic_strand_id");
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.SubjectLesson", b =>
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicLesson", b =>
                 {
-                    b.HasOne("SchoolCollab.Students.Core.Domain.SubjectStrand", "Strand")
+                    b.HasOne("SchoolCollab.Students.Core.Domain.TopicStrand", "Strand")
                         .WithMany()
                         .HasForeignKey("StrandId")
                         .OnDelete(DeleteBehavior.SetNull)
                         .HasConstraintName("fk_subject_lessons_subject_strands_strand_id");
 
-                    b.HasOne("SchoolCollab.Students.Core.Domain.Subject", "Subject")
+                    b.HasOne("SchoolCollab.Students.Core.Domain.Topic", "Topic")
                         .WithMany()
-                        .HasForeignKey("SubjectId")
+                        .HasForeignKey("TopicId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_subject_lessons_subjects_subject_id");
+                        .HasConstraintName("fk_subject_lessons_subjects_topic_id");
 
                     b.Navigation("Strand");
 
-                    b.Navigation("Subject");
+                    b.Navigation("Topic");
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.SubjectStrand", b =>
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicStrand", b =>
                 {
-                    b.HasOne("SchoolCollab.Students.Core.Domain.Subject", "Subject")
+                    b.HasOne("SchoolCollab.Students.Core.Domain.Topic", "Topic")
                         .WithMany()
-                        .HasForeignKey("SubjectId")
+                        .HasForeignKey("TopicId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
-                        .HasConstraintName("fk_subject_strands_subjects_subject_id");
+                        .HasConstraintName("fk_subject_strands_subjects_topic_id");
 
-                    b.Navigation("Subject");
+                    b.Navigation("Topic");
                 });
 #pragma warning restore 612, 618
         }

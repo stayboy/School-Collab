@@ -9,7 +9,7 @@ public record AssignmentSummary(
     AssignmentType AssignmentType,
     GradingFormat GradingFormat,
     TargetAudienceType TargetAudienceType,
-    Guid SubjectId,
+    Guid TopicId,
     Guid? GradeLevelId,
     AssignmentStatus Status,
     DateTimeOffset? DueDate,

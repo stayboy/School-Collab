@@ -20,10 +20,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public GradingFormat GradingFormat { get; private set; }
     public TargetAudienceType TargetAudienceType { get; private set; }
     // Operational references into the Students bounded context (global GradeLevel/
-    // Subject entities). These replace the former coded-value ids so the assignment
+    // Topic entities). These replace the former coded-value ids so the assignment
     // reports against the real operational entities; display names are still
     // resolved client-side from tenant-resolved coded values (spec §5.7).
-    public Guid SubjectId { get; private set; }
+    public Guid TopicId { get; private set; }
     public Guid? GradeLevelId { get; private set; }
     /// <summary>Auto-generated assignment code (e.g. ASGA01) — spec §3.6.</summary>
     public string? AssignmentNumber { get; private set; }
@@ -58,7 +58,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         AssignmentType assignmentType,
         GradingFormat gradingFormat,
         TargetAudienceType targetAudienceType,
-        Guid subjectId,
+        Guid topicId,
         Guid? gradeLevelId,
         DateTimeOffset? dueDate,
         decimal? maxScore,
@@ -66,8 +66,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         bool mandatoryReview = true,
         string? assignmentNumber = null)
     {
-        if (subjectId == Guid.Empty)
-            throw new ArgumentException("Subject is required.", nameof(subjectId));
+        if (topicId == Guid.Empty)
+            throw new ArgumentException("Topic is required.", nameof(topicId));
 
         var now = DateTimeOffset.UtcNow;
         var assignment = new Assignment
@@ -78,7 +78,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             AssignmentType = assignmentType,
             GradingFormat = gradingFormat,
             TargetAudienceType = targetAudienceType,
-            SubjectId = subjectId,
+            TopicId = topicId,
             GradeLevelId = gradeLevelId,
             DueDate = dueDate,
             MaxScore = maxScore,
@@ -98,20 +98,20 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
 
     public void Update(string title, string? description, AssignmentType assignmentType,
         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
-        Guid subjectId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
+        Guid topicId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
         bool mandatoryReview)
     {
         if (Status != AssignmentStatus.Draft)
             throw new InvalidOperationException("Only draft assignments can be updated.");
-        if (subjectId == Guid.Empty)
-            throw new ArgumentException("Subject is required.", nameof(subjectId));
+        if (topicId == Guid.Empty)
+            throw new ArgumentException("Topic is required.", nameof(topicId));
 
         Title = title.Trim();
         Description = description?.Trim();
         AssignmentType = assignmentType;
         GradingFormat = gradingFormat;
         TargetAudienceType = targetAudienceType;
-        SubjectId = subjectId;
+        TopicId = topicId;
         GradeLevelId = gradeLevelId;
         DueDate = dueDate;
         MaxScore = maxScore;

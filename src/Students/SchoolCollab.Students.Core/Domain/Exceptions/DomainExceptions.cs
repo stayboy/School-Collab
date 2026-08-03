@@ -22,12 +22,12 @@ public sealed class GradeLevelNotFoundException : Exception
         => GradeLevelId = id;
 }
 
-public sealed class SubjectNotFoundException : Exception
+public sealed class TopicNotFoundException : Exception
 {
-    public Guid SubjectId { get; }
+    public Guid TopicId { get; }
 
-    public SubjectNotFoundException(Guid id) : base($"Subject with ID '{id}' was not found.")
-        => SubjectId = id;
+    public TopicNotFoundException(Guid id) : base($"Topic with ID '{id}' was not found.")
+        => TopicId = id;
 }
 
 public sealed class PeriodNotFoundException : Exception
@@ -57,12 +57,12 @@ public sealed class DuplicateStudentNumberException : Exception
         => StudentNumber = studentNumber;
 }
 
-public sealed class DuplicateSubjectCodeException : Exception
+public sealed class DuplicateTopicCodeException : Exception
 {
     public string Code { get; }
 
-    public DuplicateSubjectCodeException(string code)
-        : base($"A subject with code '{code}' already exists.")
+    public DuplicateTopicCodeException(string code)
+        : base($"A topic with code '{code}' already exists.")
         => Code = code;
 }
 

@@ -114,9 +114,10 @@ public sealed record StudentEnrollmentDto(
 
 public sealed record GradeSubjectAssignmentDto(
     Guid Id,
-    Guid GradeLevelId,
+    Guid? GradeLevelId,
     Guid SubjectId,
-    Guid PeriodId,
+    DateOnly StartDate,
+    DateOnly? EndDate,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -235,7 +236,8 @@ public record WithdrawStudentRequest(
 public record AssignGradeSubjectRequest(
     Guid GradeLevelId,
     Guid SubjectId,
-    Guid PeriodId);
+    DateOnly StartDate,
+    DateOnly? EndDate = null);
 
 public record AssignStudentSubjectRequest(
     Guid StudentId,
@@ -720,11 +722,13 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Grade Subject Assignments ─────────────────────────────────────────────
 
-    public async Task<GradeSubjectAssignmentDto[]?> ListGradeSubjectsByPeriodAsync(Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>($"/students/grade-subjects/by-period/{periodId}", ct);
-
-    public async Task<GradeSubjectAssignmentDto[]?> ListGradeSubjectsByGradeAsync(Guid gradeLevelId, Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>($"/students/grade-subjects/by-grade/{gradeLevelId}/period/{periodId}", ct);
+    public async Task<GradeSubjectAssignmentDto[]?> ListGradeSubjectsByGradeAsync(Guid gradeLevelId, DateOnly? effectiveDate = null, CancellationToken ct = default)
+    {
+        var url = effectiveDate is { } e
+            ? $"/students/grade-subjects/by-grade/{gradeLevelId}?effectiveDate={e:yyyy-MM-dd}"
+            : $"/students/grade-subjects/by-grade/{gradeLevelId}";
+        return await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>(url, ct);
+    }
 
     public async Task<Guid> AssignGradeSubjectAsync(AssignGradeSubjectRequest req, CancellationToken ct = default)
     {

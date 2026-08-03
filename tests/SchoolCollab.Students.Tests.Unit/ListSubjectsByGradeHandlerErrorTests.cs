@@ -1,16 +1,16 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Students.Core.CQRS.Subjects.Queries.ListSubjectsByGrade;
+using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicsByGrade;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Students.Tests.Unit;
 
 /// <summary>
-/// Error-path coverage for <see cref="ListSubjectsByGradeHandler"/>. The
+/// Error-path coverage for <see cref="ListTopicsByGradeHandler"/>. The
 /// happy-path cases live in the same file's parent class
-/// (<c>ListSubjectsByGradeHandlerTests</c>) — these are the boundary /
+/// (<c>ListTopicsByGradeHandlerTests</c>) — these are the boundary /
 /// failure-mode pins the parent intentionally didn't pin.
 ///
 /// Each test names the specific failure mode it locks down:
@@ -25,7 +25,7 @@ namespace SchoolCollab.Students.Tests.Unit;
 ///         to a typed 500 response. If someone wraps the handler in a
 ///         swallowing try/catch, this test will catch it.</item>
 ///   <item><c>NonExistentGradeLevel_ReturnsEmpty_NotThrows</c> — pin the
-///         0-row behaviour for an unknown <c>GradeLevelId</c>. The Subjects
+///         0-row behaviour for an unknown <c>GradeLevelId</c>. The Topics
 ///         landing depends on this returning <c>[]</c>, not throwing, when
 ///         a tenant filter masks the grade or the id has a typo.</item>
 ///   <item><c>PeriodIdSpecified_NoMatchingAssignment_ReturnsEmpty</c> — pin
@@ -35,9 +35,9 @@ namespace SchoolCollab.Students.Tests.Unit;
 /// </list>
 /// </summary>
 [TestClass]
-public class ListSubjectsByGradeHandlerErrorTests
+public class ListTopicsByGradeHandlerErrorTests
 {
-    private static ListSubjectsByGradeHandler NewHandler(StudentsTestScope s) =>
+    private static ListTopicsByGradeHandler NewHandler(StudentsTestScope s) =>
         new(s.Db);
 
     private static async Task<Guid> SeedGradeLevelAsync(StudentsTestScope s)
@@ -63,7 +63,7 @@ public class ListSubjectsByGradeHandlerErrorTests
         // OperationCanceledException (or its TaskCanceledException subclass),
         // not be silently ignored.
         var act = async () =>
-            await NewHandler(s).HandleAsync(new ListSubjectsByGrade(glId), cts.Token);
+            await NewHandler(s).HandleAsync(new ListTopicsByGrade(glId), cts.Token);
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
@@ -84,8 +84,8 @@ public class ListSubjectsByGradeHandlerErrorTests
 
         // Act + Assert
         var act = async () =>
-            await new ListSubjectsByGradeHandler(disposedDb)
-                .HandleAsync(new ListSubjectsByGrade(glId), CancellationToken.None);
+            await new ListTopicsByGradeHandler(disposedDb)
+                .HandleAsync(new ListTopicsByGrade(glId), CancellationToken.None);
         await act.Should().ThrowAsync<ObjectDisposedException>(
             "EF errors must propagate raw so the endpoint layer can map them");
     }
@@ -94,14 +94,14 @@ public class ListSubjectsByGradeHandlerErrorTests
     public async Task NonExistentGradeLevel_ReturnsEmpty_NotThrows()
     {
         // Arrange: a scope with NO assignments for the requested grade id.
-        // The handler must return [] instead of throwing — the Subjects
+        // The handler must return [] instead of throwing — the Topics
         // landing depends on this for "grade selected but no subjects yet".
         using var s = new StudentsTestScope("subjects-nonexistent-grade");
         var unknownGradeId = Guid.NewGuid();
 
         // Act
         var result = await NewHandler(s).HandleAsync(
-            new ListSubjectsByGrade(unknownGradeId),
+            new ListTopicsByGrade(unknownGradeId),
             CancellationToken.None);
 
         // Assert
@@ -110,42 +110,42 @@ public class ListSubjectsByGradeHandlerErrorTests
     }
 
     [TestMethod]
-    public async Task PeriodIdSpecified_NoMatchingAssignment_ReturnsEmpty()
+    public async Task EffectiveDateSpecified_NoMatchingAssignment_ReturnsEmpty()
     {
         // Arrange: assignments exist for the grade but NOT for the explicit
-        // periodId. The handler must distinguish "no assignment for THIS
-        // period" from "no assignment ever" by returning [].
+        // effectiveDate. The handler must distinguish "no assignment for THIS
+        // date" from "no assignment ever" by returning [].
         using var s = new StudentsTestScope("subjects-period-mismatch");
         var glId = await SeedGradeLevelAsync(s);
-        await SeedSubjectAndAssignmentAsync(s, glId);
+        await SeedBoundedTopicAndAssignmentAsync(s, glId);
 
-        var explicitPeriodId = Guid.NewGuid(); // different from the seeded assignment's period
+        // A bounded assignment (EndDate set = blocked/archived) is NOT effective
+        // on a date after its end.
+        var explicitDate = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(100);
 
         // Act
         var result = await NewHandler(s).HandleAsync(
-            new ListSubjectsByGrade(glId, explicitPeriodId),
+            new ListTopicsByGrade(glId, explicitDate),
             CancellationToken.None);
 
         // Assert
         result.Should().BeEmpty(
-            "an explicit PeriodId must filter to ONLY assignments in that period");
+            "an explicit effectiveDate must filter to ONLY assignments effective on that date");
     }
 
-    // Helper: seed a current-period subject assignment so the harness has
-    // something to filter against.
-    private static async Task<Guid> SeedSubjectAndAssignmentAsync(StudentsTestScope s, Guid glId)
+    // Helper: seed a bounded (blocked/archived) date-based subject assignment so
+    // the harness has something the far-future effectiveDate excludes.
+    private static async Task<Guid> SeedBoundedTopicAndAssignmentAsync(StudentsTestScope s, Guid glId)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var period = Period.Create("Term 1", today.AddDays(-1), today.AddDays(1));
-        s.Db.Periods.Add(period);
+
+        var topic = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
+        s.Db.Topics.Add(topic);
         await s.Db.SaveChangesAsync();
 
-        var subject = Subject.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
-        s.Db.Subjects.Add(subject);
+        s.Db.GradeSubjectAssignments.Add(
+            GradeSubjectAssignment.Create(glId, activityGroupId: null, topic.Id, today.AddDays(-30), today));
         await s.Db.SaveChangesAsync();
-
-        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(glId, subject.Id, period.Id));
-        await s.Db.SaveChangesAsync();
-        return subject.Id;
+        return topic.Id;
     }
 }

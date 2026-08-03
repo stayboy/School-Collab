@@ -29,7 +29,7 @@ public class AssignmentActivityGroupTests
 {
     private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-    private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
     private static readonly Guid GradeLevelId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid StudentId1 = Guid.Parse("33333333-3333-3333-3333-333333333331");
     private static readonly Guid StudentId2 = Guid.Parse("33333333-3333-3333-3333-333333333332");
@@ -41,7 +41,7 @@ public class AssignmentActivityGroupTests
 
     private static Assignment NewAssignment(TargetAudienceType audience, Guid? gradeLevelId = null) =>
         Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            audience, SubjectId, gradeLevelId, null, null, TeacherId)
+            audience, TopicId, gradeLevelId, null, null, TeacherId)
             .WithTenant(TenantId);
 
     private static PublishAssignmentCommandHandler NewPublishHandler(

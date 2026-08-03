@@ -21,9 +21,9 @@ internal sealed class TeacherSubjectConfiguration : TenantEntityTypeConfiguratio
         builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.TeacherId).IsRequired();
-        builder.Property(x => x.SubjectId).IsRequired();
+        builder.Property(x => x.TopicId).IsRequired();
 
-        builder.HasIndex(x => new { x.TenantId, x.TeacherId, x.SubjectId })
+        builder.HasIndex(x => new { x.TenantId, x.TeacherId, x.TopicId })
             .IsUnique()
             .HasDatabaseName("ix_teacher_subjects_tenant_teacher_subject");
     }

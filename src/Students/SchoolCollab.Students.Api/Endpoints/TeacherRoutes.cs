@@ -11,7 +11,7 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherSubject;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
-using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListSubjectsForTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
@@ -81,9 +81,9 @@ public static class TeacherRoutes
         // Subject links (spec §4.12).
         group.MapGet("/{id:guid}/subjects", async (
             Guid id,
-            [FromServices] IQueryHandler<ListSubjectsForTeacher, SubjectDto[]> handler,
+            [FromServices] IQueryHandler<ListTopicsForTeacher, TopicDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListSubjectsForTeacher(id), ct)));
+            Results.Ok(await handler.HandleAsync(new ListTopicsForTeacher(id), ct)));
 
         group.MapPost("/{id:guid}/subjects", async (
             Guid id,
@@ -97,7 +97,7 @@ public static class TeacherRoutes
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException) { return Results.NotFound(); }
-            catch (SubjectNotFoundException) { return Results.NotFound(); }
+            catch (TopicNotFoundException) { return Results.NotFound(); }
             catch (TeacherLinkAlreadyExistsException ex) { return Results.Conflict(new { ex.Message }); }
         });
 

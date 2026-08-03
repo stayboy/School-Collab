@@ -2,10 +2,12 @@ namespace SchoolCollab.Students.Core.DTOs;
 
 public sealed record GradeSubjectAssignmentDto(
     Guid Id,
-    Guid GradeLevelId,
-    Guid SubjectId,
-    Guid PeriodId,
-    Guid? SubjectStrandId,
-    Guid? SubjectLessonId,
+    Guid? GradeLevelId,
+    Guid? ActivityGroupId,
+    Guid TopicId,
+    DateOnly StartDate,
+    DateOnly? EndDate,
+    Guid? TopicStrandId,
+    Guid? TopicLessonId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

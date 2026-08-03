@@ -4,5 +4,5 @@ namespace SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Commands.Updat
 
 public sealed record UpdateGradeSubjectTags(
     Guid AssignmentId,
-    Guid? SubjectStrandId,
-    Guid? SubjectLessonId) : ICommand;
+    Guid? TopicStrandId,
+    Guid? TopicLessonId) : ICommand;

@@ -12,9 +12,9 @@ public sealed class UnlinkTeacherSubjectHandler(
 {
     public async Task HandleAsync(UnlinkTeacherSubject command, CancellationToken cancellationToken = default)
     {
-        await repository.RemoveSubjectAsync(command.TeacherId, command.SubjectId, cancellationToken);
+        await repository.RemoveTopicAsync(command.TeacherId, command.TopicId, cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);
 
-        logger.LogInformation("Subject {SubjectId} unlinked from teacher {TeacherId}", command.SubjectId, command.TeacherId);
+        logger.LogInformation("Topic {TopicId} unlinked from teacher {TeacherId}", command.TopicId, command.TeacherId);
     }
 }

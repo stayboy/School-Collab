@@ -34,13 +34,13 @@ public sealed class ListStudentSubjectAssignmentsByStudentHandler(
                 var results = await db.StudentSubjectAssignments
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(x => x.StudentId == studentId && x.PeriodId == periodId && x.TenantId == tenantId)
-                    .OrderBy(x => x.SubjectId)
+                    .OrderBy(x => x.TopicId)
                     .ToArrayAsync(ct);
 
                 return results.Select(a => new StudentSubjectAssignmentDto(
                     a.Id,
                     a.StudentId,
-                    a.SubjectId,
+                    a.TopicId,
                     a.PeriodId,
                     a.IsOverride,
                     a.SourceType.ToString(),

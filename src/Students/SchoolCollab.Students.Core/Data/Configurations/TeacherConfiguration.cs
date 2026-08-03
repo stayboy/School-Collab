@@ -35,7 +35,7 @@ internal sealed class TeacherConfiguration : TenantEntityTypeConfigurationBase<T
         builder.HasIndex(x => new { x.TenantId, x.LastName })
             .HasDatabaseName("ix_teachers_tenant_last_name");
 
-        builder.Ignore(x => x.Subjects);
+        builder.Ignore(x => x.Topics);
         builder.Ignore(x => x.GradeLevels);
     }
 }

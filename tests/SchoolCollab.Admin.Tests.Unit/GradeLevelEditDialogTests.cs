@@ -95,7 +95,6 @@ public class GradeLevelEditDialogTests : BunitContext
     private ScriptedHandler RegisterFor(
         Guid gradeId,
         Guid codedValueId,
-        Guid? currentPeriodId,
         IEnumerable<(Guid SubjectId, Guid AssignmentId)>? seededAssignments = null)
     {
         var handler = new ScriptedHandler();
@@ -136,7 +135,8 @@ public class GradeLevelEditDialogTests : BunitContext
             ["id"] = a.AssignmentId,
             ["gradeLevelId"] = gradeId,
             ["subjectId"] = a.SubjectId,
-            ["periodId"] = currentPeriodId ?? Guid.Empty,
+            ["startDate"] = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
+            ["endDate"] = (string?)null,
             ["createdAt"] = DateTimeOffset.UnixEpoch,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         }).ToArray();
@@ -165,7 +165,7 @@ public class GradeLevelEditDialogTests : BunitContext
     {
         var gradeId = Guid.NewGuid();
         var codedValueId = Guid.NewGuid();
-        RegisterFor(gradeId, codedValueId, currentPeriodId: Guid.NewGuid());
+        RegisterFor(gradeId, codedValueId);
         var cut = RenderProvider();
 
         var model = new GradeLevelEditDialog.GradeLevelEditModel
@@ -175,7 +175,6 @@ public class GradeLevelEditDialogTests : BunitContext
             CurrentName = "Grade 5",
             MinAge = 10,
             MaxAge = 12,
-            CurrentPeriodId = Guid.NewGuid(),
         };
 
         var task = DialogService.ShowShellDialogAsync<
@@ -202,11 +201,14 @@ public class GradeLevelEditDialogTests : BunitContext
     }
 
     [TestMethod]
-    public async Task Edit_Dialog_No_Current_Period_Hides_Subjects_Section()
+    public async Task Edit_Dialog_Renders_Subjects_Without_Current_Period()
     {
+        // Assignments are date-based, not period-bound, so the Subjects section
+        // is NOT gated on a current period existing. With an empty subject
+        // catalog, the info bar shows.
         var gradeId = Guid.NewGuid();
         var codedValueId = Guid.NewGuid();
-        RegisterFor(gradeId, codedValueId, currentPeriodId: null);
+        RegisterFor(gradeId, codedValueId);
         var cut = RenderProvider();
 
         var model = new GradeLevelEditDialog.GradeLevelEditModel
@@ -214,7 +216,6 @@ public class GradeLevelEditDialogTests : BunitContext
             Id = gradeId,
             CodedValueId = codedValueId,
             CurrentName = "Grade 5",
-            CurrentPeriodId = null, // no current period
         };
 
         var task = DialogService.ShowShellDialogAsync<
@@ -225,9 +226,8 @@ public class GradeLevelEditDialogTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
-        // The Subjects row is gated on CurrentPeriodId - without one the
-        // warning bar should show instead.
-        cut.Markup.Should().Contain("No active period");
+        cut.Markup.Should().Contain("No subjects exist yet.",
+            "with an empty catalog the Subjects info bar shows even without a period");
 
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
         cancelButton.Click();

@@ -8,7 +8,7 @@ namespace SchoolCollab.Assignments.Tests.Unit;
 public class AssignmentTests
 {
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-    private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
 
     private static Assignment CreateTestAssignment(
         string title = "Title",
@@ -16,10 +16,10 @@ public class AssignmentTests
         AssignmentType type = AssignmentType.Digital,
         GradingFormat grading = GradingFormat.TeacherGraded,
         TargetAudienceType audience = TargetAudienceType.AllStudents) =>
-        Assignment.Create(title, description, type, grading, audience, SubjectId, null, null, null, TeacherId);
+        Assignment.Create(title, description, type, grading, audience, TopicId, null, null, null, TeacherId);
 
     [TestMethod]
-    public void Create_WithEmptySubjectId_Throws()
+    public void Create_WithEmptyTopicId_Throws()
     {
         var act = () => Assignment.Create(
             "Test",
@@ -27,17 +27,17 @@ public class AssignmentTests
             AssignmentType.Digital,
             GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents,
-            Guid.Empty, // empty subject
+            Guid.Empty, // empty topic
             null, null, null,
             TeacherId);
 
         act.Should().Throw<ArgumentException>()
-            .WithParameterName("subjectId")
-            .WithMessage("Subject is required.*");
+            .WithParameterName("topicId")
+            .WithMessage("Topic is required.*");
     }
 
     [TestMethod]
-    public void Update_WithEmptySubjectId_Throws()
+    public void Update_WithEmptyTopicId_Throws()
     {
         var assignment = CreateTestAssignment();
 
@@ -47,12 +47,12 @@ public class AssignmentTests
             AssignmentType.Digital,
             GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents,
-            Guid.Empty, // empty subject
+            Guid.Empty, // empty topic
             null, null, null, true);
 
         act.Should().Throw<ArgumentException>()
-            .WithParameterName("subjectId")
-            .WithMessage("Subject is required.*");
+            .WithParameterName("topicId")
+            .WithMessage("Topic is required.*");
     }
 
     [TestMethod]
@@ -66,7 +66,7 @@ public class AssignmentTests
             AssignmentType.Digital,
             GradingFormat.AutoGraded,
             TargetAudienceType.AllStudents,
-            SubjectId,
+            TopicId,
             null,
             dueDate,
             100m,
@@ -77,7 +77,7 @@ public class AssignmentTests
         Assert.AreEqual(AssignmentType.Digital, assignment.AssignmentType);
         Assert.AreEqual(GradingFormat.AutoGraded, assignment.GradingFormat);
         Assert.AreEqual(TargetAudienceType.AllStudents, assignment.TargetAudienceType);
-        Assert.AreEqual(SubjectId, assignment.SubjectId);
+        Assert.AreEqual(TopicId, assignment.TopicId);
         Assert.IsNull(assignment.GradeLevelId);
         Assert.AreEqual(dueDate, assignment.DueDate);
         Assert.AreEqual(100m, assignment.MaxScore);
@@ -95,7 +95,7 @@ public class AssignmentTests
             AssignmentType.Manual,
             GradingFormat.TeacherGraded,
             TargetAudienceType.AllStudents,
-            SubjectId,
+            TopicId,
             null, null, null,
             TeacherId);
 
@@ -136,18 +136,18 @@ public class AssignmentTests
     public void Update_WhenDraft_UpdatesProperties()
     {
         var assignment = CreateTestAssignment("Old Title");
-        var newSubjectId = Guid.NewGuid();
+        var newTopicId = Guid.NewGuid();
 
         assignment.Update("New Title", "New Desc", AssignmentType.SemiManual,
             GradingFormat.InstantGraded, TargetAudienceType.SelectedGrades,
-            newSubjectId, Guid.NewGuid(), null, 50m, true);
+            newTopicId, Guid.NewGuid(), null, 50m, true);
 
         Assert.AreEqual("New Title", assignment.Title);
         Assert.AreEqual("New Desc", assignment.Description);
         Assert.AreEqual(AssignmentType.SemiManual, assignment.AssignmentType);
         Assert.AreEqual(GradingFormat.InstantGraded, assignment.GradingFormat);
         Assert.AreEqual(TargetAudienceType.SelectedGrades, assignment.TargetAudienceType);
-        Assert.AreEqual(newSubjectId, assignment.SubjectId);
+        Assert.AreEqual(newTopicId, assignment.TopicId);
         Assert.AreEqual(50m, assignment.MaxScore);
     }
 
@@ -158,7 +158,7 @@ public class AssignmentTests
         assignment.Publish();
         var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            SubjectId, null, null, null, true);
+            TopicId, null, null, null, true);
         act.Should().Throw<InvalidOperationException>();
     }
 
@@ -170,7 +170,7 @@ public class AssignmentTests
         assignment.Close();
         var act = () => assignment.Update("New Title", null, AssignmentType.Digital,
             GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
-            SubjectId, null, null, null, true);
+            TopicId, null, null, null, true);
         act.Should().Throw<InvalidOperationException>();
     }
 

@@ -27,7 +27,7 @@ public sealed class UpdateAssignmentCommandHandler(
             command.AssignmentType,
             command.GradingFormat,
             command.TargetAudienceType,
-            command.SubjectId,
+            command.TopicId,
             command.GradeLevelId,
             command.DueDate,
             command.MaxScore,
