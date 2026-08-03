@@ -17,7 +17,7 @@ public sealed class StudentSubjectAssignment : ITenantEntity, IEntity, IAuditabl
     public Guid TenantId { get; private set; }
 
     public Guid StudentId { get; private set; }
-    public Guid SubjectId { get; private set; }
+    public Guid TopicId { get; private set; }
     public Guid PeriodId { get; private set; }
     public bool IsOverride { get; private set; }
     public SubjectAssignmentSource SourceType { get; private set; }
@@ -39,7 +39,7 @@ public sealed class StudentSubjectAssignment : ITenantEntity, IEntity, IAuditabl
         {
             Id = Guid.NewGuid(),
             StudentId = studentId,
-            SubjectId = subjectId,
+            TopicId = subjectId,
             PeriodId = periodId,
             IsOverride = isOverride,
             SourceType = sourceType,
@@ -47,7 +47,7 @@ public sealed class StudentSubjectAssignment : ITenantEntity, IEntity, IAuditabl
             UpdatedAt = now
         };
 
-        assignment._domainEvents.Add(new StudentSubjectAssignedEvent(assignment.Id, studentId, subjectId, periodId));
+        assignment._domainEvents.Add(new StudentTopicAssignedEvent(assignment.Id, studentId, subjectId, periodId));
         return assignment;
     }
 

@@ -11,7 +11,7 @@ using SchoolCollab.Students.Core.Domain.Exceptions;
 namespace SchoolCollab.Students.Tests.Unit.Tenancy;
 
 /// <summary>
-/// Acceptance criteria AC-11 (global-tenant-filter.md §6.3): GradeLevel/Subject/Period
+/// Acceptance criteria AC-11 (global-tenant-filter.md §6.3): GradeLevel/Topic/Period
 /// are strict tenant-scoped entities — created rows are tenant-stamped and isolated
 /// from other tenants; the coded_value_id uniqueness is per-tenant; the period
 /// no-overlap invariant is per-tenant; and FR-4 rejects creation under the default

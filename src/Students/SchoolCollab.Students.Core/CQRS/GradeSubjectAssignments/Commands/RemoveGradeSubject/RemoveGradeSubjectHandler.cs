@@ -17,9 +17,12 @@ public sealed class RemoveGradeSubjectHandler(
         var assignment = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new InvalidOperationException($"GradeSubjectAssignment with ID '{command.Id}' not found.");
 
-        await repository.DeleteAsync(assignment, cancellationToken);
+        // Grade↔topic assignments span multiple years, so we block/archive by
+        // ending the effective period rather than hard-deleting the row. This
+        // keeps the audit trail and any historical references intact.
+        await repository.EndAsync(assignment, DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);
 
-        logger.LogInformation("GradeSubjectAssignment {Id} removed", assignment.Id);
+        logger.LogInformation("GradeSubjectAssignment {Id} ended (blocked/archived)", assignment.Id);
     }
 }

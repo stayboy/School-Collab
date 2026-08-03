@@ -66,7 +66,6 @@ OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromCon
 // Register CodedValueSeeder
 builder.Services.AddScoped<CodedValueSeeder>();
 builder.Services.AddScoped<TenantSeeder>();
-builder.Services.AddScoped<AssignmentBackfillService>();
 builder.Services.AddScoped<EntityCodeRuleSeeder>();
 
 using var host = builder.Build();
@@ -144,22 +143,13 @@ try
             exitCode = 1;
         }
 
-        // ── Assignment backfill (PR 4: SubjectId/GradeLevelId from coded-value IDs) ──
-        // Must run AFTER Assignments and Students migrations both succeed.
-        // See documents/specs/grade-level-setup-progress.md §PR 4.
-        if (exitCode == 0)
-        {
-            try
-            {
-                var backfillService = scope.ServiceProvider.GetRequiredService<AssignmentBackfillService>();
-                await backfillService.BackfillAsync();
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Assignment backfill failed");
-                exitCode = 1;
-            }
-        }
+        // ── Assignment backfill (PR 4) ─────────────────────────────────────────
+        // Removed: AssignmentBackfillService was a one-time legacy migration that
+        // created standalone Subjects from Assignments coded-value IDs. Under the
+        // Subject→Topic polymorphism (Topics are owned by a GradeLevel/ActivityGroup
+        // and grade-level topics require a period), standalone grade-less subjects
+        // no longer exist, so the backfill is obsolete. Dev DB has no assignments
+        // to backfill, so this removal is a no-op in practice.
     }
 
     if (exitCode == 0)

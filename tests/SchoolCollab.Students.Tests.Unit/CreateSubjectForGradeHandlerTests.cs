@@ -2,24 +2,23 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Students.Core.CQRS.Subjects.Commands.CreateSubjectForGrade;
+using SchoolCollab.Students.Core.CQRS.Topics.Commands.CreateTopicForGrade;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Tests.Unit;
 
 [TestClass]
-public class CreateSubjectForGradeHandlerTests
+public class CreateTopicForGradeHandlerTests
 {
-    private static CreateSubjectForGradeHandler NewHandler(StudentsTestScope s) =>
+    private static CreateTopicForGradeHandler NewHandler(StudentsTestScope s) =>
         new(
-            s.Subjects,
+            s.Topics,
             s.GradeSubjectAssignments,
             s.GradeLevels,
-            s.Periods,
             s.Cache,
             s.Tenants,
-            NullLogger<CreateSubjectForGradeHandler>.Instance);
+            NullLogger<CreateTopicForGradeHandler>.Instance);
 
     private static async Task<Guid> SeedGradeLevelAsync(StudentsTestScope s, Guid codedValueId, int level, string name)
     {
@@ -39,48 +38,50 @@ public class CreateSubjectForGradeHandlerTests
     }
 
     [TestMethod]
-    public async Task CreateForGrade_CreatesSubjectAndAssignment()
+    public async Task CreateForGrade_CreatesTopicAndAssignment()
     {
         using var s = new StudentsTestScope("csfg-create");
         var cv = Guid.NewGuid();
         var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
-        var periodId = await SeedCurrentPeriodAsync(s, "Term 1");
         var h = NewHandler(s);
 
-        var dto = await h.HandleAsync(new CreateSubjectForGrade(gradeId, CodedValueId: null, "MATH", "Mathematics", 1));
+        var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, CodedValueId: null, "MATH", "Mathematics", 1));
 
         dto.Id.Should().NotBeEmpty();
         dto.Code.Should().Be("MATH");
         dto.Name.Should().Be("Mathematics");
-        (await s.Db.Subjects.CountAsync()).Should().Be(1);
+        (await s.Db.Topics.CountAsync()).Should().Be(1);
         (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
         var assignment = await s.Db.GradeSubjectAssignments.FirstAsync();
         assignment.GradeLevelId.Should().Be(gradeId);
-        assignment.SubjectId.Should().Be(dto.Id);
-        assignment.PeriodId.Should().Be(periodId);
+        assignment.TopicId.Should().Be(dto.Id);
+        // Assignments are date-based, not period-bound: the bridge opens today
+        // and stays open-ended (EndDate = null) so the topic spans multiple years.
+        assignment.StartDate.Should().Be(DateOnly.FromDateTime(DateTime.UtcNow));
+        assignment.EndDate.Should().BeNull();
     }
 
     [TestMethod]
-    public async Task CreateForGrade_ReusesExistingSubjectByCodedValueId()
+    public async Task CreateForGrade_ReusesExistingTopicByCodedValueId()
     {
         using var s = new StudentsTestScope("csfg-reuse");
         var cv = Guid.NewGuid();
         var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
-        await SeedCurrentPeriodAsync(s, "Term 1");
+        var periodId = await SeedCurrentPeriodAsync(s, "Term 1");
 
-        // Pre-existing subject with the same CodedValueId
-        var existing = Subject.Create(cv, "ENG", "English", 2);
-        s.Db.Subjects.Add(existing);
+        // Pre-existing topic with the same CodedValueId
+        var existing = Topic.Create(cv, "ENG", "English", 2);
+        s.Db.Topics.Add(existing);
         await s.Db.SaveChangesAsync();
 
         var h = NewHandler(s);
 
-        var dto = await h.HandleAsync(new CreateSubjectForGrade(gradeId, CodedValueId: cv, "ENG", "English Updated", 5));
+        var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, CodedValueId: cv, "ENG", "English Updated", 5));
 
         // Reuses the existing subject, updates mirrored name
         dto.Id.Should().Be(existing.Id);
         dto.Name.Should().Be("English Updated");
-        (await s.Db.Subjects.CountAsync()).Should().Be(1);
+        (await s.Db.Topics.CountAsync()).Should().Be(1);
         (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
     }
 
@@ -93,27 +94,33 @@ public class CreateSubjectForGradeHandlerTests
         await SeedCurrentPeriodAsync(s, "Term 1");
         var h = NewHandler(s);
 
-        await h.HandleAsync(new CreateSubjectForGrade(gradeId, null, "MATH", "Mathematics", 1));
-        await h.HandleAsync(new CreateSubjectForGrade(gradeId, null, "MATH", "Mathematics", 1));
+        await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1));
+        await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1));
 
         // Same code → find-or-create reuses the same subject, and the assignment
         // is not duplicated.
-        (await s.Db.Subjects.CountAsync()).Should().Be(1);
+        (await s.Db.Topics.CountAsync()).Should().Be(1);
         (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
     }
 
     [TestMethod]
-    public async Task CreateForGrade_ThrowsWhenNoCurrentPeriod()
+    public async Task CreateForGrade_WorksWithoutAnyPeriod()
     {
+        // Assignments are date-based, not period-bound, so creating a topic for a
+        // grade must NOT require a current period. The bridge opens today and is
+        // open-ended (EndDate = null).
         using var s = new StudentsTestScope("csfg-no-period");
         var cv = Guid.NewGuid();
         var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
         // No period seeded
         var h = NewHandler(s);
 
-        var act = async () => await h.HandleAsync(new CreateSubjectForGrade(gradeId, null, "MATH", "Mathematics", 1));
+        var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1));
 
-        await act.Should().ThrowAsync<NoCurrentPeriodException>();
+        dto.Id.Should().NotBeEmpty();
+        (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
+        var assignment = await s.Db.GradeSubjectAssignments.FirstAsync();
+        assignment.EndDate.Should().BeNull();
     }
 
     [TestMethod]
@@ -123,7 +130,7 @@ public class CreateSubjectForGradeHandlerTests
         await SeedCurrentPeriodAsync(s, "Term 1");
         var h = NewHandler(s);
 
-        var act = async () => await h.HandleAsync(new CreateSubjectForGrade(Guid.NewGuid(), null, "MATH", "Mathematics", 1));
+        var act = async () => await h.HandleAsync(new CreateTopicForGrade(Guid.NewGuid(), null, "MATH", "Mathematics", 1));
 
         await act.Should().ThrowAsync<GradeLevelNotFoundException>();
     }

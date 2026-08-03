@@ -1,0 +1,144 @@
+@*
+    JoinGroupsDialog — opens from the student Detail page's Activity Groups
+    section header "Join Group" button (spec §3.6 FR-29/FR-30). Presents a
+    searchable, multi-select list of available activity groups in the tenant
+    (Status = Active, not at capacity, excluding groups the student is already
+    an active member of). Submitting joins the selected groups in a single
+    operation; partial failures are reported per-group.
+*@
+@inherits DialogShellBase<JoinGroupsDialog.JoinGroupsModel, JoinGroupsDialog.JoinGroupsResult>
+@using System.ComponentModel.DataAnnotations
+@using SchoolCollab.Students.Admin.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+            <FluentTextField @bind-Value="_search"
+                             Placeholder="Search available groups…" />
+
+            @if (_loadingGroups)
+            {
+                <div class="spinner-container"><FluentProgressRing /></div>
+            }
+            else if (_availableGroups.Count == 0)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">
+                    No other groups are available to join right now.
+                </FluentMessageBar>
+            }
+            else
+            {
+                <FluentListbox Items="@_filteredGroups"
+                               @bind-SelectedValues="_selectedIds"
+                               OptionText="@(g => GroupOptionText(g))"
+                               OptionValue="@(g => g.Id.ToString())"
+                               Multiple="true" />
+            }
+        </FluentStack>
+
+        <DialogShellFooter Saving="Saving"
+                           Error="Error"
+                           SubmitText="Join"
+                           SavingText="Joining…"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+<style>
+    .muted { color: var(--neutral-foreground-hint); margin-left: 8px; }
+</style>
+
+@code {
+    public sealed class JoinGroupsModel
+    {
+        [Required] public HashSet<Guid> SelectedGroupIds { get; set; } = new();
+        public Guid StudentId { get; set; }
+    }
+
+    public sealed record JoinGroupsResult(IReadOnlyList<Guid> GroupIds);
+
+    private string? _search;
+    private List<ActivityGroupDto> _availableGroups = new();
+    private bool _loadingGroups = true;
+    private HashSet<Guid> _selectedIds = new();
+
+    private IEnumerable<ActivityGroupDto> _filteredGroups =>
+        string.IsNullOrWhiteSpace(_search)
+            ? _availableGroups
+            : _availableGroups.Where(g =>
+                g.Name.Contains(_search, StringComparison.OrdinalIgnoreCase)
+                || (g.Category?.Contains(_search, StringComparison.OrdinalIgnoreCase) ?? false));
+
+    private static string FormatMembers(ActivityGroupDto g) =>
+        g.Capacity.HasValue
+            ? $"{g.ActiveMemberCount}/{g.Capacity} members"
+            : $"{g.ActiveMemberCount} members";
+
+    private static string GroupOptionText(ActivityGroupDto g) =>
+        $"{g.Name}  ·  {g.Category ?? "General"} · {FormatMembers(g)}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadingGroups = true;
+        try
+        {
+            // All groups, then current memberships to exclude + capacity check.
+            var all = await Api.ListActivityGroupsAsync();
+            var current = await Api.ListStudentGroupsAsync(Model.StudentId);
+            var currentIds = new HashSet<Guid>(current?.Select(g => g.Id) ?? Array.Empty<Guid>());
+
+            _availableGroups = (all ?? Array.Empty<ActivityGroupDto>())
+                .Where(g => string.Equals(g.Status, "Active", StringComparison.OrdinalIgnoreCase)
+                    && !currentIds.Contains(g.Id)
+                    && (!g.Capacity.HasValue || g.ActiveMemberCount < g.Capacity.Value))
+                .OrderBy(g => g.Name)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Error = ex.Message;
+        }
+        finally
+        {
+            _loadingGroups = false;
+        }
+    }
+
+    protected override async Task<JoinGroupsResult?> SubmitAsync(JoinGroupsModel model)
+    {
+        if (_selectedIds.Count == 0)
+        {
+            Error = "Select at least one group to join.";
+            return null;
+        }
+
+        var failures = new List<string>();
+        foreach (var groupId in _selectedIds)
+        {
+            try
+            {
+                await Api.AddGroupMemberAsync(groupId, new AddActivityGroupMemberRequest(Model.StudentId));
+            }
+            catch (Exception ex)
+            {
+                var group = _availableGroups.FirstOrDefault(g => g.Id == groupId);
+                failures.Add($"{group?.Name ?? groupId.ToString()}: {ex.Message}");
+            }
+        }
+
+        if (failures.Count > 0)
+        {
+            Error = $"Some groups could not be joined: {string.Join("; ", failures)}";
+            return null;
+        }
+
+        return new JoinGroupsResult(_selectedIds.ToList());
+    }
+}

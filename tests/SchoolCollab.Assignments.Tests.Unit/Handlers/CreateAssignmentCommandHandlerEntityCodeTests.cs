@@ -66,7 +66,7 @@ public class CreateAssignmentCommandHandlerEntityCodeTests
             AssignmentType: AssignmentType.Digital,
             GradingFormat: GradingFormat.TeacherGraded,
             TargetAudienceType: TargetAudienceType.AllStudents,
-            SubjectId: Guid.NewGuid(),
+            TopicId: Guid.NewGuid(),
             GradeLevelId: null,
             DueDate: null,
             MaxScore: null,

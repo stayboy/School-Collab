@@ -1,14 +1,14 @@
 @*
-    GradeLevelEditDialog — opens from the Grade Levels landing's row
+    GradeLevelEditDialog â€” opens from the Grade Levels landing's row
     kebab Edit action. Renders:
-      - The picked GRADE as static text with a pencil ✏ icon button that
+      - The picked GRADE as static text with a pencil âœ icon button that
         opens CodedValueDialog in Override mode (tenant-only name edit;
         the system-wide coded value is NEVER edited from this surface).
       - The enrollment-validation guard clauses (MinAge / MaxAge /
-        AllowedGender) — the only fields the Edit PUT actually persists.
+        AllowedGender) â€” the only fields the Edit PUT actually persists.
       - The Subjects multi-select (current-period baseline + diff).
 
-    No GRADE dropdown — the coded value id is set at Create time and is
+    No GRADE dropdown â€” the coded value id is set at Create time and is
     immutable on Edit; renaming goes through the tenant override.
 
     Submit flow:
@@ -51,7 +51,7 @@
                                Max="150"
                                Placeholder="No minimum"
                                Style="flex:1; min-width:0" />
-            <span aria-hidden="true" style="opacity:0.6; padding:0 6px;">–</span>
+            <span aria-hidden="true" style="opacity:0.6; padding:0 6px;">â€“</span>
             <FluentNumberField @bind-Value="Model.MaxAge"
                                Id="grade-level-max-age"
                                Min="0"
@@ -66,7 +66,7 @@
                                 Placeholder="No restriction (co-ed)" />
         </FormRow>
 
-        @if (Model.CurrentPeriodId.HasValue && _allSubjects.Length > 0)
+        @if (_allSubjects.Length > 0)
         {
             <FormRow Label="@($"Subjects ({Model.SubjectIds.Count})")" AlignTop>
                 <FluentListbox Items="@_allSubjects"
@@ -77,7 +77,7 @@
                                Style="width: 100%; min-height: 160px;" />
             </FormRow>
         }
-        else if (Model.CurrentPeriodId.HasValue && _allSubjects.Length == 0)
+        else if (_allSubjects.Length == 0)
         {
             <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
                 No subjects exist yet.
@@ -86,7 +86,7 @@
         else
         {
             <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
-                No active period — open a period before assigning subjects to this grade.
+                Could not load subjects for this grade.
             </FluentMessageBar>
         }
 
@@ -144,8 +144,6 @@
         /// </summary>
         public IReadOnlyDictionary<Guid, Guid> SubjectIdToAssignmentId { get; set; }
             = new Dictionary<Guid, Guid>();
-
-        public Guid? CurrentPeriodId { get; set; }
     }
 
     protected override string SubmitText => "Save";
@@ -187,14 +185,11 @@
                 }
             }
 
-            if (Model.CurrentPeriodId.HasValue)
-            {
-                var existing = await Api.ListGradeSubjectsByGradeAsync(Model.Id, Model.CurrentPeriodId.Value) ?? [];
-                var ids = existing.Select(a => a.SubjectId).ToList();
-                var map = existing.ToDictionary(a => a.SubjectId, a => a.Id);
-                Model.SubjectIds = ids;
-                Model.SubjectIdToAssignmentId = map;
-            }
+            var existing = await Api.ListGradeSubjectsByGradeAsync(Model.Id) ?? [];
+            var ids = existing.Select(a => a.SubjectId).ToList();
+            var map = existing.ToDictionary(a => a.SubjectId, a => a.Id);
+            Model.SubjectIds = ids;
+            Model.SubjectIdToAssignmentId = map;
         }
         catch (Exception ex)
         {
@@ -257,14 +252,13 @@
             model.MaxAge,
             model.AllowedGenderCodedValueId));
 
-        // 2. Subject diff for the current period.
-        if (model.CurrentPeriodId.HasValue)
+        // 2. Subject diff. Assignments are date-based and open-ended (start
+        // today, no end) — a picked subject stays assigned across years until
+        // removed.
+        var warnings = await ApplySubjectDiffAsync(model.Id, model);
+        if (!string.IsNullOrEmpty(warnings))
         {
-            var warnings = await ApplySubjectDiffAsync(model.Id, model.CurrentPeriodId.Value, model);
-            if (!string.IsNullOrEmpty(warnings))
-            {
-                Error = warnings;
-            }
+            Error = warnings;
         }
 
         return new GradeLevelDto(
@@ -279,14 +273,15 @@
     }
 
     /// <summary>
-    /// Applies the picked subject set against the current assignments for the
-    /// given grade + period. Returns a non-empty string with any non-fatal
-    /// per-subject failure messages (so the dialog footer can show them).
+    /// Applies the picked subject set against the grade's currently-effective
+    /// assignments. Returns a non-empty string with any non-fatal per-subject
+    /// failure messages (so the dialog footer can show them).
     /// </summary>
     private async Task<string?> ApplySubjectDiffAsync(
-        Guid gradeLevelId, Guid periodId, GradeLevelEditModel model)
+        Guid gradeLevelId, GradeLevelEditModel model)
     {
-        var baseline = await Api.ListGradeSubjectsByGradeAsync(gradeLevelId, periodId) ?? [];
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baseline = await Api.ListGradeSubjectsByGradeAsync(gradeLevelId) ?? [];
         var assignedSubjectIds = new HashSet<Guid>(baseline.Select(a => a.SubjectId));
         var desiredIds = new HashSet<Guid>(model.SubjectIds);
 
@@ -297,7 +292,7 @@
             try
             {
                 await Api.AssignGradeSubjectAsync(
-                    new AssignGradeSubjectRequest(gradeLevelId, sid, periodId));
+                    new AssignGradeSubjectRequest(gradeLevelId, sid, today));
             }
             catch (Exception ex)
             {
@@ -318,6 +313,6 @@
             }
         }
 
-        return warnings.Count == 0 ? null : string.Join(" • ", warnings);
+        return warnings.Count == 0 ? null : string.Join(" â€¢ ", warnings);
     }
 }

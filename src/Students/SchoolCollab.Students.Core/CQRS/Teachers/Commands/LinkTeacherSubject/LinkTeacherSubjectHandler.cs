@@ -10,7 +10,7 @@ namespace SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherSubject;
 
 public sealed class LinkTeacherSubjectHandler(
     ITeacherRepository repository,
-    ISubjectRepository subjectRepository,
+    ITopicRepository subjectRepository,
     HybridCache cache,
     ITenantProvider tenantProvider,
     ILogger<LinkTeacherSubjectHandler> logger) : ICommandHandler<LinkTeacherSubject>
@@ -25,17 +25,17 @@ public sealed class LinkTeacherSubjectHandler(
         if (await repository.GetAsync(command.TeacherId, cancellationToken) is null)
             throw new TeacherNotFoundException(command.TeacherId);
 
-        if (await subjectRepository.GetAsync(command.SubjectId, cancellationToken) is null)
-            throw new SubjectNotFoundException(command.SubjectId);
+        if (await subjectRepository.GetAsync(command.TopicId, cancellationToken) is null)
+            throw new TopicNotFoundException(command.TopicId);
 
-        if (await repository.GetSubjectLinkAsync(command.TeacherId, command.SubjectId, cancellationToken) is not null)
-            throw new TeacherLinkAlreadyExistsException(command.TeacherId, command.SubjectId);
+        if (await repository.GetTopicLinkAsync(command.TeacherId, command.TopicId, cancellationToken) is not null)
+            throw new TeacherLinkAlreadyExistsException(command.TeacherId, command.TopicId);
 
-        var link = TeacherSubject.Create(command.TeacherId, command.SubjectId)
+        var link = TeacherSubject.Create(command.TeacherId, command.TopicId)
             .WithTenant(tenantProvider);
-        await repository.AddSubjectAsync(link, cancellationToken);
+        await repository.AddTopicAsync(link, cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);
 
-        logger.LogInformation("Subject {SubjectId} linked to teacher {TeacherId}", command.SubjectId, command.TeacherId);
+        logger.LogInformation("Topic {TopicId} linked to teacher {TeacherId}", command.TopicId, command.TeacherId);
     }
 }

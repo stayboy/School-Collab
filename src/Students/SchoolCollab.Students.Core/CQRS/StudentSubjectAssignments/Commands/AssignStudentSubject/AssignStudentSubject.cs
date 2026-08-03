@@ -5,7 +5,7 @@ namespace SchoolCollab.Students.Core.CQRS.StudentSubjectAssignments.Commands.Ass
 
 public sealed record AssignStudentSubject(
     Guid StudentId,
-    Guid SubjectId,
+    Guid TopicId,
     Guid PeriodId,
     bool IsOverride,
     SubjectAssignmentSource SourceType) : ICommand;

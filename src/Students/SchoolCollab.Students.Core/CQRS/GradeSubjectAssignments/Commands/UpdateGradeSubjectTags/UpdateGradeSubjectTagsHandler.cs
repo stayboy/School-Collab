@@ -13,16 +13,18 @@ public sealed class UpdateGradeSubjectTagsHandler(StudentsDbContext db) : IComma
         var assignment = await db.GradeSubjectAssignments.FindAsync(new object[] { command.AssignmentId }, ct);
         if (assignment == null) throw new KeyNotFoundException($"GradeSubjectAssignment {command.AssignmentId} not found.");
 
-        assignment.UpdateTags(command.SubjectStrandId, command.SubjectLessonId);
+        assignment.UpdateTags(command.TopicStrandId, command.TopicLessonId);
         await db.SaveChangesAsync(ct);
 
         return new GradeSubjectAssignmentDto(
             assignment.Id,
             assignment.GradeLevelId,
-            assignment.SubjectId,
-            assignment.PeriodId,
-            assignment.SubjectStrandId,
-            assignment.SubjectLessonId,
+            assignment.ActivityGroupId,
+            assignment.TopicId,
+            assignment.StartDate,
+            assignment.EndDate,
+            assignment.TopicStrandId,
+            assignment.TopicLessonId,
             assignment.CreatedAt,
             assignment.UpdatedAt);
     }

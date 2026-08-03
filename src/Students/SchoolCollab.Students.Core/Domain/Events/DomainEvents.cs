@@ -7,8 +7,8 @@ public sealed record StudentDeletedEvent(Guid StudentId, string StudentNumber) :
 public sealed record GradeLevelCreatedEvent(Guid GradeLevelId, string Name) : IDomainEvent;
 public sealed record GradeLevelUpdatedEvent(Guid GradeLevelId, string Name) : IDomainEvent;
 
-public sealed record SubjectCreatedEvent(Guid SubjectId, string Code) : IDomainEvent;
-public sealed record SubjectUpdatedEvent(Guid SubjectId, string Code) : IDomainEvent;
+public sealed record TopicCreatedEvent(Guid TopicId, string? Code) : IDomainEvent;
+public sealed record TopicUpdatedEvent(Guid TopicId, string? Code) : IDomainEvent;
 
 public sealed record PeriodCreatedEvent(Guid PeriodId, string Name) : IDomainEvent;
 public sealed record PeriodUpdatedEvent(Guid PeriodId, string Name) : IDomainEvent;
@@ -33,15 +33,15 @@ public sealed record StudentGuardianUpdatedEvent(
     Guid? RelationshipCodedValueId,
     bool IsEmergencyContact) : IDomainEvent;
 
-public sealed record GradeSubjectAssignedEvent(Guid AssignmentId, Guid GradeLevelId, Guid SubjectId, Guid PeriodId) : IDomainEvent;
+public sealed record GradeTopicAssignedEvent(Guid AssignmentId, Guid? GradeLevelId, Guid? ActivityGroupId, Guid TopicId, DateOnly StartDate, DateOnly? EndDate) : IDomainEvent;
 
-public sealed record StudentSubjectAssignedEvent(Guid AssignmentId, Guid StudentId, Guid SubjectId, Guid PeriodId) : IDomainEvent;
+public sealed record StudentTopicAssignedEvent(Guid AssignmentId, Guid StudentId, Guid TopicId, Guid PeriodId) : IDomainEvent;
 
-// --- Subject Strands ---
-public sealed record SubjectStrandCreatedEvent(Guid StrandId, string Name, Guid SubjectId) : IDomainEvent;
-public sealed record SubjectStrandUpdatedEvent(Guid StrandId, string Name) : IDomainEvent;
+// --- Topic Strands ---
+public sealed record TopicStrandCreatedEvent(Guid StrandId, string Name, Guid TopicId) : IDomainEvent;
+public sealed record TopicStrandUpdatedEvent(Guid StrandId, string Name) : IDomainEvent;
 
-// --- Subject Lessons ---
-public sealed record SubjectLessonCreatedEvent(Guid LessonId, string Name, Guid SubjectId) : IDomainEvent;
-public sealed record SubjectLessonUpdatedEvent(Guid LessonId, string Name) : IDomainEvent;
-public sealed record SubjectLessonStrandAssignedEvent(Guid LessonId, Guid StrandId) : IDomainEvent;
+// --- Topic Lessons ---
+public sealed record TopicLessonCreatedEvent(Guid LessonId, string Name, Guid TopicId) : IDomainEvent;
+public sealed record TopicLessonUpdatedEvent(Guid LessonId, string Name) : IDomainEvent;
+public sealed record TopicLessonStrandAssignedEvent(Guid LessonId, Guid StrandId) : IDomainEvent;

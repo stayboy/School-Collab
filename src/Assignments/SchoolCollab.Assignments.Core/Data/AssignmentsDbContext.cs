@@ -17,6 +17,7 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     public DbSet<AssignmentSubmission> AssignmentSubmissions => Set<AssignmentSubmission>();
     public DbSet<AssignmentSubmissionVersion> AssignmentSubmissionVersions => Set<AssignmentSubmissionVersion>();
     public DbSet<SubmissionReview> SubmissionReviews => Set<SubmissionReview>();
+    public DbSet<AssignmentActivityGroup> AssignmentActivityGroups => Set<AssignmentActivityGroup>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -39,6 +40,7 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         modelBuilder.ApplyConfiguration(new AssignmentSubmissionConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new AssignmentSubmissionVersionConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new SubmissionReviewConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new AssignmentActivityGroupConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
 
         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed

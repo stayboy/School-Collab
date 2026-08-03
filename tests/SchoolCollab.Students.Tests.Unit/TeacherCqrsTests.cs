@@ -15,7 +15,7 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherSubject;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
-using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListSubjectsForTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
@@ -40,9 +40,9 @@ public class TeacherCqrsTests
         new(TeacherRepo(s), s.Cache, NullLogger<UpdateTeacherHandler>.Instance);
     private static DeleteTeacherHandler NewDelete(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<DeleteTeacherHandler>.Instance);
-    private static LinkTeacherSubjectHandler NewLinkSubject(StudentsTestScope s) =>
-        new(TeacherRepo(s), s.Subjects, s.Cache, s.Tenants, NullLogger<LinkTeacherSubjectHandler>.Instance);
-    private static UnlinkTeacherSubjectHandler NewUnlinkSubject(StudentsTestScope s) =>
+    private static LinkTeacherSubjectHandler NewLinkTopic(StudentsTestScope s) =>
+        new(TeacherRepo(s), s.Topics, s.Cache, s.Tenants, NullLogger<LinkTeacherSubjectHandler>.Instance);
+    private static UnlinkTeacherSubjectHandler NewUnlinkTopic(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<UnlinkTeacherSubjectHandler>.Instance);
     private static LinkTeacherGradeLevelHandler NewLinkGrade(StudentsTestScope s) =>
         new(TeacherRepo(s), s.GradeLevels, s.Cache, s.Tenants, NullLogger<LinkTeacherGradeLevelHandler>.Instance);
@@ -52,17 +52,17 @@ public class TeacherCqrsTests
         new(TeacherRepo(s));
     private static ListTeachersHandler NewList(StudentsTestScope s) =>
         new(s.Db, s.Cache);
-    private static ListSubjectsForTeacherHandler NewListSubjects(StudentsTestScope s) =>
+    private static ListTopicsForTeacherHandler NewListTopics(StudentsTestScope s) =>
         new(s.Db, s.Cache);
     private static ListGradeLevelsForTeacherHandler NewListGrades(StudentsTestScope s) =>
         new(s.Db, s.Cache);
 
-    private static async Task<Guid> SeedSubjectAsync(StudentsTestScope s, string code, string name)
+    private static async Task<Guid> SeedTopicAsync(StudentsTestScope s, string code, string name)
     {
-        var subject = Subject.Create(Guid.NewGuid(), code, name, 1).WithTenant(s.Tenants);
-        s.Db.Subjects.Add(subject);
+        var topic = Topic.Create(Guid.NewGuid(), code, name, 1).WithTenant(s.Tenants);
+        s.Db.Topics.Add(topic);
         await s.Db.SaveChangesAsync();
-        return subject.Id;
+        return topic.Id;
     }
 
     private static async Task<Guid> SeedGradeLevelAsync(StudentsTestScope s, int level, string name)
@@ -129,18 +129,18 @@ public class TeacherCqrsTests
     }
 
     [TestMethod]
-    public async Task LinkAndUnlinkSubject_PersistsLink()
+    public async Task LinkAndUnlinkTopic_PersistsLink()
     {
         using var s = new StudentsTestScope("teacher-subject");
         var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
-        var subjectId = await SeedSubjectAsync(s, "MATH", "Mathematics");
+        var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
-        await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
-        var subjectLinks = await NewListSubjects(s).HandleAsync(new ListSubjectsForTeacher(id));
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
+        var subjectLinks = await NewListTopics(s).HandleAsync(new ListTopicsForTeacher(id));
         subjectLinks.Should().ContainSingle(x => x.Id == subjectId);
 
-        await NewUnlinkSubject(s).HandleAsync(new UnlinkTeacherSubject(id, subjectId));
-        subjectLinks = await NewListSubjects(s).HandleAsync(new ListSubjectsForTeacher(id));
+        await NewUnlinkTopic(s).HandleAsync(new UnlinkTeacherSubject(id, subjectId));
+        subjectLinks = await NewListTopics(s).HandleAsync(new ListTopicsForTeacher(id));
         subjectLinks.Should().BeEmpty();
     }
 
@@ -189,34 +189,34 @@ public class TeacherCqrsTests
     }
 
     [TestMethod]
-    public async Task LinkSubject_MissingTeacher_Throws()
+    public async Task LinkTopic_MissingTeacher_Throws()
     {
         using var s = new StudentsTestScope("teacher-link-missing-teacher");
-        var subjectId = await SeedSubjectAsync(s, "MATH", "Mathematics");
+        var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
-        var act = async () => await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(Guid.NewGuid(), subjectId));
+        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(Guid.NewGuid(), subjectId));
         await act.Should().ThrowAsync<TeacherNotFoundException>();
     }
 
     [TestMethod]
-    public async Task LinkSubject_MissingSubject_Throws()
+    public async Task LinkTopic_MissingTopic_Throws()
     {
         using var s = new StudentsTestScope("teacher-link-missing-subject");
         var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
 
-        var act = async () => await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(id, Guid.NewGuid()));
-        await act.Should().ThrowAsync<SubjectNotFoundException>();
+        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, Guid.NewGuid()));
+        await act.Should().ThrowAsync<TopicNotFoundException>();
     }
 
     [TestMethod]
-    public async Task LinkSubject_DuplicateLink_Throws()
+    public async Task LinkTopic_DuplicateLink_Throws()
     {
         using var s = new StudentsTestScope("teacher-link-duplicate");
         var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
-        var subjectId = await SeedSubjectAsync(s, "MATH", "Mathematics");
+        var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
-        await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
-        var act = async () => await NewLinkSubject(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
+        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
         await act.Should().ThrowAsync<TeacherLinkAlreadyExistsException>();
     }
 

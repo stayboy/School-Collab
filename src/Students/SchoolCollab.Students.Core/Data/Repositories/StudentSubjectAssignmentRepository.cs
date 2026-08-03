@@ -12,9 +12,9 @@ internal sealed class StudentSubjectAssignmentRepository(StudentsDbContext db)
         await Db.StudentSubjectAssignments
             .AsNoTracking()
             .Where(x => x.StudentId == studentId && x.PeriodId == periodId)
-            .OrderBy(x => x.SubjectId)
+            .OrderBy(x => x.TopicId)
             .Select(x => new StudentSubjectAssignmentDto(
-                x.Id, x.StudentId, x.SubjectId, x.PeriodId,
+                x.Id, x.StudentId, x.TopicId, x.PeriodId,
                 x.IsOverride, x.SourceType.ToString(),
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
@@ -23,9 +23,9 @@ internal sealed class StudentSubjectAssignmentRepository(StudentsDbContext db)
         await Db.StudentSubjectAssignments
             .AsNoTracking()
             .Where(x => x.PeriodId == periodId)
-            .OrderBy(x => x.StudentId).ThenBy(x => x.SubjectId)
+            .OrderBy(x => x.StudentId).ThenBy(x => x.TopicId)
             .Select(x => new StudentSubjectAssignmentDto(
-                x.Id, x.StudentId, x.SubjectId, x.PeriodId,
+                x.Id, x.StudentId, x.TopicId, x.PeriodId,
                 x.IsOverride, x.SourceType.ToString(),
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);

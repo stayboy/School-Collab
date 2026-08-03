@@ -18,7 +18,7 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
             .OrderByDescending(a => a.UpdatedAt)
             .Select(a => new AssignmentSummary(
                 a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
-                a.SubjectId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
+                a.TopicId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt))
             .ToListAsync(ct);
     }

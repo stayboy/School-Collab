@@ -1,6 +1,10 @@
 # Spec: Subject-to-Topic Polymorphism (Merge Grade-Subjects & Activity-Lists)
 
-> **Status:** Approved
+> **Status:** Superseded for ownership model — see §0 (revised). The rename of
+> `Subject` → `Topic` and of `SubjectStrand`/`SubjectLesson` → `TopicStrand`/
+> `TopicLesson` stands. The **polymorphic ownership model** described in the
+> body of this document (§2 onward) was **reversed** in favour of a shared,
+> global `Topic` + `GradeSubjectAssignment` M:N bridge (Design B). See §0.
 > **Author:** Cline (spec-driven-workflow)
 > **Date:** 2026-07-31
 > **Reviewers:** Students context owner, Assignments context owner, Architecture
@@ -15,63 +19,74 @@
 
 ## 0. Decisions locked in this revision
 
-1. **Make `Subject` polymorphic.** A `Subject` (renamed `Topic` — see §12.1)
-   gains an `OwnerType` discriminator (`GradeLevel=0, ActivityGroup=1`) and
-   `OwnerId` (Guid). When `OwnerType = GradeLevel`, the topic belongs to a
-   grade level (existing flow). When `OwnerType = ActivityGroup`, the topic
-   belongs to an activity group and serves as the categorisation that
-   `ActivityList` was designed to be. This merges the two parallel
-   categorisation systems into one entity with shared strands and lessons.
+> **Revision note (2026-08-03):** The earlier polymorphic decision (§0 items
+> 1–3 and 5–7 below) was found to be **incoherent**: `Topic` was both polymorphic
+> (`OwnerType`/`OwnerId`/`PeriodId`) **and** retained `GradeSubjectAssignment` as a
+> bridge — the bridge was redundant with `Topic.OwnerId`. This was reversed to
+> **Design B**. The decisions below reflect the **current**, authoritative model.
 
-2. **Eliminate `GradeSubjectAssignment`.** The link table that currently
-   connects `Subject` → `GradeLevel` + `Period` (+ optional Strand/Lesson tags)
-   is absorbed into the `Topic` entity itself. The topic now carries
-   `OwnerId` (= GradeLevelId), `PeriodId`, `DefaultStrandId`, and
-   `DefaultLessonId` directly. This means a topic is a per-grade, per-period
-   offering — not a global definition shared across grades. Two topic rows
-   with the same `CodedValueId` but different `OwnerId` are conceptually the
-   same subject offered to different grades (§12.3).
+1. **`Topic` is a shared, global definition.** A `Topic` (renamed from
+   `Subject`) is a tenant-scoped catalog entry. It carries no owner columns
+   (`OwnerType`/`OwnerId`/`PeriodId` were removed) and no per-grade default
+   tags (`DefaultStrandId`/`DefaultLessonId` were removed). A topic is **not**
+   scoped to a grade/period on the topic itself.
 
-3. **Eliminate `ActivityList` and `AssignmentActivityList`.** The
-   `activity-group-enrollment.md` spec introduced `ActivityList` as a child
-   entity of `ActivityGroup` and `AssignmentActivityList` as a link table.
-   Both are now **superseded** by this spec — a polymorphic `Topic` with
-   `OwnerType = ActivityGroup` IS the activity list, and `Assignment.TopicId`
-   IS the link. The corresponding spec sections (§3.7, §7.4, §7.5, §8.4,
-   §8.5, EC-15..18, AC-32..34) are removed from `activity-group-enrollment.md`.
+2. **`GradeSubjectAssignment` is the M:N bridge.** It connects a shared
+   `Topic` to a `GradeLevel` **or** an `ActivityGroup`, and carries the
+   per-grade/group **strand and lesson selection** via
+   `TopicStrandId`/`TopicLessonId`. Columns: `GradeLevelId?`,
+   `ActivityGroupId?`, `TopicId`, `StartDate`, `EndDate?`,
+   `TopicStrandId?`, `TopicLessonId?`.
+   At most one of `GradeLevelId`/`ActivityGroupId` is set per row.
+
+2a. **The bridge is date-based, not period-bound.** A grade↔topic assignment
+   spans multiple years, so it is not tied to a `PeriodId`. Its effective
+   window is `[StartDate, EndDate]` where a null `EndDate` means open-ended
+   (currently active). Blocking or archiving an assignment sets `EndDate`
+   (typically today), which ends its effective period — no status enum is
+   needed. Removing a subject from a grade therefore "ends" the bridge row
+   rather than hard-deleting it, preserving history.
+
+3. **Per-grade/group variance is selection, not duplication.** Strands and
+   lessons stay **global under the `Topic`** (`TopicStrand.TopicId`,
+   `TopicLesson.TopicId`). The bridge's `TopicStrandId`/`TopicLessonId`
+   select **which** strand/lesson a given grade/group uses for that topic —
+   no per-grade copies of strands or lessons.
 
 4. **Strands and lessons work uniformly.** `SubjectStrand` (→ `TopicStrand`)
    and `SubjectLesson` (→ `TopicLesson`) already link to `SubjectId` (→
    `TopicId`). They require no structural change beyond the rename — they
-   immediately support activity-group topics because a topic is a topic
-   regardless of owner type.
+   are shared by all grades/groups that bridge to the topic.
 
-5. **`Assignment.SubjectId` stays required** (renamed `TopicId` if the full
-   rename is chosen — see §12.1). Validation is extended: if
-   `TargetAudienceType = SelectedGroups`, the topic's `OwnerType` must be
-   `ActivityGroup` and `OwnerId` must match a linked group. If
-   `SelectedGrades`, `OwnerType` must be `GradeLevel` and `OwnerId` must
-   match `Assignment.GradeLevelId`.
+5. **`Assignment.TopicId` stays required** (the column was renamed
+   `subject_id` → `topic_id`). The `ActivityGroup` side of the bridge
+   supports `SelectedGroups` targeting; validation against the bridge is
+   extended when the full rename lands in Assignments.
 
-6. **`Code` and `CodedValueId` become nullable.** Grade-level topics use the
-   coded-value system (existing behavior). Activity-group topics are free-text
-   (title/description only, no coded value). The existing unique index on
-   `(tenant_id, code)` becomes partial `WHERE code IS NOT NULL`.
+6. **`Code` and `CodedValueId` remain nullable/optional.** Grade-level topics
+   use the coded-value system (existing behavior). Activity-group topics may be
+   free-text. The existing unique index on `(tenant_id, code)` remains a
+   partial `WHERE code IS NOT NULL`.
 
-7. **Migration is additive in sequence.** The table rename, column additions,
-   backfill from `GradeSubjectAssignment`, and index changes are all in one
-   migration. The `GradeSubjectAssignment` table is dropped after backfill.
-   No data loss — all existing data is preserved and migrated.
+7. **Migration.** The table rename + bridge extension (`activity_group_id`
+   added, `grade_level_id` made nullable, strand/lesson columns renamed
+   `subject_*` → `topic_*`) is captured in one migration. No data loss.
+
+---
 
 ## 1. Goal
 
 Merge the grade-level subject system and the activity-group activity-list
-system into a **single polymorphic entity** (`Topic`, formerly `Subject`).
-A topic can belong to either a `GradeLevel` or an `ActivityGroup`, carries
-optional strands and lessons, and serves as the required categorisation
-for every assignment regardless of audience type. This eliminates the
+system into a **single shared `Topic` entity** (formerly `Subject`), with
+`GradeSubjectAssignment` as the M:N bridge that assigns a topic to a grade or
+group and selects the strand/lesson that grade/group uses. This eliminates the
 parallel `ActivityList` entity from `activity-group-enrollment.md` and
-unifies strands, lessons, reporting, and admin UI under one model.
+unifies strands, lessons, reporting, and admin UI under one shared model.
+
+> **Note:** The polymorphic ownership sections in the body of this document
+> (§2 onward) are **historical** and were superseded by §0 above. They are
+> retained only as a record of the rejected approach; the implemented model is
+> Design B per §0.
 
 ---
 

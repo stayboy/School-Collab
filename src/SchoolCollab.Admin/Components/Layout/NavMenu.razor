@@ -1,8 +1,10 @@
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Core.Features
 @implements IAsyncDisposable
 @inject CodedValuesApiClient Api
 @inject ILogger<NavMenu> Logger
 @inject NavigationManager Nav
+@inject IFeatureFlagService FeatureFlags
 
 <FluentNavMenu Width="250"
                Title="@(_currentModule == "settings" ? "Settings" : _currentModule == "assignments" ? "Assignments" : _currentModule == "students" ? "Students" : "Navigation")">
@@ -152,6 +154,13 @@
                          Icon="@FluentIcons.Calendar">
                Periods
             </FluentNavLink>
+            @if (FeatureFlags.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
+            {
+                <FluentNavLink Href="/activity-groups"
+                             Icon="@FluentIcons.People">
+                   Activity Groups
+                </FluentNavLink>
+            }
         </FluentNavGroup>
     }
 

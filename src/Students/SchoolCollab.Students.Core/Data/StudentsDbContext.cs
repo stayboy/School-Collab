@@ -13,7 +13,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
 {
     public DbSet<Student> Students => Set<Student>();
     public DbSet<GradeLevel> GradeLevels => Set<GradeLevel>();
-    public DbSet<Subject> Subjects => Set<Subject>();
+    public DbSet<Topic> Topics => Set<Topic>();
     public DbSet<Period> Periods => Set<Period>();
     public DbSet<StudentEnrollment> StudentEnrollments => Set<StudentEnrollment>();
     public DbSet<Guardian> Guardians => Set<Guardian>();
@@ -26,8 +26,8 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<TeacherGradeLevel> TeacherGradeLevels => Set<TeacherGradeLevel>();
     public DbSet<GradeSubjectAssignment> GradeSubjectAssignments => Set<GradeSubjectAssignment>();
     public DbSet<StudentSubjectAssignment> StudentSubjectAssignments => Set<StudentSubjectAssignment>();
-    public DbSet<SubjectStrand> SubjectStrands => Set<SubjectStrand>();
-    public DbSet<SubjectLesson> SubjectLessons => Set<SubjectLesson>();
+    public DbSet<TopicStrand> TopicStrands => Set<TopicStrand>();
+    public DbSet<TopicLesson> TopicLessons => Set<TopicLesson>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<StudentTransferAuditEntry> StudentTransferAuditEntries => Set<StudentTransferAuditEntry>();
     public DbSet<ActivityGroup> ActivityGroups => Set<ActivityGroup>();
@@ -42,7 +42,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         // ApplyConfigurationsFromAssembly here because it cannot inject arguments.
         modelBuilder.ApplyConfiguration(new StudentConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new GradeLevelConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new SubjectConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TopicConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new PeriodConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new StudentEnrollmentConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new GuardianConfiguration(() => CurrentTenantId));
@@ -55,8 +55,8 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new TeacherGradeLevelConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new GradeSubjectAssignmentConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new StudentSubjectAssignmentConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new SubjectStrandConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new SubjectLessonConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TopicStrandConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TopicLessonConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<StudentsDbContext>()));
         modelBuilder.ApplyConfiguration(new StudentTransferAuditEntryConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ActivityGroupConfiguration(() => CurrentTenantId));

@@ -17,6 +17,21 @@ public static class AssignmentEndpoints
 
         group.MapAssignmentRoutes();
 
+        // Phase 3 (spec activity-group-enrollment.md §7.3): assignment ↔ group
+        // link endpoints + the FR-6 delete-guard query. Gated behind
+        // FEATURE:EnableActivityGroups (flag OFF by default — dark launch).
+        // Mounted at the root so /activity-groups/{id}/assignments matches the
+        // Students API's group route namespace.
+        if (featureFlags.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
+        {
+            var activityGroupsGroup = app.MapGroup("");
+            if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+            {
+                activityGroupsGroup.RequireAuthorization();
+            }
+            activityGroupsGroup.MapActivityGroupLinkRoutes();
+        }
+
         return app;
     }
 }

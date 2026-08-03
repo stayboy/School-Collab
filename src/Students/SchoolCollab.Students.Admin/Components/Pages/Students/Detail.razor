@@ -2,6 +2,7 @@
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Core.Features
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Admin.Components.Students
 @using SchoolCollab.Students.Admin.Components.Students
@@ -169,6 +170,64 @@
                             </FluentDataGrid>
                         }
 
+                        @* ── Activity Groups (spec §3.6 FR-28..32) ───────────────
+                           Lists the groups the student is an active member of,
+                           below the Enrollments section. The "Join Group"
+                           accent button opens the JoinGroupsDialog (multi-select
+                           of available groups); each active row has a "Leave"
+                           lightweight button. Gated behind the
+                           FEATURE:EnableActivityGroups flag (NFR-11). *@
+                        <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
+                            <div class="section-header">
+                                <h3>Activity Groups</h3>
+                                <FluentButton Appearance="Appearance.Accent"
+                                              Size="ButtonSize.Small"
+                                              IconStart="@FluentIcons.PersonAdd"
+                                              OnClick="OnJoinGroupAsync">
+                                    Join Group
+                                </FluentButton>
+                            </div>
+                            @if (!string.IsNullOrEmpty(_activityGroupsError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error">@_activityGroupsError</FluentMessageBar>
+                            }
+                            @if (_studentGroups is null)
+                            {
+                                <div class="spinner-container">
+                                    <FluentProgressRing />
+                                </div>
+                            }
+                            else if (_studentGroups.Length == 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">
+                                    Not a member of any activity groups yet — use Join Group to add one.
+                                </FluentMessageBar>
+                            }
+                            else
+                            {
+                                <FluentDataGrid Items="@_studentGroups.AsQueryable()"
+                                                TGridItem="ActivityGroupDto"
+                                                Class="activity-groups-grid">
+                                    <TemplateColumn Title="Group">
+                                        <a href="/activity-groups/@context.Id">@context.Name</a>
+                                    </TemplateColumn>
+                                    <TemplateColumn Title="Category">@(context.Category ?? "—")</TemplateColumn>
+                                    <TemplateColumn Title="Status">
+                                        <FluentBadge Appearance="@GroupStatusBadge(context.Status)">@context.Status</FluentBadge>
+                                    </TemplateColumn>
+                                    <TemplateColumn Title="Members">@context.ActiveMemberCount</TemplateColumn>
+                                    <TemplateColumn Title="Actions" Class="activity-group-actions-col">
+                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                      Size="ButtonSize.Small"
+                                                      Disabled="@_savingGroupAction"
+                                                      OnClick="@(() => OnLeaveGroupAsync(context.Id))">
+                                            Leave
+                                        </FluentButton>
+                                    </TemplateColumn>
+                                </FluentDataGrid>
+                            }
+                        </FeatureFlagGate>
+
                         @* ── Guardians (embedded, not in a tab) ───────────────────
                            Replaces the deprecated <GuardiansTab>. The
                            page owns the link list + the dialog opens
@@ -254,6 +313,15 @@
     // guardians. Empty when salutations aren't configured for the tenant.
     private Dictionary<Guid, string> _salutations = new();
     private string? _guardianError;
+
+    // ── Activity Groups section state (spec §3.6 FR-28..32) ──
+    // Groups the student is an active member of, loaded in parallel with the
+    // guardians list. Join Group opens JoinGroupsDialog; Leave exits the
+    // student from that group. Both actions are immediate (view page has no
+    // Save flow) and reload the list on success.
+    private ActivityGroupDto[]? _studentGroups;
+    private string? _activityGroupsError;
+    private bool _savingGroupAction;
 
     /// <summary>
     /// The student's currently-active enrollment. Active = no exit date AND
@@ -384,6 +452,11 @@
             //    <GuardiansTab>). The list is used by the StudentGuardiansList
             //    below the title row.
             await LoadGuardiansAsync(ct);
+
+            // 4. Activity Groups the student is an active member of (spec
+            //    §3.6 FR-28). Loaded alongside the guardians list; the section
+            //    grid + Leave/Join actions live below Enrollments.
+            await LoadStudentGroupsAsync(ct);
         }
         catch (OperationCanceledException)
         {
@@ -727,6 +800,91 @@
 
     private string? ResolveSalutation(Guid? id)
         => id is { } g && _salutations.TryGetValue(g, out var n) ? n : null;
+
+    // ── Activity Groups actions (spec §3.6 FR-28..32) ────────────────────
+
+    private async Task LoadStudentGroupsAsync(CancellationToken ct)
+    {
+        try
+        {
+            _studentGroups = await Api.ListStudentGroupsAsync(Id, ct) ?? Array.Empty<ActivityGroupDto>();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load activity groups for student {StudentId}", Id);
+            _activityGroupsError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>
+    /// Opens the JoinGroupsDialog (FR-29/FR-30) — a searchable multi-select of
+    /// available groups the student is not already an active member of.
+    /// Accepted groups create memberships; per-group failures are surfaced in
+    /// the dialog. On any success the section reloads.
+    /// </summary>
+    private async Task OnJoinGroupAsync()
+    {
+        if (_disposed || _student is null || _savingGroupAction) return;
+        _activityGroupsError = null;
+        try
+        {
+            var result = await DialogService.ShowShellDialogAsync<
+                JoinGroupsDialog,
+                JoinGroupsDialog.JoinGroupsModel,
+                JoinGroupsDialog.JoinGroupsResult>(
+                new JoinGroupsDialog.JoinGroupsModel { StudentId = Id },
+                "Join group",
+                DialogSize.Medium);
+
+            if (result is null || _disposed) return;
+            await LoadStudentGroupsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to join group for student {StudentId}", Id);
+            _activityGroupsError = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Exits the student from the given group (FR-31). The group is passed as
+    /// the activity-group id; the membership is looked up by the API.
+    /// </summary>
+    private async Task OnLeaveGroupAsync(Guid groupId)
+    {
+        if (_disposed || _savingGroupAction) return;
+        _activityGroupsError = null;
+        _savingGroupAction = true;
+        try
+        {
+            await Api.RemoveGroupMemberAsync(groupId, Id);
+            await LoadStudentGroupsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to leave group {GroupId} for student {StudentId}", groupId, Id);
+            _activityGroupsError = ex.Message;
+        }
+        finally
+        {
+            _savingGroupAction = false;
+        }
+    }
+
+    /// <summary>
+    /// Badge appearance for a group status in the Activity Groups section.
+    /// Active groups are accented; Exited/Removed/Suspended fall back to
+    /// neutral so the section's visual language matches the group details page.
+    /// </summary>
+    private static Appearance GroupStatusBadge(string status) =>
+        string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase)
+            ? Appearance.Accent
+            : Appearance.Neutral;
 
     public void Dispose()
     {

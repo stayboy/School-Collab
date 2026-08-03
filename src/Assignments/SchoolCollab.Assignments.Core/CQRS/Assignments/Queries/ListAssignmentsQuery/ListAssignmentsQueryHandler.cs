@@ -43,7 +43,7 @@ public sealed class ListAssignmentsQueryHandler(
                     (AssignmentTypeDto)s.AssignmentType,
                     (GradingFormatDto)s.GradingFormat,
                     (TargetAudienceTypeDto)s.TargetAudienceType,
-                    s.SubjectId,
+                    s.TopicId,
                     null,
                     s.GradeLevelId,
                     null,

@@ -27,7 +27,7 @@ public class AssignmentOwnedTypeTenancyTests
     private static readonly Guid TenantA = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid TenantB = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-    private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
 
     private static async Task<ServiceProvider> BuildProviderAsync(string dbName)
     {
@@ -54,7 +54,7 @@ public class AssignmentOwnedTypeTenancyTests
 
     private static Assignment NewAssignment(string title) =>
         Assignment.Create(title, null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, SubjectId, null, null, null, TeacherId);
+            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId);
 
     [TestMethod]
     public async Task OwnedQuestions_InheritParentTenant_NoCrossTenantLeak()

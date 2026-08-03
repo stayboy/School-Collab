@@ -1,0 +1,234 @@
+@page "/activity-groups/{Id:guid}"
+@using SchoolCollab.Students.Admin.Components.Students
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Core.Features
+@inject StudentsApiClient Api
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<ActivityGroupDetails> Logger
+@implements IDisposable
+
+<FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
+    <SectionContent SectionName="page-toolbar">
+        <div class="title-row">
+            <h1 class="page-title">@(_group?.Name ?? "Activity Group")</h1>
+            @if (_group is not null)
+            {
+                <FluentBadge Appearance="@StatusBadge(_group.Status)">@_group.Status</FluentBadge>
+            }
+        </div>
+        <div class="action-bar">
+            <FluentButton Appearance="Appearance.Neutral"
+                          Icon="@FluentIcons.ArrowLeft"
+                          OnClick="@(() => Nav.NavigateTo("/activity-groups"))">
+                Back
+            </FluentButton>
+            @if (_group is not null && _group.Status != "Archived")
+            {
+                <FluentButton Appearance="Appearance.Accent"
+                              Icon="@FluentIcons.PersonAdd"
+                              Disabled="@_loading"
+                              OnClick="@OpenAddMemberDialogAsync">
+                    Add members
+                </FluentButton>
+            }
+        </div>
+    </SectionContent>
+
+    @if (_loading && _group is null)
+    {
+        <div class="spinner-container"><FluentProgressRing /></div>
+    }
+    else if (_group is null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning">Activity group not found.</FluentMessageBar>
+        <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/activity-groups"))">Back</FluentButton>
+    }
+    else
+    {
+        <FluentCard class="pa-4 mt-3">
+            <FluentStack Orientation="Orientation.Vertical" Spacing="2">
+                @if (!string.IsNullOrWhiteSpace(_group.Description))
+                {
+                    <p class="group-description">@_group.Description</p>
+                }
+                <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
+                    <span class="muted">Category:</span><span>@(_group.Category ?? "—")</span>
+                    <span class="muted">Capacity:</span><span>@(_group.Capacity?.ToString() ?? "Unlimited")</span>
+                    <span class="muted">Members:</span><span>@(_group.ActiveMemberCount)</span>
+                </FluentStack>
+            </FluentStack>
+        </FluentCard>
+
+        <h2 class="section-heading mt-4">Members</h2>
+
+        @if (_error is not null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_error</FluentMessageBar>
+        }
+
+        @if (_members is null)
+        {
+            <div class="spinner-container"><FluentProgressRing /></div>
+        }
+        else if (_members.Length == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info" class="mt-2">
+                No members yet. Use “Add members” to enrol students.
+            </FluentMessageBar>
+        }
+        else
+        {
+            <FluentDataGrid TGridItem="MembershipDto"
+                            Items="@_members.AsQueryable()"
+                            GridTemplateColumns="2fr 130px 100px auto">
+                <TemplateColumn Title="Student" Context="m">
+                    <span>@m.StudentName</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Joined" Context="m">
+                    <span class="muted">@m.JoinedOn.ToString("d MMM yyyy")</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Status" Context="m">
+                    <FluentBadge Appearance="@MemberStatusBadge(m.Status)">@m.Status</FluentBadge>
+                </TemplateColumn>
+                <TemplateColumn Title="" Context="m">
+                    @if (m.Status == "Active")
+                    {
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      Icon="@FluentIcons.Delete"
+                                      Disabled="@_saving"
+                                      OnClick="@(() => OnRemoveMemberAsync(m.StudentId))">
+                            Remove
+                        </FluentButton>
+                    }
+                </TemplateColumn>
+            </FluentDataGrid>
+        }
+    }
+</FeatureFlagGate>
+
+<style>
+    .muted { color: var(--neutral-foreground-hint); }
+    .group-description { margin: 0; }
+    .section-heading { font-size: 1.25rem; }
+</style>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private ActivityGroupDto? _group;
+    private MembershipDto[]? _members;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private bool _loading;
+    private bool _saving;
+
+    private static Appearance StatusBadge(string status) => status switch
+    {
+        "Archived" => Appearance.Neutral,
+        "Suspended" => Appearance.Outline,
+        _ => Appearance.Accent,
+    };
+
+    private static Appearance MemberStatusBadge(string status) =>
+        status == "Active" ? Appearance.Accent : Appearance.Neutral;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+        _loading = true;
+        _error = null;
+        try
+        {
+            _group = await Api.GetActivityGroupByIdAsync(Id, token);
+            if (_disposed) return;
+            if (_group is not null)
+            {
+                _members = await Api.ListGroupMembersAsync(Id, token);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load activity group {Id}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            if (!_disposed) StateHasChanged();
+        }
+    }
+
+    private async Task OpenAddMemberDialogAsync()
+    {
+        if (_disposed || _saving) return;
+
+        var selected = await DialogService.ShowShellDialogAsync<
+            StudentPickerDialog,
+            StudentPickerModel,
+            SchoolCollab.Students.Core.DTOs.StudentDto[]>(
+            new StudentPickerModel(), "Add members", DialogSize.Medium);
+
+        if (_disposed || selected is null || selected.Length == 0) return;
+
+        _saving = true;
+        try
+        {
+            foreach (var student in selected)
+            {
+                try
+                {
+                    await Api.AddGroupMemberAsync(Id, new AddActivityGroupMemberRequest(student.Id));
+                }
+                catch (Exception ex)
+                {
+                    _error = $"Could not add {student.FirstName} {student.LastName}: {ex.Message}";
+                }
+            }
+            await LoadAsync();
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnRemoveMemberAsync(Guid studentId)
+    {
+        if (_disposed || _saving) return;
+        _saving = true;
+        try
+        {
+            await Api.RemoveGroupMemberAsync(Id, studentId);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}
+

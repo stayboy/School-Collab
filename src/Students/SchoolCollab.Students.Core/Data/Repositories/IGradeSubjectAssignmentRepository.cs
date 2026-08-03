@@ -7,7 +7,6 @@ public interface IGradeSubjectAssignmentRepository
 {
     Task<GradeSubjectAssignment?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task AddAsync(GradeSubjectAssignment assignment, CancellationToken cancellationToken = default);
-    Task DeleteAsync(GradeSubjectAssignment assignment, CancellationToken cancellationToken = default);
-    Task<GradeSubjectAssignmentDto[]> ListByPeriodAsync(Guid periodId, CancellationToken cancellationToken = default);
-    Task<GradeSubjectAssignmentDto[]> ListByGradeLevelAsync(Guid gradeLevelId, Guid periodId, CancellationToken cancellationToken = default);
+    Task EndAsync(GradeSubjectAssignment assignment, DateOnly endDate, CancellationToken cancellationToken = default);
+    Task<GradeSubjectAssignmentDto[]> ListByGradeLevelAsync(Guid gradeLevelId, DateOnly effectiveDate, CancellationToken cancellationToken = default);
 }

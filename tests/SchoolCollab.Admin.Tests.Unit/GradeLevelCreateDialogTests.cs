@@ -99,7 +99,6 @@ public class GradeLevelCreateDialogTests : BunitContext
     private ScriptedHandler RegisterFor(
         Guid gradeId,
         Guid codedValueId,
-        Guid? currentPeriodId,
         IEnumerable<(Guid SubjectId, Guid AssignmentId)>? seededAssignments = null)
     {
         var handler = new ScriptedHandler();
@@ -155,13 +154,14 @@ public class GradeLevelCreateDialogTests : BunitContext
                 ["updatedAt"] = DateTimeOffset.UnixEpoch,
             }));
 
-        // ListGradeSubjectsByGradeAsync -> GET /students/grade-subjects/by-grade/{id}/period/{pid}.
+        // ListGradeSubjectsByGradeAsync -> GET /students/grade-subjects/by-grade/{id}.
         var seeded = (seededAssignments ?? []).Select(a => new Dictionary<string, object?>
         {
             ["id"] = a.AssignmentId,
             ["gradeLevelId"] = gradeId,
             ["subjectId"] = a.SubjectId,
-            ["periodId"] = currentPeriodId ?? Guid.Empty,
+            ["startDate"] = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
+            ["endDate"] = (string?)null,
             ["createdAt"] = DateTimeOffset.UnixEpoch,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         }).ToArray();
@@ -187,11 +187,11 @@ public class GradeLevelCreateDialogTests : BunitContext
     {
         // Register services BEFORE opening the dialog so its [Inject] students
         // api client resolves at instantiation time.
-        RegisterFor(gradeId: Guid.NewGuid(), codedValueId: Guid.NewGuid(), currentPeriodId: Guid.NewGuid());
+        RegisterFor(gradeId: Guid.NewGuid(), codedValueId: Guid.NewGuid());
         var cut = RenderProvider();
 
         var task = DialogService.ShowShellDialogAsync<GradeLevelCreateDialog, GradeLevelCreateDialog.GradeLevelCreateModel, SchoolCollab.Students.Admin.Services.GradeLevelDto>(
-            new GradeLevelCreateDialog.GradeLevelCreateModel { CurrentPeriodId = Guid.NewGuid() },
+            new GradeLevelCreateDialog.GradeLevelCreateModel(),
             title: "Create grade level",
             size: DialogSize.Medium);
 
@@ -217,13 +217,11 @@ public class GradeLevelCreateDialogTests : BunitContext
         // calls, no RemoveGradeSubject calls.
         var gradeId = Guid.NewGuid();
         var codedValueId = Guid.NewGuid();
-        var periodId = Guid.NewGuid();
         var subjectIds = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
 
         var handler = RegisterFor(
             gradeId: gradeId,
             codedValueId: codedValueId,
-            currentPeriodId: periodId,
             seededAssignments: null); // empty baseline
 
         // Seed the subject catalog so the dialog's ListSubjectsAsync returns
@@ -247,7 +245,6 @@ public class GradeLevelCreateDialogTests : BunitContext
         var cut = RenderProvider();
         var model = new GradeLevelCreateDialog.GradeLevelCreateModel
         {
-            CurrentPeriodId = periodId,
             CodedValueId = codedValueId,
             MinAge = 10,
             MaxAge = 12,

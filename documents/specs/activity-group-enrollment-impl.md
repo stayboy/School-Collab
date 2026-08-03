@@ -2,7 +2,11 @@
 
 > Tracked checklist for `activity-group-enrollment.md` (post-review, dated 2026-07-29).
 > One PR per step, each shippable behind `FEATURE:EnableActivityGroups` (flag OFF until Phase 6).
-> Update each box to `[x]` when the PR merges; add a PR link/SHA in the **PR** column or a note line.
+> **Workflow (adopted repo-wide for spec-driven effort): stacked PRs.** Each phase branches from the
+> previous phase's branch (not main) and its PR's base is the previous PR's head. Merges are deferred
+> until the whole spec is complete, then merged bottom-up (Phase 2 -> main, Phase 3 -> main, ...).
+> PR #99 (Phase 2) is the bottom of the stack. Update each box to `[x]` when the phase is built; the
+> PR link/SHA is tracked in the Notes / change log below.
 
 **Status legend:** `[ ]` not started · `[~]` in progress · `[x]` done · `[!]` blocked
 
@@ -43,29 +47,29 @@
 
 ## Phase 3 — Assignment↔group link + publish wiring (dark, flag OFF)
 
-- [ ] **3.1** Create `AssignmentActivityGroup` link entity + config + `AssignmentsDbContext` DbSet + additive migration `<ts>_AddAssignmentActivityLinks.cs`. Update `NoUncommittedModelChanges` test for `AssignmentsDbContext`. — *FR-17, §8.3, NFR-9*
-- [ ] **3.2** `LinkAssignmentGroups` command handler — replace-set semantics; enforce same-tenant, non-archived; reject archived-group links. — *FR-18, FR-19, AC-20, AC-21*
-- [ ] **3.3** Add Assignments API link endpoints: `PUT`/`GET /api/assignments/{assignmentId}/groups` and `GET /api/activity-groups/{groupId}/assignments` (§7.3). The last is what step 2.2's port consumes. — *§7.3, AC-20*
-- [ ] **3.4** Extend publish recipient resolution for `SelectedGroups`: in `PublishAssignmentCommandHandler`, when `TargetAudienceType = SelectedGroups` (enum `2`), call `IContactResolver.ResolveSubscribersRequest` with the **`StudentIds` roster of active members of linked groups** (the `StudentIds` param already exists in `IContactResolver`). Stop hardwiring `assignment.GradeLevelId` for this audience. Generate `AssignmentRecipient` rows. — *FR-20..23, AC-22..26*
-- [ ] **3.5** Unit-test: link-set replace, cross-tenant rejection, archived-group exclusion, publish-resolves-only-active-members. — *AC-22..26, EC-7..14*
+- [x] **3.1** Create `AssignmentActivityGroup` link entity + config + `AssignmentsDbContext` DbSet + additive migration `<ts>_AddAssignmentActivityLinks.cs`. Update `NoUncommittedModelChanges` test for `AssignmentsDbContext`. — *FR-17, §8.3, NFR-9*
+- [x] **3.2** `LinkAssignmentGroups` command handler — replace-set semantics; enforce same-tenant, non-archived; reject archived-group links. — *FR-18, FR-19, AC-20, AC-21*
+- [x] **3.3** Add Assignments API link endpoints: `PUT`/`GET /api/assignments/{assignmentId}/groups` and `GET /api/activity-groups/{groupId}/assignments` (§7.3). The last is what step 2.2's port consumes. — *§7.3, AC-20*
+- [x] **3.4** Extend publish recipient resolution for `SelectedGroups`: in `PublishAssignmentCommandHandler`, when `TargetAudienceType = SelectedGroups` (enum `2`), call `IContactResolver.ResolveSubscribersRequest` with the **`StudentIds` roster of active members of linked groups** (the `StudentIds` param already exists in `IContactResolver`). Stop hardwiring `assignment.GradeLevelId` for this audience. Generate `AssignmentRecipient` rows. — *FR-20..23, AC-22..26*
+- [x] **3.5** Unit-test: link-set replace, cross-tenant rejection, archived-group exclusion, publish-resolves-only-active-members. — *AC-22..26, EC-7..14*
 
 ---
 
 ## Phase 4 — Admin UI: ActivityGroups pages (dark, flag OFF)
 
-- [ ] **4.1** `ActivityGroups` list page in `Students.Admin/Components/Pages/ActivityGroups/*`, mirror `GradeLevels` (FluentUI, keyboard nav, ARIA — NFR-10). — *FR-24..27*
-- [ ] **4.2** `ActivityGroupCreateEditDialog` + `ActivityGroupDetails` page with members tab. Follow repo `fluentui-dialog-shell` / `dialog-ui` skill conventions for modal forms. — *FR-24..27*
-- [ ] **4.3** Gate all UI by `FEATURE:EnableActivityGroups` (repo tenant-gate / feature-flag pattern per `featureflags-tenant-gates` skill). — *NFR-11*
-- [ ] **4.4** bUnit tests: CRUD + members tab. — *AC-12..19*
+- [x] **4.1** `ActivityGroups` list page in `Students.Admin/Components/Pages/ActivityGroups/*`, mirror `GradeLevels` (FluentUI, keyboard nav, ARIA — NFR-10). — *FR-24..27*
+- [x] **4.2** `ActivityGroupCreateEditDialog` + `ActivityGroupDetails` page with members tab. Follow repo `fluentui-dialog-shell` / `dialog-ui` skill conventions for modal forms. — *FR-24..27*
+- [x] **4.3** Gate all UI by `FEATURE:EnableActivityGroups` (repo tenant-gate / feature-flag pattern per `featureflags-tenant-gates` skill). — *NFR-11*
+- [x] **4.4** bUnit tests: CRUD + members tab. — *AC-12..19*
 
 ---
 
 ## Phase 5 — Student Detail page UI (dark, flag OFF)
 
-- [ ] **5.1** Add "Activity Groups" section to `Students.Admin/Components/Pages/Students/Detail.razor` (FR-28). `StudentDetailSectionsTests.cs` already has red-phase tests asserting Join Group/Leave buttons gated on `EnableActivityGroups` — make them pass. — *FR-28, AC-27*
-- [ ] **5.2** `JoinGroupDialog` (`Students.Admin/Components/ActivityGroups/JoinGroupDialog.razor`), searchable multi-select, using `dialog-ui` skill conventions. — *FR-29, FR-30, AC-28, AC-29*
-- [ ] **5.3** "Leave" action button per membership row + empty-state message when no memberships. — *FR-31, FR-32, AC-30, AC-31*
-- [ ] **5.4** bUnit tests (AC-27..31). — *AC-27..31*
+- [x] **5.1** Add "Activity Groups" section to `Students.Admin/Components/Pages/Students/Detail.razor` (FR-28). `StudentDetailSectionsTests.cs` already has red-phase tests asserting Join Group/Leave buttons gated on `EnableActivityGroups` — make them pass. — *FR-28, AC-27*
+- [x] **5.2** `JoinGroupDialog` (`Students.Admin/Components/ActivityGroups/JoinGroupDialog.razor`), searchable multi-select, using `dialog-ui` skill conventions. — *FR-29, FR-30, AC-28, AC-29*
+- [x] **5.3** "Leave" action button per membership row + empty-state message when no memberships. — *FR-31, FR-32, AC-30, AC-31*
+- [x] **5.4** bUnit tests (AC-27..31). — *AC-27..31*
 
 ---
 
@@ -87,3 +91,10 @@
 ## Notes / change log
 
 - _Checklist generated from spec review (post-edit of items 1–7 + FR-35 cleanup). Spec source of truth: `activity-group-enrollment.md`._
+
+- _2026-08-02: Adopted stacked-PR workflow repo-wide (see header). Phase 2 = PR #99 (stack bottom, base: main). Phase 3 built on feat/activity-groups-phase3 (branched from phase2; PR base = phase2 branch) - AssignmentActivityGroup link entity/migration, LinkAssignmentGroups handler + IActivityGroupLookup port, Assignments link endpoints (PUT/GET /assignments/{id}/groups, GET /activity-groups/{id}/assignments), SelectedGroups publish wiring (FR-20/23/EC-4), 10 new tests. 88 Assignments tests + 156 Students tests pass._
+
+- _2026-08-02: Phase 4 built on feat/activity-groups-phase4 (branched from phase3; PR base = phase3 branch). Admin UI: ActivityGroups list page (LandingPage + grid mirroring GradeLevels), ActivityGroupCreateDialog/EditDialog (DialogShellBase), ActivityGroupDetails page with members tab (StudentPickerDialog add + remove), flag-gated nav link (FEATURE:EnableActivityGroups). 3 new bUnit tests pass (list render, flag-off hidden, members tab). 2 pre-existing GuardianGrid test failures on the stack base are unrelated to this phase._
+
+- _2026-08-02: Phase 5 built on feat/activity-groups-phase5 (branched from phase4; PR base = phase4 branch). Student Detail page "Activity Groups" section (FR-28..32): heading below Enrollments, Join Group accent button opening new JoinGroupsDialog (searchable multi-select of available groups — Active/not-at-capacity/excluding current memberships — with per-group partial-failure reporting), per-row Leave button, empty state, all gated behind FEATURE:EnableActivityGroups. Added `ListStudentGroupsAsync` to StudentsApiClient (GET /students/{id}/activity-groups). The 5 red-phase tests in StudentDetailSectionsTests.cs (AC-27..31) now pass → Admin suite 226/228 (2 pre-existing GuardianGrid failures)._
+

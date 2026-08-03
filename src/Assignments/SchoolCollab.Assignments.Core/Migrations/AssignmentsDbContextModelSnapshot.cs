@@ -93,10 +93,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("status");
 
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
                     b.Property<int>("TargetAudienceType")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -112,6 +108,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("title");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -129,10 +129,52 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_assignments_status");
 
-                    b.HasIndex("SubjectId")
-                        .HasDatabaseName("ix_assignments_subject_id");
+                    b.HasIndex("TopicId")
+                        .HasDatabaseName("ix_assignments_topic_id");
 
                     b.ToTable("assignments", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActivityGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_group_id");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assignment_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_assignment_activity_groups");
+
+                    b.HasIndex("AssignmentId")
+                        .HasDatabaseName("ix_assignment_activity_groups_assignment_id");
+
+                    b.HasIndex("TenantId", "ActivityGroupId")
+                        .HasDatabaseName("ix_assignment_activity_groups_tenant_group");
+
+                    b.HasIndex("TenantId", "AssignmentId", "ActivityGroupId")
+                        .IsUnique()
+                        .HasDatabaseName("uq_assignment_activity_groups_tenant_assignment_group");
+
+                    b.ToTable("assignment_activity_groups", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentRecipient", b =>
@@ -718,6 +760,16 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.Navigation("Questions");
 
                     b.Navigation("Reviews");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
+                {
+                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
+                        .WithMany()
+                        .HasForeignKey("AssignmentId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_assignment_activity_groups_assignments_assignment_id");
                 });
 #pragma warning restore 612, 618
         }
