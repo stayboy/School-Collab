@@ -9,7 +9,7 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.GetOrCreateTopic;
 /// coded value). If a subject for the coded value exists, it is reused and its
 /// mirrored <see cref="Domain.Topic.Name"/>/DisplayOrder are updated;
 /// otherwise a new one is created. The topic is a shared, global definition;
-/// it is linked to the grade level via the <c>GradeSubjectAssignment</c> bridge
+/// it is linked to the grade level via the <c>GradeTopicAssignment</c> bridge
 /// for the current period. Used by the wizard's "Add to grade" button so the
 /// user can pick a subject coded value and wire it to the grade without leaving
 /// the wizard. Returns the resulting subject as a <see cref="TopicDto"/>.

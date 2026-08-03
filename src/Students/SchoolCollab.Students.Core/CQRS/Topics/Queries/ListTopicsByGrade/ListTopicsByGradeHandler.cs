@@ -9,7 +9,7 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicsByGrade;
 /// Returns the shared topics assigned to a grade level on an effective date.
 ///
 /// <para>Topics are <b>shared, global</b> catalog definitions; a topic is
-/// linked to a grade via the <see cref="Domain.GradeSubjectAssignment"/> bridge
+/// linked to a grade via the <see cref="Domain.GradeTopicAssignment"/> bridge
 /// (subject-to-topic-polymorphism.md §2.4). The bridge is <b>date-based, not
 /// period-bound</b>: a topic is in effect on a date when
 /// <c>StartDate &lt;= date &lt;= (EndDate ?? ∞)</c>. Blocked/archived assignments
@@ -27,7 +27,7 @@ public sealed class ListTopicsByGradeHandler(StudentsDbContext db)
     {
         var effectiveDate = query.EffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
 
-        var topicIds = db.GradeSubjectAssignments
+        var topicIds = db.GradeTopicAssignments
             .AsNoTracking()
             .Where(a => a.GradeLevelId == query.GradeLevelId
                 && a.StartDate <= effectiveDate

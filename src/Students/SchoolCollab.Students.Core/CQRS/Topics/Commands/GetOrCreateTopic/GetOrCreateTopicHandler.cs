@@ -13,14 +13,14 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.GetOrCreateTopic;
 /// Find-or-create by <see cref="GetOrCreateTopic.CodedValueId"/>. Reuses the
 /// existing subject (updating mirrored Name/DisplayOrder) or creates a new
 /// shared, global one, then links it to the grade via the
-/// <see cref="GradeSubjectAssignment"/> bridge — effective from today and
+/// <see cref="GradeTopicAssignment"/> bridge — effective from today and
 /// open-ended (date-based, not period-bound). Returns a <see cref="TopicDto"/>.
 /// Safe under the unique index on <c>CodedValueId</c> (§5.7). Invalidates the
 /// <c>students</c> cache tag.
 /// </summary>
 public sealed class GetOrCreateTopicHandler(
     ITopicRepository repository,
-    IGradeSubjectAssignmentRepository assignmentRepository,
+    IGradeTopicAssignmentRepository assignmentRepository,
     IGradeLevelRepository gradeLevelRepository,
     HybridCache cache,
     ITenantProvider tenantProvider,
@@ -76,9 +76,8 @@ public sealed class GetOrCreateTopicHandler(
 
         if (!existingAssignments.Any(a => a.TopicId == subject.Id))
         {
-            var assignment = GradeSubjectAssignment.Create(
+            var assignment = GradeTopicAssignment.Create(
                     command.GradeLevelId,
-                    activityGroupId: null,
                     subject.Id,
                     today)
                 .WithTenant(tenantProvider);
@@ -86,7 +85,7 @@ public sealed class GetOrCreateTopicHandler(
             await assignmentRepository.AddAsync(assignment, cancellationToken);
             assignment.ClearDomainEvents();
             logger.LogInformation(
-                "GradeSubjectAssignment created for grade {GradeLevelId}, topic {TopicId}, from {StartDate}",
+                "GradeTopicAssignment created for grade {GradeLevelId}, topic {TopicId}, from {StartDate}",
                 command.GradeLevelId, subject.Id, today);
         }
 

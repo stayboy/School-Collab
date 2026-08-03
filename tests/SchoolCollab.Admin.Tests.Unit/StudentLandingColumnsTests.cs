@@ -50,7 +50,7 @@ public class StudentLandingColumnsTests : BunitContext
                     Level: 5,
                     Name: currentGradeName,
                     DisplayOrder: 5,
-                    SubjectCount: 0,
+                    TopicCount: 0,
                     StudentCount: 0,
                     CreatedAt: default,
                     UpdatedAt: default));

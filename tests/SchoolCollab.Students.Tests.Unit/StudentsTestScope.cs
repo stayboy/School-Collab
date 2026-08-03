@@ -23,7 +23,7 @@ internal sealed class StudentsTestScope : IDisposable
     public PeriodRepository Periods { get; }
     public GradeLevelRepository GradeLevels { get; }
     public TopicRepository Topics { get; }
-    public GradeSubjectAssignmentRepository GradeSubjectAssignments { get; }
+    public GradeTopicAssignmentRepository GradeTopicAssignments { get; }
     public ActivityGroupRepository ActivityGroups { get; }
     public ActivityGroupMembershipRepository Memberships { get; }
     public StudentRepository Students { get; }
@@ -53,7 +53,7 @@ internal sealed class StudentsTestScope : IDisposable
         Periods = new PeriodRepository(Db);
         GradeLevels = new GradeLevelRepository(Db);
         Topics = new TopicRepository(Db);
-        GradeSubjectAssignments = new GradeSubjectAssignmentRepository(Db);
+        GradeTopicAssignments = new GradeTopicAssignmentRepository(Db);
         ActivityGroups = new ActivityGroupRepository(Db);
         Memberships = new ActivityGroupMembershipRepository(Db);
         Students = new StudentRepository(Db);

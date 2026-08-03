@@ -38,8 +38,8 @@ public class ListTopicsByGradeHandlerTests
         var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
         var mathId = await SeedTopicAsync(s, Guid.NewGuid(), "MATH", "Mathematics", 1);
 
-        s.Db.GradeSubjectAssignments.Add(
-            GradeSubjectAssignment.Create(glId, activityGroupId: null, mathId, Today().AddDays(-30)));
+        s.Db.GradeTopicAssignments.Add(
+            GradeTopicAssignment.Create(glId, mathId, Today().AddDays(-30)));
         await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListTopicsByGrade(glId));
@@ -56,8 +56,8 @@ public class ListTopicsByGradeHandlerTests
         var engId = await SeedTopicAsync(s, Guid.NewGuid(), "ENG", "English", 2);
 
         // Assign both subjects to Grade 1, effective from today (open-ended).
-        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(glId, activityGroupId: null, mathId, Today()));
-        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(glId, activityGroupId: null, engId, Today()));
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, mathId, Today()));
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, engId, Today()));
         await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListTopicsByGrade(glId));
@@ -77,8 +77,8 @@ public class ListTopicsByGradeHandlerTests
         var mathId = await SeedTopicAsync(s, Guid.NewGuid(), "MATH", "Mathematics", 1);
 
         // Assigned effective [-30, -10] — ended in the past.
-        s.Db.GradeSubjectAssignments.Add(
-            GradeSubjectAssignment.Create(glId, activityGroupId: null, mathId, Today().AddDays(-30), Today().AddDays(-10)));
+        s.Db.GradeTopicAssignments.Add(
+            GradeTopicAssignment.Create(glId, mathId, Today().AddDays(-30), Today().AddDays(-10)));
         await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListTopicsByGrade(glId));
@@ -98,8 +98,8 @@ public class ListTopicsByGradeHandlerTests
         var mathId = await SeedTopicAsync(s, Guid.NewGuid(), "MATH", "Mathematics", 1);
 
         // Math effective only from +10 (future) — not effective today.
-        s.Db.GradeSubjectAssignments.Add(
-            GradeSubjectAssignment.Create(glId, activityGroupId: null, mathId, Today().AddDays(10)));
+        s.Db.GradeTopicAssignments.Add(
+            GradeTopicAssignment.Create(glId, mathId, Today().AddDays(10)));
         await s.Db.SaveChangesAsync();
 
         var today = await NewHandler(s).HandleAsync(new ListTopicsByGrade(glId));
@@ -119,9 +119,9 @@ public class ListTopicsByGradeHandlerTests
         var engId = await SeedTopicAsync(s, Guid.NewGuid(), "ENG", "English", 2);
 
         // Grade 1 has Math only
-        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(gl1Id, activityGroupId: null, mathId, Today()));
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(gl1Id, mathId, Today()));
         // Grade 2 has English only
-        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(gl2Id, activityGroupId: null, engId, Today()));
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(gl2Id, engId, Today()));
         await s.Db.SaveChangesAsync();
 
         var result1 = await NewHandler(s).HandleAsync(new ListTopicsByGrade(gl1Id));
@@ -136,7 +136,7 @@ public class ListTopicsByGradeHandlerTests
     {
         using var s = new StudentsTestScope("subjects-empty");
         var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
-        // No GradeSubjectAssignments seeded
+        // No TopicAssignments seeded
 
         var result = await NewHandler(s).HandleAsync(new ListTopicsByGrade(glId));
 

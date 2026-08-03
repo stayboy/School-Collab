@@ -62,7 +62,7 @@ public class ListGradeLevelsForLandingHandlerTests
         // One topic assigned to this grade, effective from today and open-ended → TopicCount 1.
         var topic = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
         s.Db.Topics.Add(topic);
-        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(glId, activityGroupId: null, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
         await s.Db.SaveChangesAsync();
 
         // One current-tenant student enrolled in this grade for the current period.

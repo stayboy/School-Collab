@@ -32,7 +32,7 @@ public sealed record GradeLevelDto(
     int Level,
     string Name,
     int DisplayOrder,
-    int SubjectCount,
+    int TopicCount,
     int StudentCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
@@ -44,7 +44,7 @@ public sealed record GradeLevelLandingDto(
     Guid Id,
     Guid CodedValueId,
     string Name,
-    int SubjectCount,
+    int TopicCount,
     int StudentCount,
     Guid? CurrentPeriodId,
     string? CurrentPeriodName,
@@ -112,12 +112,16 @@ public sealed record StudentEnrollmentDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
-public sealed record GradeSubjectAssignmentDto(
+public sealed record TopicAssignmentDto(
     Guid Id,
+    string Audience,
     Guid? GradeLevelId,
-    Guid SubjectId,
+    Guid? ActivityGroupId,
+    Guid TopicId,
     DateOnly StartDate,
     DateOnly? EndDate,
+    Guid? TopicStrandId,
+    Guid? TopicLessonId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -233,9 +237,9 @@ public record TransferStudentRequest(
 public record WithdrawStudentRequest(
     DateOnly? ExitDate);
 
-public record AssignGradeSubjectRequest(
+public record AssignGradeTopicRequest(
     Guid GradeLevelId,
-    Guid SubjectId,
+    Guid TopicId,
     DateOnly StartDate,
     DateOnly? EndDate = null);
 
@@ -576,7 +580,15 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<ActivityGroupDto[]?> ListStudentGroupsAsync(Guid studentId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<ActivityGroupDto[]>($"/students/{studentId}/activity-groups", ct);
 
-    // ── Subjects ─────────────────────────────────────────────────────────────
+    // ── Topics ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Lists the topic (subject) catalog. Uses the canonical <c>/students/topics</c>
+    /// route (NFR-6); the <c>/subjects</c> alias is deprecated. Returns Core
+    /// <see cref="TopicDto"/> rows so the grade-level dialogs bind topic ids.
+    /// </summary>
+    public async Task<TopicDto[]?> ListTopicsAsync(CancellationToken ct = default)
+        => await _http.GetFromJsonAsync<TopicDto[]>("/students/topics", ct);
 
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<SubjectDto[]>("/students/subjects", ct);
@@ -620,7 +632,7 @@ public sealed class StudentsApiClient : IContactsClient
 
     /// <summary>
     /// Creates (or reuses) a <see cref="Subject"/> and a
-    /// <see cref="GradeSubjectAssignment"/> for the current period, linking the
+    /// <see cref="GradeTopicAssignment"/> for the current period, linking the
     /// subject to the given grade level (§8.1). Returns the resolved SubjectDto.
     /// </summary>
     public async Task<SubjectDto> CreateSubjectForGradeAsync(CreateSubjectForGradeRequest req, CancellationToken ct = default)
@@ -722,24 +734,24 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Grade Subject Assignments ─────────────────────────────────────────────
 
-    public async Task<GradeSubjectAssignmentDto[]?> ListGradeSubjectsByGradeAsync(Guid gradeLevelId, DateOnly? effectiveDate = null, CancellationToken ct = default)
+    public async Task<TopicAssignmentDto[]?> ListGradeTopicsByGradeAsync(Guid gradeLevelId, DateOnly? effectiveDate = null, CancellationToken ct = default)
     {
         var url = effectiveDate is { } e
-            ? $"/students/grade-subjects/by-grade/{gradeLevelId}?effectiveDate={e:yyyy-MM-dd}"
-            : $"/students/grade-subjects/by-grade/{gradeLevelId}";
-        return await _http.GetFromJsonAsync<GradeSubjectAssignmentDto[]>(url, ct);
+            ? $"/students/topic-assignments/by-grade/{gradeLevelId}?effectiveDate={e:yyyy-MM-dd}"
+            : $"/students/topic-assignments/by-grade/{gradeLevelId}";
+        return await _http.GetFromJsonAsync<TopicAssignmentDto[]>(url, ct);
     }
 
-    public async Task<Guid> AssignGradeSubjectAsync(AssignGradeSubjectRequest req, CancellationToken ct = default)
+    public async Task<Guid> AssignGradeTopicAsync(AssignGradeTopicRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/students/grade-subjects", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/topic-assignments/grade", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
-    public async Task RemoveGradeSubjectAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/students/grade-subjects/{id}", ct)).EnsureSuccessStatusCode();
+    public async Task RemoveTopicAssignmentAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/topic-assignments/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Student Subject Assignments ──────────────────────────────────────────
 

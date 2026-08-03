@@ -33,7 +33,8 @@ public sealed record StudentGuardianUpdatedEvent(
     Guid? RelationshipCodedValueId,
     bool IsEmergencyContact) : IDomainEvent;
 
-public sealed record GradeTopicAssignedEvent(Guid AssignmentId, Guid? GradeLevelId, Guid? ActivityGroupId, Guid TopicId, DateOnly StartDate, DateOnly? EndDate) : IDomainEvent;
+public sealed record GradeTopicAssignedEvent(Guid AssignmentId, Guid GradeLevelId, Guid TopicId, DateOnly StartDate, DateOnly? EndDate) : IDomainEvent;
+public sealed record ActivityGroupTopicAssignedEvent(Guid AssignmentId, Guid ActivityGroupId, Guid TopicId, DateOnly StartDate, DateOnly? EndDate) : IDomainEvent;
 
 public sealed record StudentTopicAssignedEvent(Guid AssignmentId, Guid StudentId, Guid TopicId, Guid PeriodId) : IDomainEvent;
 

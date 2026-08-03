@@ -4,23 +4,30 @@ using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class GradeSubjectAssignment : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
+/// <summary>
+/// Abstract base for a grade/activity-group ↔ topic bridge (TPH root). A topic is
+/// a shared, global catalog definition; this bridge wires it to a specific
+/// audience — a grade level or an activity group (see
+/// subject-to-topic-polymorphism.md §2.4). The discriminator column
+/// (<c>topic_assignment_type</c>) selects the concrete subtype
+/// (<see cref="GradeTopicAssignment"/> or <see cref="ActivityGroupTopicAssignment"/>),
+/// and each subtype carries its own non-nullable audience FK.
+///
+/// <para>The effective period is <b>date-based</b>, not period-bound: a topic stays
+/// assigned to its audience across multiple years unless blocked/archived (a set
+/// <c>EndDate</c>).</para>
+/// </summary>
+public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
-    private GradeSubjectAssignment() { }
+    protected TopicAssignment() { }
 
     public Guid Id { get; private set; }
 
     // Multi-tenancy: tenant-owned (global-tenant-filter.md §3.2 Strict).
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
     public Guid TenantId { get; private set; }
-
-    /// <summary>Grade level this topic is assigned to (null for activity-group topics).</summary>
-    public Guid? GradeLevelId { get; private set; }
-
-    /// <summary>Activity group this topic is assigned to (null for grade-level topics).</summary>
-    public Guid? ActivityGroupId { get; private set; }
 
     /// <summary>The shared, global topic (subject) assigned to the grade/group.</summary>
     public Guid TopicId { get; private set; }
@@ -47,50 +54,32 @@ public sealed class GradeSubjectAssignment : ITenantEntity, IEntity, IAuditableE
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
     /// <summary>
-    /// Creates a bridge row assigning a topic to a grade level (or, if
-    /// <paramref name="gradeLevelId"/> is null, to an activity group). The
-    /// <see cref="TopicStrandId"/>/<see cref="TopicLessonId"/> select which
-    /// strand/lesson the grade/group uses for the topic.
+    /// Seeds the shared state for a derived subtype. Validates the effective
+    /// window and stamps the audit timestamps.
     /// </summary>
-    /// <param name="startDate">First effective day (required).</param>
-    /// <param name="endDate">
-    /// Last effective day. Omit (or pass null) to keep the assignment
-    /// open-ended/active; set it to end the assignment (block/archive).
-    /// </param>
-    /// <exception cref="ArgumentException">
-    /// Thrown when <paramref name="endDate"/> is set but precedes
-    /// <paramref name="startDate"/>.
-    /// </exception>
-    public static GradeSubjectAssignment Create(
-        Guid? gradeLevelId,
-        Guid? activityGroupId,
+    protected void Initialize(
+        Guid id,
         Guid topicId,
         DateOnly startDate,
-        DateOnly? endDate = null,
-        Guid? topicStrandId = null,
-        Guid? topicLessonId = null)
+        DateOnly? endDate,
+        Guid? topicStrandId,
+        Guid? topicLessonId)
     {
         if (endDate is { } e && e < startDate)
             throw new ArgumentException("EndDate must be on or after StartDate.", nameof(endDate));
 
         var now = DateTimeOffset.UtcNow;
-        var assignment = new GradeSubjectAssignment
-        {
-            Id = Guid.NewGuid(),
-            GradeLevelId = gradeLevelId,
-            ActivityGroupId = activityGroupId,
-            TopicId = topicId,
-            StartDate = startDate,
-            EndDate = endDate,
-            TopicStrandId = topicStrandId,
-            TopicLessonId = topicLessonId,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-
-        assignment._domainEvents.Add(new GradeTopicAssignedEvent(assignment.Id, gradeLevelId, activityGroupId, topicId, startDate, endDate));
-        return assignment;
+        Id = id;
+        TopicId = topicId;
+        StartDate = startDate;
+        EndDate = endDate;
+        TopicStrandId = topicStrandId;
+        TopicLessonId = topicLessonId;
+        CreatedAt = now;
+        UpdatedAt = now;
     }
+
+    protected void AddEvent(IDomainEvent domainEvent) => _domainEvents.Add(domainEvent);
 
     /// <summary>
     /// True when the assignment is effective on <paramref name="date"/>: started
@@ -116,7 +105,7 @@ public sealed class GradeSubjectAssignment : ITenantEntity, IEntity, IAuditableE
     public void UpdateTags(Guid? strandId, Guid? lessonId)
     {
         if (TopicStrandId == strandId && TopicLessonId == lessonId) return;
-        
+
         TopicStrandId = strandId;
         TopicLessonId = lessonId;
         UpdatedAt = DateTimeOffset.UtcNow;

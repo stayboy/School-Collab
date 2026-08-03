@@ -62,7 +62,7 @@ public class TopicsByGradeEndpointErrorMappingTests
         // grade_subject_assignments -> grade_levels so the order matters
         // for the FK; TRUNCATE ... CASCADE handles it.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE grade_subject_assignments, grade_levels, subjects, periods CASCADE;");
+            "TRUNCATE TABLE topic_assignments, grade_levels, subjects, periods CASCADE;");
     }
 
     [TestMethod]
@@ -235,8 +235,8 @@ public class TopicsByGradeEndpointErrorMappingTests
             await db.SaveChangesAsync(_ct);
             // Assignments are date-based and open-ended (start today, no end),
             // so a topic stays assigned to the grade across years.
-            db.GradeSubjectAssignments.Add(
-                GradeSubjectAssignment.Create(gradeLevelId, activityGroupId: null, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
+            db.GradeTopicAssignments.Add(
+                GradeTopicAssignment.Create(gradeLevelId, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
             await db.SaveChangesAsync(_ct);
             return (object?)null;
         });

@@ -11,7 +11,7 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.CreateTopicForGrade;
 
 /// <summary>
 /// Creates (or reuses) a shared, global <see cref="Topic"/> and links it to the
-/// grade level via the <see cref="GradeSubjectAssignment"/> bridge (§8.1). The
+/// grade level via the <see cref="GradeTopicAssignment"/> bridge (§8.1). The
 /// topic itself is a shared catalog definition; the per-grade wiring lives on the
 /// bridge. Assignments are <b>date-based, not period-bound</b>: the bridge row is
 /// opened today (<see cref="DateOnly"/>) and left open-ended (<c>EndDate = null</c>)
@@ -19,7 +19,7 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.CreateTopicForGrade;
 /// </summary>
 public sealed class CreateTopicForGradeHandler(
     ITopicRepository topicRepository,
-    IGradeSubjectAssignmentRepository assignmentRepository,
+    IGradeTopicAssignmentRepository assignmentRepository,
     IGradeLevelRepository gradeLevelRepository,
     HybridCache cache,
     ITenantProvider tenantProvider,
@@ -92,7 +92,7 @@ public sealed class CreateTopicForGradeHandler(
         await cache.RemoveByTagAsync("students", cancellationToken);
         subject.ClearDomainEvents();
 
-        // 4. Retain GradeSubjectAssignment as the M:N bridge between the topic and
+        // 4. Retain GradeTopicAssignment as the M:N bridge between the topic and
         //    its grade level, effective from today and open-ended. Idempotent: skip
         //    if an active (unended) assignment already exists for this grade/topic.
         var existingAssignments = await assignmentRepository
@@ -100,9 +100,8 @@ public sealed class CreateTopicForGradeHandler(
 
         if (!existingAssignments.Any(a => a.TopicId == subject.Id))
         {
-            var assignment = GradeSubjectAssignment.Create(
+            var assignment = GradeTopicAssignment.Create(
                     command.GradeLevelId,
-                    activityGroupId: null,
                     subject.Id,
                     today)
                 .WithTenant(tenantProvider);
@@ -110,13 +109,13 @@ public sealed class CreateTopicForGradeHandler(
             await assignmentRepository.AddAsync(assignment, cancellationToken);
             assignment.ClearDomainEvents();
             logger.LogInformation(
-                "GradeSubjectAssignment created for grade {GradeLevelId}, topic {TopicId}, from {StartDate}",
+                "GradeTopicAssignment created for grade {GradeLevelId}, topic {TopicId}, from {StartDate}",
                 command.GradeLevelId, subject.Id, today);
         }
         else
         {
             logger.LogInformation(
-                "GradeSubjectAssignment already active for grade {GradeLevelId}, topic {TopicId} — skipping",
+                "GradeTopicAssignment already active for grade {GradeLevelId}, topic {TopicId} — skipping",
                 command.GradeLevelId, subject.Id);
         }
 

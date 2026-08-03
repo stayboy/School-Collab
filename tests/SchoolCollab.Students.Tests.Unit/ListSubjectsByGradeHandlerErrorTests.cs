@@ -143,8 +143,8 @@ public class ListTopicsByGradeHandlerErrorTests
         s.Db.Topics.Add(topic);
         await s.Db.SaveChangesAsync();
 
-        s.Db.GradeSubjectAssignments.Add(
-            GradeSubjectAssignment.Create(glId, activityGroupId: null, topic.Id, today.AddDays(-30), today));
+        s.Db.GradeTopicAssignments.Add(
+            GradeTopicAssignment.Create(glId, topic.Id, today.AddDays(-30), today));
         await s.Db.SaveChangesAsync();
         return topic.Id;
     }

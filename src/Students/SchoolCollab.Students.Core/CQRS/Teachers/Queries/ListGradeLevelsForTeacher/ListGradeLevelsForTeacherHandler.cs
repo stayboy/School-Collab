@@ -32,7 +32,7 @@ public sealed class ListGradeLevelsForTeacherHandler(
                                      orderby gl.Level
                                      select new GradeLevelDto(
                                          gl.Id, gl.CodedValueId, gl.Level, gl.Name, gl.DisplayOrder,
-                                         db.GradeSubjectAssignments.IgnoreQueryFilters(new[] { "Tenant" })
+                                         db.GradeTopicAssignments.IgnoreQueryFilters(new[] { "Tenant" })
                                              .Count(gsa => gsa.GradeLevelId == gl.Id && gsa.TenantId == tenantId),
                                          db.StudentEnrollments.IgnoreQueryFilters(new[] { "Tenant" })
                                              .Count(se => se.GradeLevelId == gl.Id && se.TenantId == tenantId),

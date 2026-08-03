@@ -88,9 +88,9 @@ public class GradeLevelEditDialogTests : BunitContext
 
     /// <summary>
     /// Registers the scripted HTTP backend the Edit dialog talks to.
-    /// The dialog calls ListSubjectsAsync (subject catalog),
+    /// The dialog calls ListTopicsAsync (topic catalog),
     /// CodedValuesApi.GetByIdAsync (the grade coded value), and
-    /// ListGradeSubjectsByGradeAsync (existing subject assignments).
+    /// ListGradeTopicsByGradeAsync (existing subject assignments).
     /// </summary>
     private ScriptedHandler RegisterFor(
         Guid gradeId,
@@ -99,8 +99,8 @@ public class GradeLevelEditDialogTests : BunitContext
     {
         var handler = new ScriptedHandler();
 
-        // Subject catalog - empty (no subjects in this fixture).
-        handler.Map("/students/subjects", HttpStatusCode.OK, "[]");
+        // Topic catalog - empty (no topics in this fixture).
+        handler.Map("/students/topics", HttpStatusCode.OK, "[]");
 
         // CodedValueDropdown parent lookup (no-op when not used).
         handler.Map("/api/coded-values/", HttpStatusCode.OK, "[]");
@@ -129,24 +129,28 @@ public class GradeLevelEditDialogTests : BunitContext
                 ["defaultName"] = (string?)null,
             }));
 
-        // ListGradeSubjectsByGradeAsync - baseline assignments for the diff.
+        // ListGradeTopicsByGradeAsync - baseline assignments for the diff.
         var seeded = (seededAssignments ?? []).Select(a => new Dictionary<string, object?>
         {
             ["id"] = a.AssignmentId,
+            ["audience"] = "grade",
             ["gradeLevelId"] = gradeId,
-            ["subjectId"] = a.SubjectId,
+            ["activityGroupId"] = (Guid?)null,
+            ["topicId"] = a.SubjectId,
             ["startDate"] = DateOnly.FromDateTime(DateTime.UtcNow).ToString("yyyy-MM-dd"),
             ["endDate"] = (string?)null,
+            ["topicStrandId"] = (Guid?)null,
+            ["topicLessonId"] = (Guid?)null,
             ["createdAt"] = DateTimeOffset.UnixEpoch,
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         }).ToArray();
-        handler.Map("GET", "/students/grade-subjects/by-grade/", HttpStatusCode.OK,
+        handler.Map("GET", "/students/topic-assignments/by-grade/", HttpStatusCode.OK,
             JsonSerializer.Serialize(seeded));
 
         // Assign / Remove - wired up so deeper phase-4.5 tests can reuse.
-        handler.Map("POST", "/students/grade-subjects", HttpStatusCode.Created,
+        handler.Map("POST", "/students/topic-assignments/grade", HttpStatusCode.Created,
             JsonSerializer.Serialize(new Dictionary<string, object?> { ["id"] = Guid.NewGuid() }));
-        handler.Map("DELETE", "/students/grade-subjects/", HttpStatusCode.NoContent, "");
+        handler.Map("DELETE", "/students/topic-assignments/", HttpStatusCode.NoContent, "");
         // PUT grade-level validation fields.
         handler.Map("PUT", "/students/grade-levels/", HttpStatusCode.NoContent, "");
 
@@ -201,10 +205,10 @@ public class GradeLevelEditDialogTests : BunitContext
     }
 
     [TestMethod]
-    public async Task Edit_Dialog_Renders_Subjects_Without_Current_Period()
+    public async Task Edit_Dialog_Renders_Topics_Without_Current_Period()
     {
-        // Assignments are date-based, not period-bound, so the Subjects section
-        // is NOT gated on a current period existing. With an empty subject
+        // Assignments are date-based, not period-bound, so the Topics section
+        // is NOT gated on a current period existing. With an empty topic
         // catalog, the info bar shows.
         var gradeId = Guid.NewGuid();
         var codedValueId = Guid.NewGuid();
@@ -226,8 +230,8 @@ public class GradeLevelEditDialogTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
 
-        cut.Markup.Should().Contain("No subjects exist yet.",
-            "with an empty catalog the Subjects info bar shows even without a period");
+        cut.Markup.Should().Contain("No topics exist yet.",
+            "with an empty catalog the Topics info bar shows even without a period");
 
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
         cancelButton.Click();

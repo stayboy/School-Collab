@@ -24,7 +24,9 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<Teacher> Teachers => Set<Teacher>();
     public DbSet<TeacherSubject> TeacherSubjects => Set<TeacherSubject>();
     public DbSet<TeacherGradeLevel> TeacherGradeLevels => Set<TeacherGradeLevel>();
-    public DbSet<GradeSubjectAssignment> GradeSubjectAssignments => Set<GradeSubjectAssignment>();
+    public DbSet<GradeTopicAssignment> GradeTopicAssignments => Set<GradeTopicAssignment>();
+    public DbSet<ActivityGroupTopicAssignment> ActivityGroupTopicAssignments => Set<ActivityGroupTopicAssignment>();
+    public DbSet<TopicAssignment> TopicAssignments => Set<TopicAssignment>();
     public DbSet<StudentTopicAssignment> StudentTopicAssignments => Set<StudentTopicAssignment>();
     public DbSet<TopicStrand> TopicStrands => Set<TopicStrand>();
     public DbSet<TopicLesson> TopicLessons => Set<TopicLesson>();
@@ -53,7 +55,9 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new TeacherConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherSubjectConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherGradeLevelConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new GradeSubjectAssignmentConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TopicAssignmentConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new GradeTopicAssignmentConfiguration());
+        modelBuilder.ApplyConfiguration(new ActivityGroupTopicAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new StudentTopicAssignmentConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TopicStrandConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TopicLessonConfiguration(() => CurrentTenantId));

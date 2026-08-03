@@ -14,7 +14,7 @@ public class CreateTopicForGradeHandlerTests
     private static CreateTopicForGradeHandler NewHandler(StudentsTestScope s) =>
         new(
             s.Topics,
-            s.GradeSubjectAssignments,
+            s.GradeTopicAssignments,
             s.GradeLevels,
             s.Cache,
             s.Tenants,
@@ -51,8 +51,8 @@ public class CreateTopicForGradeHandlerTests
         dto.Code.Should().Be("MATH");
         dto.Name.Should().Be("Mathematics");
         (await s.Db.Topics.CountAsync()).Should().Be(1);
-        (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
-        var assignment = await s.Db.GradeSubjectAssignments.FirstAsync();
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
+        var assignment = await s.Db.GradeTopicAssignments.FirstAsync();
         assignment.GradeLevelId.Should().Be(gradeId);
         assignment.TopicId.Should().Be(dto.Id);
         // Assignments are date-based, not period-bound: the bridge opens today
@@ -82,7 +82,7 @@ public class CreateTopicForGradeHandlerTests
         dto.Id.Should().Be(existing.Id);
         dto.Name.Should().Be("English Updated");
         (await s.Db.Topics.CountAsync()).Should().Be(1);
-        (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
     }
 
     [TestMethod]
@@ -100,7 +100,7 @@ public class CreateTopicForGradeHandlerTests
         // Same code → find-or-create reuses the same subject, and the assignment
         // is not duplicated.
         (await s.Db.Topics.CountAsync()).Should().Be(1);
-        (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
     }
 
     [TestMethod]
@@ -118,8 +118,8 @@ public class CreateTopicForGradeHandlerTests
         var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1));
 
         dto.Id.Should().NotBeEmpty();
-        (await s.Db.GradeSubjectAssignments.CountAsync()).Should().Be(1);
-        var assignment = await s.Db.GradeSubjectAssignments.FirstAsync();
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
+        var assignment = await s.Db.GradeTopicAssignments.FirstAsync();
         assignment.EndDate.Should().BeNull();
     }
 
