@@ -4,11 +4,11 @@ using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.DTOs;
 
-namespace SchoolCollab.Students.Core.CQRS.StudentSubjectAssignments.Queries.ListStudentSubjectAssignmentsByStudent;
+namespace SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListStudentTopicAssignmentsByStudent;
 
-public sealed class ListStudentSubjectAssignmentsByStudentHandler(
+public sealed class ListStudentTopicAssignmentsByStudentHandler(
     StudentsDbContext db,
-    HybridCache cache) : IQueryHandler<ListStudentSubjectAssignmentsByStudent, StudentSubjectAssignmentDto[]>
+    HybridCache cache) : IQueryHandler<ListStudentTopicAssignmentsByStudent, StudentTopicAssignmentDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -16,8 +16,8 @@ public sealed class ListStudentSubjectAssignmentsByStudentHandler(
         LocalCacheExpiration = TimeSpan.FromMinutes(1)
     };
 
-    public async Task<StudentSubjectAssignmentDto[]> HandleAsync(
-        ListStudentSubjectAssignmentsByStudent query,
+    public async Task<StudentTopicAssignmentDto[]> HandleAsync(
+        ListStudentTopicAssignmentsByStudent query,
         CancellationToken cancellationToken = default)
     {
         // Capture the tenant in the request scope: db.CurrentTenantId is lost
@@ -26,18 +26,18 @@ public sealed class ListStudentSubjectAssignmentsByStudentHandler(
         var tenantId = db.CurrentTenantId;
 
         return await cache.GetOrCreateAsync(
-            $"student:{query.StudentId}:period:{query.PeriodId}:student-subject-assignments",
+            $"student:{query.StudentId}:period:{query.PeriodId}:student-topic-assignments",
             (db, query.StudentId, query.PeriodId, tenantId),
             static async (state, ct) =>
             {
                 var (db, studentId, periodId, tenantId) = state;
-                var results = await db.StudentSubjectAssignments
+                var results = await db.StudentTopicAssignments
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(x => x.StudentId == studentId && x.PeriodId == periodId && x.TenantId == tenantId)
                     .OrderBy(x => x.TopicId)
                     .ToArrayAsync(ct);
 
-                return results.Select(a => new StudentSubjectAssignmentDto(
+                return results.Select(a => new StudentTopicAssignmentDto(
                     a.Id,
                     a.StudentId,
                     a.TopicId,

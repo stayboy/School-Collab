@@ -134,7 +134,7 @@ Every specialty in `*.Core` must correspond to exactly one
 | `PeriodRoutes.cs` | `Periods/` |
 | `EnrollmentRoutes.cs` | `Enrollments/` |
 | `GradeSubjectAssignmentRoutes.cs` | `GradeSubjectAssignments/` |
-| `StudentSubjectAssignmentRoutes.cs` | `StudentSubjectAssignments/` |
+| `StudentTopicAssignmentRoutes.cs` | `StudentTopicAssignments/` |
 
 If a new command/query does not fit any existing specialty, **add a new
 specialty folder to both `*.Core` and the API at the same time** — never
@@ -248,7 +248,7 @@ src/Students/SchoolCollab.Students.Core/
 ├── GradeSubjectAssignments/
 │   ├── Commands/   (AssignGradeSubject, UpdateGradeSubjectTags, RemoveGradeSubject)
 │   └── Queries/    (ListGradeSubjectAssignmentsByPeriod, ListGradeSubjectAssignmentsByGradeLevel)
-└── StudentSubjectAssignments/
-    ├── Commands/   (AssignStudentSubject, RemoveStudentSubject)
-    └── Queries/    (ListStudentSubjectAssignmentsByStudent, ListStudentSubjectAssignmentsByPeriod)
+└── StudentTopicAssignments/
+    ├── Commands/   (AssignStudentTopic, RemoveStudentTopic)
+    └── Queries/    (ListStudentTopicAssignmentsByStudent, ListStudentTopicAssignmentsByPeriod)
 ```

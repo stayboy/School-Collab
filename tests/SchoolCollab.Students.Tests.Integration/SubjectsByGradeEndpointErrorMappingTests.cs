@@ -11,7 +11,7 @@ using SchoolCollab.Students.Core.DTOs;
 namespace SchoolCollab.Students.Tests.Integration;
 
 /// <summary>
-/// Integration tests for the <c>GET /students/subjects/by-grade/{gradeLevelId}</c>
+/// Integration tests for the <c>GET /students/topics/by-grade/{gradeLevelId}</c>
 /// endpoint. Pins the response-shape contract that the Topics landing
 /// (<c>Topics.razor</c>) depends on:
 ///
@@ -73,7 +73,7 @@ public class TopicsByGradeEndpointErrorMappingTests
 
         // Act
         var response = await SendAsync(HttpMethod.Get,
-            $"/students/subjects/by-grade/{gradeLevelId}", ApiFactory.TestTenantA);
+            $"/students/topics/by-grade/{gradeLevelId}", ApiFactory.TestTenantA);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK,
@@ -82,6 +82,31 @@ public class TopicsByGradeEndpointErrorMappingTests
         body.Should().NotBeNull("the endpoint must always return a JSON array");
         body.Should().BeEmpty("no assignments seeded for this grade");
     }
+
+    [TestMethod]
+    public async Task SubjectsAlias_ReturnsSameDataAsTopics_Ac16()
+    {
+        // AC-16 / NFR-6: the legacy /subjects prefix is a deprecated alias for
+        // /topics and must return identical TopicDto data.
+        var gradeLevelId = await SeedGradeLevelAsync(ApiFactory.TestTenantA, "Grade 1");
+        await SeedTopicAndAssignmentAsync(ApiFactory.TestTenantA,
+            gradeLevelId, "MATH", "Mathematics");
+
+        var canonical = await SendAsync(HttpMethod.Get,
+            $"/students/topics/by-grade/{gradeLevelId}", ApiFactory.TestTenantA);
+        var aliased = await SendAsync(HttpMethod.Get,
+            $"/students/subjects/by-grade/{gradeLevelId}", ApiFactory.TestTenantA);
+
+        canonical.StatusCode.Should().Be(HttpStatusCode.OK);
+        aliased.StatusCode.Should().Be(HttpStatusCode.OK);
+        var canonicalBody = await canonical.Content.ReadFromJsonAsync<TopicDto[]>();
+        var aliasedBody = await aliased.Content.ReadFromJsonAsync<TopicDto[]>();
+        canonicalBody.Should().NotBeNull();
+        aliasedBody.Should().NotBeNull();
+        canonicalBody.Should().BeEquivalentTo(aliasedBody,
+            "the deprecated /subjects alias must return the same TopicDto data as /topics");
+    }
+
 
     [TestMethod]
     public async Task WithAssignment_Returns200WithTopics()
@@ -93,7 +118,7 @@ public class TopicsByGradeEndpointErrorMappingTests
 
         // Act
         var response = await SendAsync(HttpMethod.Get,
-            $"/students/subjects/by-grade/{gradeLevelId}", ApiFactory.TestTenantA);
+            $"/students/topics/by-grade/{gradeLevelId}", ApiFactory.TestTenantA);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -116,7 +141,7 @@ public class TopicsByGradeEndpointErrorMappingTests
 
         // Act
         var response = await SendAsync(HttpMethod.Get,
-            $"/students/subjects/by-grade/{gradeLevelId}?effectiveDate={futureEffectiveDate:yyyy-MM-dd}",
+            $"/students/topics/by-grade/{gradeLevelId}?effectiveDate={futureEffectiveDate:yyyy-MM-dd}",
             ApiFactory.TestTenantA);
 
         // Assert
@@ -149,7 +174,7 @@ public class TopicsByGradeEndpointErrorMappingTests
         try
         {
             var response = await SendAsync(HttpMethod.Get,
-                $"/students/subjects/by-grade/{gradeLevelId}",
+                $"/students/topics/by-grade/{gradeLevelId}",
                 ApiFactory.TestTenantA, cts.Token);
             statusCode = response.StatusCode;
             response.Dispose();

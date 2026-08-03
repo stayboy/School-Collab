@@ -37,7 +37,7 @@ public static class Extensions
         services.AddScoped<IActivePeriodProvider, ActivePeriodProvider>();
         services.AddScoped<IStudentEnrollmentRepository, StudentEnrollmentRepository>();
         services.AddScoped<IGradeSubjectAssignmentRepository, GradeSubjectAssignmentRepository>();
-        services.AddScoped<IStudentSubjectAssignmentRepository, StudentSubjectAssignmentRepository>();
+        services.AddScoped<IStudentTopicAssignmentRepository, StudentTopicAssignmentRepository>();
         services.AddScoped<IGuardianRepository, GuardianRepository>();
         services.AddScoped<IContactRepository, ContactRepository>();
         services.AddScoped<ITeacherRepository, TeacherRepository>();

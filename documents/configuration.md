@@ -306,6 +306,7 @@ but is **superseded** by the two-kind model above.
 | Flag | Default | Notes |
 | :--- | :--- | :--- |
 | `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
+| `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
 
 ### Historical AppHost-`Parameters:` model (superseded)
 
@@ -321,6 +322,7 @@ flags moved to the Config service.
 | Flag | Default | Consumers |
 | :--- | :--- | :--- |
 | `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
+| `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
 
 ### Setting a flag
 

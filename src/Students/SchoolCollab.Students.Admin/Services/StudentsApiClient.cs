@@ -121,10 +121,10 @@ public sealed record GradeSubjectAssignmentDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
-public sealed record StudentSubjectAssignmentDto(
+public sealed record StudentTopicAssignmentDto(
     Guid Id,
     Guid StudentId,
-    Guid SubjectId,
+    Guid TopicId,
     Guid PeriodId,
     bool IsOverride,
     string SourceType,
@@ -239,9 +239,9 @@ public record AssignGradeSubjectRequest(
     DateOnly StartDate,
     DateOnly? EndDate = null);
 
-public record AssignStudentSubjectRequest(
+public record AssignStudentTopicRequest(
     Guid StudentId,
-    Guid SubjectId,
+    Guid TopicId,
     Guid PeriodId,
     bool IsOverride,
     string SourceType);
@@ -743,22 +743,22 @@ public sealed class StudentsApiClient : IContactsClient
 
     // ── Student Subject Assignments ──────────────────────────────────────────
 
-    public async Task<StudentSubjectAssignmentDto[]?> ListStudentSubjectsByStudentAsync(Guid studentId, Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentSubjectAssignmentDto[]>($"/students/student-subjects/by-student/{studentId}/period/{periodId}", ct);
+    public async Task<StudentTopicAssignmentDto[]?> ListStudentTopicsByStudentAsync(Guid studentId, Guid periodId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<StudentTopicAssignmentDto[]>($"/students/student-topics/by-student/{studentId}/period/{periodId}", ct);
 
-    public async Task<StudentSubjectAssignmentDto[]?> ListStudentSubjectsByPeriodAsync(Guid periodId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<StudentSubjectAssignmentDto[]>($"/students/student-subjects/by-period/{periodId}", ct);
+    public async Task<StudentTopicAssignmentDto[]?> ListStudentTopicsByPeriodAsync(Guid periodId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<StudentTopicAssignmentDto[]>($"/students/student-topics/by-period/{periodId}", ct);
 
-    public async Task<Guid> AssignStudentSubjectAsync(AssignStudentSubjectRequest req, CancellationToken ct = default)
+    public async Task<Guid> AssignStudentTopicAsync(AssignStudentTopicRequest req, CancellationToken ct = default)
     {
-        var response = await _http.PostAsJsonAsync("/students/student-subjects", req, ct);
+        var response = await _http.PostAsJsonAsync("/students/student-topics", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
-    public async Task RemoveStudentSubjectAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/students/student-subjects/{id}", ct)).EnsureSuccessStatusCode();
+    public async Task RemoveStudentTopicAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/student-topics/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Guardians ───────────────────────────────────────────────────────────
     // Guardian ENTITY routes (CRUD + name-history + students-for-guardian) are
