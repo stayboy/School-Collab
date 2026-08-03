@@ -20,13 +20,13 @@ public sealed class DeleteTopicHandler(
             ?? throw new TopicNotFoundException(command.Id);
 
         // Check for referential integrity - cannot delete if
-        // student-subject assignments or grade/group bridges reference this topic.
-        var hasStudentAssignments = await db.StudentSubjectAssignments
+        // student-topic assignments or grade/group bridges reference this topic.
+        var hasStudentAssignments = await db.StudentTopicAssignments
             .AnyAsync(ssa => ssa.TopicId == command.Id, cancellationToken);
 
         if (hasStudentAssignments)
         {
-            throw new TopicReferencedException(command.Id, ["StudentSubjectAssignments"]);
+            throw new TopicReferencedException(command.Id, ["StudentTopicAssignments"]);
         }
 
         var hasBridgeAssignments = await db.GradeSubjectAssignments

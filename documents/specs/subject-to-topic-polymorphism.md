@@ -468,42 +468,40 @@ new topic row with that coded value and that grade as owner.
 
 ### 7.1 Topic CRUD — Students API
 
+> **Design B (revised §0).** `Topic` is a shared, global definition with no
+> owner columns. The owner/grading link lives on the `GradeSubjectAssignment`
+> M:N bridge (§2). So there is no `ownerType`/`ownerId`/`periodId` query
+> surface on topics; grade-filtered reads go through the bridge (see
+> `GET /topics/by-grade/{gradeLevelId}` below). The `/subjects` prefix is a
+> deprecated backward-compatible alias for `/topics` (NFR-6 / AC-16).
+
 ```ts
-// POST   /api/topics                          -> 201 TopicDto | 409
-// GET    /api/topics?ownerType=&ownerId=&periodId= -> 200 TopicDto[]
-// GET    /api/topics/{id}                      -> 200 TopicDto | 404
-// PUT    /api/topics/{id}                      -> 204 | 404 | 409
-// DELETE /api/topics/{id}                      -> 204 | 404 | 409 (referenced)
-// (GET    /api/subjects  — deprecated alias for GET /api/topics)
+// POST   /api/topics                           -> 201 TopicDto | 409
+// GET    /api/topics                           -> 200 TopicDto[]
+// GET    /api/topics/{id}                       -> 200 TopicDto | 404
+// GET    /api/topics/by-code/{code}             -> 200 TopicDto | 404
+// GET    /api/topics/by-grade/{gradeLevelId}?effectiveDate= -> 200 TopicDto[]
+// PUT    /api/topics/{id}                       -> 204 | 404 | 409
+// DELETE /api/topics/{id}                       -> 204 | 404 | 409 (referenced)
+// (GET    /api/subjects/* — deprecated alias for /api/topics/*)
 
 interface TopicDto {
   id: string;             // Guid
-  tenantId: string;
-  ownerType: "GradeLevel" | "ActivityGroup";   // 0 | 1
-  ownerId: string;        // GradeLevelId or ActivityGroupId
-  periodId: string | null;
-  code: string | null;    // nullable for group topics
-  codedValueId: string | null;  // nullable for group topics
+  codedValueId: string | null;  // optional; coded-value system link
+  code: string | null;    // optional (grade-level topics typically set it)
   name: string;
-  description: string | null;   // NEW (replaces ActivityList.description)
+  description: string | null;
   displayOrder: number;
-  defaultStrandId: string | null;   // moved from GradeSubjectAssignment
-  defaultLessonId: string | null;    // moved from GradeSubjectAssignment
   createdAt: string;      // ISO 8601
   updatedAt: string;
 }
 
 interface CreateTopicRequest {
-  ownerType: "GradeLevel" | "ActivityGroup";  // required
-  ownerId: string;         // required; GradeLevelId or ActivityGroupId
-  periodId?: string | null;  // required for GradeLevel, ignored for ActivityGroup
-  code?: string | null;     // optional for group topics, recommended for grade
-  codedValueId?: string | null;  // optional for group topics
+  codedValueId?: string | null;
+  code?: string | null;
   name: string;             // required, <= 200
   description?: string | null;  // <= 2000
   displayOrder?: number;    // default 0
-  defaultStrandId?: string | null;
-  defaultLessonId?: string | null;
 }
 
 interface UpdateTopicRequest extends Partial<CreateTopicRequest> {}
@@ -513,8 +511,8 @@ interface ProblemDetails {
   type: string; title: string; status: number;
   detail: string; errors?: Record<string, string[]>;
 }
-// 409 TopicReferencedException (topic referenced by Draft/Published assignment)
-// 422 owner does not exist / is archived / is cross-tenant
+// 409 DuplicateTopicCodeException / TopicReferencedException
+// 404 topic or grade level not found
 ```
 
 ### 7.2 Strands and lessons — Students API
@@ -746,36 +744,16 @@ public enum TopicOwnerType { GradeLevel = 0, ActivityGroup = 1 }
   `StudentsDbContext` and `AssignmentsDbContext` → empty after the real
   migrations land.
 - Unit tests (`SchoolCollab.Students.Tests.Unit`):
-  - `Topic.Create` with `OwnerType = GradeLevel` — same as existing
-    `Subject.Create` (AC-1).
-  - `Topic.Create` with `OwnerType = ActivityGroup` — no code, no coded
-    value, no period (AC-3).
-  - `Topic.Create` with archived group → rejected (AC-5).
-  - `Topic.Create` with cross-tenant group → rejected (AC-6).
-  - `TopicStrand.Create` under a group topic (AC-10).
-  - `TopicLesson.Create` under a group-topic strand (AC-11).
-  - `GradeSubjectAssignment` removed from DbContext (AC-12).
+  - `StudentTopicAssignment.Create` (was `StudentSubjectAssignment.Create`) —
+    entity + table renamed (FR-1/FR-13); the `NoUncommittedModelChanges` guard
+    passes for `StudentsDbContext`.
+  - `Topic.Create` — shared global definition (no owner columns) (AC-1, AC-3).
+  - `GradeSubjectAssignment` retained as the M:N bridge, date-based (AC-12
+    reversed — the bridge is NOT dropped under Design B).
   - `NoUncommittedModelChanges` passes for `StudentsDbContext`.
-- Unit tests (`SchoolCollab.Assignments.Tests.Unit`):
-  - `Assignment.Create` with `SelectedGrades` + topic `OwnerType =
-    GradeLevel` + matching `OwnerId` → succeeds.
-  - `Assignment.Create` with `SelectedGrades` + topic `OwnerType =
-    ActivityGroup` → rejected (AC-7, EC-1).
-  - `Assignment.Create` with `SelectedGroups` + topic `OwnerType =
-    ActivityGroup` + matching linked group → succeeds (AC-9).
-  - `Assignment.Create` with `SelectedGroups` + topic `OwnerType =
-    ActivityGroup` + non-linked group → rejected (AC-8, EC-1).
-  - `NoUncommittedModelChanges` passes for `AssignmentsDbContext`.
-- bUnit: Topics admin page with ActivityGroup filter; activity-group
-  topic create dialog (no code/coded-value fields).
-- bUnit: Assignment create/edit page — topic picker filters by
-  `TargetAudienceType` (grade-level topics for SelectedGrades, group
-  topics for SelectedGroups).
+- bUnit: Topics admin page; assignment create/edit topic picker.
 - Integration: backward-compatible API — `GET /api/subjects` returns
-  `TopicDto` data (AC-16).
-- Playwright smoke: create group → create group topic → create strand →
-  create lesson → create `SelectedGroups` assignment with that topic →
-  publish → verify recipients.
+  `TopicDto` data, identical to `GET /api/topics` (AC-16 / NFR-6).
 
 ## 12. Open questions (resolved)
 

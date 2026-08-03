@@ -78,16 +78,16 @@ public sealed class Topic : ITenantEntity, IEntity, IAuditableEntity, IHasRowVer
 
     /// <summary>
     /// Marks the subject for deletion. The repository enforces referential
-    /// integrity by checking for student-subject assignments before allowing
+    /// integrity by checking for student-topic assignments before allowing
     /// the delete (see <c>DeleteTopicHandler</c>).
     /// </summary>
     /// <exception cref="TopicReferencedException">
-    /// Thrown if student-subject assignments reference this topic.
+    /// Thrown if student-topic assignments reference this topic.
     /// </exception>
     public void Delete()
     {
         // Delete is a hard delete. The repository enforces referential integrity
-        // by checking for StudentSubjectAssignments before allowing the delete.
+        // by checking for StudentTopicAssignments before allowing the delete.
         // See DeleteTopicHandler.
         _domainEvents.Add(new TopicDeletedEvent(Id, Code));
     }

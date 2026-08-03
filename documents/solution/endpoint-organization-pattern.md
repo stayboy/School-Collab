@@ -183,7 +183,7 @@ src/Students/SchoolCollab.Students.Api/
     ├── PeriodRoutes.cs
     ├── EnrollmentRoutes.cs
     ├── GradeSubjectAssignmentRoutes.cs
-    └── StudentSubjectAssignmentRoutes.cs
+    └── StudentTopicAssignmentRoutes.cs
 ```
 
 All seven files live in the namespace `SchoolCollab.Students.Api.Endpoints`.

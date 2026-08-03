@@ -1,6 +1,6 @@
 namespace SchoolCollab.Students.Core.DTOs;
 
-public sealed record StudentSubjectAssignmentDto(
+public sealed record StudentTopicAssignmentDto(
     Guid Id,
     Guid StudentId,
     Guid TopicId,

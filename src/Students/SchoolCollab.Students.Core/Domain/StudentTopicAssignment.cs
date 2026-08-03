@@ -4,11 +4,11 @@ using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class StudentSubjectAssignment : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
+public sealed class StudentTopicAssignment : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
-    private StudentSubjectAssignment() { }
+    private StudentTopicAssignment() { }
 
     public Guid Id { get; private set; }
 
@@ -27,19 +27,19 @@ public sealed class StudentSubjectAssignment : ITenantEntity, IEntity, IAuditabl
 
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
-    public static StudentSubjectAssignment Create(
+    public static StudentTopicAssignment Create(
         Guid studentId,
-        Guid subjectId,
+        Guid topicId,
         Guid periodId,
         bool isOverride,
         SubjectAssignmentSource sourceType)
     {
         var now = DateTimeOffset.UtcNow;
-        var assignment = new StudentSubjectAssignment
+        var assignment = new StudentTopicAssignment
         {
             Id = Guid.NewGuid(),
             StudentId = studentId,
-            TopicId = subjectId,
+            TopicId = topicId,
             PeriodId = periodId,
             IsOverride = isOverride,
             SourceType = sourceType,
@@ -47,7 +47,7 @@ public sealed class StudentSubjectAssignment : ITenantEntity, IEntity, IAuditabl
             UpdatedAt = now
         };
 
-        assignment._domainEvents.Add(new StudentTopicAssignedEvent(assignment.Id, studentId, subjectId, periodId));
+        assignment._domainEvents.Add(new StudentTopicAssignedEvent(assignment.Id, studentId, topicId, periodId));
         return assignment;
     }
 
