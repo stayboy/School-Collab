@@ -12,7 +12,7 @@ public sealed class TeacherSubject : ITenantEntity, IEntity, IAuditableEntity, I
 
     public Guid Id { get; private set; }
     public Guid TeacherId { get; private set; }
-    public Guid SubjectId { get; private set; }
+    public Guid TopicId { get; private set; }
 
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
     public Guid TenantId { get; private set; }
@@ -25,7 +25,7 @@ public sealed class TeacherSubject : ITenantEntity, IEntity, IAuditableEntity, I
         {
             Id = Guid.NewGuid(),
             TeacherId = teacherId,
-            SubjectId = subjectId,
+            TopicId = subjectId,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };

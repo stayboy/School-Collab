@@ -12,7 +12,7 @@ namespace SchoolCollab.Students.Core.DTOs;
 /// overlays the tenant-resolved display name client-side (spec §5.4) by joining on
 /// <see cref="CodedValueId"/> with the tenant-resolved GRADE coded values. The
 /// mirrored name is kept here for sort/fallback only.</para>
-/// <para><see cref="SubjectCount"/> is <b>global</b> (subjects are the shared
+/// <para><see cref="TopicCount"/> is <b>global</b> (topics are the shared
 /// curriculum blueprint); <see cref="StudentCount"/> is <b>tenant-scoped</b> via
 /// <c>Student.TenantId</c>. When there is no current period, both counts are
 /// <c>0</c> and <see cref="CurrentPeriodId"/>/<see cref="CurrentPeriodName"/> are
@@ -29,7 +29,7 @@ public sealed record GradeLevelLandingDto(
     Guid Id,
     Guid CodedValueId,
     string Name,
-    int SubjectCount,
+    int TopicCount,
     int StudentCount,
     Guid? CurrentPeriodId,
     string? CurrentPeriodName,

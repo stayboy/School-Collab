@@ -7,19 +7,19 @@ namespace SchoolCollab.Students.Core.Data.Repositories;
 internal sealed class TeacherRepository(StudentsDbContext db)
     : SoftDeletableRepositoryBase<Teacher, StudentsDbContext>(db), ITeacherRepository
 {
-    public Task AddSubjectAsync(TeacherSubject link, CancellationToken cancellationToken = default)
+    public Task AddTopicAsync(TeacherSubject link, CancellationToken cancellationToken = default)
     {
         Db.TeacherSubjects.Add(link);
         return Db.SaveChangesAsync(cancellationToken);
     }
 
-    public Task<TeacherSubject?> GetSubjectLinkAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
-        => Db.TeacherSubjects.FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.SubjectId == subjectId, cancellationToken);
+    public Task<TeacherSubject?> GetTopicLinkAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
+        => Db.TeacherSubjects.FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == subjectId, cancellationToken);
 
-    public async Task RemoveSubjectAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
+    public async Task RemoveTopicAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
     {
         var link = await Db.TeacherSubjects
-            .FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.SubjectId == subjectId, cancellationToken);
+            .FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == subjectId, cancellationToken);
         if (link is not null)
         {
             Db.TeacherSubjects.Remove(link);

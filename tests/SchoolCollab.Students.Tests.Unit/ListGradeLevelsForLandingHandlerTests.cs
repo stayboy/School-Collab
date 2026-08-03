@@ -46,23 +46,23 @@ public class ListGradeLevelsForLandingHandlerTests
 
         result.Should().ContainSingle();
         var row = result[0];
-        row.SubjectCount.Should().Be(0);
+        row.TopicCount.Should().Be(0);
         row.StudentCount.Should().Be(0);
         row.CurrentPeriodId.Should().BeNull();
         row.CurrentPeriodName.Should().BeNull();
     }
 
     [TestMethod]
-    public async Task Landing_WithCurrentPeriod_CountsSubjectsAndStudents()
+    public async Task Landing_WithCurrentPeriod_CountsTopicsAndStudents()
     {
         using var s = new StudentsTestScope("landing-with-period");
         var periodId = await SeedCurrentPeriodAsync(s, "Term 1");
         var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
 
-        // One subject assigned to this grade for the current period → SubjectCount 1.
-        var subject = Subject.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
-        s.Db.Subjects.Add(subject);
-        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(glId, subject.Id, periodId));
+        // One topic assigned to this grade, effective from today and open-ended → TopicCount 1.
+        var topic = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
+        s.Db.Topics.Add(topic);
+        s.Db.GradeSubjectAssignments.Add(GradeSubjectAssignment.Create(glId, activityGroupId: null, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
         await s.Db.SaveChangesAsync();
 
         // One current-tenant student enrolled in this grade for the current period.
@@ -76,7 +76,7 @@ public class ListGradeLevelsForLandingHandlerTests
 
         result.Should().ContainSingle();
         var row = result[0];
-        row.SubjectCount.Should().Be(1);
+        row.TopicCount.Should().Be(1);
         row.StudentCount.Should().Be(1);
         row.CurrentPeriodId.Should().Be(periodId);
         row.CurrentPeriodName.Should().Be("Term 1");

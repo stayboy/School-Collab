@@ -3,8 +3,10 @@ using SchoolCollab.Core.CQRS;
 namespace SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Commands.AssignGradeSubject;
 
 public sealed record AssignGradeSubject(
-    Guid GradeLevelId,
-    Guid SubjectId,
-    Guid PeriodId,
-    Guid? SubjectStrandId = null,
-    Guid? SubjectLessonId = null) : ICommand;
+    Guid? GradeLevelId,
+    Guid? ActivityGroupId,
+    Guid TopicId,
+    DateOnly StartDate,
+    DateOnly? EndDate = null,
+    Guid? TopicStrandId = null,
+    Guid? TopicLessonId = null) : ICommand;

@@ -12,16 +12,16 @@ namespace SchoolCollab.Students.Tests.Integration;
 
 /// <summary>
 /// Integration tests for the <c>GET /students/subjects/by-grade/{gradeLevelId}</c>
-/// endpoint. Pins the response-shape contract that the Subjects landing
-/// (<c>Subjects.razor</c>) depends on:
+/// endpoint. Pins the response-shape contract that the Topics landing
+/// (<c>Topics.razor</c>) depends on:
 ///
 /// <list type="bullet">
-///   <item>200 OK with <c>SubjectDto[]</c> body — even when no subjects exist
+///   <item>200 OK with <c>TopicDto[]</c> body â€” even when no subjects exist
 ///         (empty array, not null, not a 404).</item>
 ///   <item>The endpoint tolerates a cancelled client token without
 ///         returning a 500 (regression for the "throws an error for
-///         fetching" report — the per-endpoint try/catch added in
-///         SubjectRoutes surfaces a typed response).</item>
+///         fetching" report â€” the per-endpoint try/catch added in
+///         TopicRoutes surfaces a typed response).</item>
 /// </list>
 ///
 /// These run against the real Students API + Postgres + RabbitMQ via
@@ -29,7 +29,7 @@ namespace SchoolCollab.Students.Tests.Integration;
 /// </summary>
 [TestClass]
 [DoNotParallelize]
-public class SubjectsByGradeEndpointErrorMappingTests
+public class TopicsByGradeEndpointErrorMappingTests
 {
     private static ApiFactory _factory = default!;
     private static HttpClient _client = default!;
@@ -66,7 +66,7 @@ public class SubjectsByGradeEndpointErrorMappingTests
     }
 
     [TestMethod]
-    public async Task NoSubjectsAssigned_Returns200WithEmptyArray()
+    public async Task NoTopicsAssigned_Returns200WithEmptyArray()
     {
         // Arrange: seed a grade level (no assignments).
         var gradeLevelId = await SeedGradeLevelAsync(ApiFactory.TestTenantA, "Grade 1");
@@ -78,21 +78,18 @@ public class SubjectsByGradeEndpointErrorMappingTests
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK,
             "an unknown / unassigned grade must return 200 + empty, not 404 or 500");
-        var body = await response.Content.ReadFromJsonAsync<SubjectDto[]>();
+        var body = await response.Content.ReadFromJsonAsync<TopicDto[]>();
         body.Should().NotBeNull("the endpoint must always return a JSON array");
         body.Should().BeEmpty("no assignments seeded for this grade");
     }
 
     [TestMethod]
-    public async Task WithAssignment_Returns200WithSubjects()
+    public async Task WithAssignment_Returns200WithTopics()
     {
-        // Arrange: seed a grade + period + subject + assignment under Tenant A.
+        // Arrange: seed a grade + subject + assignment under Tenant A.
         var gradeLevelId = await SeedGradeLevelAsync(ApiFactory.TestTenantA, "Grade 1");
-        var periodId = await SeedPeriodAsync(ApiFactory.TestTenantA, "Term 1",
-            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1)),
-            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(30)));
-        await SeedSubjectAndAssignmentAsync(ApiFactory.TestTenantA,
-            gradeLevelId, periodId, "MATH", "Mathematics");
+        await SeedTopicAndAssignmentAsync(ApiFactory.TestTenantA,
+            gradeLevelId, "MATH", "Mathematics");
 
         // Act
         var response = await SendAsync(HttpMethod.Get,
@@ -100,35 +97,32 @@ public class SubjectsByGradeEndpointErrorMappingTests
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var body = await response.Content.ReadFromJsonAsync<SubjectDto[]>();
+        var body = await response.Content.ReadFromJsonAsync<TopicDto[]>();
         body.Should().NotBeNull();
         body.Should().ContainSingle(s => s.Code == "MATH");
     }
 
     [TestMethod]
-    public async Task WithExplicitPeriodId_FiltersToThatPeriod()
+    public async Task WithExplicitEffectiveDate_FiltersToThatDate()
     {
-        // Arrange: one assignment in the current period, none in a different
-        // (past) period. An explicit periodId query for the past period
-        // must return 200 + empty, not 500.
+        // Arrange: one assignment effective from today (open-ended). An explicit
+        // effectiveDate in the far future has no matching assignment and must
+        // return 200 + empty, not 500.
         var gradeLevelId = await SeedGradeLevelAsync(ApiFactory.TestTenantA, "Grade 1");
-        var pastPeriodId = await SeedPeriodAsync(ApiFactory.TestTenantA, "Term 0",
-            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-30)),
-            DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-15)));
-        await SeedSubjectAndAssignmentAsync(ApiFactory.TestTenantA,
-            gradeLevelId, pastPeriodId, "MATH", "Mathematics");
+        await SeedTopicAndAssignmentAsync(ApiFactory.TestTenantA,
+            gradeLevelId, "MATH", "Mathematics");
 
-        var futurePeriodId = Guid.NewGuid(); // never seeded → filter excludes everything
+        var futureEffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3650));
 
         // Act
         var response = await SendAsync(HttpMethod.Get,
-            $"/students/subjects/by-grade/{gradeLevelId}?periodId={futurePeriodId}",
+            $"/students/subjects/by-grade/{gradeLevelId}?effectiveDate={futureEffectiveDate:yyyy-MM-dd}",
             ApiFactory.TestTenantA);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK,
-            "an explicit periodId with no matching assignment must return 200 + empty, not 500");
-        var body = await response.Content.ReadFromJsonAsync<SubjectDto[]>();
+            "an explicit effectiveDate with no matching assignment must return 200 + empty, not 500");
+        var body = await response.Content.ReadFromJsonAsync<TopicDto[]>();
         body.Should().BeEmpty();
     }
 
@@ -173,7 +167,7 @@ public class SubjectsByGradeEndpointErrorMappingTests
         }
     }
 
-    // ────── seed helpers ──────
+    // â”€â”€â”€â”€â”€â”€ seed helpers â”€â”€â”€â”€â”€â”€
 
     private async Task<Guid> SeedGradeLevelAsync(Guid tenantId, string name)
     {
@@ -203,19 +197,21 @@ public class SubjectsByGradeEndpointErrorMappingTests
         });
     }
 
-    private async Task SeedSubjectAndAssignmentAsync(
-        Guid tenantId, Guid gradeLevelId, Guid periodId, string code, string name)
+    private async Task SeedTopicAndAssignmentAsync(
+        Guid tenantId, Guid gradeLevelId, string code, string name)
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudentsDbContext>();
         var accessor = scope.ServiceProvider.GetRequiredService<SchoolCollab.Core.Tenancy.ITenantContextAccessor>();
         await accessor.RunWithExplicitTenantAsync(tenantId, async (CancellationToken _ct) =>
         {
-            var subject = Subject.Create(Guid.NewGuid(), code, name, 1);
-            db.Subjects.Add(subject);
+            var topic = Topic.Create(Guid.NewGuid(), code, name, 1);
+            db.Topics.Add(topic);
             await db.SaveChangesAsync(_ct);
+            // Assignments are date-based and open-ended (start today, no end),
+            // so a topic stays assigned to the grade across years.
             db.GradeSubjectAssignments.Add(
-                GradeSubjectAssignment.Create(gradeLevelId, subject.Id, periodId));
+                GradeSubjectAssignment.Create(gradeLevelId, activityGroupId: null, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
             await db.SaveChangesAsync(_ct);
             return (object?)null;
         });

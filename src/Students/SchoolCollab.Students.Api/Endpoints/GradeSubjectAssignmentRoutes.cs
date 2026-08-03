@@ -4,7 +4,6 @@ using SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Commands.AssignGra
 using SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Commands.RemoveGradeSubject;
 using SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Commands.UpdateGradeSubjectTags;
 using SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Queries.ListGradeSubjectAssignmentsByGradeLevel;
-using SchoolCollab.Students.Core.CQRS.GradeSubjectAssignments.Queries.ListGradeSubjectAssignmentsByPeriod;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -14,18 +13,18 @@ public static class GradeSubjectAssignmentRoutes
     {
         // ── Grade Subject Assignments ─────────────────────────────────────────────
 
-        group.MapGet("/grade-subjects/by-period/{periodId:guid}", async (
-            Guid periodId,
-            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListGradeSubjectAssignmentsByPeriod, SchoolCollab.Students.Core.DTOs.GradeSubjectAssignmentDto[]> handler,
-            CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListGradeSubjectAssignmentsByPeriod(periodId), ct)));
-
-        group.MapGet("/grade-subjects/by-grade/{gradeLevelId:guid}/period/{periodId:guid}", async (
+        // Grade↔topic assignments are date-based (not period-bound) and span
+        // multiple years. An optional effectiveDate filters to assignments in
+        // effect on that date; omitted = today.
+        group.MapGet("/grade-subjects/by-grade/{gradeLevelId:guid}", async (
             Guid gradeLevelId,
-            Guid periodId,
+            DateOnly? effectiveDate,
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListGradeSubjectAssignmentsByGradeLevel, SchoolCollab.Students.Core.DTOs.GradeSubjectAssignmentDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListGradeSubjectAssignmentsByGradeLevel(gradeLevelId, periodId), ct)));
+        {
+            var effective = effectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+            return Results.Ok(await handler.HandleAsync(new ListGradeSubjectAssignmentsByGradeLevel(gradeLevelId, effective), ct));
+        });
 
         group.MapPost("/grade-subjects", async (
             [FromBody] AssignGradeSubject command,
@@ -44,7 +43,7 @@ public static class GradeSubjectAssignmentRoutes
         {
             try
             {
-                var result = await handler.HandleAsync(new UpdateGradeSubjectTags(id, req.SubjectStrandId, req.SubjectLessonId), ct);
+                var result = await handler.HandleAsync(new UpdateGradeSubjectTags(id, req.TopicStrandId, req.TopicLessonId), ct);
                 return Results.Ok(result);
             }
             catch (KeyNotFoundException)
@@ -73,4 +72,4 @@ public static class GradeSubjectAssignmentRoutes
     }
 }
 
-internal record UpdateGradeSubjectTagsRequest(Guid? SubjectStrandId, Guid? SubjectLessonId);
+internal record UpdateGradeSubjectTagsRequest(Guid? TopicStrandId, Guid? TopicLessonId);

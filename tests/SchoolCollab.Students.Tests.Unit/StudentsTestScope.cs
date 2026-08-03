@@ -22,7 +22,7 @@ internal sealed class StudentsTestScope : IDisposable
     public ITenantContextAccessor TenantAccessor { get; }
     public PeriodRepository Periods { get; }
     public GradeLevelRepository GradeLevels { get; }
-    public SubjectRepository Subjects { get; }
+    public TopicRepository Topics { get; }
     public GradeSubjectAssignmentRepository GradeSubjectAssignments { get; }
     public ActivityGroupRepository ActivityGroups { get; }
     public ActivityGroupMembershipRepository Memberships { get; }
@@ -52,7 +52,7 @@ internal sealed class StudentsTestScope : IDisposable
             TenantType.School));
         Periods = new PeriodRepository(Db);
         GradeLevels = new GradeLevelRepository(Db);
-        Subjects = new SubjectRepository(Db);
+        Topics = new TopicRepository(Db);
         GradeSubjectAssignments = new GradeSubjectAssignmentRepository(Db);
         ActivityGroups = new ActivityGroupRepository(Db);
         Memberships = new ActivityGroupMembershipRepository(Db);

@@ -35,7 +35,7 @@ public sealed class Teacher : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    public IReadOnlyList<TeacherSubject> Subjects => _subjects.AsReadOnly();
+    public IReadOnlyList<TeacherSubject> Topics => _subjects.AsReadOnly();
     public IReadOnlyList<TeacherGradeLevel> GradeLevels => _gradeLevels.AsReadOnly();
 
     public static Teacher Create(
@@ -69,8 +69,8 @@ public sealed class Teacher : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void LinkSubject(Guid subjectId) => _subjects.Add(TeacherSubject.Create(Id, subjectId));
-    public void UnlinkSubject(Guid subjectId) => _subjects.RemoveAll(s => s.SubjectId == subjectId);
+    public void LinkTopic(Guid subjectId) => _subjects.Add(TeacherSubject.Create(Id, subjectId));
+    public void UnlinkTopic(Guid subjectId) => _subjects.RemoveAll(s => s.TopicId == subjectId);
     public void LinkGradeLevel(Guid gradeLevelId) => _gradeLevels.Add(TeacherGradeLevel.Create(Id, gradeLevelId));
     public void UnlinkGradeLevel(Guid gradeLevelId) => _gradeLevels.RemoveAll(g => g.GradeLevelId == gradeLevelId);
 

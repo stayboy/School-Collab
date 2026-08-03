@@ -35,13 +35,13 @@ public sealed class ListStudentSubjectAssignmentsByPeriodHandler(
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(x => x.PeriodId == periodId && x.TenantId == tenantId)
                     .OrderBy(x => x.StudentId)
-                    .ThenBy(x => x.SubjectId)
+                    .ThenBy(x => x.TopicId)
                     .ToArrayAsync(ct);
 
                 return results.Select(a => new StudentSubjectAssignmentDto(
                     a.Id,
                     a.StudentId,
-                    a.SubjectId,
+                    a.TopicId,
                     a.PeriodId,
                     a.IsOverride,
                     a.SourceType.ToString(),

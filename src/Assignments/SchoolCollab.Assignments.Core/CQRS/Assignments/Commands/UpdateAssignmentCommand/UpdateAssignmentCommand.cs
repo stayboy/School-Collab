@@ -11,7 +11,7 @@ public sealed record UpdateAssignmentCommand(
     AssignmentType AssignmentType,
     GradingFormat GradingFormat,
     TargetAudienceType TargetAudienceType,
-    Guid SubjectId,
+    Guid TopicId,
     Guid? GradeLevelId,
     DateTimeOffset? DueDate,
     decimal? MaxScore,

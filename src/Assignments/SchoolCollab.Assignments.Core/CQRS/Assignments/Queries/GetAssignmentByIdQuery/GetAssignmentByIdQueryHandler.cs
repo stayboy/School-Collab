@@ -46,7 +46,7 @@ public sealed class GetAssignmentByIdQueryHandler(
                     (AssignmentTypeDto)assignment.AssignmentType,
                     (GradingFormatDto)assignment.GradingFormat,
                     (TargetAudienceTypeDto)assignment.TargetAudienceType,
-                    assignment.SubjectId,
+                    assignment.TopicId,
                     null,
                     assignment.GradeLevelId,
                     null,

@@ -27,7 +27,7 @@ public class SubmissionEngineTests
 {
     private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
-    private static readonly Guid SubjectId = Guid.Parse("00000000-0000-0000-0000-000000000010");
+    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
     private static readonly Guid GradeLevelId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid StudentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
     private static readonly Guid GuardianId = Guid.Parse("44444444-4444-4444-4444-444444444444");
@@ -42,7 +42,7 @@ public class SubmissionEngineTests
     private static Assignment NewAssignment(bool mandatoryReview = true)
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
-            TargetAudienceType.AllStudents, SubjectId, GradeLevelId, null, null, TeacherId)
+            TargetAudienceType.AllStudents, TopicId, GradeLevelId, null, null, TeacherId)
             .WithTenant(TenantProvider());
         if (!mandatoryReview)
             typeof(Assignment).GetProperty(nameof(Assignment.MandatoryReview))!.SetValue(a, false);

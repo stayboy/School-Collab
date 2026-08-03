@@ -23,7 +23,7 @@ internal sealed class StudentSubjectAssignmentConfiguration : TenantEntityTypeCo
         builder.ConfigurePostgresRowVersion();
 
         builder.Property(x => x.StudentId).IsRequired();
-        builder.Property(x => x.SubjectId).IsRequired();
+        builder.Property(x => x.TopicId).IsRequired();
         builder.Property(x => x.PeriodId).IsRequired();
 
         builder.Property(x => x.IsOverride)
@@ -34,7 +34,7 @@ internal sealed class StudentSubjectAssignmentConfiguration : TenantEntityTypeCo
             .IsRequired()
             .HasDefaultValue(SubjectAssignmentSource.GradeAssignment);
 
-        builder.HasIndex(x => new { x.TenantId, x.StudentId, x.SubjectId, x.PeriodId })
+        builder.HasIndex(x => new { x.TenantId, x.StudentId, x.TopicId, x.PeriodId })
             .IsUnique()
             .HasDatabaseName("ix_student_subject_assignments_tenant_unique");
 

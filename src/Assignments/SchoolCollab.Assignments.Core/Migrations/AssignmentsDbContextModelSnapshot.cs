@@ -93,10 +93,6 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("status");
 
-                    b.Property<Guid>("SubjectId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("subject_id");
-
                     b.Property<int>("TargetAudienceType")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
@@ -112,6 +108,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("title");
+
+                    b.Property<Guid>("TopicId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("topic_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -129,8 +129,8 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.HasIndex("Status")
                         .HasDatabaseName("ix_assignments_status");
 
-                    b.HasIndex("SubjectId")
-                        .HasDatabaseName("ix_assignments_subject_id");
+                    b.HasIndex("TopicId")
+                        .HasDatabaseName("ix_assignments_topic_id");
 
                     b.ToTable("assignments", (string)null);
                 });

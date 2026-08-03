@@ -261,7 +261,6 @@
 
         var model = new GradeLevelCreateDialog.GradeLevelCreateModel
         {
-            CurrentPeriodId = _currentPeriodId,
         };
 
         var created = await DialogService.ShowShellDialogAsync<
@@ -312,7 +311,6 @@
             MinAge = row.MinAge,
             MaxAge = row.MaxAge,
             AllowedGenderCodedValueId = row.AllowedGenderCodedValueId,
-            CurrentPeriodId = _currentPeriodId,
         };
 
         var updated = await DialogService.ShowShellDialogAsync<

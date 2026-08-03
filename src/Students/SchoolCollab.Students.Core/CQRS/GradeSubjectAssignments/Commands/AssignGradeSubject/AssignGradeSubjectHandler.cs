@@ -13,14 +13,16 @@ public sealed class AssignGradeSubjectHandler(
 {
     public async Task<Guid> HandleAsync(AssignGradeSubject command, CancellationToken cancellationToken = default)
     {
-        logger.LogDebug("Handling AssignGradeSubject for grade {GradeLevelId} subject {SubjectId}", command.GradeLevelId, command.SubjectId);
+        logger.LogDebug("Handling AssignGradeSubject for grade {GradeLevelId} group {ActivityGroupId} topic {TopicId}", command.GradeLevelId, command.ActivityGroupId, command.TopicId);
 
         var assignment = GradeSubjectAssignment.Create(
             command.GradeLevelId,
-            command.SubjectId,
-            command.PeriodId,
-            command.SubjectStrandId,
-            command.SubjectLessonId);
+            command.ActivityGroupId,
+            command.TopicId,
+            command.StartDate,
+            command.EndDate,
+            command.TopicStrandId,
+            command.TopicLessonId);
 
         await repository.AddAsync(assignment, cancellationToken);
         assignment.ClearDomainEvents();

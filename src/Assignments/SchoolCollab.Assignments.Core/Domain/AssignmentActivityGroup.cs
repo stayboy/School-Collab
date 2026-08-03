@@ -7,7 +7,7 @@ namespace SchoolCollab.Assignments.Core.Domain;
 /// Assignment ↔ ActivityGroup many-to-many link (spec activity-group-enrollment.md
 /// FR-17, §8.3). Lives in the Assignments context. <see cref="ActivityGroupId"/>
 /// is an operational reference into the Students context (no cross-context DB FK),
-/// mirroring <c>Assignment.GradeLevelId</c>/<c>SubjectId</c>. Integrity is enforced
+/// mirroring <c>Assignment.GradeLevelId</c>/<c>TopicId</c>. Integrity is enforced
 /// in code: FR-21 (same tenant), FR-22 (non-archived), and the referential delete
 /// guard FR-6 (a group with any live link cannot be hard-deleted).
 /// </summary>

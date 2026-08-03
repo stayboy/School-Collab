@@ -59,7 +59,7 @@
                                 Placeholder="No restriction (co-ed)" />
         </FormRow>
 
-        @if (Model.CurrentPeriodId.HasValue && _allSubjects.Length > 0)
+        @if (_allSubjects.Length > 0)
         {
             <FormRow Label="@($"Subjects ({Model.SubjectIds.Count})")" AlignTop>
                 <FluentListbox Items="@_allSubjects"
@@ -71,7 +71,7 @@
                                Title="Pick which subjects belong to this grade for the current period. Existing assignments will be added; unselected ones will be removed." />
             </FormRow>
         }
-        else if (Model.CurrentPeriodId.HasValue && _allSubjects.Length == 0)
+        else if (_allSubjects.Length == 0)
         {
             <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
                 No subjects exist yet. Create subjects first from the Subjects landing, then reopen this dialog to assign them.
@@ -80,7 +80,7 @@
         else
         {
             <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
-                No active period — open a period before assigning subjects to this grade.
+                Could not load subjects for this grade.
             </FluentMessageBar>
         }
 
@@ -124,8 +124,6 @@
         /// </summary>
         public IReadOnlyDictionary<Guid, Guid> SubjectIdToAssignmentId { get; set; }
             = new Dictionary<Guid, Guid>();
-
-        public Guid? CurrentPeriodId { get; set; }
     }
 
     protected override string SubmitText => "Create";
@@ -197,31 +195,31 @@
             model.MaxAge,
             model.AllowedGenderCodedValueId));
 
-        // 3+4. Apply subject diff for the current period. Failures are non-fatal:
-        // surface as a warning above the form but do not block the grade save.
-        if (model.CurrentPeriodId.HasValue)
+        // 3+4. Apply subject diff. Assignments are date-based and open-ended
+        // (start today, no end) — a picked subject stays assigned across years
+        // until removed. Failures are non-fatal: surface as a warning above the
+        // form but do not block the grade save.
+        var warnings = await ApplySubjectDiffAsync(grade.Id, model);
+        if (!string.IsNullOrEmpty(warnings))
         {
-            var warnings = await ApplySubjectDiffAsync(grade.Id, model.CurrentPeriodId.Value, model);
-            if (!string.IsNullOrEmpty(warnings))
-            {
-                Error = warnings; // surfacing via Error message keeps it visible
-                                  // inside the dialog footer until the admin
-                                  // reviews and dismisses.
-            }
+            Error = warnings; // surfacing via Error message keeps it visible
+                              // inside the dialog footer until the admin
+                              // reviews and dismisses.
         }
 
         return grade;
     }
 
     /// <summary>
-    /// Applies the picked subject set against the current assignments for the
-    /// given grade + period. Returns a non-empty string with any non-fatal
-    /// per-subject failure messages (so the dialog footer can show them).
+    /// Applies the picked subject set against the grade's currently-effective
+    /// assignments. Returns a non-empty string with any non-fatal per-subject
+    /// failure messages (so the dialog footer can show them).
     /// </summary>
     private async Task<string?> ApplySubjectDiffAsync(
-        Guid gradeLevelId, Guid periodId, GradeLevelCreateModel model)
+        Guid gradeLevelId, GradeLevelCreateModel model)
     {
-        var baseline = await Api.ListGradeSubjectsByGradeAsync(gradeLevelId, periodId) ?? [];
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baseline = await Api.ListGradeSubjectsByGradeAsync(gradeLevelId) ?? [];
         var assignedSubjectIds = new HashSet<Guid>(baseline.Select(a => a.SubjectId));
         var desiredIds = new HashSet<Guid>(model.SubjectIds);
 
@@ -233,7 +231,7 @@
             try
             {
                 await Api.AssignGradeSubjectAsync(
-                    new AssignGradeSubjectRequest(gradeLevelId, sid, periodId));
+                    new AssignGradeSubjectRequest(gradeLevelId, sid, today));
             }
             catch (Exception ex)
             {
