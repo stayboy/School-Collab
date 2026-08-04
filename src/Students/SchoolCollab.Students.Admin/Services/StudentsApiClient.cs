@@ -438,13 +438,19 @@ public sealed class StudentsApiClient : IContactsClient
         if (items is null || items.Length == 0) return items;
 
         var withAge = items.Select(s => s with { Age = ComputeAge(s.DateOfBirth) }).ToArray();
-        var genderIds = withAge.Select(s => s.GenderCodedValueId).OfType<Guid>().Distinct().ToArray();
-        if (genderIds.Length == 0) return withAge;
 
-        var names = await _codedValues.GetByIdsAsync(genderIds, ct);
-        var map = names.ToDictionary(x => x.Id, x => x.Name);
-        
-        // Enrich with grade level info
+        // Gender enrichment is optional — only when at least one student has a
+        // gender coded value. It must NOT gate the grade enrichment below, or a
+        // list of students with no gender would silently skip CurrentGrade.
+        var genderIds = withAge.Select(s => s.GenderCodedValueId).OfType<Guid>().Distinct().ToArray();
+        var map = new Dictionary<Guid, string>();
+        if (genderIds.Length > 0)
+        {
+            var names = await _codedValues.GetByIdsAsync(genderIds, ct);
+            map = names.ToDictionary(x => x.Id, x => x.Name);
+        }
+
+        // Enrich with grade level info (always runs, independent of gender)
         var studentIds = withAge.Select(s => s.Id).ToArray();
         var enrollmentsByStudent = new Dictionary<Guid, StudentEnrollmentDto[]>();
         
