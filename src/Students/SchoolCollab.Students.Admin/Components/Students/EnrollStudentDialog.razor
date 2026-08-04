@@ -577,7 +577,11 @@
             _activePeriod = periods.FirstOrDefault(p =>
                 string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase));
 
-            _gradeLevels = gradesTask.Result ?? Array.Empty<GradeLevelDto>();
+            _gradeLevels = (gradesTask.Result ?? Array.Empty<GradeLevelDto>())
+                // Blocked grade levels are excluded from new-enrollment options
+                // (the landing page's enrollment toggle).
+                .Where(g => !g.IsBlockedFromEnrollment)
+                .ToArray();
 
             // Pre-select the grade the caller suggested (the student's
             // current active-enrollment grade, if any). Set BOTH the

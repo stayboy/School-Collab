@@ -38,16 +38,17 @@ public sealed record GradeLevelDto(
     DateTimeOffset UpdatedAt,
     int? MinAge = null,
     int? MaxAge = null,
-    Guid? AllowedGenderCodedValueId = null);
+    Guid? AllowedGenderCodedValueId = null,
+    bool IsBlockedFromEnrollment = false);
 
 public sealed record GradeLevelLandingDto(
     Guid Id,
     Guid CodedValueId,
     string Name,
     int TopicCount,
+    int StrandCount,
+    int LessonCount,
     int StudentCount,
-    Guid? CurrentPeriodId,
-    string? CurrentPeriodName,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     // Enrollment validation guard clauses (plan §2/§9). Mirrors the
@@ -55,7 +56,8 @@ public sealed record GradeLevelLandingDto(
     // allowed-gender chips without opening the edit form.
     int? MinAge = null,
     int? MaxAge = null,
-    Guid? AllowedGenderCodedValueId = null);
+    Guid? AllowedGenderCodedValueId = null,
+    bool IsBlockedFromEnrollment = false);
 
 public sealed record ActivityGroupDto(
     Guid Id,
@@ -132,6 +134,28 @@ public sealed record StudentTopicAssignmentDto(
     Guid PeriodId,
     bool IsOverride,
     string SourceType,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record TopicStrandDto(
+    Guid Id,
+    Guid TopicId,
+    string Name,
+    string? Description,
+    int DisplayOrder,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record TopicLessonDto(
+    Guid Id,
+    Guid TopicId,
+    Guid? StrandId,
+    string Name,
+    string? Description,
+    DateOnly? StartDate,
+    DateOnly? EndDate,
+    bool IsOpenEnded,
+    int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -249,6 +273,38 @@ public record AssignStudentTopicRequest(
     Guid PeriodId,
     bool IsOverride,
     string SourceType);
+
+// ── Strand / Lesson requests ───────────────────────────────────────────────
+
+public record CreateTopicStrandRequest(
+    Guid TopicId,
+    string Name,
+    string? Description = null,
+    int DisplayOrder = 0);
+
+public record UpdateTopicStrandRequest(
+    string Name,
+    string? Description = null,
+    int DisplayOrder = 0);
+
+public record CreateTopicLessonRequest(
+    Guid TopicId,
+    string Name,
+    string? Description = null,
+    Guid? StrandId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null,
+    bool IsOpenEnded = false,
+    int DisplayOrder = 0);
+
+public record UpdateTopicLessonRequest(
+    string Name,
+    string? Description = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null,
+    int DisplayOrder = 0);
+
+public record AssignLessonStrandRequest(Guid? StrandId);
 
 // ── Guardian requests ────────────────────────────────────────────────────────
 
@@ -524,6 +580,23 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task UpdateGradeLevelAsync(Guid id, UpdateGradeLevelRequest req, CancellationToken ct = default) =>
         (await _http.PutAsJsonAsync($"/students/grade-levels/{id}", req, ct)).EnsureSuccessStatusCode();
 
+    /// <summary>
+    /// Blocks or unblocks a grade level from being used for student enrollment
+    /// (the landing page's enrollment toggle). Throws on non-success (NotFound
+    /// for a missing grade, Conflict on a concurrent write).
+    /// </summary>
+    public async Task SetGradeLevelEnrollmentBlockedAsync(Guid id, bool blocked, CancellationToken ct = default)
+    {
+        var response = await _http.PatchAsJsonAsync(
+            $"/students/grade-levels/{id}/enrollment-blocked", new { Blocked = blocked }, ct);
+        if (response.IsSuccessStatusCode) return;
+        var body = await response.Content.ReadAsStringAsync(ct);
+        throw new HttpRequestException(
+            $"SetGradeLevelEnrollmentBlocked failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+            inner: null,
+            statusCode: response.StatusCode);
+    }
+
     public async Task DeleteGradeLevelAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/grade-levels/{id}", ct)).EnsureSuccessStatusCode();
 
@@ -590,6 +663,18 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<TopicDto[]?> ListTopicsAsync(CancellationToken ct = default)
         => await _http.GetFromJsonAsync<TopicDto[]>("/students/topics", ct);
 
+    /// <summary>
+    /// Gets a topic by its id. <c>GET /students/topics/{id}</c>.
+    /// Returns <see langword="null"/> when the topic is not found.
+    /// </summary>
+    public async Task<TopicDto?> GetTopicByIdAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/students/topics/{id}", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<TopicDto>(ct);
+    }
+
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<SubjectDto[]>("/students/subjects", ct);
 
@@ -647,6 +732,96 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task DeleteSubjectAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/subjects/{id}", ct)).EnsureSuccessStatusCode();
+
+    // ── Strands ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Lists all strands for a topic. <c>GET /students/topics/{topicId}/strands</c>.
+    /// </summary>
+    public async Task<TopicStrandDto[]?> ListTopicStrandsAsync(Guid topicId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TopicStrandDto[]>($"/students/topics/{topicId}/strands", ct);
+
+    /// <summary>
+    /// Creates a new strand under a topic. <c>POST /students/topics/strands</c>.
+    /// Returns the created <see cref="TopicStrandDto"/>.
+    /// </summary>
+    public async Task<TopicStrandDto> CreateTopicStrandAsync(CreateTopicStrandRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/topics/strands", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TopicStrandDto>(ct))!;
+    }
+
+    /// <summary>
+    /// Updates an existing strand. <c>PUT /students/topics/strands/{id}</c>.
+    /// Returns the updated <see cref="TopicStrandDto"/>.
+    /// </summary>
+    public async Task<TopicStrandDto> UpdateTopicStrandAsync(Guid id, UpdateTopicStrandRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/students/topics/strands/{id}", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TopicStrandDto>(ct))!;
+    }
+
+    /// <summary>
+    /// Deletes a strand. <c>DELETE /students/topics/strands/{id}</c>.
+    /// </summary>
+    public async Task DeleteTopicStrandAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/topics/strands/{id}", ct)).EnsureSuccessStatusCode();
+
+    // ── Lessons ─────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Lists all lessons for a topic, optionally filtered by strand.
+    /// <c>GET /students/topics/{topicId}/lessons[?strandId=…]</c>.
+    /// </summary>
+    public async Task<TopicLessonDto[]?> ListTopicLessonsAsync(Guid topicId, Guid? strandId = null, CancellationToken ct = default)
+    {
+        var url = strandId.HasValue
+            ? $"/students/topics/{topicId}/lessons?strandId={strandId}"
+            : $"/students/topics/{topicId}/lessons";
+        return await _http.GetFromJsonAsync<TopicLessonDto[]>(url, ct);
+    }
+
+    /// <summary>
+    /// Creates a new lesson under a topic. <c>POST /students/topics/lessons</c>.
+    /// Returns the created <see cref="TopicLessonDto"/>.
+    /// </summary>
+    public async Task<TopicLessonDto> CreateTopicLessonAsync(CreateTopicLessonRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/topics/lessons", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TopicLessonDto>(ct))!;
+    }
+
+    /// <summary>
+    /// Updates an existing lesson. <c>PUT /students/topics/lessons/{id}</c>.
+    /// Returns the updated <see cref="TopicLessonDto"/>.
+    /// </summary>
+    public async Task<TopicLessonDto> UpdateTopicLessonAsync(Guid id, UpdateTopicLessonRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/students/topics/lessons/{id}", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TopicLessonDto>(ct))!;
+    }
+
+    /// <summary>
+    /// Assigns (or clears) the strand for a lesson.
+    /// <c>POST /students/topics/lessons/{id}/strand</c>.
+    /// Returns the updated <see cref="TopicLessonDto"/>.
+    /// </summary>
+    public async Task<TopicLessonDto> AssignLessonStrandAsync(Guid id, AssignLessonStrandRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync($"/students/topics/lessons/{id}/strand", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TopicLessonDto>(ct))!;
+    }
+
+    /// <summary>
+    /// Deletes a lesson. <c>DELETE /students/topics/lessons/{id}</c>.
+    /// </summary>
+    public async Task DeleteTopicLessonAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/students/topics/lessons/{id}", ct)).EnsureSuccessStatusCode();
 
     // ── Periods ──────────────────────────────────────────────────────────────
 

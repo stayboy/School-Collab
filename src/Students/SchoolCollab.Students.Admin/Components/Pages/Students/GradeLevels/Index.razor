@@ -10,7 +10,7 @@
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
-@inject ILogger<GradeLevels> Logger
+@inject ILogger<Index> Logger
 @inject VisibleTenantService VisibleTenant
 @implements IDisposable
 
@@ -27,7 +27,8 @@
              GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
-             SearchPlaceholder="Search grade levels…">
+             SearchPlaceholder="Search grade levels…"
+             Error="@_error">
     <Columns>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Name" Sortable="true" SortBy="@_sortByName">
             @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
@@ -58,40 +59,46 @@
             }
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Topics">
-            @if (context.CurrentPeriodId.HasValue)
-            {
-                <FluentAnchor Appearance="Appearance.Lightweight"
-                              Href="@($"/students/subjects?gradeLevelId={context.Id}&periodId={context.CurrentPeriodId}")">
-                    @context.TopicCount
-                </FluentAnchor>
-            }
-            else
-            {
-                <span class="muted">0</span>
-            }
+            <FluentAnchor Appearance="Appearance.Lightweight"
+                          Href="@($"/students/subjects?gradeLevelId={context.Id}")">
+                @context.TopicCount
+            </FluentAnchor>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Strands">
+            <FluentAnchor Appearance="Appearance.Lightweight"
+                          Href="#"
+                          OnClick="@(() => OpenStrandsDialogAsync(context))"
+                          PreventDefault="true">
+                @context.StrandCount
+            </FluentAnchor>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Lessons">
+            <FluentAnchor Appearance="Appearance.Lightweight"
+                          Href="#"
+                          OnClick="@(() => OpenLessonsDialogAsync(context))"
+                          PreventDefault="true">
+                @context.LessonCount
+            </FluentAnchor>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Students">
-            @if (context.CurrentPeriodId.HasValue)
-            {
-                <FluentAnchor Appearance="Appearance.Lightweight"
-                              Href="@($"/students?gradeLevelId={context.Id}&periodId={context.CurrentPeriodId}")">
-                    @context.StudentCount
-                </FluentAnchor>
-            }
-            else
-            {
-                <span class="muted">0</span>
-            }
+            <FluentAnchor Appearance="Appearance.Lightweight"
+                          Href="@($"/students?gradeLevelId={context.Id}")">
+                @context.StudentCount
+            </FluentAnchor>
         </TemplateColumn>
-        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Period">
-            @if (context.CurrentPeriodId.HasValue)
-            {
-                <FluentBadge Appearance="Appearance.Accent">@context.CurrentPeriodName</FluentBadge>
-            }
-            else
-            {
-                <span class="muted">No current period</span>
-            }
+        <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Enrollment">
+            <div class="enrollment-cell">
+                <FluentSwitch Value="@(!context.IsBlockedFromEnrollment)"
+                              ValueChanged="@(v => ToggleEnrollmentBlockedAsync(context, !v))"
+                              Disabled="@(_pendingBlockToggles.Contains(context.Id))"
+                              Title="@(context.IsBlockedFromEnrollment
+                                        ? "Blocked from enrollment — new enrollments cannot use this grade"
+                                        : "Allowed for enrollment — click to block")" />
+                @if (context.IsBlockedFromEnrollment)
+                {
+                    <span class="muted blocked-label">Blocked</span>
+                }
+            </div>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Actions">
             <RowActionsMenu AriaLabel="Grade actions"
@@ -109,6 +116,15 @@
         font-variant-numeric: tabular-nums;
         white-space: nowrap;
     }
+    .enrollment-cell {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+    .blocked-label {
+        font-size: 0.8rem;
+        white-space: nowrap;
+    }
 </style>
 
 @code {
@@ -121,18 +137,20 @@
     private volatile bool _disposed;
     private bool _isRealTenant;
 
-    /// <summary>
-    /// Cached current-period id from the most recent landing load. Passed into
-    /// the Create dialog so it knows which period to assign topics to.
-    /// Null when there is no current period (Create dialog then hides the
-    /// Topics section).
-    /// </summary>
-    private Guid? _currentPeriodId;
+    /// <summary>Grade-level ids with an in-flight enrollment-block toggle, used
+    /// to disable the switch while the PATCH is outstanding.</summary>
+    private readonly HashSet<Guid> _pendingBlockToggles = new();
 
+    /// <summary>
+    /// Wide, scroll-safe grid tracks. Name gets the flexible remainder; every
+    /// other column has a generous min so its header text never truncates with
+    /// an ellipsis and its values stay readable. If the combined minima exceed
+    /// the container the grid scrolls horizontally rather than crushing columns.
+    /// </summary>
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        // 2fr Name | 80px Age range | 90px Gender | 80px Topics | 80px Students | 140px Period | auto Actions
-        GridTemplateColumns = "minmax(200px,2fr) 80px 90px 80px 80px 140px auto"
+        // Name | Age range | Gender | Topics | Strands | Lessons | Students | Enrollment | Actions
+        GridTemplateColumns = "minmax(220px,2.2fr) minmax(120px,1fr) minmax(120px,1fr) minmax(100px,1fr) minmax(100px,1fr) minmax(100px,1fr) minmax(110px,1fr) minmax(160px,1fr) auto"
     };
 
     private static readonly GridSort<GradeLevelLandingDto> _sortByName =
@@ -177,8 +195,7 @@
     /// <summary>
     /// (Re)loads the landing data — called on initial mount and again after
     /// the Create dialog reports success so the new row shows up. Always
-    /// re-reads the tenant scope so a tenant switch mid-session is honored
-    /// (the same as the original OnInitializedAsync).
+    /// re-reads the tenant scope so a tenant switch mid-session is honored.
     /// </summary>
     private async Task ReloadAsync()
     {
@@ -190,19 +207,18 @@
         if (!_isRealTenant)
         {
             _items = [];
-            _currentPeriodId = null;
             return;
         }
 
         Logger.LogInformation("Loading grade levels landing");
+        _error = null;
         try
         {
-            // Load grade levels with current-period stats
+            // Grade levels with per-row counts. Not period-bound — the counts
+            // are date-effective on topic assignments / active enrollments.
             _items = await Api.ListGradeLevelsForLandingAsync(token);
 
             if (_disposed) return;
-
-            _currentPeriodId = _items?.FirstOrDefault()?.CurrentPeriodId;
 
             // Load tenant-resolved names for display
             var gradeCodedValues = await CodedValuesApi.GetChildrenByParentCodeAsync("GRADE", token);
@@ -245,85 +261,104 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load grade levels");
             _error = ex.Message;
+            _items ??= [];
         }
     }
 
     /// <summary>
-    /// Opens the Create dialog (DialogShellBase-derived) and refreshes the
-    /// landing on success. Wired into LandingPage.OnCreate so the + New
-    /// button invokes this instead of navigating to a dedicated route.
-    /// <see cref="CreateRoute"/> is left set as a fallback for any deep link
-    /// / browser refresh that bypasses the LandingPage chrome.
+    /// Navigates to the routable Create page. Wired into LandingPage.OnCreate
+    /// so the + New button navigates instead of opening a dialog.
     /// </summary>
-    private async Task OpenCreateDialogAsync()
+    private void OpenCreateDialogAsync()
     {
-        if (_disposed) return;
-
-        var model = new GradeLevelCreateDialog.GradeLevelCreateModel
-        {
-        };
-
-        var created = await DialogService.ShowShellDialogAsync<
-            GradeLevelCreateDialog,
-            GradeLevelCreateDialog.GradeLevelCreateModel,
-            GradeLevelDto>(
-            model, "Create grade level", DialogSize.Medium);
-
-        if (_disposed) return;
-        if (created is not null)
-        {
-            // Refresh the landing so the new (or reused) grade row appears.
-            await ReloadAsync();
-        }
+        Nav.NavigateTo("/students/grade-levels/create");
     }
 
     /// <summary>
-    /// Builds the kebab-menu actions for a single grade row. Edit opens the
-    /// Edit dialog (which carries the validation rules + topic multi-select
-    /// + tenant override pencil icon — see plan §4); Delete keeps the existing
-    /// confirmation pattern. No system-wide coded-value edit surfaces from
-    /// this menu (all edits target tenancy override, per the plan).
+    /// Builds the kebab-menu actions for a single grade row. Edit navigates
+    /// to the routable Edit page; Delete keeps the existing confirmation
+    /// pattern.
     /// </summary>
     private IReadOnlyList<RowAction> BuildRowActions(GradeLevelLandingDto row)
     {
         var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
         return new List<RowAction>
         {
-            RowAction.Callback("Edit", () => OpenEditDialogAsync(row), FluentIcons.Edit),
+            RowAction.Callback("Edit", () => Nav.NavigateTo($"/students/grade-levels/{row.Id}/edit"), FluentIcons.Edit),
             RowAction.Callback("Delete", () => OnDeleteAsync(row.Id, name), FluentIcons.Delete),
         };
     }
 
     /// <summary>
-    /// Opens the Edit dialog (DialogShellBase-derived) pre-seeded with the
-    /// grade's current validation rules + topic assignments for the current
-    /// period. Refreshes the landing on success.
+    /// Flips a grade level's enrollment-blocked flag. The switch is disabled
+    /// while the PATCH is in flight. On success the local row is updated
+    /// optimistically so the UI reflects the new state without a reload.
     /// </summary>
-    private async Task OpenEditDialogAsync(GradeLevelLandingDto row)
+    private async Task ToggleEnrollmentBlockedAsync(GradeLevelLandingDto row, bool blocked)
+    {
+        if (_disposed || !_pendingBlockToggles.Add(row.Id)) return;
+
+        try
+        {
+            await Api.SetGradeLevelEnrollmentBlockedAsync(row.Id, blocked);
+            if (_disposed) return;
+            _items = _items?
+                .Select(g => g.Id == row.Id ? g with { IsBlockedFromEnrollment = blocked } : g)
+                .ToArray();
+            Logger.LogInformation("Grade level {Id} enrollment-blocked set to {Blocked}", row.Id, blocked);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to set enrollment-blocked for grade {Id}", row.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _pendingBlockToggles.Remove(row.Id);
+        }
+    }
+
+    /// <summary>
+    /// Opens the Strands dialog showing all strands across the grade's
+    /// effective topics, grouped by topic name.
+    /// </summary>
+    private async Task OpenStrandsDialogAsync(GradeLevelLandingDto row)
     {
         if (_disposed) return;
 
-        var model = new GradeLevelEditDialog.GradeLevelEditModel
-        {
-            Id = row.Id,
-            CodedValueId = row.CodedValueId,
-            CurrentName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name,
-            MinAge = row.MinAge,
-            MaxAge = row.MaxAge,
-            AllowedGenderCodedValueId = row.AllowedGenderCodedValueId,
-        };
+        await DialogService.ShowShellDialogAsync<
+            StrandsDialog,
+            StrandsDialog.StrandsDialogModel,
+            StrandsDialog.StrandsDialogResult>(
+            new StrandsDialog.StrandsDialogModel
+            {
+                GradeLevelId = row.Id,
+                GradeLevelName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name,
+            },
+            $"Strands — {(_resolvedNames.TryGetValue(row.Id, out var name) ? name : row.Name)}",
+            DialogSize.Large);
+    }
 
-        var updated = await DialogService.ShowShellDialogAsync<
-            GradeLevelEditDialog,
-            GradeLevelEditDialog.GradeLevelEditModel,
-            GradeLevelDto>(
-            model, $"Edit grade — {model.CurrentName}", DialogSize.Medium);
-
+    /// <summary>
+    /// Opens the Lessons dialog showing all lessons across the grade's
+    /// effective topics, grouped by topic name.
+    /// </summary>
+    private async Task OpenLessonsDialogAsync(GradeLevelLandingDto row)
+    {
         if (_disposed) return;
-        if (updated is not null)
-        {
-            await ReloadAsync();
-        }
+
+        await DialogService.ShowShellDialogAsync<
+            LessonsDialog,
+            LessonsDialog.LessonsDialogModel,
+            LessonsDialog.LessonsDialogResult>(
+            new LessonsDialog.LessonsDialogModel
+            {
+                GradeLevelId = row.Id,
+                GradeLevelName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name,
+            },
+            $"Lessons — {(_resolvedNames.TryGetValue(row.Id, out var name) ? name : row.Name)}",
+            DialogSize.Large);
     }
 
     private async Task OnDeleteAsync(Guid id, string name)

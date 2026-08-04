@@ -25,7 +25,8 @@
              GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
-             SearchPlaceholder="Search students…">
+             SearchPlaceholder="Search students…"
+             Error="@_error">
     <ToolbarFilters>
         @if (_filterGradeLevel is not null)
         {
@@ -213,6 +214,7 @@
         }
 
         Logger.LogInformation("Loading students list");
+        _error = null;
 
         try
         {
@@ -246,6 +248,11 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load students");
             _error = ex.Message;
+            // Stop the spinner so the bound Error message bar is visible instead of
+            // an infinite loading ring. (Previously _items stayed null → spinner
+            // forever, swallowing the error — the reported symptom.)
+            _items ??= [];
+            _gradeLevels ??= [];
         }
     }
 

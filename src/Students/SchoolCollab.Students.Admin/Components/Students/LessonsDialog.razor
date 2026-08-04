@@ -1,0 +1,29 @@
+﻿@*
+    LessonsDialog - opens from the Grade Levels landing
+*@
+@inherits DialogShellBase<LessonsDialog.LessonsDialogModel, LessonsDialog.LessonsDialogResult>
+@using SchoolCollab.Students.Admin.Services
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <span>Lessons dialog content.</span>
+        <DialogShellFooter SubmitText="Close" />
+    </EditForm>
+</div>
+@code {
+    public sealed class LessonsDialogModel
+    {
+        public Guid GradeLevelId { get; set; }
+        public string? GradeLevelName { get; set; }
+    }
+    public sealed class LessonsDialogResult { }
+    protected override Task<LessonsDialogResult?> SubmitAsync(LessonsDialogModel model)
+    {
+        return Task.FromResult<LessonsDialogResult?>(new LessonsDialogResult());
+    }
+}

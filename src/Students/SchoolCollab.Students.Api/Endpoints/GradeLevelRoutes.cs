@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.CreateGradeLevel;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.DeleteGradeLevel;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.GetOrCreateGradeLevel;
+using SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.SetGradeLevelEnrollmentBlocked;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.UpdateGradeLevel;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelByCodedValue;
@@ -98,6 +99,28 @@ public static class GradeLevelRoutes
             }
         });
 
+        // ── Block/unblock a grade level from enrollment (landing toggle) ──
+        group.MapPatch("/grade-levels/{id:guid}/enrollment-blocked", async (
+            Guid id,
+            [FromBody] SetEnrollmentBlockedRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<SetGradeLevelEnrollmentBlocked> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new SetGradeLevelEnrollmentBlocked(id, req.Blocked), ct);
+                return Results.NoContent();
+            }
+            catch (GradeLevelNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ConcurrencyException ex)
+            {
+                return Results.Conflict(new { ex.Message });
+            }
+        });
+
         group.MapDelete("/grade-levels/{id:guid}", async (
             Guid id,
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<DeleteGradeLevel> handler,
@@ -126,3 +149,4 @@ internal record UpdateGradeLevelRequest(int Level, string Name, int DisplayOrder
     int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);
 internal record GetOrCreateGradeLevelRequest(Guid CodedValueId, int Level, string Name, int DisplayOrder,
     int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);
+internal record SetEnrollmentBlockedRequest(bool Blocked);
