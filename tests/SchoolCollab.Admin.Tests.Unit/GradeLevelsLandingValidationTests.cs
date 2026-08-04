@@ -150,7 +150,7 @@ public class GradeLevelsLandingValidationTests : BunitContext
             // Catch-all for /api/coded-values/* (the page hits both /by-parent and /by-ids)
             ("/api/coded-values/", HttpStatusCode.OK, GenderNamesJson(genderId, "Male")));
 
-        var cut = Render<GradeLevels>();
+        var cut = Render<SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels.Index>();
 
         // Allow the OnInitializedAsync pipeline + Task.Delay in CodedValueDropdown
         // to complete before we assert.
@@ -173,7 +173,7 @@ public class GradeLevelsLandingValidationTests : BunitContext
             ("/students/grade-levels/landing", HttpStatusCode.OK, LandingJson(10, null, null)),
             ("/api/coded-values/", HttpStatusCode.OK, "[]"));
 
-        var cut = Render<GradeLevels>();
+        var cut = Render<SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels.Index>();
         cut.WaitForState(() => cut.Markup.Contains("10+"), TimeSpan.FromSeconds(2));
 
         cut.Markup.Should().Contain("10+", "min-only should render as '10+'");
@@ -187,7 +187,7 @@ public class GradeLevelsLandingValidationTests : BunitContext
             ("/students/grade-levels/landing", HttpStatusCode.OK, LandingJson(null, null, null)),
             ("/api/coded-values/", HttpStatusCode.OK, "[]"));
 
-        var cut = Render<GradeLevels>();
+        var cut = Render<SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels.Index>();
         cut.WaitForState(() => cut.Markup.Contains("Any age"), TimeSpan.FromSeconds(2));
 
         cut.Markup.Should().Contain("Any age");
@@ -202,7 +202,7 @@ public class GradeLevelsLandingValidationTests : BunitContext
             ("/students/grade-levels/landing", HttpStatusCode.OK, LandingJson(null, null, genderId)),
             ("/api/coded-values/", HttpStatusCode.OK, GenderNamesJson(genderId, "Female")));
 
-        var cut = Render<GradeLevels>();
+        var cut = Render<SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels.Index>();
         cut.WaitForState(() => cut.Markup.Contains("Female"), TimeSpan.FromSeconds(2));
 
         cut.Markup.Should().Contain("Female", "the gender id must resolve to the tenant-displayed name");

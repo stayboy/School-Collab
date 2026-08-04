@@ -93,7 +93,7 @@ public class GradeLevelsTenancyTests : BunitContext
     {
         var (_, handler) = Register(realTenant: false);
 
-        var cut = Render<GradeLevels>();
+        var cut = Render<SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels.Index>();
 
         handler.CallCount.Should().Be(0, "no tenant-scoped API call may be issued when !IsRealTenant");
         cut.Markup.Should().Contain(TenantEmptyMessage);
@@ -105,7 +105,7 @@ public class GradeLevelsTenancyTests : BunitContext
     {
         var (_, handler) = Register(realTenant: true);
 
-        var cut = Render<GradeLevels>();
+        var cut = Render<SchoolCollab.Students.Admin.Components.Pages.Students.GradeLevels.Index>();
 
         handler.CallCount.Should().BeGreaterThan(0, "tenant-scoped API calls are expected for a real tenant");
         cut.Markup.Should().NotContain(TenantEmptyMessage, "the tenant prompt must not show for a real tenant");
