@@ -43,6 +43,11 @@ internal sealed class GradeLevelConfiguration : TenantEntityTypeConfigurationBas
             .HasColumnName("allowed_gender_coded_value_id")
             .IsRequired(false);
 
+        builder.Property(x => x.IsBlockedFromEnrollment)
+            .HasColumnName("is_blocked_from_enrollment")
+            .IsRequired()
+            .HasDefaultValue(false);
+
         // FR-7: unique per (tenant, coded_value) — was globally unique on CodedValueId.
         builder.HasIndex(x => new { x.TenantId, x.CodedValueId })
             .IsUnique()

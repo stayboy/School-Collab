@@ -28,7 +28,8 @@ internal sealed class GradeLevelRepository(StudentsDbContext db)
             .Select(x => new GradeLevelDto(
                 x.Id, x.CodedValueId, x.Level, x.Name, x.DisplayOrder,
                 0, 0,
-                x.CreatedAt, x.UpdatedAt))
+                x.CreatedAt, x.UpdatedAt,
+                x.MinAge, x.MaxAge, x.AllowedGenderCodedValueId, x.IsBlockedFromEnrollment))
             .ToArrayAsync(cancellationToken);
 
     public Task<GradeLevel?> GetByCodedValueIdAsync(Guid codedValueId, CancellationToken cancellationToken = default)

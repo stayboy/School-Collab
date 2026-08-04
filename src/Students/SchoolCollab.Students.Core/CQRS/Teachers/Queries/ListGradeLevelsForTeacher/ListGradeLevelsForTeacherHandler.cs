@@ -36,7 +36,8 @@ public sealed class ListGradeLevelsForTeacherHandler(
                                              .Count(gsa => gsa.GradeLevelId == gl.Id && gsa.TenantId == tenantId),
                                          db.StudentEnrollments.IgnoreQueryFilters(new[] { "Tenant" })
                                              .Count(se => se.GradeLevelId == gl.Id && se.TenantId == tenantId),
-                                         gl.CreatedAt, gl.UpdatedAt))
+                                         gl.CreatedAt, gl.UpdatedAt,
+                                         gl.MinAge, gl.MaxAge, gl.AllowedGenderCodedValueId, gl.IsBlockedFromEnrollment))
                     .ToArrayAsync(ct);
                 return results;
             },

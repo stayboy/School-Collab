@@ -9,4 +9,5 @@ public sealed record UpdateGradeLevel(
     int DisplayOrder,
     int? MinAge = null,
     int? MaxAge = null,
-    Guid? AllowedGenderCodedValueId = null) : ICommand;
+    Guid? AllowedGenderCodedValueId = null,
+    bool IsBlockedFromEnrollment = false) : ICommand;

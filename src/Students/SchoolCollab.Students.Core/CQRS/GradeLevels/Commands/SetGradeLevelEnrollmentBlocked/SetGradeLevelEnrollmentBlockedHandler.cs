@@ -5,23 +5,24 @@ using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
-namespace SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.UpdateGradeLevel;
+namespace SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.SetGradeLevelEnrollmentBlocked;
 
-public sealed class UpdateGradeLevelHandler(
+public sealed class SetGradeLevelEnrollmentBlockedHandler(
     IGradeLevelRepository repository,
     HybridCache cache,
-    ILogger<UpdateGradeLevelHandler> logger) : ICommandHandler<UpdateGradeLevel>
+    ILogger<SetGradeLevelEnrollmentBlockedHandler> logger)
+    : ICommandHandler<SetGradeLevelEnrollmentBlocked>
 {
-    public async Task HandleAsync(UpdateGradeLevel command, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(
+        SetGradeLevelEnrollmentBlocked command,
+        CancellationToken cancellationToken = default)
     {
-        logger.LogDebug("Handling UpdateGradeLevel {Id}", command.Id);
+        logger.LogDebug("Handling SetGradeLevelEnrollmentBlocked {Id} = {Blocked}", command.Id, command.Blocked);
 
         var gradeLevel = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new GradeLevelNotFoundException(command.Id);
 
-        gradeLevel.Update(command.Level, command.Name, command.DisplayOrder,
-            command.MinAge, command.MaxAge, command.AllowedGenderCodedValueId,
-            command.IsBlockedFromEnrollment);
+        gradeLevel.SetEnrollmentBlocked(command.Blocked);
 
         try
         {
@@ -36,6 +37,6 @@ public sealed class UpdateGradeLevelHandler(
 
         gradeLevel.ClearDomainEvents();
 
-        logger.LogInformation("GradeLevel {Id} updated", gradeLevel.Id);
+        logger.LogInformation("GradeLevel {Id} enrollment-blocked set to {Blocked}", gradeLevel.Id, command.Blocked);
     }
 }
