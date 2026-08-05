@@ -6,18 +6,18 @@ using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
-namespace SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherSubject;
+namespace SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherTopic;
 
-public sealed class LinkTeacherSubjectHandler(
+public sealed class LinkTeacherTopicHandler(
     ITeacherRepository repository,
     ITopicRepository subjectRepository,
     HybridCache cache,
     ITenantProvider tenantProvider,
-    ILogger<LinkTeacherSubjectHandler> logger) : ICommandHandler<LinkTeacherSubject>
+    ILogger<LinkTeacherTopicHandler> logger) : ICommandHandler<LinkTeacherTopic>
 {
-    public async Task HandleAsync(LinkTeacherSubject command, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(LinkTeacherTopic command, CancellationToken cancellationToken = default)
     {
-        tenantProvider.RequireTenantContext(nameof(LinkTeacherSubject), typeof(TeacherSubject));
+        tenantProvider.RequireTenantContext(nameof(LinkTeacherTopic), typeof(TeacherTopic));
 
         // Validate both sides exist (tenant-scoped; soft-deleted teachers are
         // excluded so a blocked record cannot receive new links). Mirrors
@@ -31,7 +31,7 @@ public sealed class LinkTeacherSubjectHandler(
         if (await repository.GetTopicLinkAsync(command.TeacherId, command.TopicId, cancellationToken) is not null)
             throw new TeacherLinkAlreadyExistsException(command.TeacherId, command.TopicId);
 
-        var link = TeacherSubject.Create(command.TeacherId, command.TopicId)
+        var link = TeacherTopic.Create(command.TeacherId, command.TopicId)
             .WithTenant(tenantProvider);
         await repository.AddTopicAsync(link, cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);

@@ -7,15 +7,15 @@ using SchoolCollab.Students.Core.Domain;
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
 /// <summary>
-/// Teacher↔subject link (spec §4.12).
+/// Teacher↔topic link (spec §4.12). Subject->Topic rename (FR-13).
 /// </summary>
-internal sealed class TeacherSubjectConfiguration : TenantEntityTypeConfigurationBase<TeacherSubject>
+internal sealed class TeacherTopicConfiguration : TenantEntityTypeConfigurationBase<TeacherTopic>
 {
-    public TeacherSubjectConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
+    public TeacherTopicConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
 
-    protected override void ConfigureTenantEntity(EntityTypeBuilder<TeacherSubject> builder)
+    protected override void ConfigureTenantEntity(EntityTypeBuilder<TeacherTopic> builder)
     {
-        builder.ToTable("teacher_subjects");
+        builder.ToTable("teacher_topics");
 
         builder.ConfigureAuditProperties();
         builder.ConfigurePostgresRowVersion();
@@ -25,6 +25,6 @@ internal sealed class TeacherSubjectConfiguration : TenantEntityTypeConfiguratio
 
         builder.HasIndex(x => new { x.TenantId, x.TeacherId, x.TopicId })
             .IsUnique()
-            .HasDatabaseName("ix_teacher_subjects_tenant_teacher_subject");
+            .HasDatabaseName("ix_teacher_topics_tenant_teacher_topic");
     }
 }

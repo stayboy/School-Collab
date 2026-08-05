@@ -3,14 +3,14 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data.Repositories;
 
-namespace SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherSubject;
+namespace SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherTopic;
 
-public sealed class UnlinkTeacherSubjectHandler(
+public sealed class UnlinkTeacherTopicHandler(
     ITeacherRepository repository,
     HybridCache cache,
-    ILogger<UnlinkTeacherSubjectHandler> logger) : ICommandHandler<UnlinkTeacherSubject>
+    ILogger<UnlinkTeacherTopicHandler> logger) : ICommandHandler<UnlinkTeacherTopic>
 {
-    public async Task HandleAsync(UnlinkTeacherSubject command, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(UnlinkTeacherTopic command, CancellationToken cancellationToken = default)
     {
         await repository.RemoveTopicAsync(command.TeacherId, command.TopicId, cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);

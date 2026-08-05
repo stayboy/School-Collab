@@ -7,22 +7,22 @@ namespace SchoolCollab.Students.Core.Data.Repositories;
 internal sealed class TeacherRepository(StudentsDbContext db)
     : SoftDeletableRepositoryBase<Teacher, StudentsDbContext>(db), ITeacherRepository
 {
-    public Task AddTopicAsync(TeacherSubject link, CancellationToken cancellationToken = default)
+    public Task AddTopicAsync(TeacherTopic link, CancellationToken cancellationToken = default)
     {
-        Db.TeacherSubjects.Add(link);
+        Db.TeacherTopics.Add(link);
         return Db.SaveChangesAsync(cancellationToken);
     }
 
-    public Task<TeacherSubject?> GetTopicLinkAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
-        => Db.TeacherSubjects.FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == subjectId, cancellationToken);
+    public Task<TeacherTopic?> GetTopicLinkAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default)
+        => Db.TeacherTopics.FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == topicId, cancellationToken);
 
-    public async Task RemoveTopicAsync(Guid teacherId, Guid subjectId, CancellationToken cancellationToken = default)
+    public async Task RemoveTopicAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default)
     {
-        var link = await Db.TeacherSubjects
-            .FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == subjectId, cancellationToken);
+        var link = await Db.TeacherTopics
+            .FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == topicId, cancellationToken);
         if (link is not null)
         {
-            Db.TeacherSubjects.Remove(link);
+            Db.TeacherTopics.Remove(link);
             await Db.SaveChangesAsync(cancellationToken);
         }
     }
@@ -30,6 +30,12 @@ internal sealed class TeacherRepository(StudentsDbContext db)
     public Task AddGradeLevelAsync(TeacherGradeLevel link, CancellationToken cancellationToken = default)
     {
         Db.TeacherGradeLevels.Add(link);
+        return Db.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task UpdateGradeLevelAsync(TeacherGradeLevel link, CancellationToken cancellationToken = default)
+    {
+        Db.TeacherGradeLevels.Update(link);
         return Db.SaveChangesAsync(cancellationToken);
     }
 

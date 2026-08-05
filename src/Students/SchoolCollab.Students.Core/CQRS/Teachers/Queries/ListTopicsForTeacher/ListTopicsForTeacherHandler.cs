@@ -26,7 +26,7 @@ public sealed class ListTopicsForTeacherHandler(
             static async (state, ct) =>
             {
                 var (db, query, tenantId) = state;
-                var results = await (from ts in db.TeacherSubjects.IgnoreQueryFilters(["Tenant"])
+                var results = await (from ts in db.TeacherTopics.IgnoreQueryFilters(["Tenant"])
                                      join s in db.Topics.IgnoreQueryFilters(["Tenant"]) on ts.TopicId equals s.Id
                                      where ts.TenantId == tenantId && ts.TeacherId == query.TeacherId && s.TenantId == tenantId
                                      orderby s.DisplayOrder, s.Name

@@ -4,11 +4,11 @@ using SchoolCollab.Core.Tenancy;
 namespace SchoolCollab.Students.Core.Domain;
 
 /// <summary>
-/// Link between a teacher and a subject they teach (spec §4.12).
+/// Link between a teacher and a topic they teach (spec §4.12). Subject->Topic rename (FR-13).
 /// </summary>
-public sealed class TeacherSubject : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
+public sealed class TeacherTopic : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
 {
-    private TeacherSubject() { }
+    private TeacherTopic() { }
 
     public Guid Id { get; private set; }
     public Guid TeacherId { get; private set; }
@@ -20,12 +20,12 @@ public sealed class TeacherSubject : ITenantEntity, IEntity, IAuditableEntity, I
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    public static TeacherSubject Create(Guid teacherId, Guid subjectId) =>
-        new TeacherSubject
+    public static TeacherTopic Create(Guid teacherId, Guid topicId) =>
+        new TeacherTopic
         {
             Id = Guid.NewGuid(),
             TeacherId = teacherId,
-            TopicId = subjectId,
+            TopicId = topicId,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };

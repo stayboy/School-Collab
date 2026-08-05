@@ -5,12 +5,14 @@ using SchoolCollab.Students.Core.DTOs;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.CreateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherGradeLevel;
-using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherSubject;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherTopic;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherGradeLevelRole;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherGradeLevel;
-using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherSubject;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -78,22 +80,22 @@ public static class TeacherRoutes
             }
         });
 
-        // Subject links (spec §4.12).
-        group.MapGet("/{id:guid}/subjects", async (
+        // Topic links (spec §4.12). Subject->Topic rename (FR-13).
+        group.MapGet("/{id:guid}/topics", async (
             Guid id,
             [FromServices] IQueryHandler<ListTopicsForTeacher, TopicDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListTopicsForTeacher(id), ct)));
 
-        group.MapPost("/{id:guid}/subjects", async (
+        group.MapPost("/{id:guid}/topics", async (
             Guid id,
-            [FromBody] LinkTeacherSubjectRequest req,
-            [FromServices] ICommandHandler<LinkTeacherSubject> handler,
+            [FromBody] LinkTeacherTopicRequest req,
+            [FromServices] ICommandHandler<LinkTeacherTopic> handler,
             CancellationToken ct) =>
         {
             try
             {
-                await handler.HandleAsync(new LinkTeacherSubject(id, req.SubjectId), ct);
+                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId), ct);
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException) { return Results.NotFound(); }
@@ -101,13 +103,13 @@ public static class TeacherRoutes
             catch (TeacherLinkAlreadyExistsException ex) { return Results.Conflict(new { ex.Message }); }
         });
 
-        group.MapDelete("/{id:guid}/subjects/{subjectId:guid}", async (
+        group.MapDelete("/{id:guid}/topics/{topicId:guid}", async (
             Guid id,
-            Guid subjectId,
-            [FromServices] ICommandHandler<UnlinkTeacherSubject> handler,
+            Guid topicId,
+            [FromServices] ICommandHandler<UnlinkTeacherTopic> handler,
             CancellationToken ct) =>
         {
-            await handler.HandleAsync(new UnlinkTeacherSubject(id, subjectId), ct);
+            await handler.HandleAsync(new UnlinkTeacherTopic(id, topicId), ct);
             return Results.NoContent();
         });
 
@@ -126,7 +128,7 @@ public static class TeacherRoutes
         {
             try
             {
-                await handler.HandleAsync(new LinkTeacherGradeLevel(id, req.GradeLevelId), ct);
+                await handler.HandleAsync(new LinkTeacherGradeLevel(id, req.GradeLevelId, req.TeacherRoleCodedValueId), ct);
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException) { return Results.NotFound(); }
@@ -144,6 +146,23 @@ public static class TeacherRoutes
             return Results.NoContent();
         });
 
+        // Set/clear the coded-value role a teacher holds on a grade level
+        // (grade-level-detail-view-plan.md §3.1). Idempotent at the domain layer.
+        group.MapPatch("/{id:guid}/grade-levels/{gradeLevelId:guid}/role", async (
+            Guid id,
+            Guid gradeLevelId,
+            [FromBody] SetTeacherGradeLevelRoleRequest req,
+            [FromServices] ICommandHandler<SetTeacherGradeLevelRole> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new SetTeacherGradeLevelRole(id, gradeLevelId, req.TeacherRoleCodedValueId), ct);
+                return Results.NoContent();
+            }
+            catch (TeacherLinkNotFoundException) { return Results.NotFound(); }
+        });
+
         return group;
     }
 }
@@ -155,6 +174,8 @@ internal record UpdateTeacherRequest(
     string Email,
     string? ContactPhone);
 
-internal record LinkTeacherSubjectRequest(Guid SubjectId);
+internal record LinkTeacherTopicRequest(Guid TopicId);
 
-internal record LinkTeacherGradeLevelRequest(Guid GradeLevelId);
+internal record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
+
+internal record SetTeacherGradeLevelRoleRequest(Guid? TeacherRoleCodedValueId);

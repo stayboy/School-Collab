@@ -9,9 +9,9 @@ using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.CreateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherGradeLevel;
-using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherSubject;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherGradeLevel;
-using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherSubject;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
@@ -40,10 +40,10 @@ public class TeacherCqrsTests
         new(TeacherRepo(s), s.Cache, NullLogger<UpdateTeacherHandler>.Instance);
     private static DeleteTeacherHandler NewDelete(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<DeleteTeacherHandler>.Instance);
-    private static LinkTeacherSubjectHandler NewLinkTopic(StudentsTestScope s) =>
-        new(TeacherRepo(s), s.Topics, s.Cache, s.Tenants, NullLogger<LinkTeacherSubjectHandler>.Instance);
-    private static UnlinkTeacherSubjectHandler NewUnlinkTopic(StudentsTestScope s) =>
-        new(TeacherRepo(s), s.Cache, NullLogger<UnlinkTeacherSubjectHandler>.Instance);
+    private static LinkTeacherTopicHandler NewLinkTopic(StudentsTestScope s) =>
+        new(TeacherRepo(s), s.Topics, s.Cache, s.Tenants, NullLogger<LinkTeacherTopicHandler>.Instance);
+    private static UnlinkTeacherTopicHandler NewUnlinkTopic(StudentsTestScope s) =>
+        new(TeacherRepo(s), s.Cache, NullLogger<UnlinkTeacherTopicHandler>.Instance);
     private static LinkTeacherGradeLevelHandler NewLinkGrade(StudentsTestScope s) =>
         new(TeacherRepo(s), s.GradeLevels, s.Cache, s.Tenants, NullLogger<LinkTeacherGradeLevelHandler>.Instance);
     private static UnlinkTeacherGradeLevelHandler NewUnlinkGrade(StudentsTestScope s) =>
@@ -135,11 +135,11 @@ public class TeacherCqrsTests
         var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
         var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
-        await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId));
         var subjectLinks = await NewListTopics(s).HandleAsync(new ListTopicsForTeacher(id));
         subjectLinks.Should().ContainSingle(x => x.Id == subjectId);
 
-        await NewUnlinkTopic(s).HandleAsync(new UnlinkTeacherSubject(id, subjectId));
+        await NewUnlinkTopic(s).HandleAsync(new UnlinkTeacherTopic(id, subjectId));
         subjectLinks = await NewListTopics(s).HandleAsync(new ListTopicsForTeacher(id));
         subjectLinks.Should().BeEmpty();
     }
@@ -194,7 +194,7 @@ public class TeacherCqrsTests
         using var s = new StudentsTestScope("teacher-link-missing-teacher");
         var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
-        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(Guid.NewGuid(), subjectId));
+        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(Guid.NewGuid(), subjectId));
         await act.Should().ThrowAsync<TeacherNotFoundException>();
     }
 
@@ -204,7 +204,7 @@ public class TeacherCqrsTests
         using var s = new StudentsTestScope("teacher-link-missing-subject");
         var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
 
-        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, Guid.NewGuid()));
+        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, Guid.NewGuid()));
         await act.Should().ThrowAsync<TopicNotFoundException>();
     }
 
@@ -215,8 +215,8 @@ public class TeacherCqrsTests
         var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
         var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
-        await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
-        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherSubject(id, subjectId));
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId));
+        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId));
         await act.Should().ThrowAsync<TeacherLinkAlreadyExistsException>();
     }
 

@@ -22,7 +22,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<ContactSubscription> ContactSubscriptions => Set<ContactSubscription>();
     public DbSet<Teacher> Teachers => Set<Teacher>();
-    public DbSet<TeacherSubject> TeacherSubjects => Set<TeacherSubject>();
+    public DbSet<TeacherTopic> TeacherTopics => Set<TeacherTopic>();
     public DbSet<TeacherGradeLevel> TeacherGradeLevels => Set<TeacherGradeLevel>();
     public DbSet<GradeTopicAssignment> GradeTopicAssignments => Set<GradeTopicAssignment>();
     public DbSet<ActivityGroupTopicAssignment> ActivityGroupTopicAssignments => Set<ActivityGroupTopicAssignment>();
@@ -53,7 +53,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new ContactConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ContactSubscriptionConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new TeacherSubjectConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TeacherTopicConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherGradeLevelConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TopicAssignmentConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new GradeTopicAssignmentConfiguration());

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.Students.Core.Data;
@@ -11,9 +12,11 @@ using SchoolCollab.Students.Core.Data;
 namespace SchoolCollab.Students.Core.Migrations
 {
     [DbContext(typeof(StudentsDbContext))]
-    partial class StudentsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260805104356_AddTeacherGradeLevelRole")]
+    partial class AddTeacherGradeLevelRole
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1079,7 +1082,7 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("teacher_grade_levels", (string)null);
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherTopic", b =>
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherSubject", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
@@ -1112,13 +1115,13 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnName("updated_at");
 
                     b.HasKey("Id")
-                        .HasName("pk_teacher_topics");
+                        .HasName("pk_teacher_subjects");
 
                     b.HasIndex("TenantId", "TeacherId", "TopicId")
                         .IsUnique()
-                        .HasDatabaseName("ix_teacher_topics_tenant_teacher_topic");
+                        .HasDatabaseName("ix_teacher_subjects_tenant_teacher_subject");
 
-                    b.ToTable("teacher_topics", (string)null);
+                    b.ToTable("teacher_subjects", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Topic", b =>

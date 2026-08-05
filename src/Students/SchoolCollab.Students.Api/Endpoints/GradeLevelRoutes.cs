@@ -10,6 +10,7 @@ using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelByCodedVa
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelById;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevels;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevelsForLanding;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -67,6 +68,14 @@ public static class GradeLevelRoutes
             var result = await handler.HandleAsync(new GetGradeLevelById(id), ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
+
+        // Teachers linked to a grade level, each carrying their coded-value role
+        // on that grade and the topics they teach (grade-level-detail-view-plan.md §3.1).
+        group.MapGet("/grade-levels/{id:guid}/teachers", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTeachersForGradeLevel, SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListTeachersForGradeLevel(id), ct)));
 
         group.MapPost("/grade-levels", async (
             [FromBody] CreateGradeLevel command,
