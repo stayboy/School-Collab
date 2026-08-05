@@ -1,6 +1,6 @@
 ﻿# Spec: Grade-Level Detail/View Page + Teacher Role Tags + Subject->Topic Rename Finish
 
-> Status: **Complete - backend rename + teacher-role surface + frontend pages + tests all done**
+> Status: **Complete - all phases implemented + tests green; submitted as a linked gh-stack (stack #118, PRs #113-#117) awaiting merge**
 > Owner: Students + Settings + Admin contexts
 > Depends on: `grade-level-landing-topics-strands-lessons.md`,
 > `grade-level-simplified-management.md`, `subject-to-topic-polymorphism.md`,
@@ -408,6 +408,26 @@ When built (Phase 2/3), per the "global tenant default + per-grade exceptions" d
   WithExplicitEffectiveDate_FiltersToThatDate` fails **on clean base HEAD too**
   (confirmed via isolated git worktree) — pre-existing, unrelated to this pass.
 - [ ] Playwright suite not run for this pass.
+
+### Stacked PR rollout (gh-stack) — 2026-08-05
+All rollout steps are complete and shipped as a single linked **gh-stack (stack #118)**, one
+branch/PR per layer, each PR diff scoped to its phase and based on the PR below it. Merge
+bottom-up with `gh stack merge <n> --yes` (all-or-nothing).
+
+| PR | Branch | Rollout steps | Status |
+|----|--------|---------------|--------|
+| #113 | `stack/1-tchroles-seed` | Step 1 (TCHROLES seed) | **open** |
+| #114 | `stack/2-backend-teacher-role-rename` | Steps 2-3 (role + rename) | **open** |
+| #115 | `stack/3-admin-client` | Step 4 (client methods) | **open** |
+| #116 | `stack/4-detail-landing` | Step 5 (Detail + landing) | **open** |
+| #117 | `stack/5-create-edit` | Step 6 (Create/Edit) | **open** |
+
+- Setup: `gh extension install github/gh-stack`; `git config rerere.enabled true` +
+  `remote.pushDefault origin`. Skill at `~/.agents/skills/gh-stack`.
+- Each branch tip builds green (0 errors) and the 11 new bUnit tests pass at the stack tip.
+- Commit identity: `pi-agent` / `bot@school-collab.local` (configured repo default).
+- To update a layer: `gh stack checkout <layer>` -> edit/commit -> `gh stack rebase --upstack`
+  -> `gh stack push`; then `gh stack sync` to refresh PRs.
 
 ### Notes / decisions captured during the pass
 - Per the "keep UI labels as-is" instruction, the admin client retains the visible
