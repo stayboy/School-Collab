@@ -34,7 +34,11 @@
              RowActionsUseMenuService="false">
     <Columns>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Name" Sortable="true" SortBy="@_sortByName">
-            @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
+            <FluentAnchor Appearance="Appearance.Lightweight"
+                          Href="@($"/students/grade-levels/{context.Id}")"
+                          Title="Open grade level detail">
+                @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
+            </FluentAnchor>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Age range">
             @if (context.MinAge.HasValue || context.MaxAge.HasValue)
@@ -69,17 +73,13 @@
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Strands">
             <FluentAnchor Appearance="Appearance.Lightweight"
-                          Href="#"
-                          OnClick="@(() => OpenStrandsDialogAsync(context))"
-                          PreventDefault="true">
+                          Href="@($"/students/grade-levels/{context.Id}")">
                 @context.StrandCount
             </FluentAnchor>
         </TemplateColumn>
         <TemplateColumn TGridItem="GradeLevelLandingDto" Title="Lessons">
             <FluentAnchor Appearance="Appearance.Lightweight"
-                          Href="#"
-                          OnClick="@(() => OpenLessonsDialogAsync(context))"
-                          PreventDefault="true">
+                          Href="@($"/students/grade-levels/{context.Id}")">
                 @context.LessonCount
             </FluentAnchor>
         </TemplateColumn>
@@ -282,6 +282,7 @@
         var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
         return new List<RowAction>
         {
+            RowAction.Callback("View", () => Nav.NavigateTo($"/students/grade-levels/{row.Id}"), FluentIcons.Open),
             RowAction.Callback("Edit", () => Nav.NavigateTo($"/students/grade-levels/{row.Id}/edit"), FluentIcons.Edit),
             RowAction.Callback("Delete", () => OnDeleteAsync(row.Id, name), FluentIcons.Delete),
         };
@@ -315,48 +316,6 @@
         {
             _pendingBlockToggles.Remove(row.Id);
         }
-    }
-
-    /// <summary>
-    /// Opens the Strands dialog showing all strands across the grade's
-    /// effective topics, grouped by topic name.
-    /// </summary>
-    private async Task OpenStrandsDialogAsync(GradeLevelLandingDto row)
-    {
-        if (_disposed) return;
-
-        await DialogService.ShowShellDialogAsync<
-            StrandsDialog,
-            StrandsDialog.StrandsDialogModel,
-            StrandsDialog.StrandsDialogResult>(
-            new StrandsDialog.StrandsDialogModel
-            {
-                GradeLevelId = row.Id,
-                GradeLevelName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name,
-            },
-            $"Strands — {(_resolvedNames.TryGetValue(row.Id, out var name) ? name : row.Name)}",
-            DialogSize.Large);
-    }
-
-    /// <summary>
-    /// Opens the Lessons dialog showing all lessons across the grade's
-    /// effective topics, grouped by topic name.
-    /// </summary>
-    private async Task OpenLessonsDialogAsync(GradeLevelLandingDto row)
-    {
-        if (_disposed) return;
-
-        await DialogService.ShowShellDialogAsync<
-            LessonsDialog,
-            LessonsDialog.LessonsDialogModel,
-            LessonsDialog.LessonsDialogResult>(
-            new LessonsDialog.LessonsDialogModel
-            {
-                GradeLevelId = row.Id,
-                GradeLevelName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name,
-            },
-            $"Lessons — {(_resolvedNames.TryGetValue(row.Id, out var name) ? name : row.Name)}",
-            DialogSize.Large);
     }
 
     private async Task OnDeleteAsync(Guid id, string name)

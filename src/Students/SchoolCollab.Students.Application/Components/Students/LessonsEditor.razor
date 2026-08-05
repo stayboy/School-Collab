@@ -1,0 +1,226 @@
+@*
+    LessonsEditor - inline lessons CRUD for a topic, shown inside the expanded
+    topic region of the Grade-Level Detail page (grade-level-detail-view-plan.md
+    §5 Tab 1). Self-contained: loads its lessons + strands on first render and
+    manages create / update / delete / strand-assignment via StudentsApiClient.
+*@
+@using SchoolCollab.Students.Application.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject ILogger<LessonsEditor> Logger
+
+<div class="editor-block">
+    <div class="editor-header">
+        <h4>Lessons (@(_items?.Length ?? 0))</h4>
+        <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                      IconStart="@FluentIcons.Add" OnClick="ToggleNewForm">New Lesson</FluentButton>
+    </div>
+
+    @if (_error is not null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_error</FluentMessageBar>
+    }
+    @if (_items is null)
+    {
+        <FluentProgressRing />
+    }
+    else if (_items.Length == 0)
+    {
+        <p class="muted">No lessons yet.</p>
+    }
+    else
+    {
+        <div class="lesson-list">
+            @foreach (var l in _items)
+            {
+                <div class="lesson-row">
+                    @if (_editingId == l.Id)
+                    {
+                        <FluentTextField @bind-Value="_editName" Placeholder="Lesson name" class="lesson-input" />
+                        <FluentSelect TOption="TopicStrandDto"
+                                      Items="_strands"
+                                      OptionText="@(s => s.Name)"
+                                      OptionValue="@(s => s.Id.ToString())"
+                                      @bind-SelectedOption="_editStrand"
+                                      Placeholder="No strand"
+                                      class="lesson-strand-select" />
+                        <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" OnClick="@(() => SaveEditAsync(l))">Save</FluentButton>
+                        <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelEdit">Cancel</FluentButton>
+                    }
+                    else
+                    {
+                        <span class="lesson-name">@l.Name</span>
+                        <span class="muted lesson-strand">@(l.StrandId is { } sid ? _strandName(sid) : "No strand")</span>
+                        <span class="lesson-actions">
+                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.Edit" Title="Edit lesson"
+                                          OnClick="@(() => StartEdit(l))" />
+                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.Delete" Title="Delete lesson"
+                                          OnClick="@(() => DeleteAsync(l))" />
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (_showNewForm)
+    {
+        <div class="new-form">
+            <FluentTextField @bind-Value="_newName" Placeholder="Lesson name" class="lesson-input" />
+            <FluentSelect TOption="TopicStrandDto"
+                          Items="_strands"
+                          OptionText="@(s => s.Name)"
+                          OptionValue="@(s => s.Id.ToString())"
+                          @bind-SelectedOption="_newStrand"
+                          Placeholder="No strand"
+                          class="lesson-strand-select" />
+            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+                          OnClick="CreateAsync" Disabled="@string.IsNullOrWhiteSpace(_newName)">Add</FluentButton>
+            <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelNew">Cancel</FluentButton>
+        </div>
+    }
+</div>
+
+<style>
+    .editor-header { display: flex; align-items: center; justify-content: space-between; }
+    .editor-header h4 { margin: 0 0 0.25rem; }
+    .muted { color: var(--neutral-foreground-hint); }
+    .lesson-list { display: flex; flex-direction: column; gap: 0.25rem; }
+    .lesson-row { display: flex; align-items: center; gap: 0.5rem; }
+    .lesson-name { font-weight: 500; }
+    .lesson-strand { font-size: 0.85em; }
+    .lesson-actions { margin-left: auto; display: flex; align-items: center; }
+    .lesson-input { max-width: 200px; }
+    .lesson-strand-select { max-width: 160px; }
+    .new-form { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; flex-wrap: wrap; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public Guid TopicId { get; set; }
+    [Parameter, EditorRequired] public string TopicName { get; set; } = string.Empty;
+
+    private TopicLessonDto[]? _items;
+    private TopicStrandDto[] _strands = [];
+    private string? _error;
+    private bool _showNewForm;
+    private string _newName = string.Empty;
+    private TopicStrandDto? _newStrand;
+    private Guid? _editingId;
+    private string _editName = string.Empty;
+    private TopicStrandDto? _editStrand;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var lessonsTask = Api.ListTopicLessonsAsync(TopicId);
+            var strandsTask = Api.ListTopicStrandsAsync(TopicId);
+            await Task.WhenAll(lessonsTask, strandsTask);
+            _items = lessonsTask.Result ?? [];
+            _strands = strandsTask.Result ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load lessons for topic {TopicId}", TopicId);
+            _error = ex.Message;
+        }
+    }
+
+    private string _strandName(Guid strandId)
+    {
+        var found = _strands.FirstOrDefault(s => s.Id == strandId);
+        return found is null ? strandId.ToString()[..8] : found.Name;
+    }
+
+    private void ToggleNewForm()
+    {
+        _showNewForm = !_showNewForm;
+        _newName = string.Empty;
+        _newStrand = null;
+        _error = null;
+    }
+
+    private void CancelNew()
+    {
+        _showNewForm = false;
+        _newName = string.Empty;
+        _newStrand = null;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        try
+        {
+            await Api.CreateTopicLessonAsync(new CreateTopicLessonRequest(
+                TopicId, _newName.Trim(), null, _newStrand?.Id, null, null, false, 0));
+            _showNewForm = false;
+            _newName = string.Empty;
+            _newStrand = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void StartEdit(TopicLessonDto lesson)
+    {
+        _editingId = lesson.Id;
+        _editName = lesson.Name;
+        _editStrand = lesson.StrandId is { } sid ? _strands.FirstOrDefault(s => s.Id == sid) : null;
+        _error = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _editName = string.Empty;
+        _editStrand = null;
+    }
+
+    private async Task SaveEditAsync(TopicLessonDto lesson)
+    {
+        if (string.IsNullOrWhiteSpace(_editName)) return;
+        try
+        {
+            var newStrandId = _editStrand?.Id;
+            if (newStrandId != lesson.StrandId)
+            {
+                await Api.AssignLessonStrandAsync(lesson.Id, new AssignLessonStrandRequest(newStrandId));
+            }
+            await Api.UpdateTopicLessonAsync(lesson.Id, new UpdateTopicLessonRequest(
+                _editName.Trim(), lesson.Description, lesson.StartDate, lesson.EndDate, lesson.DisplayOrder));
+            _editingId = null;
+            _editName = string.Empty;
+            _editStrand = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(TopicLessonDto lesson)
+    {
+        try
+        {
+            await Api.DeleteTopicLessonAsync(lesson.Id);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}
