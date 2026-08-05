@@ -2,6 +2,7 @@
 @page "/students/teachers/{Id:guid}/edit"
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Constants
@@ -76,7 +77,7 @@
                     <FluentWizardStep Label="Subjects"
                                       Summary="Subjects taught"
                                       IconPrevious="@FluentIcons.CheckmarkCircleFilled"
-                                      OnChange="OnSubjectsChangingAsync">
+                                      OnChange="OnTopicsChangingAsync">
                         <section class="wizard-section">
                             <div class="wizard-section-header">
                                 <FluentIcon Icon="@(Icons.Regular.Size24.Book)" Color="@Color.Accent" />
@@ -86,22 +87,22 @@
                                 </div>
                             </div>
 
-                            @if (_allSubjects is null)
+                            @if (_allTopics is null)
                             {
                                 <div class="spinner-container"><FluentProgressRing /></div>
                             }
-                            else if (_allSubjects.Length == 0)
+                            else if (_allTopics.Length == 0)
                             {
                                 <FluentMessageBar Intent="MessageIntent.Info">No subjects in this tenant yet.</FluentMessageBar>
                             }
                             else
                             {
                                 <div class="check-list">
-                                    @foreach (var s in _allSubjects)
+                                    @foreach (var s in _allTopics)
                                     {
                                         <div class="check-row">
-                                            <FluentCheckbox Value="@_selectedSubjectIds.Contains(s.Id)"
-                                                            ValueChanged="@(v => OnSubjectToggled(s.Id, v))" />
+                                            <FluentCheckbox Value="@_selectedTopicIds.Contains(s.Id)"
+                                                            ValueChanged="@(v => OnTopicToggled(s.Id, v))" />
                                             <span class="check-name">@s.Name <span class="muted">@s.Code</span></span>
                                         </div>
                                     }
@@ -178,15 +179,15 @@
                             </div>
 
                             <div class="review-card">
-                                <h4>Subjects (@_selectedSubjectIds.Count)</h4>
-                                @if (_selectedSubjectIds.Count == 0)
+                                <h4>Subjects (@_selectedTopicIds.Count)</h4>
+                                @if (_selectedTopicIds.Count == 0)
                                 {
                                     <FluentMessageBar Intent="MessageIntent.Info">No subjects selected.</FluentMessageBar>
                                 }
                                 else
                                 {
                                     <ul class="review-list">
-                                        @foreach (var s in _allSubjects?.Where(s => _selectedSubjectIds.Contains(s.Id)) ?? [])
+                                        @foreach (var s in _allTopics?.Where(s => _selectedTopicIds.Contains(s.Id)) ?? [])
                                         {
                                             <li>@s.Name <span class="muted">@s.Code</span></li>
                                         }
@@ -283,11 +284,11 @@
     private string _email = string.Empty;
     private string _contactPhone = string.Empty;
 
-    // Subjects / grade levels.
-    private SubjectDto[]? _allSubjects;
+    // Topics / grade levels.
+    private TopicDto[]? _allTopics;
     private GradeLevelDto[]? _allGradeLevels;
-    private HashSet<Guid> _selectedSubjectIds = new();
-    private HashSet<Guid> _originalSubjectIds = new();
+    private HashSet<Guid> _selectedTopicIds = new();
+    private HashSet<Guid> _originalTopicIds = new();
     private HashSet<Guid> _selectedGradeLevelIds = new();
     private HashSet<Guid> _originalGradeLevelIds = new();
 
@@ -304,7 +305,7 @@
 
         try
         {
-            _allSubjects = await Api.ListSubjectsAsync(ct) ?? [];
+            _allTopics = await Api.ListTopicsAsync(ct) ?? [];
             _allGradeLevels = await Api.ListGradeLevelsAsync(ct) ?? [];
 
             if (_isEdit && Id is not null)
@@ -320,11 +321,11 @@
                     _contactPhone = t.ContactPhone ?? string.Empty;
                 }
 
-                var existingSubjects = await Api.ListSubjectsForTeacherAsync(Id.Value, ct) ?? [];
+                var existingTopics = await Api.ListTopicsForTeacherAsync(Id.Value, ct) ?? [];
                 var existingGradeLevels = await Api.ListGradeLevelsForTeacherAsync(Id.Value, ct) ?? [];
-                _originalSubjectIds = existingSubjects.Select(s => s.Id).ToHashSet();
+                _originalTopicIds = existingTopics.Select(s => s.Id).ToHashSet();
                 _originalGradeLevelIds = existingGradeLevels.Select(g => g.Id).ToHashSet();
-                _selectedSubjectIds = new HashSet<Guid>(_originalSubjectIds);
+                _selectedTopicIds = new HashSet<Guid>(_originalTopicIds);
                 _selectedGradeLevelIds = new HashSet<Guid>(_originalGradeLevelIds);
             }
         }
@@ -374,9 +375,9 @@
         return Task.CompletedTask;
     }
 
-    private Task OnSubjectsChangingAsync(FluentWizardStepChangeEventArgs args)
+    private Task OnTopicsChangingAsync(FluentWizardStepChangeEventArgs args)
     {
-        // No blocking validation — a teacher may teach zero subjects.
+        // No blocking validation — a teacher may teach zero topics.
         return Task.CompletedTask;
     }
 
@@ -386,12 +387,12 @@
         return Task.CompletedTask;
     }
 
-    private void OnSubjectToggled(Guid subjectId, bool selected)
+    private void OnTopicToggled(Guid topicId, bool selected)
     {
         if (selected)
-            _selectedSubjectIds.Add(subjectId);
+            _selectedTopicIds.Add(topicId);
         else
-            _selectedSubjectIds.Remove(subjectId);
+            _selectedTopicIds.Remove(topicId);
         StateHasChanged();
     }
 
@@ -427,11 +428,11 @@
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
                     _email.Trim(),
                     string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
-                await SyncLinksAsync(teacherId, _originalSubjectIds, _selectedSubjectIds,
-                    id => Api.LinkTeacherSubjectAsync(teacherId, id, ct),
-                    id => Api.UnlinkTeacherSubjectAsync(teacherId, id, ct));
+                await SyncLinksAsync(teacherId, _originalTopicIds, _selectedTopicIds,
+                    id => Api.LinkTeacherTopicAsync(teacherId, id, ct),
+                    id => Api.UnlinkTeacherTopicAsync(teacherId, id, ct));
                 await SyncLinksAsync(teacherId, _originalGradeLevelIds, _selectedGradeLevelIds,
-                    id => Api.LinkTeacherGradeLevelAsync(teacherId, id, ct),
+                    id => Api.LinkTeacherGradeLevelAsync(teacherId, id, null, ct),
                     id => Api.UnlinkTeacherGradeLevelAsync(teacherId, id, ct));
             }
             else
@@ -442,10 +443,10 @@
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
                     _email.Trim(),
                     string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
-                foreach (var subjectId in _selectedSubjectIds)
-                    await Api.LinkTeacherSubjectAsync(teacherId, subjectId, ct);
+                foreach (var topicId in _selectedTopicIds)
+                    await Api.LinkTeacherTopicAsync(teacherId, topicId, ct);
                 foreach (var gradeLevelId in _selectedGradeLevelIds)
-                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, ct);
+                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, null, ct);
             }
 
             Nav.NavigateTo($"/students/teachers/{teacherId}");

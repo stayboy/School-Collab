@@ -1,5 +1,6 @@
 @page "/students/teachers/{Id:guid}"
 @using SchoolCollab.Students.Application.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -57,15 +58,15 @@
                     </div>
 
                     <div class="review-card">
-                        <h4>Subjects (@(_subjects?.Length ?? 0))</h4>
-                        @if (_subjects is null || _subjects.Length == 0)
+                        <h4>Subjects (@(_topics?.Length ?? 0))</h4>
+                        @if (_topics is null || _topics.Length == 0)
                         {
                             <FluentMessageBar Intent="MessageIntent.Info">No subjects linked.</FluentMessageBar>
                         }
                         else
                         {
                             <ul class="review-list">
-                                @foreach (var s in _subjects)
+                                @foreach (var s in _topics)
                                 {
                                     <li>@s.Name <span class="muted">@s.Code</span></li>
                                 }
@@ -108,7 +109,7 @@
 
     private bool _loading = true;
     private TeacherDto? _teacher;
-    private SubjectDto[]? _subjects;
+    private TopicDto[]? _topics;
     private GradeLevelDto[]? _gradeLevels;
     private string? _titleName;
     private string? _error;
@@ -125,12 +126,12 @@
             // Run the three reads in parallel — the page is read-only and
             // there are no dependencies between them.
             var teacherTask = Api.GetTeacherByIdAsync(Id, ct);
-            var subjectsTask = Api.ListSubjectsForTeacherAsync(Id, ct);
+            var subjectsTask = Api.ListTopicsForTeacherAsync(Id, ct);
             var gradesTask = Api.ListGradeLevelsForTeacherAsync(Id, ct);
             await Task.WhenAll(teacherTask, subjectsTask, gradesTask);
 
             _teacher = teacherTask.Result;
-            _subjects = subjectsTask.Result ?? [];
+            _topics = subjectsTask.Result ?? [];
             _gradeLevels = gradesTask.Result ?? [];
 
             if (_teacher is not null && _teacher.TitleCodedValueId is { } titleId)

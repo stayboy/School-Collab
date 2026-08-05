@@ -372,9 +372,11 @@ public record UpdateTeacherRequest(
     string Email,
     string? ContactPhone);
 
-public record LinkTeacherSubjectRequest(Guid SubjectId);
+public record LinkTeacherTopicRequest(Guid TopicId);
 
-public record LinkTeacherGradeLevelRequest(Guid GradeLevelId);
+public record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
+
+public record SetTeacherGradeLevelRoleRequest(Guid? TeacherRoleCodedValueId);
 
 // ── Client ──────────────────────────────────────────────────────────────────
 
@@ -1194,20 +1196,30 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task DeleteTeacherAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{id}", ct)).EnsureSuccessStatusCode();
 
-    public async Task LinkTeacherSubjectAsync(Guid teacherId, Guid subjectId, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/subjects", new LinkTeacherSubjectRequest(subjectId), ct)).EnsureSuccessStatusCode();
+    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId), ct)).EnsureSuccessStatusCode();
 
-    public async Task UnlinkTeacherSubjectAsync(Guid teacherId, Guid subjectId, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/teachers/{teacherId}/subjects/{subjectId}", ct)).EnsureSuccessStatusCode();
+    public async Task UnlinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/teachers/{teacherId}/topics/{topicId}", ct)).EnsureSuccessStatusCode();
 
-    public async Task LinkTeacherGradeLevelAsync(Guid teacherId, Guid gradeLevelId, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/grade-levels", new LinkTeacherGradeLevelRequest(gradeLevelId), ct)).EnsureSuccessStatusCode();
+    public async Task LinkTeacherGradeLevelAsync(Guid teacherId, Guid gradeLevelId, Guid? roleCodedValueId = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/grade-levels", new LinkTeacherGradeLevelRequest(gradeLevelId, roleCodedValueId), ct)).EnsureSuccessStatusCode();
 
     public async Task UnlinkTeacherGradeLevelAsync(Guid teacherId, Guid gradeLevelId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{teacherId}/grade-levels/{gradeLevelId}", ct)).EnsureSuccessStatusCode();
 
-    public async Task<SubjectDto[]?> ListSubjectsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<SubjectDto[]>($"/teachers/{teacherId}/subjects", ct);
+    // Set/clear the coded-value role a teacher holds on a grade level
+    // (grade-level-detail-view-plan.md §3.1). PATCH /teachers/{id}/grade-levels/{gradeId}/role.
+    public async Task SetTeacherGradeLevelRoleAsync(Guid teacherId, Guid gradeLevelId, Guid? roleCodedValueId, CancellationToken ct = default) =>
+        (await _http.PatchAsJsonAsync($"/teachers/{teacherId}/grade-levels/{gradeLevelId}/role", new SetTeacherGradeLevelRoleRequest(roleCodedValueId), ct)).EnsureSuccessStatusCode();
+
+    public async Task<TopicDto[]?> ListTopicsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TopicDto[]>($"/teachers/{teacherId}/topics", ct);
+
+    // Teachers linked to a grade level with their role + assigned topics
+    // (grade-level-detail-view-plan.md §3.2). GET /grade-levels/{id}/teachers.
+    public async Task<TeacherWithRoleDto[]?> ListTeachersForGradeLevelAsync(Guid gradeLevelId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TeacherWithRoleDto[]>($"/students/grade-levels/{gradeLevelId}/teachers", ct);
 
     public async Task<GradeLevelDto[]?> ListGradeLevelsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<GradeLevelDto[]>($"/teachers/{teacherId}/grade-levels", ct);
