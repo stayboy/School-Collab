@@ -7,8 +7,8 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Students.Admin.Components.Students;
-using SchoolCollab.Students.Admin.Services;
+using SchoolCollab.Students.Application.Components.Students;
+using SchoolCollab.Students.Application.Services;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 

@@ -3,7 +3,7 @@ using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Students.Admin.Services;
+using SchoolCollab.Students.Application.Services;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 

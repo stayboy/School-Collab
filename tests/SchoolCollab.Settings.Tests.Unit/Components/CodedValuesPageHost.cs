@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.AspNetCore.Components.Sections;
-using IndexPage = SchoolCollab.Settings.Admin.Components.Pages.CodedValues.Index;
+using IndexPage = SchoolCollab.Settings.Application.Components.Pages.CodedValues.Index;
 
 namespace SchoolCollab.Settings.Tests.Unit.Components;
 

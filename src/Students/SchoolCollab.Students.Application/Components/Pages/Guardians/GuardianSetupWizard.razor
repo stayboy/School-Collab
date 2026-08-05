@@ -1,0 +1,451 @@
+@page "/students/guardians/create"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthenticationStateProvider
+@inject VisibleTenantService VisibleTenant
+@inject ILogger<GuardianSetupWizard> Logger
+@implements IDisposable
+
+<PageTitle>New Guardian</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+                <FluentWizard StepperPosition="StepperPosition.Top"
+                              StepSequence="WizardStepSequence.Visited"
+                              Width="960px"
+                              Height="auto"
+                              @ref="_wizard"
+                              @bind-Value="_stepIndex">
+                    @* ── Step 1: profile ── *@
+                    <FluentWizardStep Label="Profile"
+                                      Summary="Guardian name &amp; address"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                      OnChange="OnProfileChangingAsync">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Person)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Guardian profile</h3>
+                                    <p class="wizard-hint">Title, name and address. No email/phone here — add those as contacts in the next step.</p>
+                                </div>
+                            </div>
+
+                            <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                                <FormRow Label="Title">
+                                    <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                                        @bind-SelectedId="_titleCodedValueId" />
+                                </FormRow>
+                                <FormRow Label="First name" Required>
+                                    <FluentTextField @bind-Value="_firstName" Required Placeholder="First name" />
+                                </FormRow>
+                                <FormRow Label="Last name" Required>
+                                    <FluentTextField @bind-Value="_lastName" Required Placeholder="Last name" />
+                                </FormRow>
+                                <FormRow Label="Display name">
+                                    <FluentTextField @bind-Value="_displayName" Placeholder="e.g. Mum / Dad (optional)" />
+                                </FormRow>
+                                <FormRow Label="Address">
+                                    <FluentTextField @bind-Value="_address" Placeholder="Street address (optional)" />
+                                </FormRow>
+                                <FormRow Label="Community">
+                                    <CodedValueDropdown Parent="CodedValueParent.Communities"
+                                                        @bind-SelectedId="_communityId" />
+                                </FormRow>
+                            </FluentStack>
+
+                            @if (!string.IsNullOrEmpty(_profileError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_profileError</FluentMessageBar>
+                            }
+                        </section>
+                    </FluentWizardStep>
+
+                    @* ── Step 2: contacts ── *@
+                    <FluentWizardStep Label="Contacts"
+                                      Summary="Add contact channels"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Phone)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Contact channels</h3>
+                                    <p class="wizard-hint">Add one or more email / SMS / WhatsApp contacts. Each defaults to unsubscribed until verified and opted in.</p>
+                                </div>
+                            </div>
+
+                            @if (_guardianId is null)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Warning">Complete the profile step first.</FluentMessageBar>
+                            }
+                            else
+                            {
+                                <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@_guardianId.Value" />
+                            }
+                        </section>
+                    </FluentWizardStep>
+
+                    @* ── Step 3: link wards ── *@
+                    <FluentWizardStep Label="Wards"
+                                      Summary="Link to students"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                      OnChange="OnWardsChangingAsync">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.People)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Link to wards</h3>
+                                    <p class="wizard-hint">Pick the students this guardian cares for and set their role (Primary or CC).</p>
+                                </div>
+                            </div>
+
+                            @if (_students is null)
+                            {
+                                <div class="spinner-container"><FluentProgressRing /></div>
+                            }
+                            else if (_students.Length == 0)
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">No students in this tenant yet.</FluentMessageBar>
+                            }
+                            else
+                            {
+                                <div class="ward-list">
+                                    @foreach (var s in _students)
+                                    {
+                                        var sel = _wards.GetValueOrDefault(s.Id);
+                                        <div class="ward-row">
+                                            <FluentCheckbox Value="@sel.HasValue"
+                                                            ValueChanged="@(v => OnWardToggled(s.Id, v))" />
+                                            <span class="ward-name"><strong>@s.StudentNumber</strong> — @s.FirstName @s.LastName</span>
+                                            @if (sel.HasValue)
+                                            {
+                                                <DropdownForEnum TEnum="GuardianRole"
+                                                                 SelectedValue="sel.Value.Role"
+                                                                 SelectedValueChanged="@(r => OnWardRoleChanged(s.Id, r))"
+                                                                 Class="ward-role" />
+                                                <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                                                                    SelectedId="@sel.Value.RelationshipCodedValueId"
+                                                                    SelectedIdChanged="@(id => OnWardRelationshipChanged(s.Id, id))"
+                                                                    Placeholder="Relationship"
+                                                                    class="ward-relationship" />
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+
+                            @if (!string.IsNullOrEmpty(_wardsError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_wardsError</FluentMessageBar>
+                            }
+                        </section>
+                    </FluentWizardStep>
+
+                    @* ── Step 4: review ── *@
+                    <FluentWizardStep Label="Review"
+                                      Summary="Verify and save"
+                                      IconPrevious="@FluentIcons.CheckmarkCircleFilled"
+                                      DeferredLoading="true">
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Eye)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Review &amp; Save</h3>
+                                    <p class="wizard-hint">Verify the details before finishing.</p>
+                                </div>
+                            </div>
+
+                            <div class="review-card">
+                                <div class="review-grid">
+                                    <div class="review-row"><span class="review-label">Name</span><span class="review-value">@_firstName @_lastName</span></div>
+                                    @if (!string.IsNullOrWhiteSpace(_displayName))
+                                    {
+                                        <div class="review-row"><span class="review-label">Display name</span><span class="review-value">@_displayName</span></div>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(_address))
+                                    {
+                                        <div class="review-row"><span class="review-label">Address</span><span class="review-value">@_address</span></div>
+                                    }
+                                </div>
+                            </div>
+
+                            <div class="review-card">
+                                <h4>Contacts (@_contactCount)</h4>
+                                @if (_contactCount == 0)
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Info">No contacts added.</FluentMessageBar>
+                                }
+                            </div>
+
+                            <div class="review-card">
+                                <h4>Wards (@_wards.Count)</h4>
+                                @if (_wards.Count == 0)
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Info">No wards linked.</FluentMessageBar>
+                                }
+                                else
+                                {
+                                    <ul class="review-list">
+                                        @foreach (var (studentId, link) in _wards)
+                                        {
+                                            var st = _students?.FirstOrDefault(x => x.Id == studentId);
+                                            <li><span><strong>@(st?.StudentNumber ?? studentId.ToString())</strong> — @st?.FirstName @st?.LastName</span> <FluentBadge Appearance="Appearance.Accent">@link.Value.Role</FluentBadge></li>
+                                        }
+                                    </ul>
+                                }
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(_error))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3 mb-3">@_error</FluentMessageBar>
+                            }
+                        </section>
+                    </FluentWizardStep>
+                </FluentWizard>
+
+                @* ButtonTemplate mirrors GradeLevelWizard's footer. *@
+                <div class="wizard-actions">
+                    @if (_stepIndex > 0)
+                    {
+                        <FluentButton Appearance="Appearance.Neutral"
+                                      IconStart="@FluentIcons.ArrowLeft"
+                                      OnClick="@(() => GoToStepAsync(_stepIndex - 1))">
+                            Back
+                        </FluentButton>
+                    }
+                    <span class="wizard-actions-spacer" aria-hidden="true"></span>
+                    <FluentButton Appearance="Appearance.Outline" OnClick="Cancel">Cancel</FluentButton>
+                    @if (_stepIndex < 3)
+                    {
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@FluentIcons.ArrowRight"
+                                      OnClick="@(() => GoToStepAsync(_stepIndex + 1))"
+                                      class="ms-2">
+                            Continue
+                        </FluentButton>
+                    }
+                    else
+                    {
+                        <FluentButton Appearance="Appearance.Accent"
+                                      IconStart="@FluentIcons.Save"
+                                      Disabled="@_saving" OnClick="SaveAsync"
+                                      class="ms-2">
+                            @(_saving ? "Saving…" : "Save and Finish")
+                        </FluentButton>
+                    }
+                </div>
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Guardian records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private readonly record struct WardLink(GuardianRole Role, Guid? RelationshipCodedValueId);
+
+    private FluentWizard? _wizard;
+    private int _stepIndex;
+    private Guid? _guardianId;
+    private string? _profileError;
+    private string? _wardsError;
+    private string? _error;
+    private bool _saving;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private bool _isRealTenant;
+
+    // Profile fields.
+    private Guid? _titleCodedValueId;
+    private string _firstName = string.Empty;
+    private string _lastName = string.Empty;
+    private string _displayName = string.Empty;
+    private string _address = string.Empty;
+    private Guid? _communityId;
+
+    // Wards.
+    private SchoolCollab.Students.Application.Services.StudentDto[]? _students;
+    private Dictionary<Guid, WardLink?> _wards = new();
+
+    // Review.
+    private int _contactCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        AuthenticationStateProvider.AuthenticationStateChanged += OnAuthenticationStateChanged;
+        await RefreshTenantFromAuthStateAsync();
+
+        if (!_isRealTenant)
+            return;
+
+        try
+        {
+            _students = await Api.ListStudentsAsync(ct) ?? [];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load students for guardian wizard");
+        }
+    }
+
+    private async void OnAuthenticationStateChanged(Task<AuthenticationState> task)
+    {
+        if (_disposed) return;
+        try
+        {
+            await task;
+            var current = (await VisibleTenant.GetScopeAsync()).IsRealTenant;
+            if (current != _isRealTenant)
+            {
+                _isRealTenant = current;
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to handle authentication state change in GuardianSetupWizard");
+        }
+    }
+
+    private async Task RefreshTenantFromAuthStateAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+    }
+
+    private async Task OnProfileChangingAsync(FluentWizardStepChangeEventArgs args)
+    {
+        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName))
+        {
+            args.IsCancelled = true;
+            _profileError = "First name and last name are required.";
+            return;
+        }
+
+        try
+        {
+            if (_guardianId is null)
+            {
+                _guardianId = await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                    _titleCodedValueId, _firstName.Trim(), _lastName.Trim(),
+                    string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
+                    string.IsNullOrWhiteSpace(_address) ? null : _address.Trim(),
+                    _communityId));
+            }
+            else
+            {
+                await Api.UpdateGuardianAsync(_guardianId.Value, new UpdateGuardianRequest(
+                    _titleCodedValueId, _firstName.Trim(), _lastName.Trim(),
+                    string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
+                    string.IsNullOrWhiteSpace(_address) ? null : _address.Trim(),
+                    _communityId));
+            }
+            _profileError = null;
+        }
+        catch (Exception ex)
+        {
+            args.IsCancelled = true;
+            _profileError = ex.Message;
+            Logger.LogError(ex, "Failed to create/update guardian in wizard");
+        }
+    }
+
+    private void OnWardToggled(Guid studentId, bool selected)
+    {
+        if (selected)
+            _wards[studentId] = new WardLink(GuardianRole.Primary, null);
+        else
+            _wards.Remove(studentId);
+        StateHasChanged();
+    }
+
+    private void OnWardRoleChanged(Guid studentId, GuardianRole role)
+    {
+        if (_wards.TryGetValue(studentId, out var link))
+            _wards[studentId] = link.Value with { Role = role };
+    }
+
+    private void OnWardRelationshipChanged(Guid studentId, Guid? relationshipId)
+    {
+        if (_wards.TryGetValue(studentId, out var link))
+            _wards[studentId] = link.Value with { RelationshipCodedValueId = relationshipId };
+    }
+
+    private Task OnWardsChangingAsync(FluentWizardStepChangeEventArgs args)
+    {
+        // No blocking validation; the review step tolerates zero wards.
+        _wardsError = null;
+        return Task.CompletedTask;
+    }
+
+    private async Task GoToStepAsync(int step)
+    {
+        if (_wizard is not null)
+            await _wizard.GoToStepAsync(step);
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_guardianId is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            // Contacts were already persisted via <ContactsEditor>. Link the
+            // selected wards now; the guardian itself was created on the
+            // profile step, so Save only wires up the student links.
+            foreach (var (studentId, link) in _wards)
+            {
+                await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                    studentId, _guardianId.Value, link.Value.RelationshipCodedValueId, link.Value.Role, false, null));
+            }
+
+            Nav.NavigateTo($"/students/guardians/{_guardianId}");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save guardian links");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/students/guardians");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+        AuthenticationStateProvider.AuthenticationStateChanged -= OnAuthenticationStateChanged;
+    }
+}

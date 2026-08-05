@@ -1,6 +1,6 @@
 using FluentAssertions;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Settings.Admin.Components.Pages.EntityCodeRules;
+using SchoolCollab.Settings.Application.Components.Pages.EntityCodeRules;
 using SchoolCollab.Settings.Core.Domain;
 
 namespace SchoolCollab.Settings.Tests.Unit;

@@ -154,13 +154,12 @@
                          Icon="@FluentIcons.Calendar">
                Periods
             </FluentNavLink>
-            @if (FeatureFlags.IsEnabled(FeatureFlagKeys.EnableActivityGroups))
-            {
+            <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
                 <FluentNavLink Href="/activity-groups"
                              Icon="@FluentIcons.People">
                    Activity Groups
                 </FluentNavLink>
-            }
+            </FeatureFlagGate>
         </FluentNavGroup>
     }
 

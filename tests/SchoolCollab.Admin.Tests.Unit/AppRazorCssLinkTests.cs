@@ -12,8 +12,8 @@ namespace SchoolCollab.Admin.Tests.Unit;
 /// tags pointing at flat-name scoped-CSS bundles:
 ///
 ///   <c>SchoolCollab.Admin.styles.css</c>
-///   <c>SchoolCollab.Settings.Admin.styles.css</c>
-///   <c>SchoolCollab.Assignments.Admin.styles.css</c>
+///   <c>SchoolCollab.Settings.Application.styles.css</c>
+///   <c>SchoolCollab.Assignments.Application.styles.css</c>
 ///
 /// Of those, the two RCL ones (<c>Settings</c> and <c>Assignments</c>)
 /// 404'd at runtime — the flat-name convention was the pre-.NET 8
@@ -75,9 +75,9 @@ public class AppRazorCssLinkTests
             "App.razor must still link at least the global app.css");
 
         var linkText = string.Join("\n", linkLines.Select(m => m.Value));
-        linkText.Should().NotContain("SchoolCollab.Settings.Admin.styles.css",
+        linkText.Should().NotContain("SchoolCollab.Settings.Application.styles.css",
             "the Settings RCL's flat-name scoped-CSS bundle is no longer produced by the SDK");
-        linkText.Should().NotContain("SchoolCollab.Assignments.Admin.styles.css",
+        linkText.Should().NotContain("SchoolCollab.Assignments.Application.styles.css",
             "the Assignments RCL's flat-name scoped-CSS bundle is no longer produced by the SDK");
     }
 

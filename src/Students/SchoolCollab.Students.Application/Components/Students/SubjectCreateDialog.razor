@@ -1,0 +1,110 @@
+@*
+    SubjectCreateDialog — opens from the Subjects landing's + New
+    button (when a grade level is selected). Renders only the SUBJECT
+    coded value picker; name / code / display-order derive from the
+    picked coded value via the server-side find-or-create endpoint.
+
+    No subject-assignment concerns here - subjects are wired to grades
+    from inside the GradeLevel dialog (plan §4.1). The Create dialog
+    just creates the Subject row; opening the new grade's Edit dialog
+    is what assigns subjects to it.
+*@
+@inherits DialogShellBase<SubjectCreateDialog.SubjectCreateModel, SubjectDto>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject CodedValuesApiClient CodedValuesApi
+@inject StudentsApiClient Api
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Subject" For="subject-coded-value" Required="true">
+            <CodedValueDropdown Parent="CodedValueParent.Subjects"
+                                @bind-SelectedId="Model.CodedValueId" />
+        </FormRow>
+
+        @if (Model.GradeLevelId.HasValue)
+        {
+            <p class="hint">A new assignment will be created linking this subject to the selected grade level for the current period.</p>
+        }
+        else
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+                No grade level selected. Pick a grade level first on the Subjects landing - the new subject will then be assignable to it from the Grade Levels landing's Edit dialog.
+            </FluentMessageBar>
+        }
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Create"
+                           SavingText="Creating..."
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+<style>
+    .dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+    .hint { color: var(--neutral-foreground-hint); font-size: 0.85em; margin-top: 4px; }
+</style>
+
+@code {
+    public sealed class SubjectCreateModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public Guid? CodedValueId { get; set; }
+
+        /// <summary>
+        /// Optional grade-level context. When supplied the dialog passes it
+        /// through to the CreateSubjectForGradeAsync endpoint so the
+        /// subject is wired to the grade in the same atomic call.
+        /// </summary>
+        public Guid? GradeLevelId { get; set; }
+    }
+
+    protected override string SubmitText => "Create";
+
+    protected override async Task<SubjectDto?> SubmitAsync(SubjectCreateModel model)
+    {
+        if (model.CodedValueId is null)
+        {
+            Error = "Pick a subject coded value.";
+            return null;
+        }
+
+        var cv = await CodedValuesApi.GetByIdAsync(model.CodedValueId.Value);
+        if (cv is null)
+        {
+            Error = $"Subject coded value '{model.CodedValueId}' not found.";
+            return null;
+        }
+
+        // Find-or-create the subject row via the Subjects API. When a grade
+        // level is in scope, route through CreateSubjectForGradeAsync so the
+        // subject is wired up in the same call (subject + grade-subject
+        // assignment for the current period).
+        SubjectDto created;
+        if (model.GradeLevelId.HasValue)
+        {
+            created = await Api.CreateSubjectForGradeAsync(new CreateSubjectForGradeRequest(
+                model.GradeLevelId.Value,
+                model.CodedValueId,
+                cv.Code,
+                cv.Name,
+                cv.DisplayOrder));
+        }
+        else
+        {
+            // Standalone create (no grade wiring) - use the find-or-create
+            // endpoint so the new subject is returned with its resolved Id.
+            created = await Api.GetOrCreateSubjectAsync(new CreateSubjectRequest(
+                model.CodedValueId.Value, cv.Code, cv.Name, cv.DisplayOrder));
+        }
+
+        return created;
+    }
+}

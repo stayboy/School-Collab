@@ -5,7 +5,7 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Students.Admin.Services;
+using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Domain;
 
 namespace SchoolCollab.Admin.Tests.Unit;

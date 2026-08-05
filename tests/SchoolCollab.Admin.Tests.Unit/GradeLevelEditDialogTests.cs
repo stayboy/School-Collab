@@ -12,8 +12,8 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Students.Admin.Components.Students;
-using SchoolCollab.Students.Admin.Services;
+using SchoolCollab.Students.Application.Components.Students;
+using SchoolCollab.Students.Application.Services;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -184,7 +184,7 @@ public class GradeLevelEditDialogTests : BunitContext
         var task = DialogService.ShowShellDialogAsync<
             GradeLevelEditDialog,
             GradeLevelEditDialog.GradeLevelEditModel,
-            SchoolCollab.Students.Admin.Services.GradeLevelDto>(
+            SchoolCollab.Students.Application.Services.GradeLevelDto>(
             model, "Edit grade - Grade 5", DialogSize.Medium);
 
         // Wait for the EditForm to mount inside the provider.
@@ -225,7 +225,7 @@ public class GradeLevelEditDialogTests : BunitContext
         var task = DialogService.ShowShellDialogAsync<
             GradeLevelEditDialog,
             GradeLevelEditDialog.GradeLevelEditModel,
-            SchoolCollab.Students.Admin.Services.GradeLevelDto>(
+            SchoolCollab.Students.Application.Services.GradeLevelDto>(
             model, "Edit grade", DialogSize.Medium);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());

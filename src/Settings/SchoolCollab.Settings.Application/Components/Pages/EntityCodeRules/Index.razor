@@ -1,0 +1,205 @@
+@page "/entity-code-rules"
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Services
+@inject EntityCodeRulesApiClient Api
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<Index> Logger
+@implements IDisposable
+
+<LandingPage TItem="EntityCodeRuleDto"
+             Title="Code Generation Rules"
+             Subtitle="Configure the templates that auto-generate student, staff, and assignment codes."
+             CreateLabel="+ New Rule"
+             CreateRoute="/entity-code-rules/new"
+             EmptyMessage="No generation rules yet. Create one to start auto-generating student / staff / assignment codes."
+             Items="@FilteredItems"
+             Error="@_error"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchChanged"
+             SearchPlaceholder="Search code or name…"
+             GridSettings="@_gridSettings"
+             RowActions="@BuildRuleActions"
+             RowActionsAriaLabel="Rule actions">
+    <Columns>
+        <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Code" SortBy="@_sortByCode" Sortable="true" TooltipText="@(x => x.Code)">
+            <code>@context.Code</code>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Name" SortBy="@_sortByName" Sortable="true" TooltipText="@(x => x.Name)">
+            @context.Name
+        </TemplateColumn>
+        <PropertyColumn TGridItem="EntityCodeRuleDto" TProp="string" Property="@(x => x.Description)" Title="Description" />
+        <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Status">
+            @if (context.IsActive)
+            {
+                <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+            }
+            else
+            {
+                <FluentBadge Appearance="Appearance.Neutral">Inactive</FluentBadge>
+            }
+        </TemplateColumn>
+        <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Segments">
+            <FluentBadge Appearance="Appearance.Neutral">@context.Segments.Count</FluentBadge>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="EntityCodeRuleDto" Title="Preview">
+            <code>@EntityCodePreview.RenderFirst(context.Segments)</code>
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
+
+@code {
+    private EntityCodeRuleDto[]? _items;
+    private string? _error;
+    private string _searchText = string.Empty;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    /// <summary>Items after applying the client-side search filter (Code or
+    /// Name, case-insensitive). Null while loading; empty array for "no rules".</summary>
+    private EntityCodeRuleDto[]? FilteredItems
+    {
+        get
+        {
+            if (_items is null) return null;
+            if (string.IsNullOrWhiteSpace(_searchText)) return _items;
+            var q = _searchText.Trim();
+            return _items
+                .Where(x => x.Code.Contains(q, StringComparison.OrdinalIgnoreCase)
+                       || x.Name.Contains(q, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+        }
+    }
+
+    private IReadOnlyList<RowAction> BuildRuleActions(EntityCodeRuleDto rule)
+    {
+        var actions = new List<RowAction>
+        {
+            RowAction.Navigate("Edit", $"/entity-code-rules/{rule.Id}/edit", FluentIcons.Edit),
+        };
+        if (!rule.IsActive)
+        {
+            actions.Add(RowAction.Callback("Activate", () => OnActivateAsync(rule), FluentIcons.Checkmark));
+        }
+        actions.Add(RowAction.Separator());
+        actions.Add(RowAction.Callback("Delete", () => OnDeleteAsync(rule), FluentIcons.Delete));
+        return actions;
+    }
+
+    private Task OnSearchChanged(string? text)
+    {
+        _searchText = text ?? string.Empty;
+        return Task.CompletedTask;
+    }
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "120px minmax(140px,2fr) minmax(120px,2fr) minmax(70px,0.7fr) minmax(50px,0.5fr) minmax(100px,1.2fr) auto"
+    };
+
+    private readonly GridSort<EntityCodeRuleDto> _sortByCode =
+        GridSort<EntityCodeRuleDto>.ByAscending(x => x.Code);
+
+    private readonly GridSort<EntityCodeRuleDto> _sortByName =
+        GridSort<EntityCodeRuleDto>.ByAscending(x => x.Name);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        await LoadAsync(_loadCts.Token);
+    }
+
+    private async Task LoadAsync(CancellationToken ct)
+    {
+        Logger.LogInformation("Loading entity code rules");
+        try
+        {
+            _items = await Api.ListAsync(ct);
+            if (_disposed) return;
+            Logger.LogInformation("Loaded {Count} entity code rules", _items?.Length ?? 0);
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load entity code rules");
+            _error = ex.Message;
+        }
+    }
+
+    private async Task OnActivateAsync(EntityCodeRuleDto rule)
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Activate '{rule.Code}'? This will deactivate any other active rule with the same code (e.g. another STUDENT_CODE rule).",
+            "Activate",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        try
+        {
+            await Api.ActivateAsync(rule.Id);
+            if (_disposed) return;
+            // Reload to reflect the server's deactivate-others side-effect.
+            await LoadAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (KeyNotFoundException)
+        {
+            if (_disposed) return;
+            _error = $"Rule '{rule.Code}' no longer exists. Reload the list.";
+            await LoadAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to activate rule {Id}", rule.Id);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task OnDeleteAsync(EntityCodeRuleDto rule)
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Delete '{rule.Code}'? This soft-deletes the rule; existing student/staff/assignment codes are preserved.",
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        try
+        {
+            await Api.DeleteAsync(rule.Id);
+            if (_disposed) return;
+            if (_items is not null)
+            {
+                _items = _items.Where(x => x.Id != rule.Id).ToArray();
+            }
+        }
+        catch (KeyNotFoundException)
+        {
+            if (_disposed) return;
+            _error = $"Rule '{rule.Code}' no longer exists. Reload the list.";
+            await LoadAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete rule {Id}", rule.Id);
+            _error = ex.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

@@ -52,7 +52,7 @@
                 <EntityGrid TItem="TItem"
                             Items="Items"
                             GridSettings="GridSettings"
-                            Columns="Columns"
+                            Columns="EffectiveColumns"
                             Loading="@Loading"
                             EmptyMessage="@EmptyMessage"
                             Error="@Error" />
@@ -127,6 +127,52 @@
     /// </summary>
     [Parameter, EditorRequired]
     public RenderFragment? Columns { get; set; }
+
+    /// <summary>
+    /// Optional per-row action builder. When supplied, the grid gains a trailing
+    /// "Actions" column rendered as the shared <c>&lt;RowActionsMenu&gt;</c> kebab
+    /// dropdown (the repo-standard pattern used by the student / grade / subject /
+    /// activity-group landing pages). The page supplies a
+    /// <c>Func&lt;TItem, IReadOnlyList&lt;RowAction&gt;&gt;</c> (e.g. <c>BuildXActions</c>)
+    /// and does NOT declare its own Actions column — LandingPage appends it so every
+    /// landing page gets the same dropdown. The page must reserve the trailing
+    /// column in its <see cref="LandingGridSettings.GridTemplateColumns"/> (a
+    /// trailing <c>auto</c> or fixed width), matching the old inline Actions width.
+    /// </summary>
+    [Parameter]
+    public Func<TItem, IReadOnlyList<RowAction>>? RowActions { get; set; }
+
+    /// <summary>Accessibility label for the per-row actions kebab trigger button.</summary>
+    [Parameter]
+    public string? RowActionsAriaLabel { get; set; }
+
+    /// <summary>Header text for the trailing actions column. Default "Actions".</summary>
+    [Parameter]
+    public string RowActionsColumnTitle { get; set; } = "Actions";
+
+    /// <summary>
+    /// Controls whether the trailing actions menu renders via
+    /// <c>FluentMenuProvider</c> (true, the production default so the menu is
+    /// never clipped by the grid's scroll container) or inline (false, used in
+    /// bUnit tests so the items are assertable in the rendered markup). Mirrors
+    /// the <c>UseMenuService</c> parameter of <c>&lt;RowActionsMenu&gt;</c>.
+    /// </summary>
+    [Parameter]
+    public bool RowActionsUseMenuService { get; set; } = true;
+
+    /// <summary>
+    /// The effective grid columns: the page's <see cref="Columns"/> plus a trailing
+    /// "Actions" <see cref="RowActionsMenu"/> column when <see cref="RowActions"/>
+    /// is supplied.
+    /// </summary>
+    private RenderFragment EffectiveColumns => @<text>@Columns@if (RowActions is not null)
+    {
+        <TemplateColumn TGridItem="TItem" Title="@RowActionsColumnTitle" Sortable="false" Context="row">
+            <RowActionsMenu AriaLabel="@(RowActionsAriaLabel ?? RowActionsColumnTitle)"
+                            UseMenuService="@RowActionsUseMenuService"
+                            Actions="@RowActions(row)" />
+        </TemplateColumn>
+    }</text>;
 
     /// <summary>
     /// Error text. Rendered as a red message bar beneath the grid when non-empty.

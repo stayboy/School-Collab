@@ -166,7 +166,7 @@ public class GuardianContactsDialogTests
         var srcPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Components", "Students", relativePath));
         File.Exists(srcPath).Should().BeTrue(
             $"{relativePath} should exist at '{srcPath}' — check the path resolution");

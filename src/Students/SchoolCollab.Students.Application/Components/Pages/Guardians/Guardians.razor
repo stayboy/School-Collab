@@ -1,0 +1,311 @@
+@page "/students/guardians"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<Guardians> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<LandingPage TItem="GuardianDto"
+             Title="Guardians"
+             CreateLabel="+ New Guardian"
+             CreateRoute="/students/guardians/create"
+             CreateEnabled="@_isRealTenant"
+             SearchEnabled="@_isRealTenant"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@_filteredItems"
+             Loading="@(_items is null)"
+             GridSettings="@_gridSettings"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchValueChanged"
+             SearchPlaceholder="Search guardians…"
+             Error="@_error"
+             RowActions="@BuildGuardianActions"
+             RowActionsAriaLabel="Guardian actions">
+    <ToolbarFilters>
+        @if (_filterStudentId.HasValue)
+        {
+            <div class="landing-filter-chips">
+                <Chip Label="Student"
+                      Subtitle="@_filterStudentName"
+                      DismissTitle="Clear student filter"
+                      OnDismiss="ClearStudentFilter" />
+            </div>
+        }
+    </ToolbarFilters>
+    <Columns>
+        <TemplateColumn TGridItem="GuardianDto" Title="Name" Sortable="true" SortBy="@_sortByName">
+            <strong>@GetDisplayName(context)</strong>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GuardianDto" Title="Address">
+            @(context.Address ?? "—")
+        </TemplateColumn>
+        <TemplateColumn TGridItem="GuardianDto" Title="Students" Class="guardian-students-col">
+            @if (context.StudentCount is > 0)
+            {
+                <FluentAnchor Appearance="Appearance.Lightweight"
+                              Href="@($"/students?guardianId={context.Id}")"
+                              Class="guardian-students-link">
+                    @context.StudentCount students
+                </FluentAnchor>
+            }
+            else
+            {
+                <span class="guardian-students-none">@(context.StudentCount is 0 ? "0 students" : "—")</span>
+            }
+        </TemplateColumn>
+        @for (var i = 0; i < 3; i++)
+        {
+            var index = i;
+            <TemplateColumn TGridItem="GuardianDto" Title="@($"C{index + 1}")" Context="row">
+                @{
+                    var contact = index < row.Contacts.Count ? row.Contacts[index] : null;
+                }
+                @if (contact is not null)
+                {
+                    <span class="guardian-contact-cell">
+                        <span>@(string.IsNullOrWhiteSpace(contact.CountryCode) ? contact.Value : $"{contact.CountryCode} {contact.Value}")</span>
+                    </span>
+                    <div class="contact-channel muted">@contact.Channel</div>
+                }
+                else
+                {
+                    <span class="muted">—</span>
+                }
+            </TemplateColumn>
+        }
+    </Columns>
+</LandingPage>
+
+<style>
+    .muted {
+        color: var(--neutral-foreground-hint);
+    }
+
+    ::deep .grid-header-wrap {
+        display: inline-block;
+        width: 100%;
+        word-break: break-word;
+        white-space: normal;
+        line-height: 1.2;
+        text-align: left;
+    }
+
+    ::deep .guardian-students-link {
+        white-space: nowrap;
+    }
+
+    ::deep .guardian-students-none {
+        color: var(--neutral-foreground-hint, #6b6b6b);
+    }
+
+    .guardian-contact-cell {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+    .contact-channel {
+        font-size: 0.75rem;
+        line-height: 1.2;
+    }
+
+    .landing-filter-chips {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        margin-right: 8px;
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? StudentId { get; set; }
+
+    private GuardianDto[]? _items;
+    private string _searchText = string.Empty;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private bool _isRealTenant;
+    private Guid? _filterStudentId;
+    private string? _filterStudentName;
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(200px,2fr) minmax(160px,1fr) minmax(110px,0.9fr) minmax(140px,1.2fr) minmax(130px,1fr) minmax(130px,1fr) auto"
+    };
+
+    private static readonly GridSort<GuardianDto> _sortByName =
+        GridSort<GuardianDto>.ByAscending(x => x.LastName);
+
+    /// <summary>
+    /// Ports <c>GuardianGrid.FormatGuardianName</c>: renders the combined
+    /// "title + name" format — title (if known) + DisplayName, falling back to
+    /// FirstName LastName. When the list is scoped to a student (RelationshipName
+    /// populated), appends the relationship in parentheses: "name (relationship)",
+    /// matching how the student's guardians grid shows a guardian name. Matches how
+    /// the student's guardians grid shows a guardian name.
+    /// </summary>
+    private static string GetDisplayName(GuardianDto g)
+    {
+        var baseName = string.IsNullOrWhiteSpace(g.DisplayName)
+            ? $"{g.FirstName} {g.LastName}".Trim()
+            : g.DisplayName;
+        var named = string.IsNullOrWhiteSpace(g.TitleName) ? baseName : $"{g.TitleName} {baseName}";
+        return string.IsNullOrWhiteSpace(g.RelationshipName) ? named : $"{named} ({g.RelationshipName})";
+    }
+
+    private GuardianDto[] _filteredItems =>
+        string.IsNullOrWhiteSpace(_searchText)
+            ? (_items ?? [])
+            : (_items ?? []).Where(MatchesSearch).ToArray();
+
+    private string CurrentEmptyMessage =>
+        !_isRealTenant
+            ? "Select a tenant to manage guardians."
+            : (_filterStudentId.HasValue && _filteredItems.Length == 0
+                ? $"No guardians linked to student '{_filterStudentName}'."
+                : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
+                    ? $"No guardians match '{_searchText}'."
+                    : "No guardians yet. Create one to get started."));
+
+    private bool MatchesSearch(GuardianDto g)
+    {
+        var search = _searchText.Trim();
+        var name = $"{g.FirstName} {g.LastName} {g.DisplayName}".Trim();
+        return name.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || (g.Address?.Contains(search, StringComparison.OrdinalIgnoreCase) ?? false);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant)
+        {
+            _items = [];
+            return;
+        }
+
+        try
+        {
+            if (StudentId.HasValue)
+            {
+                _filterStudentId = StudentId;
+
+                // Resolve the student's display name for the filter chip. The
+                // count cell navigates here with ?studentId=, so we show which
+                // student the guardians view is scoped to.
+                var student = await Api.GetStudentByIdAsync(StudentId.Value, token);
+                _filterStudentName = student is null
+                    ? StudentId.Value.ToString("D")
+                    : $"{student.FirstName} {student.LastName}".Trim();
+
+                _items = await Api.ListGuardiansAsync(token, studentId: StudentId.Value);
+            }
+            else
+            {
+                // No filter (or a filter was just cleared via navigation) — reload
+                // the full list and reset the filter state so the chip disappears
+                // and the grid isn't left showing stale student-scoped rows.
+                _filterStudentId = null;
+                _filterStudentName = null;
+                _items = await Api.ListGuardiansAsync(token);
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load guardians");
+            _error = ex.Message;
+            _items = [];
+        }
+    }
+
+    private async Task OnDeleteAsync(Guid id, string name)
+    {
+        if (_disposed) return;
+
+        _error = null;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Are you sure you want to delete guardian '{name}'? This blocks the record but keeps its history, links and contacts.",
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        var previous = _items;
+        _items = _items?.Where(x => x.Id != id).ToArray();
+        StateHasChanged();
+
+        try
+        {
+            await Api.DeleteGuardianAsync(id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete guardian {Id}", id);
+            _items = previous;
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // If the studentId query param changed while already on the page (e.g.
+        // clicking another student's count), re-scope the list.
+        if (!_isRealTenant) return;
+        if (StudentId != _filterStudentId)
+        {
+            await OnInitializedAsync();
+        }
+    }
+
+    private IReadOnlyList<RowAction> BuildGuardianActions(GuardianDto g)
+    {
+        var name = $"{g.FirstName} {g.LastName}".Trim();
+        return new List<RowAction>
+        {
+            RowAction.Navigate("View", $"/students/guardians/{g.Id}", FluentIcons.Open),
+            RowAction.Navigate("Edit", $"/students/guardians/{g.Id}/edit", FluentIcons.Edit),
+            RowAction.Separator(),
+            RowAction.Callback("Delete", () => OnDeleteAsync(g.Id, name), FluentIcons.Delete),
+        };
+    }
+
+    private void OnSearchValueChanged(string? text)
+    {
+        _searchText = text?.Trim() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    private void ClearStudentFilter()
+    {
+        // Just navigate to clear the ?studentId= query param. OnParametersSetAsync
+        // detects StudentId != _filterStudentId and calls OnInitializedAsync, which
+        // resets the filter state and reloads the full list. Do NOT null the filter
+        // fields here — doing so makes the change invisible to OnParametersSetAsync
+        // (both sides null) and leaves the stale filtered rows on screen.
+        Nav.NavigateTo("/students/guardians");
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

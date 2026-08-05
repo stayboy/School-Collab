@@ -1,0 +1,139 @@
+@* Read-only list of a student's guardian links. Shared by the page-side
+   callers (Edit.razor and Detail.razor) — the page owns the API calls and
+   the dialog opens (Manage / Edit / Remove) and just passes the data +
+   callbacks down to this component.
+
+   This component is intentionally PRESENTATIONAL ONLY:
+     - No API calls (the parent calls Api.ListGuardiansByStudentAsync /
+       LinkGuardianAsync / UpdateGuardianLinkAsync / UnlinkGuardianAsync).
+     - No dialog opens (the parent opens GuardianPickerDialog /
+       GuardianFormDialog via ShowShellDialogAsync and reloads on result).
+     - No EditForm (the page-level form is the owning EditForm, and
+       re-nesting would be invalid HTML; the existing dialog-ui skill
+       explicitly forbids nested EditForms / nested dialogs).
+
+   The column structure is now delegated to the shared
+   <see cref="GuardianGrid{TItem}"/> component (spec §4.7 / goal #5) so
+   the linked list and the picker share the same column profile, header
+   titles, and cell formatting — including up to 3 contact columns titled
+   C1, C2, C3 (same as Picker; C1 is the lowest-DisplayOrder contact; no
+   per-contact star icon — preferred is conveyed by column order only).
+   This wrapper still owns:
+     - the loading-spinner / empty-state UX (the grid only renders
+       when Items is non-null AND non-empty)
+     - the parent-supplied relationship-name + salutation lookups
+       (the grid is a dumb display; lookups are passed via accessors)
+     - the per-row Edit / Remove callbacks (optional — Edit is hidden
+       when the parent doesn't wire OnEdit)
+     - the count badge in the small header (for the linked section)
+
+   The data shape is <see cref="StudentGuardianViewDto"/> — the same
+   projection every other guardian list already consumes. Carries the
+   link metadata (Role, Relationship, EmergencyContact) AND the
+   guardian's display name, so the list renders without a second
+   round-trip per guardian. *@
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Core.Domain
+@using Microsoft.FluentUI.AspNetCore.Components
+@using GuardianGridMode = SchoolCollab.Students.Application.Components.Students.GuardianGrid<SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto>.GridMode
+
+@if (Items is null)
+{
+    <div class="spinner-container"><FluentProgressRing /></div>
+}
+else if (Items.Length == 0)
+{
+    <FluentMessageBar Intent="MessageIntent.Info">@(EmptyMessage ?? "No guardians linked yet.")</FluentMessageBar>
+}
+else
+{
+    <div class="student-guardians-list">
+        <GuardianGrid TItem="StudentGuardianViewDto"
+                      Items="Items"
+                      Mode="GuardianGridMode.Linked"
+                      EmptyMessage="@(EmptyMessage ?? "No guardians linked yet.")"
+                      GetKey="@(g => g.GuardianId)"
+                      GetDisplayName="@(g => FormatGuardianName(g))"
+                      GetName="@(g => FormatGuardianName(g))"
+                      GetRelationshipName="@(g => ResolveRelName(g))"
+                      GetContacts="@(g => g.Contacts)"
+                      GetIsPrimaryLink="@(g => g.Role == GuardianRole.Primary)"
+                      GetIsEmergencyContact="@(g => g.IsEmergencyContact)"
+                      GetTotalContactCount="@(g => g.TotalContactCount)"
+                      OnEdit="OnEdit"
+                      OnRemove="OnRemove"
+                      OnViewAllContacts="OnViewAllContacts" />
+    </div>
+}
+
+@code {
+    /// <summary>The student's currently-linked guardians. Null = loading;
+    /// empty array = "no guardians linked yet" (renders the empty state
+    /// message). The parent owns the load and passes the projected
+    /// <see cref="StudentGuardianViewDto"/> array down.</summary>
+    [Parameter] public StudentGuardianViewDto[]? Items { get; set; }
+
+    /// <summary>Optional override for the empty-state message. The
+    /// Edit page (which always has the form) uses the default;
+    /// the Detail page (which is the dedicated view) passes its
+    /// own copy if it wants to vary the wording.</summary>
+    [Parameter] public string? EmptyMessage { get; set; }
+
+    /// <summary>Optional resolver for a relationship coded-value id →
+    /// display name. Same signature as
+    /// <c>GuardianAssignmentList.RelationshipNameLookup</c> so the
+    /// wizard and the page share the same name-resolution path.</summary>
+    [Parameter] public Func<Guid?, string?>? RelationshipNameLookup { get; set; }
+
+    /// <summary>Optional resolver for a salutation (title) coded-value id
+    /// → display name. Used by <see cref="FormatGuardianName"/> to prepend
+    /// the title (e.g. "Mr", "Mrs") to the displayed name. Pages that
+    /// already load salutations for other purposes can pass their cached
+    /// lookup; otherwise the cell renders without a title.</summary>
+    [Parameter] public Func<Guid?, string?>? SalutationLookup { get; set; }
+
+    /// <summary>Fired when the user clicks the per-row Edit button.
+    /// Not delegated to → button is hidden (Edit is optional from
+    /// pages that only allow link / unlink, e.g. a future bulk
+    /// admin view). The page opens <c>GuardianFormDialog</c> in
+    /// <c>ForEdit</c> mode and reloads on a non-null result.</summary>
+    [Parameter] public EventCallback<StudentGuardianViewDto> OnEdit { get; set; }
+
+    /// <summary>Fired when the user clicks the per-row Remove
+    /// button. Always delegated to — removing a link is part of
+    /// every page-side flow. The page calls
+    /// <c>UnlinkGuardianAsync</c> and reloads.</summary>
+    [Parameter] public EventCallback<StudentGuardianViewDto> OnRemove { get; set; }
+
+    /// <summary>Fired when the user clicks the per-row
+    /// <c>View all (N) contacts</c> anchor in the Name cell (only for
+    /// guardians with &gt; 3 contacts; rendered by
+    /// <c>GuardianGrid</c> using <see cref="StudentGuardianViewDto.TotalContactCount"/>).
+    /// The page opens <c>GuardianContactsDialog</c> for the row's
+    /// guardian (spec 2026-07-27 §4.4 / §4.5). Not delegated to →
+    /// the anchor is hidden (Linked Name cell shows em-dash).</summary>
+    [Parameter] public EventCallback<StudentGuardianViewDto> OnViewAllContacts { get; set; }
+
+    /// <summary>Spec §4.8: format a linked guardian's displayed name
+    /// with the salutation prepended when both the id and the lookup
+    /// resolve; otherwise fall back to DisplayName-or-First+Last.</summary>
+    private string FormatGuardianName(StudentGuardianViewDto g)
+    {
+        var baseName = string.IsNullOrWhiteSpace(g.DisplayName)
+            ? $"{g.FirstName} {g.LastName}".Trim()
+            : g.DisplayName;
+        if (SalutationLookup is null) return baseName;
+        var title = SalutationLookup(g.TitleCodedValueId);
+        return string.IsNullOrWhiteSpace(title) ? baseName : $"{title} {baseName}";
+    }
+
+    /// <summary>Resolves a row's relationship id through the parent-supplied
+    /// lookup. Returns the resolved name (or null when the lookup is
+    /// missing / doesn't know the id); the grid's GetRelationshipName
+    /// accessor treats null as the em-dash placeholder.</summary>
+    private string? ResolveRelName(StudentGuardianViewDto g)
+    {
+        if (RelationshipNameLookup is null) return null;
+        return RelationshipNameLookup(g.RelationshipCodedValueId);
+    }
+}

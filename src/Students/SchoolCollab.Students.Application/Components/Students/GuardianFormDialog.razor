@@ -1,0 +1,113 @@
+@* Guardian form dialog — edits a guardian assignment (opened from the
+   guardian list / wizard with GuardianAssignmentModel.ForEdit). Edits
+   Title / First / Last / Relationship AND the guardian's contacts inline
+   via the shared <ContactsEditor>:
+     - Existing guardian (Model.ExistingGuardianId set): Live mode —
+       contacts load on mount and every mutation persists immediately
+       against the guardian (mirrors GuardianDetail.razor).
+     - Not-yet-persisted wizard draft (ExistingGuardianId null): Buffered
+       mode — contacts edit in-memory (Model.Contacts) and are carried
+       through on submit; the wizard persists them on commit (Phase 4).
+       Mirrors the picker's New panel.
+   The legacy single-contact rows are hidden (ShowContactFields=false) —
+   contacts are owned by <ContactsEditor>, not the legacy
+   ContactChannel/ContactValue fields. Subscription toggles are hidden
+   (ShowSubscription=false) — subscriptions are managed on
+   GuardianDetail.razor; this dialog is for quick contact/value edits.
+   Every guardian added through the wizard is Primary — the role is not
+   surfaced. Fields use the canonical <FormRow> label+input layout. *@
+@inherits DialogShellBase<GuardianAssignmentModel, GuardianAssignment>
+@using Microsoft.AspNetCore.Components.Forms
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Application.Components.Students
+@inject ILogger<GuardianFormDialog> _logger
+
+<div class="guardian-dialog">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+        <p class="gw-hint">@(_isEdit ? "Edit the guardian's details." : "Create a new guardian and attach them to this student.")</p>
+
+        <GuardianFormFields Model="Model" ShowContactFields="false" />
+
+        <div class="gw-section-title">Contacts</div>
+        @if (Model.ExistingGuardianId is { } gid)
+        {
+            @* Existing guardian: edit contacts live against the persisted
+               guardian (mirrors GuardianDetail.razor). Every mutation
+               persists immediately via IContactsClient; the dialog Save
+               persists the name + relationship (the page applies the
+               relationship via UpdateGuardianLinkAsync). *@
+            <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@gid"
+                            ShowSubscription="false" />
+        }
+        else
+        {
+            @* Not-yet-persisted wizard draft: edit contacts in-memory
+               (Buffered), bound to Model.Contacts. Carried through on
+               submit; the wizard persists them on commit (Phase 4).
+               Mirrors the picker's New panel. *@
+            <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                            OwnerType="ContactOwnerType.Guardian"
+                            Contacts="Model.Contacts"
+                            ShowSubscription="false"
+                            ContactsChanged="OnContactsChanged" />
+        }
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@SubmitText"
+                           SavingText="@SavingText"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    private bool _isEdit => Model.IsEdit;
+
+    protected override string SubmitText => Model.IsEdit ? "Save" : "Add guardian";
+    protected override string SavingText => Model.IsEdit ? "Saving…" : "Adding…";
+
+    /// <summary>Buffered <see cref="ContactsEditor"/> re-render callback —
+    /// the editor mutates <c>Model.Contacts</c> in place and raises
+    /// <c>ContactsChanged</c>; we trigger a re-render so the list reflects
+    /// the mutation. Mirrors the picker's <c>OnNewContactsChanged</c>.
+    /// Used only in the wizard-draft (ExistingGuardianId null) branch.</summary>
+    private void OnContactsChanged() => StateHasChanged();
+
+    protected override Task<GuardianAssignment?> SubmitAsync(GuardianAssignmentModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.FirstName) || string.IsNullOrWhiteSpace(model.LastName))
+        {
+            Error = "First and last name are required.";
+            return Task.FromResult<GuardianAssignment?>(null);
+        }
+
+        // The dialog edits name + relationship (+ title) and, inline, the
+        // guardian's contacts via <ContactsEditor>. For an existing guardian
+        // the editor runs in Live mode and persists contacts immediately, so
+        // SubmitAsync does not need to carry them; for a wizard draft the
+        // editor runs in Buffered mode and Model.Contacts holds the edits,
+        // which we carry through so the wizard persists them on commit
+        // (previously the assignment was rebuilt from the legacy
+        // single-contact fields and Contacts defaulted to null, silently
+        // dropping the draft's contacts). The legacy single-contact fields
+        // (ContactChannel/ContactValue/CountryCode) are no longer collected
+        // (ShowContactFields=false) and are passed null.
+        var assignment = new GuardianAssignment(
+            model.ExistingGuardianId,
+            model.FirstName!.Trim(),
+            model.LastName!.Trim(),
+            model.RelationshipCodedValueId,
+            ContactChannel: null,
+            ContactValue: null,
+            TitleCodedValueId: model.TitleCodedValueId,
+            CountryCode: null,
+            Contacts: model.Contacts);
+        return Task.FromResult<GuardianAssignment?>(assignment);
+    }
+}

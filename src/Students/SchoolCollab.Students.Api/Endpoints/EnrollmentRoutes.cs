@@ -6,6 +6,7 @@ using SchoolCollab.Students.Core.CQRS.Enrollments.Commands.WithdrawStudent;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.CQRS.Enrollments.Queries.ListEnrollmentsByPeriod;
 using SchoolCollab.Students.Core.CQRS.Enrollments.Queries.ListEnrollmentsByStudent;
+using SchoolCollab.Students.Core.CQRS.Enrollments.Queries.ListEnrollmentsByStudents;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -26,6 +27,15 @@ public static class EnrollmentRoutes
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListEnrollmentsByPeriod, SchoolCollab.Students.Core.DTOs.StudentEnrollmentDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListEnrollmentsByPeriod(periodId), ct)));
+
+        // Bulk variant — all enrollments for many students in one round-trip.
+        // Used by the client-side student-list enrichment (EnrichStudentsAsync)
+        // to hydrate CurrentGrade without an N+1 per-student fetch.
+        group.MapGet("/enrollments/by-students", async (
+            [FromQuery] Guid[] studentIds,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListEnrollmentsByStudents, SchoolCollab.Students.Core.DTOs.StudentEnrollmentDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListEnrollmentsByStudents(studentIds), ct)));
 
         group.MapPost("/enrollments", async (
             [FromBody] EnrollStudentRequest req,

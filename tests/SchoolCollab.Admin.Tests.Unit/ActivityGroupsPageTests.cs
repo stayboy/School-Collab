@@ -10,8 +10,8 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Features;
-using SchoolCollab.Students.Admin.Components.Pages.ActivityGroups;
-using SchoolCollab.Students.Admin.Services;
+using SchoolCollab.Students.Application.Components.Pages.ActivityGroups;
+using SchoolCollab.Students.Application.Services;
 using System.Security.Claims;
 
 namespace SchoolCollab.Admin.Tests.Unit;

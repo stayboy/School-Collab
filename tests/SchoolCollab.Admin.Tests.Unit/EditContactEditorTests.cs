@@ -6,7 +6,7 @@ namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
 /// Source-level regression tests for the student edit form
-/// (<c>src/Students/SchoolCollab.Students.Admin/Components/Pages/Students/Edit.razor</c>).
+/// (<c>src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor</c>).
 ///
 /// The student's direct contact editor (email / SMS / WhatsApp)
 /// used to live INSIDE the Profile card on the view page
@@ -37,7 +37,7 @@ public class EditContactEditorTests
         var srcPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Components", "Pages", "Students", "Edit.razor"));
         File.Exists(srcPath).Should().BeTrue(
             $"Edit.razor should exist at '{srcPath}'");

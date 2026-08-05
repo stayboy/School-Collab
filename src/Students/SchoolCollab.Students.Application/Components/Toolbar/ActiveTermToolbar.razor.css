@@ -1,0 +1,74 @@
+/* Active academic term shown in the app header (next to Settings). It is a
+   real anchor to /students/periods, where the user can view/edit, activate
+   (open) a draft, complete (close) an active period, or create a new one.
+
+   The class lives on a <span> WRAPPER (not the FluentAnchor root) because
+   Blazor CSS-isolation scopes a child component's root element with the
+   CHILD's scope attribute, not the parent's. A rule on .active-term-link
+   targeting the FluentAnchor root would silently fail to match -- the same
+   scope mismatch documented in MainLayout.razor.css. The plain wrapper
+   receives the Students Application scope, so the rules here apply. The inner
+   FluentAnchor picks up the color via the CSS custom properties we publish
+   on the wrapper (which it reads inside its shadow DOM). */
+.active-term-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    /* The header sits on the active OfficeColor accent. Content on an
+       accent fill must use the FluentUI "foreground-on-accent" tokens, not
+       the neutral foreground (which is tuned for the body canvas). The
+       tokens are defined by <fluent-header> on itself, so they cascade into
+       us. The white literal is a safety net in case the design system is
+       not yet bootstrapped. */
+    --link-fg: var(--foreground-on-accent-rest, #ffffff);
+    --link-fg-hover: var(--foreground-on-accent-hover, #ffffff);
+    --link-fg-active: var(--foreground-on-accent-active, #ffffff);
+    color: var(--link-fg);
+    font-size: 0.85rem;
+    line-height: 1.2;
+    white-space: nowrap;
+    background: transparent;
+    border: none;
+    padding: 0;
+    /* Push the same color into the FluentAnchor's Hypertext shadow tokens so
+       the icon and the link's underline use the contrasting color too. */
+    --neutral-foreground-rest: var(--link-fg);
+    --accent-foreground-rest: var(--link-fg);
+    --accent-foreground-hover: var(--link-fg-hover);
+    --accent-foreground-active: var(--link-fg-active);
+    --accent-foreground-focus: var(--link-fg-hover);
+}
+
+.active-term-link:hover {
+    color: var(--link-fg-hover);
+    text-decoration: underline;
+}
+
+.active-term-link:active {
+    color: var(--link-fg-active);
+}
+
+.active-term-name {
+    font-weight: 600;
+    color: inherit;
+}
+
+.active-term-muted {
+    color: inherit;
+    font-style: italic;
+    opacity: 0.85;
+}
+
+/* No-tenant hint: shown in the same toolbar slot when TestAuthHandler's
+   default Guid.Empty tenant is in scope (so IsRealTenant = false). It
+   reuses the icon and muted label so the slot always looks occupied
+   (never an invisible gap), and the cursor is default to make it clear
+   the icon is not a link. */
+.active-term-link--muted {
+    cursor: default;
+    opacity: 0.7;
+}
+
+.active-term-link--muted:hover {
+    text-decoration: none;
+}

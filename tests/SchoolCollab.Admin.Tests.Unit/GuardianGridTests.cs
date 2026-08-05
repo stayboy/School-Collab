@@ -235,7 +235,7 @@ public class GuardianGridTests
         var srcPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Components", "Students", relativePath));
         File.Exists(srcPath).Should().BeTrue(
             $"{relativePath} should exist at '{srcPath}' — check the path resolution");
@@ -264,6 +264,12 @@ public class GuardianGridTests
     /// </summary>
     private static (string picker, string linked) SplitByModeBranch(string razor)
     {
+        // Normalize CRLF to LF first. The working copy is checked out with
+        // CRLF line endings (git core.autocrlf=true on Windows), and this
+        // parser's needles are newline-anchored — otherwise the mode-level
+        // `else` arm is never found. Line endings must not matter to a
+        // source-structure test.
+        razor = razor.Replace("\r\n", "\n");
         var ifIdx = razor.IndexOf("@if (Mode == GridMode.Picker)", StringComparison.Ordinal);
         ifIdx.Should().BeGreaterThanOrEqualTo(0,
             "the grid has a Picker/Linked mode @if branch");

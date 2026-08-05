@@ -12,7 +12,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Core\SchoolCollab.Assignments.Core.csproj" />
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Contracts\SchoolCollab.Assignments.Contracts.csproj" />
-    <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Admin\SchoolCollab.Assignments.Admin.csproj" />
+    <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Application\SchoolCollab.Assignments.Application.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="MSTest" />

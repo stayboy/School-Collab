@@ -1,0 +1,691 @@
+@page "/students/{id:guid}/edit"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.Contracts
+@using SchoolCollab.Students.Application.Components.Students
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<Edit> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<PageTitle>Edit Student — @(_student?.StudentNumber ?? "Loading…")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">Edit Student</h1>
+            </div>
+
+            <TenantGate>
+                <ChildContent>
+            @if (_student is null)
+            {
+                <div class="spinner-container">
+                    <FluentProgressRing />
+                </div>
+            }
+            else
+            {
+                @* The /students/{id}/edit page is a long form: identity
+                   fields + guardians + Direct contact editor. Save and
+                   Cancel live in a sticky right-column sidebar so they
+                   stay visible as the user scrolls. The sidebar is a
+                   page-level FluentStack — NOT a wrapper inside
+                   <StudentFormFields> — so the same component can be
+                   embedded in dialogs (Create.razor,
+                   GradeLevelWizard.razor, StudentPickerDialog.razor)
+                   with the dialog-ui convention of bottom-horizontal
+                   Cancel/Save separated by a border-top.
+
+                   The 2-column grid:
+                     col 1: <StudentFormFields> (RenderActions="false"
+                             so the component skips its built-in bottom
+                             row) + <FluentDivider> + <ContactsEditor>
+                     col 2: <FluentStack Orientation="Vertical"
+                             HorizontalAlignment="Stretch"> Save (top)
+                             + Cancel (bottom), full-width, equal size.
+                   The Save button calls _form!.SubmitAsync() which
+                   mirrors the standard Blazor pattern for driving an
+                   EditForm submit from a button that sits outside
+                   the form. *@
+                <div class="student-edit-grid">
+                    <div class="student-edit-grid__fields">
+                        @* Page-side guardian management: the form is in
+                           <see cref="StudentFormFields.StudentFormFieldsMode.Linked"/>
+                           mode, so the guardians section is a compact
+                           "Guardians (N) — Manage" header that opens
+                           <c>GuardianPickerDialog</c> (page owns the link
+                           APIs + reload) + a read-only grid of current
+                           links with per-row delete. Each link / unlink
+                           is IMMEDIATE (no page-level Save dependency) —
+                           the wizard's "defer to save" semantics do not
+                           apply on a page. *@
+                        <StudentFormFields @ref="_form"
+                                           Model="_model"
+                                           ShowGuardians="true"
+                                           Mode="StudentFormFields.StudentFormFieldsMode.Linked"
+                                           StudentId="Id"
+                                           LinkedItems="_links.ToArray()"
+                                           OnManageGuardians="OnManageGuardiansAsync"
+                                           OnRemoveGuardian="OnRemoveGuardianAsync"
+                                           ReadOnlyStudentNumber="true"
+                                           ErrorMessage="@_error"
+                                           OnValidSubmit="OnSaveAsync"
+                                           RenderActions="false" />
+                        @if (!string.IsNullOrEmpty(_guardianError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
+                        }
+
+                        @* ── Direct contact (email / SMS / WhatsApp).
+                           Lives in the edit form, NOT on the view page,
+                           so adding/verifying/setting primary on a
+                           contact is a write action that belongs with
+                           the rest of the student's editable data.
+                           Hosted by the shared
+                           <ContactsEditor OwnerType=Student> — same
+                           component used on GuardianDetail.razor for
+                           guardians' contacts. ShowSubscription=false:
+                           students don't subscribe to their own
+                           contact info (that's a guardian/teacher
+                           feature). *@
+                        <FluentDivider class="student-edit-divider" Role="DividerRole.Presentation" />
+                        <div class="student-edit-direct-contact">
+                            <h3 class="student-edit-section-title">Direct contact</h3>
+                            <ContactsEditor OwnerType="ContactOwnerType.Student"
+                                             OwnerId="@Id"
+                                             ShowSubscription="false" />
+                        </div>
+
+                        @* ── Active enrollment (read-only display + actions).
+                           The student's grade is NOT a property of the Student
+                           record — it lives on a StudentEnrollment (one per
+                           grade/period the student has been in). Exactly one
+                           is the "primary active enrollment" (= the most
+                           recent one with Status == "Active" and ExitDate
+                           null). The spec says: existing primary active
+                           enrollment CANNOT be edited on this page — it is
+                           only displayed. The user can act on it via the
+                           Transfer / Withdraw actions (which create a new
+                           enrollment record and mark the current as
+                           Transferred / Withdrawn) or add a brand-new
+                           enrollment via Enroll (which becomes the new
+                           primary active enrollment). *@
+                        <FluentDivider class="student-edit-divider" Role="DividerRole.Presentation" />
+                        <div class="student-edit-enrollment">
+                            <div class="section-header">
+                                <h3 class="student-edit-section-title">Active enrollment</h3>
+                                <FluentStack Orientation="Orientation.Horizontal" Spacing="4">
+                                    <FluentButton Appearance="Appearance.Accent"
+                                                  Size="ButtonSize.Small"
+                                                  OnClick="OnEnrollAsync"
+                                                  Disabled="@_savingEnrollment"
+                                                  Title="Enroll this student in a grade level for the active period"
+                                                  IconStart="@FluentIcons.Add">
+                                        Enroll
+                                    </FluentButton>
+                                    @if (PrimaryActiveEnrollment is not null)
+                                    {
+                                        <FluentButton Appearance="Appearance.Outline"
+                                                      Size="ButtonSize.Small"
+                                                      OnClick="OnTransferAsync"
+                                                      Disabled="@_savingEnrollment"
+                                                      Title="Transfer to a different grade level (marks current as Transferred and creates a new active enrollment)">
+                                            <FluentIcon Icon="@(Icons.Regular.Size16.ArrowSwap)" Slot="start" />
+                                            Transfer
+                                        </FluentButton>
+                                        <FluentButton Appearance="Appearance.Outline"
+                                                      Size="ButtonSize.Small"
+                                                      OnClick="OnWithdrawAsync"
+                                                      Disabled="@_savingEnrollment"
+                                                      Title="Set an exit date on the current active enrollment">
+                                            <FluentIcon Icon="@(Icons.Regular.Size16.ArrowExit)" Slot="start" />
+                                            Withdraw
+                                        </FluentButton>
+                                    }
+                                </FluentStack>
+                            </div>
+
+                            @if (_enrollments is null)
+                            {
+                                <div class="spinner-container">
+                                    <FluentProgressRing />
+                                </div>
+                            }
+                            else if (PrimaryActiveEnrollment is { } active)
+                            {
+                                <FluentCard class="enrollment-display-card" AreaRestricted="false">
+                                    <FluentStack Orientation="Orientation.Vertical" Spacing="6">
+                                        <FluentStack Orientation="Orientation.Horizontal"
+                                                     HorizontalAlignment="HorizontalAlignment.Start"
+                                                     VerticalAlignment="VerticalAlignment.Center"
+                                                     HorizontalGap="12">
+                                            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+                                            <span class="enrollment-display-grade">
+                                                <strong>Grade:</strong>
+                                                @(_gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : active.GradeLevelId.ToString()[..8])
+                                            </span>
+                                            <span class="enrollment-display-period">
+                                                <strong>Period:</strong>
+                                                @(_periodNames.TryGetValue(active.PeriodId, out var pn) ? pn : active.PeriodId.ToString()[..8])
+                                            </span>
+                                        </FluentStack>
+                                        <span class="enrollment-display-meta muted">
+                                            Enrolled on <strong>@active.EnrolledOn.ToString("d")</strong>
+                                            · read-only — edit via Transfer / Withdraw
+                                        </span>
+                                    </FluentStack>
+                                </FluentCard>
+                            }
+                            else
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info">
+                                    This student has no active enrollment. Use <strong>Enroll</strong> to add one.
+                                </FluentMessageBar>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="student-edit-grid__sidebar">
+                        <FluentStack Orientation="Orientation.Vertical"
+                                     HorizontalAlignment="HorizontalAlignment.Stretch"
+                                     Spacing="8"
+                                     class="student-edit-action-stack">
+                            <FluentButton Appearance="Appearance.Accent"
+                                          Disabled="@_saving"
+                                          OnClick="OnSidebarSaveAsync"
+                                          class="student-edit-action-stack__button">
+                                @(_saving ? "Saving…" : "Save")
+                            </FluentButton>
+                            <FluentButton Appearance="Appearance.Outline"
+                                          Disabled="@_saving"
+                                          OnClick='@(() => Nav.NavigateTo($"/students/{Id}"))'
+                                          class="student-edit-action-stack__button">
+                                Cancel
+                            </FluentButton>
+                        </FluentStack>
+                    </div>
+                </div>
+            }
+                </ChildContent>
+                <Fallback>
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                    </FluentMessageBar>
+                </Fallback>
+            </TenantGate>
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private StudentDto? _student;
+    private readonly StudentFormModel _model = new();
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private bool _isRealTenant;
+
+    /// <summary>Reference to the <see cref="StudentFormFields"/>
+    /// instance. The right-column Save button calls
+    /// <see cref="StudentFormFields.SubmitAsync"/> through this
+    /// reference to drive the form's validation + OnValidSubmit
+    /// (DataAnnotations + the caller's OnSaveAsync delegate). The
+    /// Cancel button navigates back to the view page.</summary>
+    private StudentFormFields? _form;
+
+    /// <summary>Click handler for the right-column Save button. Delegates
+    /// to <see cref="StudentFormFields.SubmitAsync"/>, which validates
+    /// the form and fires <see cref="OnSaveAsync"/> on success.
+    /// Idempotent under double-clicks: <c>SubmitAsync</c> is a no-op
+    /// while <c>Submitting</c> is true.</summary>
+    private async Task OnSidebarSaveAsync()
+    {
+        if (_form is null) return;
+        await _form.SubmitAsync();
+    }
+
+    // ── Enrollment display + actions (read-only primary active) ──────────
+    //
+    // The primary active enrollment is the one with Status == "Active" and
+    // ExitDate == null. If multiple match (shouldn't, but is a safe fallback
+    // while transfers are mid-flight) the most-recent by EnrolledOn wins.
+    // These mirror Detail.razor's helpers; kept private+local so the two
+    // pages can evolve independently.
+
+    private StudentEnrollmentDto[]? _enrollments;
+    private Dictionary<Guid, string> _gradeLevelNames = new();
+    private Dictionary<Guid, string> _periodNames = new();
+    private bool _savingEnrollment;
+
+    // ── Guardian link state (page-owned; form is in Linked mode) ──
+    //
+    // The page owns the link list + the link / unlink API calls +
+    // the dialog opens (GuardianPickerDialog / GuardianFormDialog
+    // via ShowShellDialogAsync). The form component is a thin
+    // presenter in Linked mode: it renders the count + Manage
+    // button + read-only grid + per-row delete, and fires
+    // OnManageGuardians / OnRemoveGuardian back to the page.
+    //
+    // This is the OPPOSITE of the wizard's semantics: the wizard
+    // collects guardians as DRAFTS and persists them in Phase 4
+    // (deferred to save). On a page the link is IMMEDIATE — the
+    // user expects the action to land as soon as they confirm
+    // the dialog, not wait for a page-level Save.
+
+    private List<SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto> _links = new();
+    private Dictionary<Guid, string> _relNames = new();
+    private string? _guardianError;
+
+    private StudentEnrollmentDto? PrimaryActiveEnrollment
+    {
+        get
+        {
+            if (_enrollments is null || _enrollments.Length == 0) return null;
+            return _enrollments
+                .Where(e => e.ExitDate is null
+                    && string.Equals(e.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(e => e.EnrolledOn)
+                .FirstOrDefault();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant) return;
+
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        Logger.LogInformation("Loading student {StudentId} for edit", Id);
+        try
+        {
+            // Load the student + their enrollments in parallel. The enrollment
+            // list is needed by the new "Active enrollment" section below the
+            // direct-contact editor; we also need it for the per-section
+            // grade-level / period name lookups (built below).
+            var studentTask = Api.GetStudentByIdAsync(Id, ct);
+            var enrollmentsTask = Api.ListEnrollmentsByStudentAsync(Id, ct);
+            await Task.WhenAll(studentTask, enrollmentsTask);
+            if (_disposed) return;
+
+            _student = studentTask.Result;
+            _enrollments = enrollmentsTask.Result;
+
+            if (_student is null)
+            {
+                _error = $"Student {Id} not found.";
+                Logger.LogWarning("Student {StudentId} not found for edit", Id);
+            }
+            else
+            {
+                // Project the DTO into the shared form model. Types match
+                // (string / string / string / DateOnly? / Guid? / string / string?)
+                // so the assignment is a straight copy — no string parsing
+                // needed now that the form uses FluentDatePicker and
+                // CodedValueDropdown for the typed fields.
+                _model.StudentNumber = _student.StudentNumber;
+                _model.FirstName = _student.FirstName;
+                _model.LastName = _student.LastName;
+                _model.DateOfBirth = _student.DateOfBirth;
+                _model.GenderCodedValueId = _student.GenderCodedValueId;
+                Logger.LogInformation(
+                    "Loaded student {StudentNumber} for edit with {Count} enrollment(s)",
+                    _student.StudentNumber, _enrollments?.Length ?? 0);
+            }
+
+            // Build the grade-level / period name lookups the "Active
+            // enrollment" display needs. One round-trip per list, bounded
+            // by the number of distinct grade/period rows in the student's
+            // enrollment history.
+            var gradeIds = (_enrollments ?? Array.Empty<StudentEnrollmentDto>())
+                .Select(e => e.GradeLevelId).Distinct().ToArray();
+            var periodIds = (_enrollments ?? Array.Empty<StudentEnrollmentDto>())
+                .Select(e => e.PeriodId).Distinct().ToArray();
+
+            if (gradeIds.Length > 0)
+            {
+                var grades = await Api.ListGradeLevelsAsync(ct) ?? Array.Empty<GradeLevelDto>();
+                _gradeLevelNames = grades.ToDictionary(g => g.Id, g => g.Name);
+            }
+            if (periodIds.Length > 0)
+            {
+                var periods = await Api.ListPeriodsAsync(ct) ?? Array.Empty<PeriodDto>();
+                _periodNames = periods.ToDictionary(p => p.Id, p => p.Name);
+            }
+
+            // Page-owned link list (the form is in Linked mode and is
+            // a thin presenter — the page must hand the projected
+            // StudentGuardianViewDto[] down via the LinkedItems
+            // parameter so the form's read-only grid + Manage button
+            // have data on first render).
+            await LoadGuardiansAsync(ct);
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load student {StudentId} for edit", Id);
+            _error = ex.Message;
+        }
+    }
+
+    // ── Enrollment action handlers ────────────────────────────────────────
+    //
+    // The primary active enrollment is read-only on this page. To change
+    // the student's grade / period the user opens one of three dialogs:
+    //   - Enroll  → creates a brand-new active enrollment in the tenant's
+    //               current active period. (Does NOT close the existing
+    //               one; if there's already an active enrollment in the
+    //               same period the server will reject it with a
+    //               duplicate-enrollment conflict and the dialog surfaces
+    //               the error.)
+    //   - Transfer → marks the current active enrollment as Transferred
+    //               and points it at the new grade (same period).
+    //   - Withdraw → marks the current active enrollment as Withdrawn
+    //               with an exit date.
+    //
+    // All three dialogs use the shared EnrollStudentDialog /
+    // StudentTransferDialog / WithdrawEnrollmentDialog components that the
+    // Detail page already uses, so the behavior is consistent across pages.
+    // On success we reload the enrollment list so the read-only display
+    // reflects the new state without a full page refresh.
+
+    private async Task OnEnrollAsync()
+    {
+        if (_disposed || _student is null) return;
+        var model = new EnrollStudentModel(
+            StudentId: Id,
+            SuggestedPeriodId: PrimaryActiveEnrollment?.PeriodId,
+            SuggestedGradeLevelId: PrimaryActiveEnrollment?.GradeLevelId);
+        var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
+            model, "Enroll student", DialogSize.Medium);
+        if (result is { Success: true })
+        {
+            await ReloadEnrollmentsAsync();
+        }
+    }
+
+    private async Task OnTransferAsync()
+    {
+        if (_disposed) return;
+        var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
+            new StudentTransferModel(Id), "Transfer student", DialogSize.Medium);
+        if (result is { Success: true })
+        {
+            await ReloadEnrollmentsAsync();
+        }
+    }
+
+    private async Task OnWithdrawAsync()
+    {
+        if (_disposed || PrimaryActiveEnrollment is not { } active) return;
+        var result = await DialogService.ShowShellDialogAsync<WithdrawEnrollmentDialog, WithdrawEnrollmentModel, WithdrawEnrollmentResult>(
+            new WithdrawEnrollmentModel(
+                EnrollmentId: active.Id,
+                StudentName: $"{_student?.FirstName} {_student?.LastName}".Trim(),
+                GradeName: _gradeLevelNames.TryGetValue(active.GradeLevelId, out var gn) ? gn : null,
+                DefaultExitDate: DateOnly.FromDateTime(DateTime.UtcNow)),
+            "Withdraw student",
+            DialogSize.Medium);
+        if (result is { Success: true })
+        {
+            await ReloadEnrollmentsAsync();
+        }
+    }
+
+    private async Task ReloadEnrollmentsAsync()
+    {
+        if (_disposed) return;
+        _savingEnrollment = true;
+        try
+        {
+            _enrollments = await Api.ListEnrollmentsByStudentAsync(Id)
+                ?? Array.Empty<StudentEnrollmentDto>();
+
+            // Rebuild lookup dicts if a mutation introduced a new grade or
+            // period we hadn't seen (Transfer/Enroll/Withdraw can't introduce
+            // a new period; Transfer/Enroll CAN introduce a new grade).
+            var gradeIds = _enrollments.Select(e => e.GradeLevelId).Distinct().ToArray();
+            var periodIds = _enrollments.Select(e => e.PeriodId).Distinct().ToArray();
+            if (gradeIds.Except(_gradeLevelNames.Keys).Any())
+            {
+                foreach (var g in await Api.ListGradeLevelsAsync() ?? Array.Empty<GradeLevelDto>())
+                {
+                    _gradeLevelNames[g.Id] = g.Name;
+                }
+            }
+            if (periodIds.Except(_periodNames.Keys).Any())
+            {
+                foreach (var p in await Api.ListPeriodsAsync() ?? Array.Empty<PeriodDto>())
+                {
+                    _periodNames[p.Id] = p.Name;
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reload enrollments for student {StudentId}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _savingEnrollment = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    // ── Guardian link handlers (page-owned, immediate persist) ──
+    //
+    // Linked-mode semantics for the page:
+    //   - Manage → opens GuardianPickerDialog (which itself exposes
+    //     "New guardian" → GuardianFormDialog). On non-null the
+    //     page iterates the returned GuardianAssignment[] and links
+    //     each (creating first if ExistingGuardianId is null) via
+    //     LinkGuardianAsync. Then reloads the list.
+    //   - Remove → calls UnlinkGuardianAsync for the picked row's
+    //     GuardianId and reloads.
+    //
+    // The page OWNS these calls because the wizard's "defer to save"
+    // pattern does not apply on a page — the user expects the
+    // action to land as soon as they confirm the dialog. The form
+    // component (in Linked mode) is a thin presenter: it only
+    // fires EventCallback<Guid> / EventCallback<StudentGuardianViewDto>
+    // back to the page; the page does the actual API work.
+    //
+    // Both handlers re-load via LoadGuardiansAsync so the new
+    // state is reflected without a full page refresh. The error
+    // bar below the form surfaces the most recent failure (link
+    // or unlink) without losing the form's per-field errors.
+
+    private async Task OnManageGuardiansAsync()
+    {
+        if (_disposed) return;
+        _guardianError = null;
+        try
+        {
+            var results = await DialogService.ShowShellDialogAsync<GuardianPickerDialog, GuardianPickerModel, GuardianAssignment[]>(
+                new GuardianPickerModel(Id), "Manage guardians", DialogSize.Large);
+            if (results is null) return;
+
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            foreach (var a in results)
+            {
+                var guardianId = a.ExistingGuardianId
+                    ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                        a.TitleCodedValueId, a.FirstName, a.LastName, null, null, null), ct);
+                await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                    Id, guardianId, a.RelationshipCodedValueId, a.Role, false, null), ct);
+                // Seed contacts for a newly-created guardian. The picker's
+                // multi-contact editor (Buffered ContactsEditor) populates
+                // a.Contacts; the legacy single-contact path (StudentFormFields
+                // inline create) populates a.ContactChannel/ContactValue/
+                // CountryCode. Prefer the multi-contact list when present;
+                // fall back to the single-contact shortcut otherwise.
+                if (a.ExistingGuardianId is null)
+                {
+                    if (a.Contacts is { Count: > 0 })
+                    {
+                        var ordered = a.Contacts.OrderBy(x => x.Order).ToList();
+                        for (var i = 0; i < ordered.Count; i++)
+                        {
+                            var c = ordered[i];
+                            try
+                            {
+                                await Api.AddContactAsync(new AddContactRequest(
+                                    ContactOwnerType.Guardian, guardianId,
+                                    c.Channel, c.Value, c.Label)
+                                    { CountryCode = c.CountryCode, DisplayOrder = i }, ct);
+                            }
+                            catch (OperationCanceledException) { throw; }
+                            catch (Exception contactEx)
+                            {
+                                Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                            }
+                        }
+                    }
+                    else if (a.ContactValue is not null)
+                    {
+                        try
+                        {
+                            await Api.AddContactAsync(new AddContactRequest(
+                                ContactOwnerType.Guardian, guardianId,
+                                a.ContactChannel ?? ContactChannel.Email, a.ContactValue, null)
+                                { CountryCode = a.CountryCode }, ct);
+                        }
+                        catch (OperationCanceledException) { throw; }
+                        catch (Exception contactEx)
+                        {
+                            Logger.LogError(contactEx, "Failed to seed contact for guardian {GuardianId}", guardianId);
+                        }
+                    }
+                }
+            }
+            await LoadGuardiansAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to link guardian(s) for student {StudentId}", Id);
+            _guardianError = ex.Message;
+        }
+    }
+
+    private async Task OnRemoveGuardianAsync(SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto row)
+    {
+        if (_disposed) return;
+        _guardianError = null;
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            await Api.UnlinkGuardianAsync(Id, row.GuardianId, ct);
+            await LoadGuardiansAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to unlink guardian {GuardianId} from student {StudentId}",
+                row.GuardianId, Id);
+            _guardianError = ex.Message;
+        }
+        finally
+        {
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task LoadGuardiansAsync(CancellationToken ct)
+    {
+        try
+        {
+            var links = await Api.ListGuardiansByStudentAsync(Id, ct) ?? [];
+            _links = links.ToList();
+
+            // Resolve the relationship coded-value ids to display names so
+            // the StudentGuardiansList inside the form can render the
+            // "Relationship" column without a second round-trip per row.
+            // Bounded by the number of distinct relationships the student
+            // currently has, so a sequential loop is fine.
+            _relNames = new Dictionary<Guid, string>();
+            foreach (var link in _links.Where(l => l.RelationshipCodedValueId.HasValue))
+            {
+                var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
+                if (cv is not null) _relNames[cv.Id] = cv.Name;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load guardians for student {StudentId}", Id);
+            _guardianError = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private string? ResolveRelName(Guid? id)
+        => id is { } g && _relNames.TryGetValue(g, out var n) ? n : null;
+
+    private async Task OnSaveAsync()
+    {
+        if (!_isRealTenant || _student is null || _disposed) return;
+
+        _error = null;
+
+        var req = new UpdateStudentRequest(
+            _model.FirstName!, _model.LastName!,
+            _model.DateOfBirth, _model.GenderCodedValueId);
+
+        _saving = true;
+        try
+        {
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            await Api.UpdateStudentAsync(Id, req, ct);
+            if (_disposed) return;
+
+            Logger.LogInformation("Updated student {StudentId}", Id);
+            Nav.NavigateTo($"/students/{Id}");
+        }
+        catch (OperationCanceledException)
+        {
+            // user navigated away
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update student {StudentId}", Id);
+            _error = ex.Message;
+            _saving = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

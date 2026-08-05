@@ -1,5 +1,5 @@
 using FluentAssertions;
-using SchoolCollab.Assignments.Admin.Helpers;
+using SchoolCollab.Assignments.Application.Helpers;
 using SchoolCollab.Assignments.Contracts;
 
 namespace SchoolCollab.Assignments.Tests.Unit;

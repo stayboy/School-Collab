@@ -1,0 +1,260 @@
+@*
+    GradeLevelCreateDialog — opens from the Grade Levels landing's + New
+    button. Renders the GRADE picker (required), the enrollment-validation
+    guard clauses, and a Topics multi-select that the admin can fill in
+    up front (diff-applied on submit after the grade is created).
+
+    Submit flow (see plan §4.1.3):
+      1. Resolve the picked coded value via CodedValuesApi.GetByIdAsync
+         (for Name / Level / DisplayOrder mirroring).
+      2. Api.GetOrCreateGradeLevelAsync — returns the resolved DTO with
+         its Id (works for both brand-new and reused grade rows).
+      3. Api.ListGradeTopicsByGradeAsync(gradeId)
+         → baseline for the diff.
+      4. Apply the diff via AssignGradeTopicAsync / RemoveTopicAssignmentAsync.
+
+    The Topics section is hidden when CurrentPeriodId is null (no active
+    period). The grade + validation fields save regardless.
+*@
+@inherits DialogShellBase<GradeLevelCreateDialog.GradeLevelCreateModel, GradeLevelDto>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject CodedValuesApiClient CodedValuesApi
+@inject StudentsApiClient Api
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Grade" For="grade-level-coded-value" Required="true">
+            <CodedValueDropdown Parent="CodedValueParent.Grades"
+                                @bind-SelectedId="Model.CodedValueId"
+                                @bind-SelectedId:after="OnCodedValueChanged" />
+        </FormRow>
+
+        <FormRow Label="Age range" AlignTop>
+            <FluentNumberField @bind-Value="Model.MinAge"
+                               Id="grade-level-min-age"
+                               Min="0"
+                               Max="150"
+                               Placeholder="No minimum"
+                               Style="flex:1; min-width:0"
+                               Title="Minimum age (inclusive) for enrolling in this grade. Leave blank for no minimum." />
+            <span aria-hidden="true" style="opacity:0.6; padding:0 6px;">–</span>
+            <FluentNumberField @bind-Value="Model.MaxAge"
+                               Id="grade-level-max-age"
+                               Min="0"
+                               Max="150"
+                               Placeholder="No maximum"
+                               Style="flex:1; min-width:0"
+                               Title="Maximum age (inclusive) for enrolling in this grade. Leave blank for no maximum." />
+        </FormRow>
+
+        <FormRow Label="Allowed Gender" For="grade-level-allowed-gender">
+            <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                @bind-SelectedId="Model.AllowedGenderCodedValueId"
+                                Placeholder="No restriction (co-ed)" />
+        </FormRow>
+
+        @if (_allTopics.Length > 0)
+        {
+            <FormRow Label="@($"Topics ({Model.TopicIds.Count})")" AlignTop>
+                <FluentListbox Items="@_allTopics"
+                               @bind-SelectedValues="Model.TopicIds"
+                               OptionText="@(s => s.Name)"
+                               OptionValue="@(s => s.Id.ToString())"
+                               Multiple="true"
+                               Style="width: 100%; min-height: 160px;"
+                               Title="Pick which topics belong to this grade for the current period. Existing assignments will be added; unselected ones will be removed." />
+            </FormRow>
+        }
+        else if (_allTopics.Length == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
+                No topics exist yet. Create topics first from the Topics landing, then reopen this dialog to assign them.
+            </FluentMessageBar>
+        }
+        else
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+                Could not load topics for this grade.
+            </FluentMessageBar>
+        }
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Create"
+                           SavingText="Creating..."
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+<style>
+    .dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+</style>
+
+@code {
+    private TopicDto[] _allTopics = [];
+    private bool _topicsLoaded;
+
+    /// <summary>
+    /// Editable form model for the Create dialog. Plain class (not record)
+    /// because every field is two-way bound (FluentNumberField / FluentSelect
+    /// / CodedValueDropdown / FluentListbox) — init-only record properties
+    /// reject the @bind-Value assignments the Razor compiler emits.
+    /// </summary>
+    public sealed class GradeLevelCreateModel
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public Guid? CodedValueId { get; set; }
+
+        public int? MinAge { get; set; }
+        public int? MaxAge { get; set; }
+        public Guid? AllowedGenderCodedValueId { get; set; }
+
+        /// <summary>Picked topic ids; bound to the FluentListbox.</summary>
+        public IReadOnlyList<Guid> TopicIds { get; set; } = [];
+
+        /// <summary>
+        /// topic id → grade-topic-assignment id for already-assigned topics
+        /// (used by RemoveTopicAssignmentAsync on Edit; empty on a brand-new grade).
+        /// </summary>
+        public IReadOnlyDictionary<Guid, Guid> TopicIdToAssignmentId { get; set; }
+            = new Dictionary<Guid, Guid>();
+    }
+
+    protected override string SubmitText => "Create";
+
+    protected override void OnModelInitialized(GradeLevelCreateModel model)
+    {
+        // Defensive: nothing extra to seed on Create. The topics catalog
+        // load below runs in OnAfterRenderAsync so the API client has been
+        // resolved by the DI scope (the dialog is rendered via ShowDialogAsync
+        // which sets up its own scope).
+    }
+
+    private async Task LoadTopicsAsync()
+    {
+        try
+        {
+            var all = await Api.ListTopicsAsync();
+            _allTopics = all ?? [];
+            _topicsLoaded = true;
+        }
+        catch (Exception ex)
+        {
+            _allTopics = [];
+            _topicsLoaded = true;
+            Error = $"Could not load topics: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// The CodedValueDropdown's binder has already updated <c>Model.CodedValueId</c>
+    /// by the time this fires. We don't fetch the coded value here — the submit
+    /// handler does it in step 1.
+    /// </summary>
+    private void OnCodedValueChanged() { }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !_topicsLoaded)
+        {
+            await LoadTopicsAsync();
+            StateHasChanged();
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    protected override async Task<GradeLevelDto?> SubmitAsync(GradeLevelCreateModel model)
+    {
+        if (model.CodedValueId is null)
+        {
+            Error = "Pick a grade coded value.";
+            return null;
+        }
+
+        // 1. Resolve the picked coded value for Name / Level / DisplayOrder.
+        var cv = await CodedValuesApi.GetByIdAsync(model.CodedValueId.Value);
+        if (cv is null)
+        {
+            Error = $"Grade coded value '{model.CodedValueId}' not found.";
+            return null;
+        }
+
+        // 2. Create-or-reuse the grade row (carries the validation fields too).
+        var grade = await Api.GetOrCreateGradeLevelAsync(new GetOrCreateGradeLevelRequest(
+            model.CodedValueId.Value,
+            cv.DisplayOrder,
+            cv.Name,
+            cv.DisplayOrder,
+            model.MinAge,
+            model.MaxAge,
+            model.AllowedGenderCodedValueId));
+
+        // 3+4. Apply topic diff. Assignments are date-based and open-ended
+        // (start today, no end) — a picked topic stays assigned across years
+        // until removed. Failures are non-fatal: surface as a warning above the
+        // form but do not block the grade save.
+        var warnings = await ApplyTopicDiffAsync(grade.Id, model);
+        if (!string.IsNullOrEmpty(warnings))
+        {
+            Error = warnings; // surfacing via Error message keeps it visible
+                              // inside the dialog footer until the admin
+                              // reviews and dismisses.
+        }
+
+        return grade;
+    }
+
+    /// <summary>
+    /// Applies the picked topic set against the grade's currently-effective
+    /// assignments. Returns a non-empty string with any non-fatal per-topic
+    /// failure messages (so the dialog footer can show them).
+    /// </summary>
+    private async Task<string?> ApplyTopicDiffAsync(
+        Guid gradeLevelId, GradeLevelCreateModel model)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baseline = await Api.ListGradeTopicsByGradeAsync(gradeLevelId) ?? [];
+        var assignedTopicIds = new HashSet<Guid>(baseline.Select(a => a.TopicId));
+        var desiredIds = new HashSet<Guid>(model.TopicIds);
+
+        var warnings = new List<string>();
+
+        // Add: each desired topic id that isn't already assigned.
+        foreach (var sid in desiredIds.Except(assignedTopicIds))
+        {
+            try
+            {
+                await Api.AssignGradeTopicAsync(
+                    new AssignGradeTopicRequest(gradeLevelId, sid, today));
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not assign topic {sid}: {ex.Message}");
+            }
+        }
+
+        // Remove: each assigned topic id that isn't in the desired set.
+        var baselineByTopicId = baseline.ToDictionary(a => a.TopicId, a => a.Id);
+        foreach (var sid in assignedTopicIds.Except(desiredIds))
+        {
+            if (!baselineByTopicId.TryGetValue(sid, out var assignmentId)) continue;
+            try
+            {
+                await Api.RemoveTopicAssignmentAsync(assignmentId);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not unassign topic {sid}: {ex.Message}");
+            }
+        }
+
+        return warnings.Count == 0 ? null : string.Join(" • ", warnings);
+    }
+}

@@ -12,9 +12,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
-    <ProjectReference Include="..\Settings\SchoolCollab.Settings.Admin\SchoolCollab.Settings.Admin.csproj" />
-    <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Admin\SchoolCollab.Assignments.Admin.csproj" />
-    <ProjectReference Include="..\Students\SchoolCollab.Students.Admin\SchoolCollab.Students.Admin.csproj" />
+    <ProjectReference Include="..\Settings\SchoolCollab.Settings.Application\SchoolCollab.Settings.Application.csproj" />
+    <ProjectReference Include="..\Assignments\SchoolCollab.Assignments.Application\SchoolCollab.Assignments.Application.csproj" />
+    <ProjectReference Include="..\Students\SchoolCollab.Students.Application\SchoolCollab.Students.Application.csproj" />
     <ProjectReference Include="..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />
     <ProjectReference Include="..\AI\SchoolCollab.AI.Server\SchoolCollab.AI.Server.csproj" />
     <ProjectReference Include="..\SchoolCollab.Core\SchoolCollab.Core.csproj" />

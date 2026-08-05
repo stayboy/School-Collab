@@ -20,17 +20,23 @@ public sealed class GetStudentByStudentNumberHandler(
         GetStudentByStudentNumber query,
         CancellationToken cancellationToken = default)
     {
+        // Capture the tenant in the request scope: db.CurrentTenantId is lost
+        // inside the HybridCache factory, so the global "Tenant" filter would
+        // hide every row. Scope the query explicitly instead (see
+        // ListStudentsHandler).
+        var tenantId = db.CurrentTenantId;
         var normalisedNumber = query.StudentNumber.Trim().ToUpperInvariant();
-        var cacheKey = $"student:number:{normalisedNumber}:{db.CurrentTenantId}";
+        var cacheKey = $"student:number:{normalisedNumber}:{tenantId}";
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, normalisedNumber),
+            (db, normalisedNumber, tenantId),
             static async (state, ct) =>
             {
-                var (db, studentNumber) = state;
+                var (db, studentNumber, tenantId) = state;
                 var student = await db.Students
                     .IgnoreQueryFilters(["Tenant"])
+                    .Where(s => s.TenantId == tenantId)
                     .AsNoTracking()
                     .SingleOrDefaultAsync(x => x.StudentNumber == studentNumber, ct);
 

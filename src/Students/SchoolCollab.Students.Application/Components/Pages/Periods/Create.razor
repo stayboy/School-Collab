@@ -1,0 +1,55 @@
+@page "/students/periods/create"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Create> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<PageTitle>New Period</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+                @if (!_isRealTenant)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        You have no tenant assigned. Period records are tenant-scoped — pick a tenant to continue.
+                    </FluentMessageBar>
+                }
+                else
+                {
+                    <section class="page-container">
+                        <PeriodForm CancelRoute="/students/periods" OnSaved="OnSavedAsync" />
+                    </section>
+                }
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Period records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private bool _isRealTenant;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+    }
+
+    private void OnSavedAsync(PeriodDto _) => Nav.NavigateTo("/students/periods");
+
+    public void Dispose() => _disposed = true;
+}

@@ -104,7 +104,7 @@ public sealed record CreateEntityCodeRuleResponse(Guid Id);
 
 /// <summary>
 /// Typed HTTP client for the <c>/api/entity-code-rules</c> endpoints (spec §4.7).
-/// Registered in <c>SchoolCollab.Settings.Admin.ModuleServices</c> with
+/// Registered in <c>SchoolCollab.Settings.Application.ModuleServices</c> with
 /// base address <c>https+http://settings-api</c>.
 /// </summary>
 public sealed class EntityCodeRulesApiClient(HttpClient http)

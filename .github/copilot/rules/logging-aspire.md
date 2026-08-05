@@ -61,7 +61,7 @@ visible in the Aspire dashboard structured log viewer.
   });
   ```
 
-## Blazor Frontend (`SchoolCollab.CodedValues.Admin`)
+## Blazor Frontend (`SchoolCollab.Settings.Application`)
 
 - Inject `ILogger<T>` in every page component and service class.
 

@@ -23,7 +23,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Assignments.Co
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Assignments.Api", "src\Assignments\SchoolCollab.Assignments.Api\SchoolCollab.Assignments.Api.csproj", "{3FAE3537-E8D4-4AF2-9AB7-A7011610336F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Assignments.Admin", "src\Assignments\SchoolCollab.Assignments.Admin\SchoolCollab.Assignments.Admin.csproj", "{81BE88ED-7C74-468C-A5E3-688CE6C293AE}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Assignments.Application", "src\Assignments\SchoolCollab.Assignments.Application\SchoolCollab.Assignments.Application.csproj", "{81BE88ED-7C74-468C-A5E3-688CE6C293AE}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Assignments.Tests.Unit", "tests\SchoolCollab.Assignments.Tests.Unit\SchoolCollab.Assignments.Tests.Unit.csproj", "{F5184227-0698-47D9-B764-95515E403A4B}"
 EndProject
@@ -43,7 +43,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Students.Contr
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Students.Api", "src\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj", "{4FFE8189-CFE9-4E87-A166-9AA787354D2D}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Students.Admin", "src\Students\SchoolCollab.Students.Admin\SchoolCollab.Students.Admin.csproj", "{1268FE67-AAD4-4E82-A04F-E8A962BA44B7}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Students.Application", "src\Students\SchoolCollab.Students.Application\SchoolCollab.Students.Application.csproj", "{1268FE67-AAD4-4E82-A04F-E8A962BA44B7}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Students.Worker", "src\Students\SchoolCollab.Students.Worker\SchoolCollab.Students.Worker.csproj", "{A1F5EDA0-2D33-4245-B8CA-8226593C5492}"
 EndProject
@@ -69,7 +69,7 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Settings.Core"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Settings.Contracts", "src\Settings\SchoolCollab.Settings.Contracts\SchoolCollab.Settings.Contracts.csproj", "{84D24C6D-8BA8-46F2-BA20-91DF9A5CEB8E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Settings.Admin", "src\Settings\SchoolCollab.Settings.Admin\SchoolCollab.Settings.Admin.csproj", "{7F2BA527-5658-4128-876E-46FCE245CD40}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Settings.Application", "src\Settings\SchoolCollab.Settings.Application\SchoolCollab.Settings.Application.csproj", "{7F2BA527-5658-4128-876E-46FCE245CD40}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "SchoolCollab.Settings.Tests.Unit", "tests\SchoolCollab.Settings.Tests.Unit\SchoolCollab.Settings.Tests.Unit.csproj", "{0184E240-0564-4727-90B1-2B19958DCE4B}"
 EndProject
