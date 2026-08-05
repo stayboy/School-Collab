@@ -49,6 +49,7 @@ public sealed class ListStudentsHandler(
                 return results.Select(s => new StudentDto(
                     s.Id,
                     s.StudentNumber,
+                    s.TitleCodedValueId,
                     s.FirstName,
                     s.LastName,
                     s.DateOfBirth,

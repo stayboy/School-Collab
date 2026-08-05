@@ -27,6 +27,29 @@ internal sealed class TeacherRepository(StudentsDbContext db)
         }
     }
 
+    public Task AddQualificationAsync(TeacherQualification link, CancellationToken cancellationToken = default)
+    {
+        Db.TeacherQualifications.Add(link);
+        return Db.SaveChangesAsync(cancellationToken);
+    }
+
+    public Task<Guid[]> GetQualificationCodedValueIdsAsync(Guid teacherId, CancellationToken cancellationToken = default)
+        => Db.TeacherQualifications
+            .Where(q => q.TeacherId == teacherId)
+            .Select(q => q.CodedValueId)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task RemoveQualificationAsync(Guid teacherId, Guid codedValueId, CancellationToken cancellationToken = default)
+    {
+        var link = await Db.TeacherQualifications
+            .FirstOrDefaultAsync(q => q.TeacherId == teacherId && q.CodedValueId == codedValueId, cancellationToken);
+        if (link is not null)
+        {
+            Db.TeacherQualifications.Remove(link);
+            await Db.SaveChangesAsync(cancellationToken);
+        }
+    }
+
     public Task AddGradeLevelAsync(TeacherGradeLevel link, CancellationToken cancellationToken = default)
     {
         Db.TeacherGradeLevels.Add(link);

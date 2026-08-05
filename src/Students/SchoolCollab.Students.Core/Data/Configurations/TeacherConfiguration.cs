@@ -37,5 +37,6 @@ internal sealed class TeacherConfiguration : TenantEntityTypeConfigurationBase<T
 
         builder.Ignore(x => x.Topics);
         builder.Ignore(x => x.GradeLevels);
+        builder.Ignore(x => x.Qualifications);
     }
 }

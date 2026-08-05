@@ -26,6 +26,8 @@ internal sealed class GuardianConfiguration : TenantEntityTypeConfigurationBase<
         builder.Property(x => x.FirstName).IsRequired();
         builder.Property(x => x.LastName).IsRequired();
         builder.Property(x => x.DisplayName);
+        builder.Property(x => x.DateOfBirth);
+        builder.Property(x => x.GenderCodedValueId);
         builder.Property(x => x.Address);
         builder.Property(x => x.CommunityId);
 

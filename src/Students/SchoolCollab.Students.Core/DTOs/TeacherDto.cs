@@ -9,6 +9,10 @@ public sealed record TeacherDto(
     string? DisplayName,
     string Email,
     string? ContactPhone,
+    Guid? GenderCodedValueId,
+    DateOnly? DateOfBirth,
+    Guid? LevelOfEducationCodedValueId,
+    Guid[] QualificationCodedValueIds,
     bool IsDeleted,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

@@ -77,6 +77,15 @@
                              class="w-9" />
         </FormRow>
 
+        @* Title. Optional salutation (SALUTS parent) — shared demographic field.
+           Simple two-way binding into the model. *@
+        <FormRow Label="Title">
+            <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                @bind-SelectedId="Model.TitleCodedValueId"
+                                Placeholder="Select title"
+                                Width="FieldWidth.W4" />
+        </FormRow>
+
         @* Date of birth. FluentDatePicker binds to DateTime?, so we
            convert from the model's DateOnly? on the way in and back on
            the way out. Narrow input (160px) — a date picker doesn't

@@ -32,8 +32,16 @@ public sealed class ListTeachersHandler(
                     .OrderBy(t => t.LastName).ThenBy(t => t.FirstName)
                     .ToArrayAsync(ct);
 
+                var quals = await db.TeacherQualifications
+                    .Where(q => q.TenantId == tenantId)
+                    .GroupBy(q => q.TeacherId)
+                    .Select(g => new { TeacherId = g.Key, CodedValueIds = g.Select(x => x.CodedValueId).ToArray() })
+                    .ToDictionaryAsync(x => x.TeacherId, x => x.CodedValueIds, ct);
+
                 return results.Select(t => new TeacherDto(
                     t.Id, t.TitleCodedValueId, t.FirstName, t.LastName, t.DisplayName, t.Email, t.ContactPhone,
+                    t.GenderCodedValueId, t.DateOfBirth, t.LevelOfEducationCodedValueId,
+                    quals.TryGetValue(t.Id, out var q) ? q : [],
                     t.IsDeleted, t.CreatedAt, t.UpdatedAt)).ToArray();
             },
             CacheOptions,

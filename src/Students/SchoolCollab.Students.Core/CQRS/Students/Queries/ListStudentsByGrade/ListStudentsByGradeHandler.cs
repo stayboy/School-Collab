@@ -57,6 +57,7 @@ public sealed class ListStudentsByGradeHandler(
                 {
                     s.Id,
                     s.StudentNumber,
+                    s.TitleCodedValueId,
                     s.FirstName,
                     s.LastName,
                     s.DateOfBirth,
@@ -70,6 +71,7 @@ public sealed class ListStudentsByGradeHandler(
             .Select(x => new StudentDto(
                 x.Id,
                 x.StudentNumber,
+                x.TitleCodedValueId,
                 x.FirstName,
                 x.LastName,
                 x.DateOfBirth,

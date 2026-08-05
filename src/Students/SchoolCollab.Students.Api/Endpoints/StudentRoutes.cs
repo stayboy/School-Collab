@@ -80,7 +80,7 @@ public static class StudentRoutes
             try
             {
                 await handler.HandleAsync(new UpdateStudent(id, req.FirstName, req.LastName,
-                    req.DateOfBirth, req.GenderCodedValueId), ct);
+                    req.DateOfBirth, req.GenderCodedValueId, req.TitleCodedValueId), ct);
                 return Results.NoContent();
             }
             catch (StudentNotFoundException)
@@ -137,4 +137,4 @@ public static class StudentRoutes
     }
 }
 
-internal record UpdateStudentRequest(string FirstName, string LastName, DateOnly? DateOfBirth, Guid? GenderCodedValueId);
+internal record UpdateStudentRequest(Guid? TitleCodedValueId, string FirstName, string LastName, DateOnly? DateOfBirth, Guid? GenderCodedValueId);

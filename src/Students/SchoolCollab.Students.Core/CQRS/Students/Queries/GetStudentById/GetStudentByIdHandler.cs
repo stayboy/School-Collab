@@ -45,6 +45,7 @@ public sealed class GetStudentByIdHandler(
                 return new StudentDto(
                     student.Id,
                     student.StudentNumber,
+                    student.TitleCodedValueId,
                     student.FirstName,
                     student.LastName,
                     student.DateOfBirth,

@@ -265,11 +265,11 @@ public class StudentsApiClientEnrichmentTests
         {
             new GuardianDto(
                 Id: guardianWithStudents, TitleCodedValueId: titleId, FirstName: "Grace", LastName: "Hopper",
-                DisplayName: "Grace Hopper", Address: null, CommunityId: null, IsDeleted: false,
+                DisplayName: "Grace Hopper", DateOfBirth: null, GenderCodedValueId: null, Address: null, CommunityId: null, IsDeleted: false,
                 CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow),
             new GuardianDto(
                 Id: guardianNoStudents, TitleCodedValueId: null, FirstName: "Ada", LastName: "Lovelace",
-                DisplayName: null, Address: null, CommunityId: null, IsDeleted: false,
+                DisplayName: null, DateOfBirth: null, GenderCodedValueId: null, Address: null, CommunityId: null, IsDeleted: false,
                 CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow),
         };
 

@@ -73,10 +73,6 @@
                                     <span class="profile-value">@_grade.Name</span>
                                 </div>
                                 <div class="profile-row">
-                                    <span class="profile-label">Level</span>
-                                    <span class="profile-value">@_grade.Level</span>
-                                </div>
-                                <div class="profile-row">
                                     <span class="profile-label">Age range</span>
                                     <span class="profile-value">@FormatAgeRange(_grade.MinAge, _grade.MaxAge)</span>
                                 </div>
@@ -97,20 +93,13 @@
                                     </span>
                                 </div>
                                 <div class="profile-row">
-                                    <span class="profile-label">Counts</span>
+                                    <span class="profile-label">Students</span>
                                     <span class="profile-value">
-                                        <span class="count-chip">@_assignedTopics.Count topics</span>
-                                        <span class="count-chip">@(_teachers?.Length ?? 0) teachers</span>
-                                        <span class="count-chip">@_grade.StudentCount students</span>
+                                        <FluentAnchor Appearance="Appearance.Lightweight"
+                                                      Href="@($"/students?gradeLevelId={_grade.Id}")">
+                                            @_grade.StudentCount students
+                                        </FluentAnchor>
                                     </span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Created</span>
-                                    <span class="profile-value">@_grade.CreatedAt.ToLocalTime().ToString("g")</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Updated</span>
-                                    <span class="profile-value">@_grade.UpdatedAt.ToLocalTime().ToString("g")</span>
                                 </div>
                             </div>
                         </FluentCard>
@@ -267,6 +256,28 @@
                                     </FluentDataGrid>
                                 }
                             </FluentTab>
+
+                            <FluentTab Label="Students" Icon="@FluentIcons.People">
+                                <div class="section-header">
+                                    <h3>Students (@(_students?.Length ?? 0))</h3>
+                                </div>
+                                @if (_students is null)
+                                {
+                                    <div class="spinner-container">
+                                        <FluentProgressRing />
+                                    </div>
+                                }
+                                else if (_students.Length == 0)
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                                        No active students in this grade for the current period.
+                                    </FluentMessageBar>
+                                }
+                                else
+                                {
+                                    <StudentsGrid Students="@_students" />
+                                }
+                            </FluentTab>
                         </FluentTabs>
                     }
                 </ChildContent>
@@ -348,6 +359,7 @@
 
     // ── Teachers tab ────────────────────────────────────────────────────────
     private TeacherWithRoleDto[]? _teachers;
+    private StudentDto[]? _students;
     private TeacherDto[]? _allTeachers;
     private bool _showTeacherPicker;
     private TeacherDto? _teacherToAdd;
@@ -401,12 +413,14 @@
             var catalogTask = Api.ListTopicsAsync(ct);
             var teachersTask = Api.ListTeachersForGradeLevelAsync(Id, ct);
             var allTeachersTask = Api.ListTeachersAsync(ct);
-            await Task.WhenAll(gradeTask, catalogTask, teachersTask, allTeachersTask);
+            var studentsTask = Api.ListStudentsByGradeAsync(Id, ct: ct);
+            await Task.WhenAll(gradeTask, catalogTask, teachersTask, allTeachersTask, studentsTask);
 
             _grade = gradeTask.Result;
             _catalog = (catalogTask.Result ?? []).ToDictionary(t => t.Id);
             _teachers = teachersTask.Result ?? [];
             _allTeachers = allTeachersTask.Result ?? [];
+            _students = studentsTask.Result ?? [];
 
             if (_grade is null) return;
 

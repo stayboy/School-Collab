@@ -53,6 +53,13 @@ public sealed class ListTeachersForGradeLevelHandler(
                         t.DisplayName,
                         t.Email,
                         t.ContactPhone,
+                        t.GenderCodedValueId,
+                        t.DateOfBirth,
+                        t.LevelOfEducationCodedValueId,
+                        (from q in db.TeacherQualifications.IgnoreQueryFilters(new[] { "Tenant" })
+                         where q.TeacherId == t.Id && q.TenantId == tenantId
+                         orderby q.CreatedAt
+                         select q.CodedValueId).ToArray(),
                         t.IsDeleted,
                         tg.TeacherRoleCodedValueId,
                         // Assigned topics for this teacher, tenant-scoped.

@@ -55,7 +55,10 @@ public static class TeacherRoutes
         {
             try
             {
-                await handler.HandleAsync(new UpdateTeacher(id, req.FirstName, req.LastName, req.DisplayName, req.Email, req.ContactPhone), ct);
+                await handler.HandleAsync(new UpdateTeacher(
+                    id, req.FirstName, req.LastName, req.DisplayName, req.Email, req.ContactPhone,
+                    req.GenderCodedValueId, req.DateOfBirth, req.LevelOfEducationCodedValueId,
+                    req.QualificationCodedValueIds), ct);
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException)
@@ -172,7 +175,11 @@ internal record UpdateTeacherRequest(
     string LastName,
     string? DisplayName,
     string Email,
-    string? ContactPhone);
+    string? ContactPhone,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
 internal record LinkTeacherTopicRequest(Guid TopicId);
 

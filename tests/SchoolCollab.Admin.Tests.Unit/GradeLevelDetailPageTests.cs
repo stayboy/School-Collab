@@ -96,7 +96,8 @@ public class GradeLevelDetailPageTests : BunitContext
         string gradeJson,
         string topicsCatalogJson = "[]",
         string teachersJson = "[]",
-        string assignmentsJson = "[]")
+        string assignmentsJson = "[]",
+        string studentsJson = "[]")
     {
         var auth = new MutableAuthenticationStateProvider { User = CreateUser(realTenant: true) };
         var handler = new ScriptedHandler();
@@ -105,6 +106,7 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", $"/students/grade-levels/{gradeId}/teachers", HttpStatusCode.OK, teachersJson);
         handler.Map("GET", "/teachers", HttpStatusCode.OK, teachersJson);
         handler.Map("GET", $"/students/topic-assignments/by-grade/{gradeId}", HttpStatusCode.OK, assignmentsJson);
+        handler.Map("GET", $"/students/by-grade/{gradeId}", HttpStatusCode.OK, studentsJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
 

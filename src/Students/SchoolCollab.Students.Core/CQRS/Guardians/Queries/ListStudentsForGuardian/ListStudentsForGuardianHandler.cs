@@ -35,7 +35,7 @@ public sealed class ListStudentsForGuardianHandler(
                     select s).ToArrayAsync(ct);
 
                 return results.Select(s => new StudentDto(
-                    s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth,
+                    s.Id, s.StudentNumber, s.TitleCodedValueId, s.FirstName, s.LastName, s.DateOfBirth,
                     s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt)).ToArray();
             },
             CacheOptions,

@@ -53,6 +53,17 @@
                                     <FormRow Label="Display name">
                                         <FluentTextField @bind-Value="_editDisplayName" />
                                     </FormRow>
+                                    <FormRow Label="Date of birth">
+                                        <FluentDatePicker Id="guardianEditDob"
+                                                          Value="@EditDateOfBirthAsDateTime"
+                                                          ValueChanged="@OnEditDateOfBirthChanged"
+                                                          Placeholder="Select date" />
+                                    </FormRow>
+                                    <FormRow Label="Gender">
+                                        <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                                            @bind-SelectedId="_editGenderCodedValueId"
+                                                            Placeholder="Select gender" />
+                                    </FormRow>
                                     <FormRow Label="Address">
                                         <FluentTextField @bind-Value="_editAddress" />
                                     </FormRow>
@@ -210,6 +221,14 @@
     private string _editDisplayName = string.Empty;
     private string _editAddress = string.Empty;
     private Guid? _editCommunityId;
+    private DateOnly? _editDateOfBirth;
+    private Guid? _editGenderCodedValueId;
+
+    // DOB bridge: _editDateOfBirth is DateOnly? but FluentDatePicker.Value is DateTime?.
+    private DateTime? EditDateOfBirthAsDateTime => _editDateOfBirth?.ToDateTime(TimeOnly.MinValue);
+
+    private void OnEditDateOfBirthChanged(DateTime? value)
+        => _editDateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
 
     // Link form state.
     private SchoolCollab.Students.Application.Services.StudentDto? _newWard;
@@ -268,6 +287,8 @@
         _editDisplayName = _guardian.DisplayName ?? string.Empty;
         _editAddress = _guardian.Address ?? string.Empty;
         _editCommunityId = _guardian.CommunityId;
+        _editDateOfBirth = _guardian.DateOfBirth;
+        _editGenderCodedValueId = _guardian.GenderCodedValueId;
     }
 
     private void StartEdit() => _editing = true;
@@ -290,7 +311,7 @@
                 _editFirstName.Trim(), _editLastName.Trim(),
                 string.IsNullOrWhiteSpace(_editDisplayName) ? null : _editDisplayName.Trim(),
                 string.IsNullOrWhiteSpace(_editAddress) ? null : _editAddress.Trim(),
-                _editCommunityId));
+                _editCommunityId, _editDateOfBirth, _editGenderCodedValueId));
 
             _guardian = await Api.GetGuardianByIdAsync(_guardian.Id, default);
             if (_guardian?.TitleCodedValueId.HasValue == true)

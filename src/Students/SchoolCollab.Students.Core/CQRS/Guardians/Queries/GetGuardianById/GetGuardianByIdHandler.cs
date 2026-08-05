@@ -13,7 +13,7 @@ public sealed class GetGuardianByIdHandler(
         return g is null
             ? null
             : new GuardianDto(
-                g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.Address, g.CommunityId,
+                g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.DateOfBirth, g.GenderCodedValueId, g.Address, g.CommunityId,
                 g.IsDeleted, g.CreatedAt, g.UpdatedAt);
     }
 }

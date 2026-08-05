@@ -26,7 +26,9 @@ public sealed record StudentDto(
     // Current grade enrollment info, populated client-side from enrollments
     GradeLevelDto? CurrentGrade = null,
     // Guardian count, populated client-side from the bulk guardian-counts endpoint
-    int? GuardianCount = null);
+    int? GuardianCount = null,
+    // Title salutation (SALUTS parent), projected server-side.
+    Guid? TitleCodedValueId = null);
 
 public sealed record GradeLevelDto(
     Guid Id,
@@ -172,13 +174,15 @@ public record CreateStudentRequest(
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,
-    Guid? GenderCodedValueId);
+    Guid? GenderCodedValueId,
+    Guid? TitleCodedValueId = null);
 
 public record UpdateStudentRequest(
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,
-    Guid? GenderCodedValueId);
+    Guid? GenderCodedValueId,
+    Guid? TitleCodedValueId = null);
 
 public record CreateGradeLevelRequest(
     Guid CodedValueId,
@@ -320,7 +324,9 @@ public record CreateGuardianRequest(
     string LastName,
     string? DisplayName,
     string? Address,
-    Guid? CommunityId);
+    Guid? CommunityId,
+    DateOnly? DateOfBirth = null,
+    Guid? GenderCodedValueId = null);
 
 public record UpdateGuardianRequest(
     Guid? TitleCodedValueId,
@@ -328,7 +334,9 @@ public record UpdateGuardianRequest(
     string LastName,
     string? DisplayName,
     string? Address,
-    Guid? CommunityId);
+    Guid? CommunityId,
+    DateOnly? DateOfBirth = null,
+    Guid? GenderCodedValueId = null);
 
 public record LinkGuardianRequest(
     Guid StudentId,
@@ -355,7 +363,11 @@ public sealed record TeacherDto(
     string? ContactPhone,
     bool IsDeleted,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
 public record CreateTeacherRequest(
     Guid? TitleCodedValueId,
@@ -363,14 +375,22 @@ public record CreateTeacherRequest(
     string LastName,
     string? DisplayName,
     string Email,
-    string? ContactPhone);
+    string? ContactPhone,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
 public record UpdateTeacherRequest(
     string FirstName,
     string LastName,
     string? DisplayName,
     string Email,
-    string? ContactPhone);
+    string? ContactPhone,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
 public record LinkTeacherTopicRequest(Guid TopicId);
 

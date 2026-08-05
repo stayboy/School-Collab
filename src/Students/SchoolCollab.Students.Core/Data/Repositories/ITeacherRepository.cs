@@ -14,6 +14,11 @@ public interface ITeacherRepository
     Task AddTopicAsync(TeacherTopic link, CancellationToken cancellationToken = default);
     Task<TeacherTopic?> GetTopicLinkAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default);
     Task RemoveTopicAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default);
+
+    Task AddQualificationAsync(TeacherQualification link, CancellationToken cancellationToken = default);
+    Task<Guid[]> GetQualificationCodedValueIdsAsync(Guid teacherId, CancellationToken cancellationToken = default);
+    Task RemoveQualificationAsync(Guid teacherId, Guid codedValueId, CancellationToken cancellationToken = default);
+
     Task AddGradeLevelAsync(TeacherGradeLevel link, CancellationToken cancellationToken = default);
     Task UpdateGradeLevelAsync(TeacherGradeLevel link, CancellationToken cancellationToken = default);
     Task<TeacherGradeLevel?> GetGradeLevelLinkAsync(Guid teacherId, Guid gradeLevelId, CancellationToken cancellationToken = default);

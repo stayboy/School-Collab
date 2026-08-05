@@ -9,4 +9,8 @@ public sealed record CreateTeacher(
     string LastName,
     string? DisplayName,
     string Email,
-    string? ContactPhone) : ICommand;
+    string? ContactPhone,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null) : ICommand;
