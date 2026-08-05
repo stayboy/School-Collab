@@ -107,12 +107,17 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", $"/students/topic-assignments/by-grade/{gradeId}", HttpStatusCode.OK, assignmentsJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
+        // Notification &amp; Delivery editor: no tenant default / no grade override.
+        handler.Map("GET", "/api/settings/notification-policy", HttpStatusCode.NoContent, "");
+        handler.Map("GET", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.NoContent, "");
+        handler.Map("PUT", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.OK, "");
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         Services.AddSingleton<AuthenticationStateProvider>(auth);
         var codedValuesClient = new CodedValuesApiClient(http);
         Services.AddSingleton(codedValuesClient);
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
+        Services.AddSingleton(new NotificationPolicyApiClient(http));
         Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
 
         return (handler, gradeId);
