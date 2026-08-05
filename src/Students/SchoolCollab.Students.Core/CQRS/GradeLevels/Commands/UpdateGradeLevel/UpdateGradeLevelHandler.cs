@@ -20,7 +20,8 @@ public sealed class UpdateGradeLevelHandler(
             ?? throw new GradeLevelNotFoundException(command.Id);
 
         gradeLevel.Update(command.Level, command.Name, command.DisplayOrder,
-            command.MinAge, command.MaxAge, command.AllowedGenderCodedValueId);
+            command.MinAge, command.MaxAge, command.AllowedGenderCodedValueId,
+            command.IsBlockedFromEnrollment);
 
         try
         {

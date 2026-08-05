@@ -1,0 +1,91 @@
+/* Column-level styling for the Students landing page.
+   The FluentDataGrid header defaults to ellipsis-truncation, so the
+   .grid-header-wrap class below opts back into wrapping for any column that
+   has a header title long enough to need it (Full Name, Current Grade). */
+
+/* Override FluentDataGrid's .col-title-text defaults (white-space: nowrap;
+   overflow: hidden; text-overflow: ellipsis) so the long titles can wrap.
+   This is a scoped-CSS file, so the override is only active while the
+   Students landing page is on screen — the ::deep combinator escapes the
+   Blazor scope marker so the rule reaches the FluentDataGrid-internal
+   .col-title-text element. Short column titles still render on one line
+   because they have no whitespace to break on. */
+::deep .col-title-text {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.2;
+}
+
+::deep .grid-header-wrap {
+    display: inline-block;
+    width: 100%;
+    word-break: break-word;
+    white-space: normal;
+    line-height: 1.2;
+    text-align: left;
+}
+
+/* Student column body: name on its own line, "(Gender, Age)" beneath it in
+   a muted style. We use flex column (not a <br>) so the demographics line
+   reflows with wrapping on narrow viewports. The whole cell is a
+   FluentAnchor (Lightweight), so it stretches to fill the column width and
+   the full name + demographics are clickable to the student detail page. */
+::deep .student-full-name {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    line-height: 1.25;
+    width: 100%;
+    text-decoration: none;
+}
+
+::deep .student-full-name__name {
+    font-weight: 500;
+}
+
+::deep .student-full-name__demographics {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.85em;
+}
+
+/* Current Grade column — plain text in the cell. The width is set on
+   GridTemplateColumns in @code; this rule just prevents the text from
+   hugging/overflowing the cell edge. */
+::deep .student-current-grade {
+    display: inline-block;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Guardians column — the count renders as a Lightweight FluentAnchor (the
+   repo's standard grid-link pattern); muted plain text when zero/unknown. */
+::deep .student-guardians-link {
+    white-space: nowrap;
+}
+
+::deep .student-guardians-none {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}
+
+/* Filter pills in the toolbar (e.g. the active grade filter) use the shared
+   Chip component. Wrap them so multiple chips lay out with a gap and don't
+   crowd the neighboring toolbar controls. */
+.landing-filter-chips {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 8px;
+}
+
+/* Actions column — compact the kebab (⋮) trigger button so the 72px column
+   holds the icon button without overflow. The ::deep combinator escapes the
+   Blazor scope marker so the rule reaches the FluentButton rendered by
+   RowActionsMenu inside the FluentDataGrid cell. */
+::deep .row-actions-menu fluent-button {
+    min-height: 32px;
+    min-width: 32px;
+    padding: 0;
+}

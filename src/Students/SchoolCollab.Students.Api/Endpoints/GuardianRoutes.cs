@@ -8,6 +8,7 @@ using SchoolCollab.Students.Core.CQRS.Guardians.Queries.GetGuardianById;
 using SchoolCollab.Students.Core.CQRS.Guardians.Queries.GetGuardianNameHistory;
 using SchoolCollab.Students.Core.CQRS.Guardians.Queries.ListGuardians;
 using SchoolCollab.Students.Core.CQRS.Guardians.Queries.ListGuardiansByStudent;
+using SchoolCollab.Students.Core.CQRS.Guardians.Queries.ListStudentCountsByGuardians;
 using SchoolCollab.Students.Core.CQRS.Guardians.Queries.ListStudentsForGuardian;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.DTOs;
@@ -31,8 +32,9 @@ public static class GuardianRoutes
             [FromServices] IQueryHandler<ListGuardians, GuardianDto[]> handler,
             CancellationToken ct,
             [FromQuery] string? search = null,
-            [FromQuery] Guid? excludeStudentId = null) =>
-            Results.Ok(await handler.HandleAsync(new ListGuardians(search, excludeStudentId), ct)));
+            [FromQuery] Guid? excludeStudentId = null,
+            [FromQuery] Guid? studentId = null) =>
+            Results.Ok(await handler.HandleAsync(new ListGuardians(search, excludeStudentId, studentId), ct)));
 
         group.MapGet("/{id:guid}", async (
             Guid id,
@@ -54,6 +56,16 @@ public static class GuardianRoutes
             [FromServices] IQueryHandler<ListStudentsForGuardian, StudentDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListStudentsForGuardian(id), ct)));
+
+        // Bulk student-count endpoint: GET /guardians/student-counts?guardianIds=…
+        // Returns the number of linked (non-deleted) students per guardian so
+        // the guardians landing page can render an "N students" cell without an
+        // N+1 per-guardian fetch. Mirrors /students/guardian-counts.
+        group.MapGet("/student-counts", async (
+            [FromQuery] Guid[] guardianIds,
+            [FromServices] IQueryHandler<ListStudentCountsByGuardians, StudentCountDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListStudentCountsByGuardians(guardianIds), ct)));
 
         group.MapPut("/{id:guid}", async (
             Guid id,

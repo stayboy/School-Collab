@@ -12,8 +12,8 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
-using SchoolCollab.Students.Admin.Components.Students;
-using SchoolCollab.Students.Admin.Services;
+using SchoolCollab.Students.Application.Components.Students;
+using SchoolCollab.Students.Application.Services;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -194,7 +194,7 @@ public class GradeLevelCreateDialogTests : BunitContext
         RegisterFor(gradeId: Guid.NewGuid(), codedValueId: Guid.NewGuid());
         var cut = RenderProvider();
 
-        var task = DialogService.ShowShellDialogAsync<GradeLevelCreateDialog, GradeLevelCreateDialog.GradeLevelCreateModel, SchoolCollab.Students.Admin.Services.GradeLevelDto>(
+        var task = DialogService.ShowShellDialogAsync<GradeLevelCreateDialog, GradeLevelCreateDialog.GradeLevelCreateModel, SchoolCollab.Students.Application.Services.GradeLevelDto>(
             new GradeLevelCreateDialog.GradeLevelCreateModel(),
             title: "Create grade level",
             size: DialogSize.Medium);
@@ -258,7 +258,7 @@ public class GradeLevelCreateDialogTests : BunitContext
         var task = DialogService.ShowShellDialogAsync<
             GradeLevelCreateDialog,
             GradeLevelCreateDialog.GradeLevelCreateModel,
-            SchoolCollab.Students.Admin.Services.GradeLevelDto>(
+            SchoolCollab.Students.Application.Services.GradeLevelDto>(
             model, "Create grade level", DialogSize.Medium);
 
         // Wait for the dialog's EditForm to render, then submit.

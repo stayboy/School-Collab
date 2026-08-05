@@ -41,7 +41,8 @@ public sealed class GetOrCreateGradeLevelHandler(
             // the coded value. Validation rules (MinAge/MaxAge/AllowedGender) are
             // managed via the Edit page (UpdateGradeLevel), not the wizard.
             existing.Update(command.Level, command.Name, command.DisplayOrder,
-                existing.MinAge, existing.MaxAge, existing.AllowedGenderCodedValueId);
+                existing.MinAge, existing.MaxAge, existing.AllowedGenderCodedValueId,
+                existing.IsBlockedFromEnrollment);
             await repository.UpdateAsync(existing, cancellationToken);
             gradeLevel = existing;
             created = false;
@@ -52,7 +53,8 @@ public sealed class GetOrCreateGradeLevelHandler(
         {
             gradeLevel = GradeLevel.Create(
                 command.CodedValueId, command.Level, command.Name, command.DisplayOrder,
-                command.MinAge, command.MaxAge, command.AllowedGenderCodedValueId)
+                command.MinAge, command.MaxAge, command.AllowedGenderCodedValueId,
+                command.IsBlockedFromEnrollment)
                 .WithTenant(tenantProvider);
             await repository.AddAsync(gradeLevel, cancellationToken);
             created = true;
@@ -75,6 +77,7 @@ public sealed class GetOrCreateGradeLevelHandler(
             gradeLevel.UpdatedAt,
             gradeLevel.MinAge,
             gradeLevel.MaxAge,
-            gradeLevel.AllowedGenderCodedValueId);
+            gradeLevel.AllowedGenderCodedValueId,
+            gradeLevel.IsBlockedFromEnrollment);
     }
 }

@@ -1,0 +1,127 @@
+@page "/students/create"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Services
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<Create> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<PageTitle>New Student</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <div class="title-row">
+                <h1 class="page-title">New Student</h1>
+            </div>
+
+            <TenantGate>
+                <ChildContent>
+                @* Field values live on _model directly now — the shared
+                   <StudentFormFields> binds to Model.StudentNumber / FirstName
+                   / LastName / DateOfBirth (DateOnly?) / GenderCodedValueId
+                   (Guid?), and DataAnnotations
+                   validation runs on the model via <DataAnnotationsValidator />. *@
+                <StudentFormFields Model="_model"
+                                   ShowGuardians="true"
+                                   ErrorMessage="@_error"
+                                   OnValidSubmit="OnSaveAsync"
+                                   SubmitLabel="Create Student"
+                                   SubmittingLabel="Saving…"
+                                   Submitting="@_saving"
+                                   OnCancel="@(() => Nav.NavigateTo("/students"))" />
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Student records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+            </TenantGate>
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private readonly StudentFormModel _model = new();
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _saveCts;
+    private volatile bool _disposed;
+    private bool _isRealTenant;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+    }
+
+    private async Task OnSaveAsync()
+    {
+        _saving = true;
+        _error = null;
+
+        if (!_isRealTenant) return;
+
+        _saveCts?.Cancel();
+        _saveCts?.Dispose();
+        _saveCts = new CancellationTokenSource();
+        var ct = _saveCts.Token;
+
+        try
+        {
+            Logger.LogInformation("User initiated create for student {StudentNumber}", _model.StudentNumber);
+            var request = new CreateStudentRequest(
+                _model.StudentNumber!,
+                _model.FirstName!,
+                _model.LastName!,
+                _model.DateOfBirth,
+                _model.GenderCodedValueId);
+
+            var studentId = await Api.CreateStudentAsync(request, ct);
+
+            // Link any guardians drafted on the form (existing or newly created).
+            try
+            {
+                foreach (var draft in _model.GuardianLinks)
+                {
+                    var guardianId = draft.ExistingGuardianId
+                        ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                            draft.TitleCodedValueId, draft.FirstName, draft.LastName, null, null, null), ct);
+                    await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                        studentId, guardianId, draft.RelationshipCodedValueId, draft.Role, false, null), ct);
+                }
+            }
+            catch (Exception gEx)
+            {
+                Logger.LogError(gEx, "Student {StudentId} created but guardian linking failed", studentId);
+                _error = $"Student created, but some guardians could not be linked: {gEx.Message}";
+                return;
+            }
+
+            Nav.NavigateTo("/students");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create student");
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _saveCts?.Cancel();
+        _saveCts?.Dispose();
+        _saveCts = null;
+    }
+}

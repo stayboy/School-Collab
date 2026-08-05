@@ -7,7 +7,7 @@ namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
 /// Source-level regression tests for the single-page student detail view
-/// (<c>SchoolCollab.Students.Admin/Components/Pages/Students/Detail.razor</c>).
+/// (<c>SchoolCollab.Students.Application/Components/Pages/Students/Detail.razor</c>).
 ///
 /// The student view was modernized to be a single scrollable page
 /// (Profile, Enrollments, Guardians, Contacts) with no <c>FluentTabs</c>.
@@ -31,7 +31,7 @@ public class StudentDetailSectionsTests
         var srcPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Components", "Pages", "Students", "Detail.razor"));
         File.Exists(srcPath).Should().BeTrue(
             $"Detail.razor should exist at '{srcPath}' — check the path resolution");
@@ -162,7 +162,7 @@ public class StudentDetailSectionsTests
         var cssPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Components", "Pages", "Students", "Detail.razor.css"));
         File.Exists(cssPath).Should().BeTrue();
         var css = File.ReadAllText(cssPath);
@@ -407,7 +407,7 @@ public class StudentDetailSectionsTests
         var cssPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Components", "Pages", "Students", "Detail.razor.css"));
         File.Exists(cssPath).Should().BeTrue();
         var css = File.ReadAllText(cssPath);
@@ -427,7 +427,7 @@ public class StudentDetailSectionsTests
         var cssPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Components", "Pages", "Students", "Detail.razor.css"));
         var css = File.ReadAllText(cssPath);
         css.Should().Contain(".page-container");

@@ -489,6 +489,7 @@ test-results/
 aspire.config.json
 
 # Agent / tooling artifacts
+.cline/
 .pi/
 School-Collab/
 intrun*.txt

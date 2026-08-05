@@ -48,10 +48,10 @@ namespace SchoolCollab.Admin.Tests.Unit;
 [TestClass]
 public class EditSidebarLayoutTests
 {
-    private const string EditRazorPath = "src/Students/SchoolCollab.Students.Admin/Components/Pages/Students/Edit.razor";
-    private const string EditCssPath = "src/Students/SchoolCollab.Students.Admin/Components/Pages/Students/Edit.razor.css";
-    private const string FormRazorPath = "src/Students/SchoolCollab.Students.Admin/Components/Students/StudentFormFields.razor";
-    private const string FormCssPath = "src/Students/SchoolCollab.Students.Admin/Components/Students/StudentFormFields.razor.css";
+    private const string EditRazorPath = "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor";
+    private const string EditCssPath = "src/Students/SchoolCollab.Students.Application/Components/Pages/Students/Edit.razor.css";
+    private const string FormRazorPath = "src/Students/SchoolCollab.Students.Application/Components/Students/StudentFormFields.razor";
+    private const string FormCssPath = "src/Students/SchoolCollab.Students.Application/Components/Students/StudentFormFields.razor.css";
 
     /// <summary>
     /// Reads a source file from the repo root. The path constants above

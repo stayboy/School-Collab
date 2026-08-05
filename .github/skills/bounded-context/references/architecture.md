@@ -10,7 +10,7 @@ projects:
 | `SchoolCollab.{Context}.Core` | Domain, data, CQRS, messaging | EF Core, Npgsql, HybridCache, Scrutor |
 | `SchoolCollab.{Context}.Contracts` | Integration events (plain records) | None (shared contract library) |
 | `SchoolCollab.{Context}.Api` | Minimal API endpoints | Core, Aspire defaults |
-| `SchoolCollab.{Context}.Admin` | Blazor SSR admin pages | Core DTOs via ApiClient |
+| `SchoolCollab.{Context}.Application` | Blazor SSR admin pages | Core DTOs via ApiClient |
 | `SchoolCollab.{Context}.Worker` | Background services | Core, Aspire defaults |
 | `SchoolCollab.{Context}.Tests.Unit` | Unit tests | Core |
 

@@ -1,10 +1,11 @@
 namespace SchoolCollab.Students.Core.DTOs;
 
 /// <summary>
-/// Landing-page projection of a <see cref="Domain.GradeLevel"/> with counts scoped
-/// to the <b>current period</b> (the period whose <c>[StartDate, EndDate]</c>
-/// contains today). The current period is derived server-side (see
-/// <c>ListGradeLevelsForLandingHandler</c>) — the UI never picks it.
+/// Landing-page projection of a <see cref="Domain.GradeLevel"/> with counts. Not
+/// bound to any "current period" — grade-levels setup is period-agnostic (see
+/// <c>ListGradeLevelsForLandingHandler</c>). <see cref="TopicCount"/> is
+/// date-effective on topic assignments; <see cref="StudentCount"/> counts the
+/// grade's <b>active enrollments</b> (all periods), tenant-scoped.
 /// </summary>
 /// <remarks>
 /// <para><see cref="Name"/> is the <b>mirrored</b> name copied from the coded value
@@ -14,9 +15,7 @@ namespace SchoolCollab.Students.Core.DTOs;
 /// mirrored name is kept here for sort/fallback only.</para>
 /// <para><see cref="TopicCount"/> is <b>global</b> (topics are the shared
 /// curriculum blueprint); <see cref="StudentCount"/> is <b>tenant-scoped</b> via
-/// <c>Student.TenantId</c>. When there is no current period, both counts are
-/// <c>0</c> and <see cref="CurrentPeriodId"/>/<see cref="CurrentPeriodName"/> are
-/// <see langword="null"/>.</para>
+/// <c>Student.TenantId</c>.</para>
 /// <para><see cref="MinAge"/>, <see cref="MaxAge"/>, and
 /// <see cref="AllowedGenderCodedValueId"/> mirror the enrollment-validation guard
 /// clauses on <see cref="Domain.GradeLevel"/> (plan §2 / §9). All three are
@@ -30,11 +29,12 @@ public sealed record GradeLevelLandingDto(
     Guid CodedValueId,
     string Name,
     int TopicCount,
+    int StrandCount,
+    int LessonCount,
     int StudentCount,
-    Guid? CurrentPeriodId,
-    string? CurrentPeriodName,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     int? MinAge = null,
     int? MaxAge = null,
-    Guid? AllowedGenderCodedValueId = null);
+    Guid? AllowedGenderCodedValueId = null,
+    bool IsBlockedFromEnrollment = false);

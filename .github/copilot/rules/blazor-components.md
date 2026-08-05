@@ -272,7 +272,7 @@ The coded-values landing page (`Components/Pages/CodedValues/Index.razor`) is th
    projection to the API and a matching `GetRootSummariesAsync()` on the client.
    (Pending implementation — tracked in `lp-slim-dto` todo.)
 
-6. **Reference implementation:** `src/CodedValues/SchoolCollab.CodedValues.Admin/Components/Pages/CodedValues/Index.razor`.
+6. **Reference implementation:** `src/Settings/SchoolCollab.Settings.Application/Components/Pages/CodedValues/Index.razor`.
    When you create a new read-only list page, copy that file and change only the
    route, the title, the API call, and the columns.
 

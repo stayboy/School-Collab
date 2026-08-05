@@ -1,0 +1,90 @@
+@* Withdraw a student from their currently-active enrollment by setting
+   an exit date. The dialog is a thin shell over
+   StudentsApiClient.WithdrawStudentAsync; it presents a single
+   FluentDatePicker and a confirmation summary, and the shared
+   DialogShellFooter handles save/cancel/error/saving state. *@
+@inherits DialogShellBase<WithdrawEnrollmentModel, WithdrawEnrollmentResult>
+@using SchoolCollab.Students.Application.Services
+@inject StudentsApiClient Api
+@inject ILogger<WithdrawEnrollmentDialog> Logger
+
+<div class="withdraw-dialog">
+    <FluentMessageBar Intent="MessageIntent.Info">
+        Withdraw <strong>@(Model.StudentName ?? "this student")</strong>
+        @if (!string.IsNullOrWhiteSpace(Model.GradeName))
+        {
+            <text> from <strong>@Model.GradeName</strong></text>
+        }
+        ? This will set the exit date on the current enrollment.
+    </FluentMessageBar>
+
+    <EditForm Model="_form" OnValidSubmit="HandleSubmitAsync">
+        <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+            <FluentDatePicker Value="@ExitDateAsDateTime" ValueChanged="@OnExitDateChanged" Label="Exit date" Required="true" />
+        </FluentStack>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Withdraw"
+                           SavingText="Withdrawing…"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public DateTime? ExitDate { get; set; }
+    }
+
+    private readonly FormState _form = new();
+
+    // Bridge: FluentDatePicker binds to DateTime?; the API contract is
+    // DateOnly? (WithdrawStudentRequest.ExitDate) so we convert on the
+    // way out in SubmitAsync.
+    private DateTime? ExitDateAsDateTime => _form.ExitDate;
+
+    private async Task OnExitDateChanged(DateTime? value)
+    {
+        _form.ExitDate = value;
+        await Task.CompletedTask;
+    }
+
+    protected override void OnInitialized()
+    {
+        _form.ExitDate = Model.DefaultExitDate.HasValue
+            ? Model.DefaultExitDate.Value.ToDateTime(TimeOnly.MinValue)
+            : DateTime.UtcNow;
+    }
+
+    protected override async Task<WithdrawEnrollmentResult?> SubmitAsync(WithdrawEnrollmentModel model)
+    {
+        // Surface a specific, actionable error instead of a silent no-op. The
+        // EditForm has no DataAnnotationsValidator (the FluentDatePicker
+        // Required is display-only), so Blazor validation does NOT block submit
+        // when the date is cleared — without this guard a cleared exit date would
+        // silently return null and the user would see "clicking Withdraw does
+        // nothing". Setting <Error> turns the silent no-op into a visible
+        // message bar (footer).
+        if (_form.ExitDate is null)
+        {
+            Error = "Pick an exit date before withdrawing.";
+            return null;
+        }
+
+        try
+        {
+            var exitDate = DateOnly.FromDateTime(_form.ExitDate.Value);
+            await Api.WithdrawStudentAsync(
+                model.EnrollmentId,
+                new WithdrawStudentRequest(exitDate));
+            return new WithdrawEnrollmentResult(true);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to withdraw enrollment {EnrollmentId}", model.EnrollmentId);
+            Error = ex.Message;
+            return null;
+        }
+    }
+}

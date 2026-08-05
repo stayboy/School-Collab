@@ -1,0 +1,319 @@
+@*
+    GradeLevelEditDialog â€” opens from the Grade Levels landing's row
+    kebab Edit action. Renders:
+      - The picked GRADE as static text with a pencil âœ icon button that
+        opens CodedValueDialog in Override mode (tenant-only name edit;
+        the system-wide coded value is NEVER edited from this surface).
+      - The enrollment-validation guard clauses (MinAge / MaxAge /
+        AllowedGender) â€” the only fields the Edit PUT actually persists.
+      - The Topics multi-select (current-period baseline + diff).
+
+    No GRADE dropdown â€” the coded value id is set at Create time and is
+    immutable on Edit; renaming goes through the tenant override.
+
+    Submit flow:
+      1. PUT /students/grade-levels/{id} with the validation fields.
+      2. Apply the topic diff via AssignGradeTopicAsync /
+         RemoveTopicAssignmentAsync.
+*@
+@inherits DialogShellBase<GradeLevelEditDialog.GradeLevelEditModel, GradeLevelDto>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject CodedValuesApiClient CodedValuesApi
+@inject StudentsApiClient Api
+@inject IDialogService DialogService
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Grade" For="grade-level-static-name">
+            <div class="grade-static-row">
+                <span id="grade-level-static-name" class="grade-static-name">@Model.CurrentName</span>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Edit())"
+                              Title="Override the tenant display name for this grade"
+                              aria-label="Override tenant name"
+                              OnClick="@OpenNameOverrideDialog"
+                              Disabled="@_resolvingOverride" />
+            </div>
+            <p class="hint">The grade is set at create time. Renaming is a per-tenant override; the system-wide coded value is never edited here.</p>
+        </FormRow>
+
+        <FormRow Label="Age range" AlignTop>
+            <FluentNumberField @bind-Value="Model.MinAge"
+                               Id="grade-level-min-age"
+                               Min="0"
+                               Max="150"
+                               Placeholder="No minimum"
+                               Style="flex:1; min-width:0" />
+            <span aria-hidden="true" style="opacity:0.6; padding:0 6px;">â€“</span>
+            <FluentNumberField @bind-Value="Model.MaxAge"
+                               Id="grade-level-max-age"
+                               Min="0"
+                               Max="150"
+                               Placeholder="No maximum"
+                               Style="flex:1; min-width:0" />
+        </FormRow>
+
+        <FormRow Label="Allowed Gender" For="grade-level-allowed-gender">
+            <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                @bind-SelectedId="Model.AllowedGenderCodedValueId"
+                                Placeholder="No restriction (co-ed)" />
+        </FormRow>
+
+        @if (_allTopics.Length > 0)
+        {
+            <FormRow Label="@($"Topics ({Model.TopicIds.Count})")" AlignTop>
+                <FluentListbox Items="@_allTopics"
+                               @bind-SelectedValues="Model.TopicIds"
+                               OptionText="@(s => s.Name)"
+                               OptionValue="@(s => s.Id.ToString())"
+                               Multiple="true"
+                               Style="width: 100%; min-height: 160px;" />
+            </FormRow>
+        }
+        else if (_allTopics.Length == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info" class="mb-3">
+                No topics exist yet.
+            </FluentMessageBar>
+        }
+        else
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+                Could not load topics for this grade.
+            </FluentMessageBar>
+        }
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Save"
+                           SavingText="Saving..."
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+<style>
+    .dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+    .grade-static-row { display: flex; align-items: center; gap: 8px; }
+    .grade-static-name { font-weight: 600; font-size: 1em; }
+    .hint { color: var(--neutral-foreground-hint); font-size: 0.85em; margin-top: 4px; }
+</style>
+
+@code {
+    private TopicDto[] _allTopics = [];
+    private CodedValueDto? _codedValue;
+    private bool _resolvingOverride;
+
+    /// <summary>
+    /// Editable form model for the Edit dialog. Plain class (not record)
+    /// because every field is two-way bound - init-only record properties
+    /// reject the @bind-Value assignments the Razor compiler emits.
+    /// </summary>
+    public sealed class GradeLevelEditModel
+    {
+        public Guid Id { get; set; }
+        public Guid CodedValueId { get; set; }
+        public string CurrentName { get; set; } = string.Empty;
+
+        /// <summary>
+        /// Mirrors the picked GRADE coded value's DisplayOrder. Captured at
+        /// dialog mount so the PUT body carries the immutable Level /
+        /// DisplayOrder values (the Core UpdateGradeLevel handler echoes
+        /// them back unchanged). Renames go through the tenant override
+        /// path instead.
+        /// </summary>
+        public int Level { get; set; }
+        public int DisplayOrder { get; set; }
+
+        public int? MinAge { get; set; }
+        public int? MaxAge { get; set; }
+        public Guid? AllowedGenderCodedValueId { get; set; }
+
+        /// <summary>Picked topic ids; bound to the FluentListbox.</summary>
+        public IReadOnlyList<Guid> TopicIds { get; set; } = [];
+
+        /// <summary>
+        /// topic id -> grade-topic-assignment id for already-assigned
+        /// topics (used by RemoveTopicAssignmentAsync on Edit).
+        /// </summary>
+        public IReadOnlyDictionary<Guid, Guid> TopicIdToAssignmentId { get; set; }
+            = new Dictionary<Guid, Guid>();
+    }
+
+    protected override string SubmitText => "Save";
+
+    protected override void OnModelInitialized(GradeLevelEditModel model)
+    {
+        // Pre-load the catalog + assignments + coded value so the form
+        // mounts with the current state. The async work runs in
+        // OnAfterRenderAsync so the DI scope is ready.
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadAllAsync();
+            StateHasChanged();
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task LoadAllAsync()
+    {
+        try
+        {
+            var all = await Api.ListTopicsAsync();
+            _allTopics = all ?? [];
+
+            _codedValue = await CodedValuesApi.GetByIdAsync(Model.CodedValueId);
+            if (_codedValue is not null)
+            {
+                // Echo the immutable Level / DisplayOrder from the coded
+                // value into the model so the PUT body is stable.
+                Model.Level = _codedValue.DisplayOrder;
+                Model.DisplayOrder = _codedValue.DisplayOrder;
+                if (string.IsNullOrEmpty(Model.CurrentName))
+                {
+                    Model.CurrentName = _codedValue.Name;
+                }
+            }
+
+            var existing = await Api.ListGradeTopicsByGradeAsync(Model.Id) ?? [];
+            var ids = existing.Select(a => a.TopicId).ToList();
+            var map = existing.ToDictionary(a => a.TopicId, a => a.Id);
+            Model.TopicIds = ids;
+            Model.TopicIdToAssignmentId = map;
+        }
+        catch (Exception ex)
+        {
+            Error = $"Could not load edit context: {ex.Message}";
+        }
+    }
+
+    private async Task OpenNameOverrideDialog()
+    {
+        if (_resolvingOverride) return;
+        _resolvingOverride = true;
+        try
+        {
+            if (_codedValue is null)
+            {
+                _codedValue = await CodedValuesApi.GetByIdAsync(Model.CodedValueId);
+                if (_codedValue is null)
+                {
+                    Error = "Could not load the grade coded value.";
+                    return;
+                }
+            }
+
+            var updated = await DialogService.ShowShellDialogAsync<
+                CodedValueDialog,
+                CodedValueFormModel,
+                CodedValueDto>(
+                CodedValueFormModel.ForOverride(_codedValue, _codedValue.IsOverridden),
+                title: "Override grade name",
+                size: DialogSize.Small);
+
+            if (updated is not null)
+            {
+                Model.CurrentName = updated.Name;
+                _codedValue = updated;
+            }
+        }
+        finally
+        {
+            _resolvingOverride = false;
+        }
+    }
+
+    protected override async Task<GradeLevelDto?> SubmitAsync(GradeLevelEditModel model)
+    {
+        // 1. Update grade-level validation fields. Name / Level / DisplayOrder
+        // are immutable on Edit - they derive from the coded value and would
+        // otherwise let an admin silently desync them from the coded value.
+        // The model carries the immutable Level / DisplayOrder values from the
+        // coded value (captured in LoadAllAsync) so the PUT body is stable.
+        // Api.UpdateGradeLevelAsync returns Task (the API returns NoContent),
+        // so we synthesize the post-update DTO from the model so the caller
+        // (the landing) gets a typed result. The landing reloads from the
+        // server anyway, so this is just shape-conformance.
+        await Api.UpdateGradeLevelAsync(model.Id, new UpdateGradeLevelRequest(
+            model.Level,
+            model.CurrentName,
+            model.DisplayOrder,
+            model.MinAge,
+            model.MaxAge,
+            model.AllowedGenderCodedValueId));
+
+        // 2. Topic diff. Assignments are date-based and open-ended (start
+        // today, no end) — a picked topic stays assigned across years until
+        // removed.
+        var warnings = await ApplyTopicDiffAsync(model.Id, model);
+        if (!string.IsNullOrEmpty(warnings))
+        {
+            Error = warnings;
+        }
+
+        return new GradeLevelDto(
+            model.Id,
+            model.CodedValueId,
+            model.Level,
+            model.CurrentName,
+            model.DisplayOrder,
+            0, 0, // TopicCount / StudentCount - landing reloads, not used here
+            DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            model.MinAge, model.MaxAge, model.AllowedGenderCodedValueId);
+    }
+
+    /// <summary>
+    /// Applies the picked topic set against the grade's currently-effective
+    /// assignments. Returns a non-empty string with any non-fatal per-topic
+    /// failure messages (so the dialog footer can show them).
+    /// </summary>
+    private async Task<string?> ApplyTopicDiffAsync(
+        Guid gradeLevelId, GradeLevelEditModel model)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baseline = await Api.ListGradeTopicsByGradeAsync(gradeLevelId) ?? [];
+        var assignedTopicIds = new HashSet<Guid>(baseline.Select(a => a.TopicId));
+        var desiredIds = new HashSet<Guid>(model.TopicIds);
+
+        var warnings = new List<string>();
+
+        foreach (var sid in desiredIds.Except(assignedTopicIds))
+        {
+            try
+            {
+                await Api.AssignGradeTopicAsync(
+                    new AssignGradeTopicRequest(gradeLevelId, sid, today));
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not assign topic {sid}: {ex.Message}");
+            }
+        }
+
+        foreach (var sid in assignedTopicIds.Except(desiredIds))
+        {
+            if (!model.TopicIdToAssignmentId.TryGetValue(sid, out var assignmentId)) continue;
+            try
+            {
+                await Api.RemoveTopicAssignmentAsync(assignmentId);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not unassign topic {sid}: {ex.Message}");
+            }
+        }
+
+        return warnings.Count == 0 ? null : string.Join(" â€¢ ", warnings);
+    }
+}

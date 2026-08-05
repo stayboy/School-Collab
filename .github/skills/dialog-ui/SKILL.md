@@ -99,8 +99,8 @@ Where the rule lives today (do NOT "tidy" a form by swapping it for a
 | Component | Class | File |
 | --- | --- | --- |
 | `DialogShellFooter` (shared; every `DialogShellBase` dialog) | `.button-row` (`border-top`) | `src/SchoolCollab.Admin.Shared/Components/Dialogs/DialogShellFooter.razor` (inline `<style>`) |
-| `StudentFormFields` (shared Student create / edit / inline wizard) | `.form-actions` (`border-top`) + `.form-actions--right` | `src/Students/SchoolCollab.Students.Admin/Components/Students/StudentFormFields.razor.css` |
-| `PeriodForm` (sibling, same pattern) | `.form-actions` | `src/Students/SchoolCollab.Students.Admin/Components/Pages/Periods/PeriodForm.razor.css` |
+| `StudentFormFields` (shared Student create / edit / inline wizard) | `.form-actions` (`border-top`) + `.form-actions--right` | `src/Students/SchoolCollab.Students.Application/Components/Students/StudentFormFields.razor.css` |
+| `PeriodForm` (sibling, same pattern) | `.form-actions` | `src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodForm.razor.css` |
 
 The `StudentFormFields` and `DialogShellFooter` comments cross-reference each
 other — if you change one, change the other.
@@ -199,6 +199,6 @@ do NOT re-declare the label grid locally.
 - `src/SchoolCollab.Admin.Shared/Components/Dialogs/DialogShellFooter.razor`
 - `src/SchoolCollab.Admin.Shared/Components/Dialogs/DialogServiceExtensions.cs`
 - `src/SchoolCollab.Admin.Shared/Components/FormRow.razor(.css)`
-- `src/Students/SchoolCollab.Students.Admin/Components/Students/StudentFormFields.razor(.css)`
-- `src/Students/SchoolCollab.Students.Admin/Components/Pages/Periods/PeriodForm.razor.css`
+- `src/Students/SchoolCollab.Students.Application/Components/Students/StudentFormFields.razor(.css)`
+- `src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodForm.razor.css`
 - `documents/solution/dialog-consolidation-plan.md` (full spec)

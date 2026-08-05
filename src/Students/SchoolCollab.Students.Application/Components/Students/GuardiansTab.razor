@@ -1,0 +1,212 @@
+@* DEPRECATED — no longer rendered. The page-side callers
+   (/students/{id}/edit, /students/{id}) now own the guardian link
+   list and the dialog opens (GuardianPickerDialog /
+   GuardianFormDialog) directly, and render the read-only list
+   via the shared StudentGuardiansList component.
+
+   This file is kept in the codebase for any external embed
+   surface and as a historical reference. It is no longer wired
+   up by Detail.razor or Edit.razor.
+
+   To re-introduce a "guardians tab" experience, use the
+   StudentGuardiansList component + the dialog approach the
+   pages use. The component is presentational only (no API
+   calls, no dialog opens) and is shared with Edit.razor.
+
+   ─────────────────────────────────────────────────────────────────
+
+   Student → Guardians tab (spec §11). Lists the student's linked guardians
+   grouped by role, with add / remove. Reuses StudentsApiClient's
+   ListGuardiansByStudentAsync (returns StudentGuardianViewDto[] carrying both
+   the link role and the guardian name) and LinkGuardianAsync / UnlinkGuardianAsync. *@
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject ILogger<GuardiansTab> Logger
+
+<div class="guardians-tab">
+    @if (_links is null)
+    {
+        <div class="spinner-container"><FluentProgressRing /></div>
+    }
+    else
+    {
+        @* Grouped by role: Primary first, then CC. *@
+        @foreach (var role in _roles)
+        {
+            var inRole = _links.Where(l => l.Role == role).ToArray();
+            if (inRole.Length == 0) continue;
+            <h4 class="role-heading">@role <span class="muted">(@inRole.Length)</span></h4>
+            <ul class="assigned-list">
+                @foreach (var link in inRole)
+                {
+                    <li>
+                        <span><strong>@link.FirstName @link.LastName</strong></span>
+                        @if (!string.IsNullOrWhiteSpace(link.DisplayName)) { <span class="muted"> — @link.DisplayName</span> }
+                        @if (link.RelationshipCodedValueId.HasValue && _relNames.TryGetValue(link.RelationshipCodedValueId.Value, out var rel)) { <span class="muted"> (@rel)</span> }
+                        @if (link.IsEmergencyContact) { <FluentBadge Appearance="Appearance.Accent">Emergency</FluentBadge> }
+                        <FluentButton Appearance="Appearance.Lightweight" Title="Remove link" OnClick="@(() => RemoveAsync(link.GuardianId))"><FluentIcon Icon="@(Icons.Regular.Size20.Delete)" /></FluentButton>
+                    </li>
+                }
+            </ul>
+        }
+
+        @if (_links.Count == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info">No guardians linked yet.</FluentMessageBar>
+        }
+
+        @* Collapsible wrapper: hides the link form by default so the
+           Contacts section below stays above the fold on the new single-page
+           student view. *@
+        <details class="guardians-link-disclosure">
+            <summary>Add a guardian link</summary>
+
+            <FluentCard class="detail-card" AreaRestricted="false">
+                <div class="wizard-section-header">
+                    <div>
+                        <h4>Link a guardian</h4>
+                        <p class="wizard-hint">Pick an existing guardian and set the role.</p>
+                    </div>
+                </div>
+                <div class="link-guardian-row">
+                    <FluentSelect TOption="GuardianDto" Items="_availableGuardians" @bind-SelectedOption="_newGuardian" OptionText="@(g => $"{g.FirstName} {g.LastName}")" OptionValue="@(g => g.Id.ToString())" Placeholder="Guardian" class="link-guardian-select" />
+                    <DropdownForEnum TEnum="GuardianRole"
+                                      @bind-SelectedValue="_newRole"
+                                      Placeholder="Role"
+                                      Class="link-guardian-role" />
+                    <CodedValueDropdown Parent="CodedValueParent.Relationships" @bind-SelectedId="_newRelationship" Placeholder="Relationship" class="link-guardian-rel" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="AddAsync" Disabled="@(_newGuardian is null || _saving)">Link</FluentButton>
+                </div>
+                @if (!string.IsNullOrEmpty(_error))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                }
+            </FluentCard>
+
+        </details>
+    }
+</div>
+
+<style>
+    .muted { color: var(--neutral-foreground-hint); }
+    .role-heading { margin: 12px 0 4px; }
+    .link-guardian-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .link-guardian-select { flex: 1 1 220px; min-width: 180px; }
+    .link-guardian-role { width: 120px; }
+    .link-guardian-rel { width: 170px; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public Guid StudentId { get; set; }
+
+    private List<StudentGuardianViewDto> _links = new();
+    private GuardianDto[] _availableGuardians = [];
+    private Dictionary<Guid, string> _relNames = new();
+    private bool _saving;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private GuardianDto? _newGuardian;
+    private GuardianRole _newRole = GuardianRole.Primary;
+    private Guid? _newRelationship;
+    private static readonly GuardianRole[] _roles = (GuardianRole[])Enum.GetValues(typeof(GuardianRole));
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loadCts?.Cancel();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+        await LoadAsync(ct);
+    }
+
+    private async Task LoadAsync(CancellationToken ct)
+    {
+        _error = null;
+        try
+        {
+            var links = await Api.ListGuardiansByStudentAsync(StudentId, ct) ?? [];
+            _links = links.ToList();
+
+            var all = await Api.ListGuardiansAsync(ct) ?? [];
+            var linkedIds = new HashSet<Guid>(_links.Select(l => l.GuardianId));
+            _availableGuardians = all.Where(g => !linkedIds.Contains(g.Id)).ToArray();
+
+            _relNames = new Dictionary<Guid, string>();
+            foreach (var link in _links.Where(l => l.RelationshipCodedValueId.HasValue))
+            {
+                var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
+                if (cv is not null) _relNames[cv.Id] = cv.Name;
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load guardians for student {StudentId}", StudentId);
+            _error = ex.Message;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task AddAsync()
+    {
+        if (_newGuardian is null) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                StudentId, _newGuardian.Id, _newRelationship, _newRole, false, null));
+            _newGuardian = null;
+            _newRelationship = null;
+            _newRole = GuardianRole.Primary;
+            await LoadAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to link guardian {GuardianId} to student {StudentId}", _newGuardian?.Id, StudentId);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            _saving = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task RemoveAsync(Guid guardianId)
+    {
+        _error = null;
+        try
+        {
+            await Api.UnlinkGuardianAsync(StudentId, guardianId);
+            await LoadAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to unlink guardian {GuardianId} from student {StudentId}", guardianId, StudentId);
+            _error = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

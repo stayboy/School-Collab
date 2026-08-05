@@ -373,6 +373,12 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("integer")
                         .HasColumnName("display_order");
 
+                    b.Property<bool>("IsBlockedFromEnrollment")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_blocked_from_enrollment");
+
                     b.Property<int>("Level")
                         .HasColumnType("integer")
                         .HasColumnName("level");

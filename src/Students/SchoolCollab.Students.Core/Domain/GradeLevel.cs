@@ -31,6 +31,12 @@ public sealed class GradeLevel : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public int? MaxAge { get; private set; }
     public Guid? AllowedGenderCodedValueId { get; private set; }
 
+    // When true, this grade level cannot be used for student enrollment. The
+    // landing page toggles it; EnrollStudent refuses blocked grades. Defaults to
+    // false (enrollment allowed). Independent of any current period — grade-level
+    // setup is period-agnostic.
+    public bool IsBlockedFromEnrollment { get; private set; }
+
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -44,7 +50,8 @@ public sealed class GradeLevel : ITenantEntity, IEntity, IAuditableEntity, IHasR
         int displayOrder,
         int? minAge = null,
         int? maxAge = null,
-        Guid? allowedGenderCodedValueId = null)
+        Guid? allowedGenderCodedValueId = null,
+        bool isBlockedFromEnrollment = false)
     {
         if (minAge is not null && maxAge is not null && minAge > maxAge)
             throw new GradeLevelConstraintException(
@@ -61,6 +68,7 @@ public sealed class GradeLevel : ITenantEntity, IEntity, IAuditableEntity, IHasR
             MinAge = minAge,
             MaxAge = maxAge,
             AllowedGenderCodedValueId = allowedGenderCodedValueId,
+            IsBlockedFromEnrollment = isBlockedFromEnrollment,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -75,7 +83,8 @@ public sealed class GradeLevel : ITenantEntity, IEntity, IAuditableEntity, IHasR
         int displayOrder,
         int? minAge = null,
         int? maxAge = null,
-        Guid? allowedGenderCodedValueId = null)
+        Guid? allowedGenderCodedValueId = null,
+        bool isBlockedFromEnrollment = false)
     {
         if (minAge is not null && maxAge is not null && minAge > maxAge)
             throw new GradeLevelConstraintException(
@@ -87,6 +96,19 @@ public sealed class GradeLevel : ITenantEntity, IEntity, IAuditableEntity, IHasR
         MinAge = minAge;
         MaxAge = maxAge;
         AllowedGenderCodedValueId = allowedGenderCodedValueId;
+        IsBlockedFromEnrollment = isBlockedFromEnrollment;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new GradeLevelUpdatedEvent(Id, Name));
+    }
+
+    /// <summary>
+    /// Blocks or unblocks this grade level from being used for student
+    /// enrollment. Idempotent: no-op when the value is unchanged.
+    /// </summary>
+    public void SetEnrollmentBlocked(bool blocked)
+    {
+        if (IsBlockedFromEnrollment == blocked) return;
+        IsBlockedFromEnrollment = blocked;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new GradeLevelUpdatedEvent(Id, Name));
     }

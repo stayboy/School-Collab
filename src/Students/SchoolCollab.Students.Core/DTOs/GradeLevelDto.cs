@@ -12,4 +12,5 @@ public sealed record GradeLevelDto(
     DateTimeOffset UpdatedAt,
     int? MinAge = null,
     int? MaxAge = null,
-    Guid? AllowedGenderCodedValueId = null);
+    Guid? AllowedGenderCodedValueId = null,
+    bool IsBlockedFromEnrollment = false);

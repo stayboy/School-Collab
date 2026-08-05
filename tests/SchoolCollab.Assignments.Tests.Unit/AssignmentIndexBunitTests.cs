@@ -8,8 +8,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
-using IndexPage = SchoolCollab.Assignments.Admin.Components.Pages.Assignments.Index;
-using SchoolCollab.Assignments.Admin.Services;
+using IndexPage = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Index;
+using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
 
 namespace SchoolCollab.Assignments.Tests.Unit;

@@ -37,7 +37,14 @@ public sealed class ListStudentsByGradeHandler(
             return [];
         }
 
-        // Query students enrolled in the specified grade for the specified period
+        // Query students enrolled in the specified grade for the specified period.
+        // Order on an anonymous projection FIRST, then project into the DTO LAST:
+        // EF Core's relational provider cannot translate OrderBy/ThenBy applied to a
+        // custom-type (StudentDto) projection — it treats that as a terminal client
+        // projection and throws InvalidOperationException ("could not be translated")
+        // at runtime, even though the InMemory provider (used by unit tests) evaluates
+        // it client-side and passes. Ordering on the anonymous type keeps the ORDER BY
+        // in SQL; the final Select to StudentDto is the last, translatable step.
         var students = await db.StudentEnrollments
             .AsNoTracking()
             .Where(se => se.GradeLevelId == query.GradeLevelId
@@ -46,7 +53,8 @@ public sealed class ListStudentsByGradeHandler(
             .Join(db.Students,
                 se => se.StudentId,
                 s => s.Id,
-                (se, s) => new StudentDto(
+                (se, s) => new
+                {
                     s.Id,
                     s.StudentNumber,
                     s.FirstName,
@@ -55,9 +63,20 @@ public sealed class ListStudentsByGradeHandler(
                     s.GenderCodedValueId,
                     s.IsDeleted,
                     s.CreatedAt,
-                    s.UpdatedAt))
-            .OrderBy(s => s.LastName)
-            .ThenBy(s => s.FirstName)
+                    s.UpdatedAt
+                })
+            .OrderBy(x => x.LastName)
+            .ThenBy(x => x.FirstName)
+            .Select(x => new StudentDto(
+                x.Id,
+                x.StudentNumber,
+                x.FirstName,
+                x.LastName,
+                x.DateOfBirth,
+                x.GenderCodedValueId,
+                x.IsDeleted,
+                x.CreatedAt,
+                x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 
         return students;

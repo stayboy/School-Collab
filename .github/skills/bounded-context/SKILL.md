@@ -24,7 +24,7 @@ src/{Context}/
 ├── SchoolCollab.{Context}.Core/        # Domain + Data + CQRS + Messaging
 ├── SchoolCollab.{Context}.Contracts/   # Integration events (MassTransit)
 ├── SchoolCollab.{Context}.Api/         # Minimal API
-├── SchoolCollab.{Context}.Admin/        # Blazor SSR admin pages
+├── SchoolCollab.{Context}.Application/  # Blazor SSR admin pages (Application = admin front-end)
 ├── SchoolCollab.{Context}.Worker/      # Background services (optional)
 └── SchoolCollab.{Context}.Tests.Unit/  # Unit tests
 ```

@@ -5,6 +5,13 @@
       "args": [
         "Microsoft.FluentUI.AspNetCore.McpServer@5.0.0-rc.3-26138.1"
       ]
+    },
+    "memory": {
+      "command": "cmd",
+      "args": ["/c", "npx", "-y", "@modelcontextprotocol/server-memory"],
+      "env": {
+        "MEMORY_FILE_PATH": "C:\\Users\\skwar\\source\\repos\\School-Collab\\.cline\\memory.jsonl"
+      }
     }
   }
 }

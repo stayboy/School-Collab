@@ -161,6 +161,122 @@ internal record Update{Entity}Request(string Name, ...);
 - Return `Results.NoContent()` on success
 - Catch `NotFoundException` → `NotFound`
 
+## Bulk Load / N+1 Avoidance
+
+**Rule: never loop single-entity GETs to hydrate related objects for a list.**
+A list of N items must not trigger N HTTP round-trips or N DB queries. When a
+page/aggregate needs a related object (or a child set) for every row, expose a
+**bulk endpoint** that fetches all of them in one round-trip, and a matching
+client method that groups the result client-side.
+
+### Bulk query (Core)
+
+A plural query returns all children for many parents in one DB hit. Cache it
+keyed on the hashed, sorted, distinct parent-id list.
+
+```csharp
+// ListEnrollmentsByStudents.cs — plural query
+public sealed record ListEnrollmentsByStudents(Guid[] StudentIds) : IQuery<StudentEnrollmentDto[]>;
+
+// ListEnrollmentsByStudentsHandler.cs
+public sealed class ListEnrollmentsByStudentsHandler(StudentsDbContext db, HybridCache cache)
+    : IQueryHandler<ListEnrollmentsByStudents, StudentEnrollmentDto[]>
+{
+    private static readonly HybridCacheEntryOptions CacheOptions = new()
+    { Expiration = TimeSpan.FromMinutes(5), LocalCacheExpiration = TimeSpan.FromMinutes(1) };
+
+    public async Task<StudentEnrollmentDto[]> HandleAsync(
+        ListEnrollmentsByStudents query, CancellationToken cancellationToken = default)
+    {
+        if (query.StudentIds.Length == 0) return [];
+        var distinctSorted = query.StudentIds.Distinct().OrderBy(id => id).ToArray();
+        var tenantId = db.CurrentTenantId; // capture tenant; lost inside HybridCache factory
+        var cacheKey = $"students:{CacheKeyHelper.Hash(string.Join(",", distinctSorted))}:enrollments";
+
+        return await cache.GetOrCreateAsync(cacheKey, (db, distinctSorted, tenantId),
+            static async (state, ct) =>
+            {
+                var (db, studentIds, tenantId) = state;
+                var results = await db.StudentEnrollments
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(x => studentIds.Contains(x.StudentId) && x.TenantId == tenantId)
+                    .OrderByDescending(x => x.EnrolledOn)
+                    .ToArrayAsync(ct);
+                return results.Select(e => new StudentEnrollmentDto(/* ... */)).ToArray();
+            },
+            CacheOptions, tags: ["students"], cancellationToken: cancellationToken);
+    }
+}
+```
+
+### Bulk endpoint (API)
+
+```csharp
+// Bind a `Guid[]` from repeated query params, mirroring the CodedValues
+// GET /by-ids?ids=...&ids=... pattern.
+group.MapGet("/{route}/by-ids", async (
+    [FromQuery] Guid[] ids,
+    [FromServices] IQueryHandler<List{Entities}ByIds, {Entity}Dto[]> handler,
+    CancellationToken ct) =>
+    Results.Ok(await handler.HandleAsync(new List{Entities}ByIds(ids), ct)));
+```
+
+### Bulk client method (Application)
+
+```csharp
+public async Task<{Entity}Dto[]> List{Entities}ByIdsAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+{
+    var idArray = ids as Guid[] ?? ids.ToArray();
+    if (idArray.Length == 0) return []; // no request for empty input
+    var query = string.Join("&", idArray.Select(id => $"ids={id}"));
+    return await _http.GetFromJsonAsync<{Entity}Dto[]>($"/{route}/by-ids?{query}", ct) ?? [];
+}
+```
+
+### Enrichment (client service)
+
+Hydrate the whole list in one bulk call, then group by the parent key and fill
+children. Keep resilience at the bulk boundary: on failure, leave the related
+field null rather than failing the list (mirrors the old per-item catch).
+
+```csharp
+var all = await List{Entities}ByIdsAsync(parentIds, ct);
+var byParent = all.GroupBy(e => e.ParentId).ToDictionary(g => g.Key, g => g.ToArray());
+```
+
+**Tenant-safety:** bulk handlers must scope the query explicitly with the
+captured tenant id (the global "Tenant" filter resolves to <c>Guid.Empty</c>
+inside the HybridCache factory and would hide every row). Always capture
+<code>db.CurrentTenantId</code> before <code>GetOrCreateAsync</code> and add
+<code>&amp;&amp; x.TenantId == tenantId</code>.
+
+**Existing examples:**
+- `GET /students/enrollments/by-students` — bulk enrollment load for student-list
+  grade hydration (`EnrichStudentsAsync`, `StudentsApiClient`).
+- `GET /students/guardian-counts?studentIds=…` — bulk guardian-count load for the
+  student landing page's "N guardians" cell (`ListGuardianCountsByStudents`,
+  `ListGuardianCountsByStudentsHandler`). Counts only NON-deleted linked guardians
+  so the number matches the guardians list.
+- `GET /guardians/student-counts?guardianIds=…` — the REVERSE bulk student-count
+  load for the guardians landing page's "N students" cell
+  (`ListStudentCountsByGuardians`, `ListStudentCountsByGuardiansHandler`). Counts
+  only NON-deleted linked students so the number matches the students list. The
+  guardians page's "N students" FluentAnchor navigates to
+  <code>/students?guardianId={{id}}</code>, where the student page reads
+  <code>[SupplyParameterFromQuery] Guid? GuardianId</code> and shows a dismissible
+  <c>Chip</c>.
+- `GET /api/coded-values/by-ids` — bulk coded-value name lookup by id.
+
+**Related filter (not a bulk-load, but the same enrichment pattern):**
+`GET /guardians?studentId=…` restricts the guardians list to guardians linked to
+one student. It is served by the SAME <c>ListGuardians</c> query/handler — the
+optional <c>StudentId</c> filter joins <c>StudentGuardians</c> inside the
+<c>GetOrCreateAsync</c> factory (cache key is partitioned by the student id). The
+student landing page's "N guardians" FluentAnchor navigates to
+<code>/students/guardians?studentId={{id}}</code>, where the guardians page reads
+<code>[SupplyParameterFromQuery] Guid? StudentId</code> and shows a dismissible
+<c>Chip</c> indicating the active student filter.
+
 ## Error Handling Patterns
 
 ### Domain Exceptions

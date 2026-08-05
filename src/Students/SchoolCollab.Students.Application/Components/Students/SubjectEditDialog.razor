@@ -1,0 +1,137 @@
+@*
+    SubjectEditDialog — opens from the Subjects landing's row kebab Edit
+    action. Renders the picked SUBJECT coded value as static text with a
+    pencil ✏ icon button that opens CodedValueDialog in Override mode
+    (tenant-only name edit; system-wide coded-value edits are not
+    surfaced from this surface).
+
+    Code is immutable on Edit - it derives from the coded value and the
+    user explicitly does not get to edit it.
+
+    Per the landing-dialogs plan: no validation fields on Subjects
+    (MinAge / MaxAge / AllowedGender are GradeLevel-only).
+
+    Submit: the dialog's only submit path is the tenant-name override,
+    invoked via the pencil icon (opens CodedValueDialog). The dialog's
+    own Save button is intentionally absent - the existing pattern
+    (Edit dialog with no entity-level mutations) is a "rename only"
+    surface.
+*@
+@inherits DialogShellBase<SubjectEditDialog.SubjectEditModel, SchoolCollab.Admin.Shared.Services.CodedValueDto>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Code" For="subject-static-code">
+            <div class="subject-static-row">
+                <code id="subject-static-code">@Model.CurrentCode</code>
+            </div>
+            <p class="hint">Code is set by the system-wide coded value and is immutable here.</p>
+        </FormRow>
+
+        <FormRow Label="Name" For="subject-static-name">
+            <div class="subject-static-row">
+                <span id="subject-static-name" class="subject-static-name">@Model.CurrentName</span>
+                <FluentButton Appearance="Appearance.Stealth"
+                              IconStart="@(new Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size16.Edit())"
+                              Title="Override the tenant display name for this subject"
+                              aria-label="Override tenant name"
+                              OnClick="@OpenNameOverrideDialog"
+                              Disabled="@_resolvingOverride" />
+            </div>
+            <p class="hint">Renaming is a per-tenant override; the system-wide coded value is never edited here.</p>
+        </FormRow>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Done"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+<style>
+    .dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+    .subject-static-row { display: flex; align-items: center; gap: 8px; }
+    .subject-static-name { font-weight: 600; font-size: 1em; }
+    .hint { color: var(--neutral-foreground-hint); font-size: 0.85em; margin-top: 4px; }
+</style>
+
+@code {
+    private CodedValueDto? _codedValue;
+    private bool _resolvingOverride;
+
+    /// <summary>
+    /// Editable form model for the Subject Edit dialog. Plain class (not
+    /// record) because every field is two-way bound. The dialog has no
+    /// entity-level mutations - the tenant override goes through the
+    /// pencil icon's CodedValueDialog invocation; the model's only role
+    /// here is to carry the picked subject's identity.
+    /// </summary>
+    public sealed class SubjectEditModel
+    {
+        public Guid CodedValueId { get; set; }
+        public string CurrentCode { get; set; } = string.Empty;
+        public string CurrentName { get; set; } = string.Empty;
+    }
+
+    protected override string SubmitText => "Done";
+
+    protected override void OnModelInitialized(SubjectEditModel model)
+    {
+        // Resolve the coded value lazily on first interaction - the dialog
+        // does not call any API on mount, only when the pencil is clicked.
+    }
+
+    private async Task OpenNameOverrideDialog()
+    {
+        if (_resolvingOverride) return;
+        _resolvingOverride = true;
+        try
+        {
+            if (_codedValue is null)
+            {
+                _codedValue = await CodedValuesApi.GetByIdAsync(Model.CodedValueId);
+                if (_codedValue is null)
+                {
+                    Error = "Could not load the subject coded value.";
+                    return;
+                }
+            }
+
+            var updated = await DialogService.ShowShellDialogAsync<
+                CodedValueDialog,
+                CodedValueFormModel,
+                CodedValueDto>(
+                CodedValueFormModel.ForOverride(_codedValue, _codedValue.IsOverridden),
+                title: $"Override subject name — {Model.CurrentName}",
+                size: DialogSize.Small);
+
+            if (updated is not null)
+            {
+                Model.CurrentName = updated.Name;
+                _codedValue = updated;
+            }
+        }
+        finally
+        {
+            _resolvingOverride = false;
+        }
+    }
+
+    protected override Task<CodedValueDto?> SubmitAsync(SubjectEditModel model)
+    {
+        // SubjectEditDialog is a rename-only surface; the Done button
+        // simply closes the dialog with the (possibly just-overridden)
+        // coded value so the landing reloads with the fresh name. If no
+        // override was applied, the original coded value is returned.
+        return Task.FromResult<CodedValueDto?>(_codedValue);
+    }
+}

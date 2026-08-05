@@ -101,11 +101,11 @@ namespace SchoolCollab.Admin.Tests.Unit;
 [TestClass]
 public class EnrollStudentDialogFeatureFlagTests
 {
-    private const string DialogPath = "src/Students/SchoolCollab.Students.Admin/Components/Students/EnrollStudentDialog.razor";
-    private const string DialogCssPath = "src/Students/SchoolCollab.Students.Admin/Components/Students/EnrollStudentDialog.razor.css";
+    private const string DialogPath = "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollStudentDialog.razor";
+    private const string DialogCssPath = "src/Students/SchoolCollab.Students.Application/Components/Students/EnrollStudentDialog.razor.css";
     private const string AppSettingsPath = "src/SchoolCollab.Admin/appsettings.json";
     private const string MigrationServicePath = "src/SchoolCollab.MigrationService/Program.cs";
-    private const string ApiClientPath = "src/Students/SchoolCollab.Students.Admin/Services/StudentsApiClient.cs";
+    private const string ApiClientPath = "src/Students/SchoolCollab.Students.Application/Services/StudentsApiClient.cs";
     private const string EnrollmentRoutesPath = "src/Students/SchoolCollab.Students.Api/Endpoints/EnrollmentRoutes.cs";
     private const string ExpectedFlagKey = FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog;
 

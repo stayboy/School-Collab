@@ -1,11 +1,11 @@
 using Microsoft.FluentUI.AspNetCore.Components;
 using SchoolCollab.Admin.Components;
-using SchoolCollab.Assignments.Admin;
-using SchoolCollab.Settings.Admin;
+using SchoolCollab.Assignments.Application;
+using SchoolCollab.Settings.Application;
 using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
-using SchoolCollab.Students.Admin;
+using SchoolCollab.Students.Application;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -90,9 +90,9 @@ app.MapDefaultEndpoints();
 var razorComponents = app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode()
     .AddAdditionalAssemblies(
-        typeof(SchoolCollab.Settings.Admin.Components._Imports).Assembly,
-        typeof(SchoolCollab.Assignments.Admin.Components._Imports).Assembly,
-        typeof(SchoolCollab.Students.Admin.Components._Imports).Assembly);
+        typeof(SchoolCollab.Settings.Application.Components._Imports).Assembly,
+        typeof(SchoolCollab.Assignments.Application.Components._Imports).Assembly,
+        typeof(SchoolCollab.Students.Application.Components._Imports).Assembly);
 
 if (!disableOIDC)
 {

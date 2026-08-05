@@ -31,6 +31,7 @@ public sealed class GetGradeLevelByCodedValueHandler(StudentsDbContext db)
             gradeLevel.UpdatedAt,
             gradeLevel.MinAge,
             gradeLevel.MaxAge,
-            gradeLevel.AllowedGenderCodedValueId);
+            gradeLevel.AllowedGenderCodedValueId,
+            gradeLevel.IsBlockedFromEnrollment);
     }
 }

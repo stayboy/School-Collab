@@ -37,7 +37,7 @@ public class ListGradeLevelsForLandingHandlerTests
     }
 
     [TestMethod]
-    public async Task Landing_NoCurrentPeriod_ZeroCountsAndNullPeriod()
+    public async Task Landing_NoTopicsNoStudents_ZeroCounts()
     {
         using var s = new StudentsTestScope("landing-no-period");
         await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
@@ -48,8 +48,8 @@ public class ListGradeLevelsForLandingHandlerTests
         var row = result[0];
         row.TopicCount.Should().Be(0);
         row.StudentCount.Should().Be(0);
-        row.CurrentPeriodId.Should().BeNull();
-        row.CurrentPeriodName.Should().BeNull();
+        row.StrandCount.Should().Be(0);
+        row.LessonCount.Should().Be(0);
     }
 
     [TestMethod]
@@ -78,8 +78,6 @@ public class ListGradeLevelsForLandingHandlerTests
         var row = result[0];
         row.TopicCount.Should().Be(1);
         row.StudentCount.Should().Be(1);
-        row.CurrentPeriodId.Should().Be(periodId);
-        row.CurrentPeriodName.Should().Be("Term 1");
     }
 
     [TestMethod]
@@ -157,17 +155,120 @@ public class ListGradeLevelsForLandingHandlerTests
     }
 
     [TestMethod]
-    public async Task Landing_ProjectsValidationRules_NullWhenNoRestriction()
+    public async Task Landing_ProjectsEnrollmentBlockedFlag()
     {
-        using var s = new StudentsTestScope("landing-validation-projection-null");
-        await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1"); // no validation fields
+        using var s = new StudentsTestScope("landing-blocked-projection");
+        var codedValueId = Guid.NewGuid();
+        var gl = GradeLevel.Create(codedValueId, 1, "Grade 1", 1, isBlockedFromEnrollment: true);
+        s.Db.GradeLevels.Add(gl);
+        await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
 
         result.Should().ContainSingle();
-        var row = result[0];
-        row.MinAge.Should().BeNull("the grade has no minimum-age restriction");
-        row.MaxAge.Should().BeNull("the grade has no maximum-age restriction");
-        row.AllowedGenderCodedValueId.Should().BeNull("the grade is co-ed");
+        result[0].IsBlockedFromEnrollment.Should().BeTrue(
+            "the landing DTO must project the enrollment-blocked flag for the landing toggle");
+    }
+
+    [TestMethod]
+    public async Task Landing_StrandCount_CountsAcrossEffectiveTopics()
+    {
+        using var s = new StudentsTestScope("landing-strand-count");
+        var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+
+        // Two topics assigned to this grade, effective from today.
+        var topicA = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
+        var topicB = Topic.Create(Guid.NewGuid(), "SCI", "Science", 2);
+        s.Db.Topics.Add(topicA);
+        s.Db.Topics.Add(topicB);
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topicA.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topicB.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
+
+        // 3 strands on topic A, 1 strand on topic B → StrandCount 4.
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Algebra", null, 1));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Geometry", null, 2));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Statistics", null, 3));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicB.Id, "Biology", null, 1));
+        await s.Db.SaveChangesAsync();
+
+        var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
+
+        result.Should().ContainSingle();
+        result[0].StrandCount.Should().Be(4);
+    }
+
+    [TestMethod]
+    public async Task Landing_LessonCount_CountsAcrossEffectiveTopics()
+    {
+        using var s = new StudentsTestScope("landing-lesson-count");
+        var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+
+        // Two topics assigned to this grade, effective from today.
+        var topicA = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
+        var topicB = Topic.Create(Guid.NewGuid(), "SCI", "Science", 2);
+        s.Db.Topics.Add(topicA);
+        s.Db.Topics.Add(topicB);
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topicA.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topicB.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
+
+        // 5 lessons on topic A, 2 lessons on topic B → LessonCount 7.
+        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 1", null, null, null, 1));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 2", null, null, null, 2));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 3", null, null, null, 3));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 4", null, null, null, 4));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 5", null, null, null, 5));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topicB.Id, "Lesson A", null, null, null, 1));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topicB.Id, "Lesson B", null, null, null, 2));
+        await s.Db.SaveChangesAsync();
+
+        var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
+
+        result.Should().ContainSingle();
+        result[0].LessonCount.Should().Be(7);
+    }
+
+    [TestMethod]
+    public async Task Landing_ArchivedTopic_StrandsAndLessonsExcluded()
+    {
+        using var s = new StudentsTestScope("landing-archived-topic");
+        var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var topic = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
+        s.Db.Topics.Add(topic);
+
+        // Archived topic: EndDate is yesterday.
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topic.Id, today.AddDays(-30), today.AddDays(-1)));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Algebra", null, 1));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topic.Id, "Lesson 1", null, null, null, 1));
+        await s.Db.SaveChangesAsync();
+
+        var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
+
+        result.Should().ContainSingle();
+        result[0].TopicCount.Should().Be(0, "archived topic is not effective");
+        result[0].StrandCount.Should().Be(0, "strands of archived topic are excluded");
+        result[0].LessonCount.Should().Be(0, "lessons of archived topic are excluded");
+    }
+
+    [TestMethod]
+    public async Task Landing_NoCurrentPeriod_StrandAndLessonCountsStillComputed()
+    {
+        using var s = new StudentsTestScope("landing-no-period-strands-lessons");
+        var glId = await SeedGradeLevelAsync(s, Guid.NewGuid(), 1, "Grade 1");
+
+        var topic = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
+        s.Db.Topics.Add(topic);
+        s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Algebra", null, 1));
+        s.Db.TopicLessons.Add(TopicLesson.Create(topic.Id, "Lesson 1", null, null, null, 1));
+        await s.Db.SaveChangesAsync();
+
+        var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
+
+        result.Should().ContainSingle();
+        result[0].StrandCount.Should().Be(1, "strand count is not gated on period");
+        result[0].LessonCount.Should().Be(1, "lesson count is not gated on period");
+        result[0].StudentCount.Should().Be(0, "no enrollments exist");
     }
 }

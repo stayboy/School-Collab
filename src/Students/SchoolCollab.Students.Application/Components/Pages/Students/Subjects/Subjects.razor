@@ -1,0 +1,380 @@
+@page "/students/subjects"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Students
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<Subjects> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<LandingPage TItem="SubjectDto"
+             Title="Subjects"
+             CreateLabel="+ New Subject"
+             CreateEnabled="@(_isRealTenant && _selectedGradeLevel is not null)"
+             OnCreate="@OpenCreateDialogAsync"
+             SearchEnabled="@_isRealTenant"
+             EmptyMessage="@CurrentEmptyMessage"
+             Items="@_filteredItems"
+             Loading="@(_items is null || _gradeLevels is null)"
+             GridSettings="@_gridSettings"
+             SearchText="@_searchText"
+             SearchTextChanged="@OnSearchValueChanged"
+             SearchPlaceholder="Search subjects…"
+             RowActions="@BuildRowActions"
+             RowActionsAriaLabel="Subject actions"
+             RowActionsUseMenuService="false">
+    <ToolbarFilters>
+        <FluentSelect TOption="GradeLevelOption"
+                      Items="@_gradeLevelOptions"
+                      @bind-SelectedOption="_selectedGradeLevel"
+                      OptionText="@(o => o?.Label ?? "")"
+                      OptionValue="@(o => o?.Value ?? "")"
+                      Label="Grade Level"
+                      Placeholder="Select a grade level"
+                      class="grade-filter" />
+    </ToolbarFilters>
+    <Columns>
+        <TemplateColumn TGridItem="SubjectDto" Title="Code" SortBy="@_sortByCode" Sortable="true">
+            <code>@context.Code</code>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="SubjectDto" Title="Name" SortBy="@_sortByName" Sortable="true">
+            @(_resolvedNames.TryGetValue(context.Id, out var name) ? name : context.Name)
+        </TemplateColumn>
+        <TemplateColumn TGridItem="SubjectDto" Title="Created">
+            @context.CreatedAt.ToLocalTime().ToString("d")
+        </TemplateColumn>
+    </Columns>
+</LandingPage>
+
+<style>
+    .grade-filter {
+        min-width: 200px;
+    }
+    .muted {
+        color: var(--neutral-foreground-hint);
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery] public Guid? GradeLevelId { get; set; }
+    [SupplyParameterFromQuery] public Guid? PeriodId { get; set; }
+
+    private GradeLevelDto[]? _gradeLevels;
+    private SubjectDto[]? _items;
+    private Dictionary<Guid, string> _resolvedNames = new();
+    private string _searchText = string.Empty;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private bool _isRealTenant;
+
+    private GradeLevelOption? _selectedGradeLevel;
+    private GradeLevelOption[] _gradeLevelOptions = [];
+
+    private record GradeLevelOption(string Value, string Label);
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        // Code | Name | Created | Actions - DisplayOrder dropped (mirrors the
+        // picked SUBJECT coded value's DisplayOrder; the Subjects landing
+        // uses Name + Code which are already the coded value's resolved fields).
+        GridTemplateColumns = "100px minmax(200px,2fr) 140px auto"
+    };
+
+    private static readonly GridSort<SubjectDto> _sortByCode =
+        GridSort<SubjectDto>.ByAscending(x => x.Code);
+
+    private static readonly GridSort<SubjectDto> _sortByName =
+        GridSort<SubjectDto>.ByAscending(x => x.Name);
+
+    private SubjectDto[] _filteredItems =>
+        string.IsNullOrWhiteSpace(_searchText)
+            ? (_items ?? [])
+            : (_items ?? []).Where(MatchesSearch).ToArray();
+
+    private string CurrentEmptyMessage
+    {
+        get
+        {
+            if (!_isRealTenant)
+                return "Select a tenant to manage subjects.";
+
+            if (_gradeLevels is null || _gradeLevels.Length == 0)
+                return "No grade levels exist. Create a grade level first.";
+
+            if (_selectedGradeLevel is null)
+                return "Select a grade level to view its subjects.";
+
+            if (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0)
+                return $"No subjects match '{_searchText}'.";
+
+            return _items?.Length == 0
+                ? "No subjects assigned to this grade level for the current period."
+                : "No subjects yet.";
+        }
+    }
+
+    private bool MatchesSearch(SubjectDto s)
+    {
+        var search = _searchText.Trim();
+        return s.Code.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || s.Name.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+        if (!_isRealTenant)
+        {
+            _gradeLevels = [];
+            _items = [];
+            return;
+        }
+
+        Logger.LogInformation("Loading subjects page");
+
+        try
+        {
+            // Load grade levels first (for the filter)
+            _gradeLevels = await Api.ListGradeLevelsAsync(token);
+            if (_disposed) return;
+
+            if (_gradeLevels is not null && _gradeLevels.Length > 0)
+            {
+                // Build options for the dropdown
+                _gradeLevelOptions = _gradeLevels
+                    .OrderBy(gl => gl.Level)
+                    .Select(gl => new GradeLevelOption(gl.Id.ToString(), gl.Name))
+                    .ToArray();
+
+                // If query param has gradeLevelId, select it
+                if (GradeLevelId.HasValue)
+                {
+                    _selectedGradeLevel = _gradeLevelOptions
+                        .FirstOrDefault(o => o.Value == GradeLevelId.Value.ToString());
+                }
+                // Otherwise default to first grade level
+                else if (_gradeLevelOptions.Length > 0)
+                {
+                    _selectedGradeLevel = _gradeLevelOptions[0];
+                }
+            }
+
+            // Load subjects for selected grade level
+            await LoadSubjectsAsync(token);
+
+            Logger.LogInformation("Loaded {Count} subjects", _items?.Length ?? 0);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects");
+            _error = ex.Message;
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_isRealTenant) return;
+
+        // If query param changes, update selection
+        if (GradeLevelId.HasValue && _gradeLevelOptions.Length > 0)
+        {
+            var match = _gradeLevelOptions.FirstOrDefault(o => o.Value == GradeLevelId.Value.ToString());
+            if (match is not null && !Equals(_selectedGradeLevel, match))
+            {
+                _selectedGradeLevel = match;
+                _items = null;
+                _loadCts ??= new CancellationTokenSource();
+                await LoadSubjectsAsync(_loadCts.Token);
+            }
+        }
+    }
+
+    private async Task LoadSubjectsAsync(CancellationToken token)
+    {
+        if (_selectedGradeLevel is null || !Guid.TryParse(_selectedGradeLevel.Value, out var gradeLevelId))
+        {
+            _items = [];
+            _resolvedNames = new();
+            return;
+        }
+
+        try
+        {
+            // Use the period from query param, or null to derive current period server-side
+            _items = await Api.ListSubjectsByGradeAsync(gradeLevelId, PeriodId, token);
+            if (_disposed) return;
+
+            // Batch-load tenant-resolved SUBJECT names so the Name column
+            // reflects any per-tenant overrides (mirrors the GradeLevels
+            // landing's _resolvedNames pattern).
+            var subjectIds = (_items ?? []).Select(s => s.CodedValueId).Distinct().ToArray();
+            _resolvedNames = new();
+            if (subjectIds.Length > 0)
+            {
+                var cv = await CodedValuesApi.GetByIdsAsync(subjectIds, token);
+                foreach (var v in cv)
+                {
+                    foreach (var s in _items ?? [])
+                    {
+                        if (s.CodedValueId == v.Id) _resolvedNames[s.Id] = v.Name;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects for grade {GradeId}", gradeLevelId);
+            _error = ex.Message;
+            _items = [];
+            _resolvedNames = new();
+        }
+    }
+
+    /// <summary>
+    /// Builds the kebab-menu actions for a single subject row. Edit opens
+    /// the Edit dialog (rename-only surface - the system-wide coded value
+    /// is NEVER edited from here); Delete keeps the existing confirmation
+    /// pattern. Same dialog-only pattern as GradeLevels/GradeLevelEditDialog.
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildRowActions(SubjectDto row)
+    {
+        var name = _resolvedNames.TryGetValue(row.Id, out var resolved) ? resolved : row.Name;
+        return new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => OpenEditDialogAsync(row), FluentIcons.Edit),
+            RowAction.Callback("Delete", () => OnDeleteAsync(row.Id, name), FluentIcons.Delete),
+        };
+    }
+
+    /// <summary>
+    /// Opens the Create dialog. Passes the current Grade Level filter
+    /// context so the dialog can wire the new subject to the grade via
+    /// CreateSubjectForGradeAsync in one round-trip when the filter is set.
+    /// </summary>
+    private async Task OpenCreateDialogAsync()
+    {
+        if (_disposed) return;
+
+        var gradeLevelId = _selectedGradeLevel is not null
+            && Guid.TryParse(_selectedGradeLevel.Value, out var gid)
+            ? gid
+            : (Guid?)null;
+
+        var model = new SubjectCreateDialog.SubjectCreateModel
+        {
+            GradeLevelId = gradeLevelId,
+        };
+
+        var created = await DialogService.ShowShellDialogAsync<
+            SubjectCreateDialog,
+            SubjectCreateDialog.SubjectCreateModel,
+            SubjectDto>(
+            model, "New subject", gradeLevelId.HasValue ? DialogSize.Small : DialogSize.Medium);
+
+        if (_disposed) return;
+        if (created is not null)
+        {
+            // Reload so the new (or reused) subject row appears in the
+            // current grade-level filter.
+            await LoadSubjectsAsync(_loadCts?.Token ?? CancellationToken.None);
+        }
+    }
+
+    /// <summary>
+    /// Opens the Edit dialog (rename-only surface) pre-seeded with the
+    /// subject's resolved code + tenant name. Refreshes the landing on
+    /// success so the row reflects any new override.
+    /// </summary>
+    private async Task OpenEditDialogAsync(SubjectDto row)
+    {
+        if (_disposed) return;
+
+        var resolvedName = _resolvedNames.TryGetValue(row.Id, out var n) ? n : row.Name;
+        var model = new SubjectEditDialog.SubjectEditModel
+        {
+            CodedValueId = row.CodedValueId,
+            CurrentCode = row.Code,
+            CurrentName = resolvedName,
+        };
+
+        await DialogService.ShowShellDialogAsync<
+            SubjectEditDialog,
+            SubjectEditDialog.SubjectEditModel,
+            CodedValueDto>(
+            model, $"Edit subject — {row.Code}", DialogSize.Small);
+
+        if (_disposed) return;
+        await LoadSubjectsAsync(_loadCts?.Token ?? CancellationToken.None);
+    }
+
+    private async Task OnDeleteAsync(Guid id, string name)
+    {
+        if (_disposed) return;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            $"Are you sure you want to delete subject '{name}'? This cannot be undone if grade-subject assignments exist.",
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        var previous = _items;
+        _items = _items?.Where(x => x.Id != id).ToArray();
+        StateHasChanged();
+
+        try
+        {
+            await Api.DeleteSubjectAsync(id);
+            if (_disposed) return;
+            Logger.LogInformation("Deleted subject {Id}", id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete subject {Id}", id);
+            _items = previous;
+            _error = ex.Message.Contains("referenced", StringComparison.OrdinalIgnoreCase)
+                ? "Cannot delete: this subject is assigned to grade levels."
+                : ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSelectedGradeLevelChangedAsync(GradeLevelOption? option)
+    {
+        _selectedGradeLevel = option;
+        _items = null;
+        _loadCts ??= new CancellationTokenSource();
+        await LoadSubjectsAsync(_loadCts.Token);
+        StateHasChanged();
+    }
+
+    private void OnSearchValueChanged(string? text)
+    {
+        _searchText = text?.Trim() ?? string.Empty;
+        StateHasChanged();
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

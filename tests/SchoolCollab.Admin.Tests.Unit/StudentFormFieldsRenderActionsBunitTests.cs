@@ -4,7 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using SchoolCollab.Students.Admin.Components.Students;
+using SchoolCollab.Students.Application.Components.Students;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -63,9 +63,9 @@ public class StudentFormFieldsRenderActionsBunitTests : BunitContext
         // enough to satisfy the DI container.
         var http = new HttpClient { BaseAddress = new Uri("http://localhost/") };
         Services.AddSingleton(new SchoolCollab.Admin.Shared.Services.CodedValuesApiClient(http));
-        Services.AddSingleton(_ => new SchoolCollab.Students.Admin.Services.StudentsApiClient(
+        Services.AddSingleton(_ => new SchoolCollab.Students.Application.Services.StudentsApiClient(
             http,
-            NullLogger<SchoolCollab.Students.Admin.Services.StudentsApiClient>.Instance,
+            NullLogger<SchoolCollab.Students.Application.Services.StudentsApiClient>.Instance,
             new SchoolCollab.Admin.Shared.Services.CodedValuesApiClient(http)));
     }
 

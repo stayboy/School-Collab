@@ -31,7 +31,7 @@ public class StudentsApiClientRoutesTests
         var srcPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Admin",
+            "src", "Students", "SchoolCollab.Students.Application",
             "Services", "StudentsApiClient.cs"));
         File.Exists(srcPath).Should().BeTrue(
             $"StudentsApiClient.cs should exist at '{srcPath}'");

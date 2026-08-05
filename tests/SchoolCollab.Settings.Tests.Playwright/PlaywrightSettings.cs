@@ -3,7 +3,7 @@ namespace SchoolCollab.Settings.Tests.Playwright;
 /// <summary>
 /// Base URLs for the Playwright smoke tests. The Config Flags admin UI lives in
 /// the main <c>SchoolCollab.Admin</c> host; the AI-chat consumer lives in the
-/// <c>SchoolCollab.Settings.Admin</c> host. Under <c>aspire run</c> the
+/// <c>SchoolCollab.Settings.Application</c> host. Under <c>aspire run</c> the
 /// AppHost assigns random ports, so point these at the actual service URLs
 /// printed in the Aspire dashboard:
 /// <list type="bullet">

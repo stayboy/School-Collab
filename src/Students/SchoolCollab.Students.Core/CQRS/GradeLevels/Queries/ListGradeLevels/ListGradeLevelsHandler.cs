@@ -47,8 +47,9 @@ public sealed class ListGradeLevelsHandler(
                         gl.MinAge,
                         gl.MaxAge,
                         gl.AllowedGenderCodedValueId,
-                        gl.CreatedAt,
-                        gl.UpdatedAt,
+                        gl.IsBlockedFromEnrollment,
+                        CreatedAt = gl.CreatedAt,
+                        UpdatedAt = gl.UpdatedAt,
                         TopicCount = db.GradeTopicAssignments
                             .IgnoreQueryFilters(new[] { "Tenant" })
                             .Count(ga => ga.GradeLevelId == gl.Id && ga.TenantId == tenantId),
@@ -70,7 +71,8 @@ public sealed class ListGradeLevelsHandler(
                     gl.UpdatedAt,
                     gl.MinAge,
                     gl.MaxAge,
-                    gl.AllowedGenderCodedValueId)).ToArray();
+                    gl.AllowedGenderCodedValueId,
+                    gl.IsBlockedFromEnrollment)).ToArray();
             },
             CacheOptions,
             tags: ["students"],

@@ -38,7 +38,7 @@ directly:
   control via the AppHost's user-secrets store
   (`UserSecretsId=71bc1e6c-899e-4131-98f2-60199f7d3ba2`). See
   `documents/configuration.md` §2 for the `dotnet user-secrets` recipe.
-- Admin hosts (`SchoolCollab.Admin`, `SchoolCollab.CodedValues.Admin`,
+- Admin hosts (`SchoolCollab.Admin`, `SchoolCollab.Settings.Application`, etc.)
   etc.) **MUST NOT register `CodedValueAIService`, `IChatClientFactory`,
   `ChatModelResolver`, or `IConfiguration`-based AI resolvers in their DI
   container.** Those types live behind the AI host's HTTP boundary.
