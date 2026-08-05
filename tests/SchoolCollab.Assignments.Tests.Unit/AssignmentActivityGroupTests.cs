@@ -57,6 +57,7 @@ public class AssignmentActivityGroupTests
                lookup,
                new FakeTenantProvider(TenantId),
                broadcaster,
+               new FakeNotificationPolicyResolver(),
                new FakeHybridCache(),
                NullLogger<PublishAssignmentCommandHandler>.Instance);
 

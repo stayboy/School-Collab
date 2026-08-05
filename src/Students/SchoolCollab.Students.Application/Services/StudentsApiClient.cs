@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Core.Notifications;
 using SchoolCollab.Students.Core.Contracts;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
@@ -610,6 +611,22 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task UpdateGradeLevelAsync(Guid id, UpdateGradeLevelRequest req, CancellationToken ct = default) =>
         (await _http.PutAsJsonAsync($"/students/grade-levels/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    // ── Per-grade notification policy override (null fields = inherit tenant default) ──
+
+    public async Task<GradeNotificationPolicyDto?> GetGradeNotificationPolicyAsync(Guid gradeLevelId, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/students/grade-levels/{gradeLevelId}/notification-policy", ct);
+        if (response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GradeNotificationPolicyDto>(ct);
+    }
+
+    public async Task UpsertGradeNotificationPolicyAsync(Guid gradeLevelId, UpsertGradeNotificationPolicyRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/students/grade-levels/{gradeLevelId}/notification-policy", req, ct);
+        response.EnsureSuccessStatusCode();
+    }
 
     /// <summary>
     /// Blocks or unblocks a grade level from being used for student enrollment
@@ -1288,3 +1305,15 @@ public sealed class StudentsApiClient : IContactsClient
 
     private sealed record IdResponse(Guid Id);
 }
+
+/// <summary>Upsert request for a per-grade notification policy override (all-nullable:
+/// a null field clears to "inherit the tenant default"). Mirrors the Students API shape.</summary>
+public sealed record UpsertGradeNotificationPolicyRequest(
+    NotificationChannel[]? PreferredChannelOrder,
+    NotificationChannel[]? BlockedChannels,
+    int? MaxNotifications,
+    int? MaxReminders,
+    int? ReminderIntervalHours,
+    int? LinkValidityDays,
+    TimeOnly? SendoutTimeOfDay,
+    int? SendoutIntervalMinutes);

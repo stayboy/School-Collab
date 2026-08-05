@@ -129,6 +129,7 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithReference(rabbit)
     .WithReference(redis)
     .WithReference(studentsApi)
+    .WithReference(settingsApi)
     .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
     .WaitFor(rabbit)
     .WaitFor(redis)
