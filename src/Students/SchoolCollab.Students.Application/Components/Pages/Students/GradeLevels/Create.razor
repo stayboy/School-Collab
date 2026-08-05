@@ -1,0 +1,196 @@
+@page "/students/grade-levels/create"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Students
+@using SchoolCollab.Admin.Shared.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject NavigationManager Nav
+@inject ILogger<Create> Logger
+@implements IDisposable
+
+<PageTitle>New Grade Level</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+                <div class="page-heading">
+                    <h1>New Grade Level</h1>
+                    <p class="muted">Create a grade, optionally assigning topics up front.</p>
+                </div>
+
+                <GradeLevelFormFields Model="_model"
+                                      OnValidSubmit="HandleSubmitAsync"
+                                      OnCodedValuePicked="OnGradePickedAsync"
+                                      SubmitLabel="Create"
+                                      SubmittingLabel="Creating…"
+                                      Submitting="_submitting"
+                                      ShowCancel="true"
+                                      CancelLabel="Cancel"
+                                      OnCancel="GoBack"
+                                      ErrorMessage="_error">
+                    <TopicsSection>
+                        @if (_allTopics.Length > 0)
+                        {
+                            <FormRow Label="@($"Topics ({_selectedTopicIds.Count})")" AlignTop>
+                                <FluentListbox Items="@_allTopics"
+                                               @bind-SelectedValues="_selectedTopicIds"
+                                               OptionText="@(t => t.Name)"
+                                               OptionValue="@(t => t.Id.ToString())"
+                                               Multiple="true"
+                                               Style="width: 100%; min-height: 160px;"
+                                               Title="Pick which topics belong to this grade. Picked topics are assigned on save." />
+                            </FormRow>
+                        }
+                        else
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                                No topics exist yet. Create topics first, then assign them here or from the grade detail page.
+                            </FluentMessageBar>
+                        }
+                    </TopicsSection>
+                </GradeLevelFormFields>
+
+                <div class="action-bar">
+                    <FluentButton Appearance="Appearance.Outline" OnClick="GoBack">Back to Grade Levels</FluentButton>
+                </div>
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+<style>
+    .muted { color: var(--neutral-foreground-hint); }
+    .page-heading h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
+    .action-bar { margin-top: 1rem; }
+</style>
+
+@code {
+    private readonly GradeLevelFormFields.GradeLevelFormModel _model = new();
+    private TopicDto[] _allTopics = [];
+    private List<Guid> _selectedTopicIds = new();
+    private bool _submitting;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+        try
+        {
+            _allTopics = await Api.ListTopicsAsync(ct) ?? [];
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load topics for create page");
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>Syncs Name / Level / DisplayOrder from the picked grade coded value.</summary>
+    private async Task OnGradePickedAsync(Guid? codedValueId)
+    {
+        if (codedValueId is null) return;
+        try
+        {
+            var cv = await CodedValuesApi.GetByIdAsync(codedValueId.Value);
+            if (cv is null) return;
+            _model.Name = cv.Name;
+            _model.Level = cv.DisplayOrder;
+            _model.DisplayOrder = cv.DisplayOrder;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        if (_model.CodedValueId is null)
+        {
+            _error = "Pick a grade.";
+            return;
+        }
+        if (_submitting) return;
+        _submitting = true;
+        _error = null;
+        try
+        {
+            var grade = await Api.GetOrCreateGradeLevelAsync(new GetOrCreateGradeLevelRequest(
+                _model.CodedValueId.Value,
+                _model.Level,
+                _model.Name ?? string.Empty,
+                _model.DisplayOrder,
+                _model.MinAge,
+                _model.MaxAge,
+                _model.AllowedGenderCodedValueId));
+
+            var warnings = await ApplyTopicDiffAsync(grade.Id);
+            if (!string.IsNullOrEmpty(warnings))
+            {
+                _error = warnings;
+                return;
+            }
+            if (_disposed) return;
+            Nav.NavigateTo($"/students/grade-levels/{grade.Id}");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create grade level");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private async Task<string?> ApplyTopicDiffAsync(Guid gradeLevelId)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baseline = await Api.ListGradeTopicsByGradeAsync(gradeLevelId) ?? [];
+        var assignedIds = new HashSet<Guid>(baseline.Select(a => a.TopicId));
+        var desiredIds = new HashSet<Guid>(_selectedTopicIds);
+        var warnings = new List<string>();
+
+        foreach (var tid in desiredIds.Except(assignedIds))
+        {
+            try
+            {
+                await Api.AssignGradeTopicAsync(new AssignGradeTopicRequest(gradeLevelId, tid, today));
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not assign topic {tid}: {ex.Message}");
+            }
+        }
+
+        return warnings.Count == 0 ? null : string.Join(" • ", warnings);
+    }
+
+    private void GoBack() => Nav.NavigateTo("/students/grade-levels");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

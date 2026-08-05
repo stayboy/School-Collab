@@ -106,6 +106,15 @@
         </FormRow>
     </FluentStack>
 
+    @* Optional topics multi-select (assigned to the grade on submit).
+       Supplied by the routable Create / Edit pages
+       (grade-level-detail-view-plan.md §7). Rendered inside the form so its
+       listbox bindings are part of the submit flow. *@
+    @if (TopicsSection is not null)
+    {
+        @TopicsSection
+    }
+
     @if (!string.IsNullOrEmpty(ErrorMessage))
     {
         <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@ErrorMessage</FluentMessageBar>
@@ -152,19 +161,31 @@
     /// <summary>Optional advanced override for the action row (e.g. dialog footer).</summary>
     [Parameter] public RenderFragment? Actions { get; set; }
 
+    /// <summary>
+    /// Optional topics multi-select rendered inside the form, above the action
+    /// row. The parent page owns the catalog + selected-ids + diff logic
+    /// (grade-level-detail-view-plan.md §7).
+    /// </summary>
+    [Parameter] public RenderFragment? TopicsSection { get; set; }
+
+    /// <summary>
+    /// Raised after the GRADE coded-value dropdown changes (SelectedId + after).
+    /// The parent page uses it to resolve the coded value and sync
+    /// Name / Level / DisplayOrder into the model.
+    /// </summary>
+    [Parameter] public EventCallback<Guid?> OnCodedValuePicked { get; set; }
+
     private EditForm? _editForm;
 
     /// <summary>
     /// Syncs the model's Name and Level/DisplayOrder with the picked coded
     /// value. Called from the <CodedValueDropdown>'s @bind-SelectedId:after.
     /// </summary>
-    private void OnCodedValueChanged()
+    private async Task OnCodedValueChanged()
     {
-        // The CodedValueDropdown raises after SelectedId changes; the calling
-        // page resolves the full CodedValueDto via the API and updates Model
-        // properties (Name, Level, DisplayOrder) through the OnCodedValuePicked
-        // callback if provided. We don't fetch here — the parent owns the
-        // data layer.
+        // Notify the parent page so it can resolve the picked coded value and
+        // mirror Name / Level / DisplayOrder into the model.
+        await OnCodedValuePicked.InvokeAsync(Model.CodedValueId);
     }
 
     public sealed class GradeLevelFormModel
