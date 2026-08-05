@@ -121,3 +121,8 @@ CNCODES_ZAF,+27,South Africa,CNCODES,4
 CNCODES_NGA,+234,Nigeria,CNCODES,5
 CNCODES_KEN,+254,Kenya,CNCODES,6
 CNCODES_IND,+91,India,CNCODES,7
+TCHROLES,Teacher Roles,Role a teacher holds on a grade level,,0
+TCHROLE_HOG,Head of Grade,,TCHROLES,1
+TCHROLE_CT,Class Teacher,,TCHROLES,2
+TCHROLE_AT,Assistant Teacher,,TCHROLES,3
+TCHROLE_SL,Subject Lead,,TCHROLES,4

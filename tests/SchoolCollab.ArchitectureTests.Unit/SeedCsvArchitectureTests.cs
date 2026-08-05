@@ -31,6 +31,20 @@ public class SeedCsvArchitectureTests
     }
 
     [TestMethod]
+    public void SeedCsv_ContainsTeacherRoleCodedValueParentAndChildren()
+    {
+        var codes = ReadCodes(Path.Combine(SeedDataDir, "seed.csv"));
+
+        codes.Should().Contain("TCHROLES",
+            "Teacher roles is a coded-value parent for the grade-level teacher-role tag (grade-level-detail-view-plan.md §4.2).");
+        codes.Should().Contain("TCHROLE_HOG");
+        codes.Should().Contain("TCHROLE_CT");
+        codes.Should().Contain("TCHROLE_AT");
+        codes.Should().Contain("TCHROLE_SL");
+    }
+
+
+    [TestMethod]
     public void SeedCsv_ContainsFiveAccraCommunities_AndAccraGhana()
     {
         var codes = ReadCodes(Path.Combine(SeedDataDir, "seed.csv"));
