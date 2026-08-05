@@ -321,8 +321,13 @@ public class GradeLevelDetailPageTests : BunitContext
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Allowed"));
 
-        // The overview switch renders and reflects the not-blocked state.
-        cut.Find("fluent-switch").Should().NotBeNull();
+        // The overview shows a read-only enrollment status (no inline switch).
         cut.Markup.Should().Contain("Enrollment");
+
+        // Open the Actions popover to reveal the allow-enrollment switch.
+        cut.Find("#grade-actions-trigger").Click();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Actions"));
+        cut.Find("fluent-switch").Should().NotBeNull();
+        cut.Markup.Should().Contain("Allow enrollment");
     }
 }

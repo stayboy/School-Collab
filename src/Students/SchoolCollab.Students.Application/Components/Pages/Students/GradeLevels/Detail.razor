@@ -58,11 +58,36 @@
                                     }
                                 </p>
                             </div>
-                            <FluentButton Appearance="Appearance.Outline"
-                                          IconStart="@FluentIcons.Edit"
-                                          OnClick="@(() => Nav.NavigateTo($"/students/grade-levels/{Id}/edit"))">
-                                Edit
-                            </FluentButton>
+                            <FluentButton id="grade-actions-trigger"
+                                          Appearance="Appearance.Outline"
+                                          IconStart="@FluentIcons.MoreVertical"
+                                          AriaLabel="Grade actions"
+                                          Title="Grade actions"
+                                          OnClick="@(() => _actionsOpen = !_actionsOpen)" />
+                            <FluentPopover AnchorId="grade-actions-trigger"
+                                           @bind-Open="_actionsOpen"
+                                           VerticalPosition="VerticalPosition.Bottom"
+                                           HorizontalPosition="HorizontalPosition.End"
+                                           Style="width: 260px;">
+                                <Header>Actions</Header>
+                                <Body>
+                                    <FluentStack Orientation="Orientation.Vertical" Class="actions-menu">
+                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                      IconStart="@FluentIcons.Edit"
+                                                      OnClick="GoEdit">
+                                            Edit grade
+                                        </FluentButton>
+                                        <div class="actions-divider"></div>
+                                        <div class="actions-toggle-row">
+                                            <FluentSwitch Value="@(!_grade.IsBlockedFromEnrollment)"
+                                                          ValueChanged="@(v => ToggleEnrollmentAsync(!v))"
+                                                          Disabled="@_savingEnrollment"
+                                                          Title="@(_grade.IsBlockedFromEnrollment ? "Allow new enrollments for this grade" : "Block new enrollments for this grade")" />
+                                            <span>Allow enrollment</span>
+                                        </div>
+                                    </FluentStack>
+                                </Body>
+                            </FluentPopover>
                         </div>
 
                         @* ── Overview card ─────────────────────────────────── *@
@@ -86,15 +111,7 @@
                                 </div>
                                 <div class="profile-row">
                                     <span class="profile-label">Enrollment</span>
-                                    <span class="profile-value">
-                                        <div class="enrollment-inline">
-                                            <FluentSwitch Value="@(!_grade.IsBlockedFromEnrollment)"
-                                                          ValueChanged="@(v => ToggleEnrollmentBlockedAsync(!v))"
-                                                          Disabled="@_savingEnrollment"
-                                                          Title="@(_grade.IsBlockedFromEnrollment ? "Blocked — new enrollments cannot use this grade" : "Allowed — click to block")" />
-                                            <span class="muted">@(_grade.IsBlockedFromEnrollment ? "Blocked" : "Allowed")</span>
-                                        </div>
-                                    </span>
+                                    <span class="profile-value">@(_grade.IsBlockedFromEnrollment ? "Blocked" : "Allowed")</span>
                                 </div>
                                 <div class="profile-row">
                                     <span class="profile-label">Counts</span>
@@ -304,7 +321,9 @@
     .profile-row { display: flex; gap: 0.75rem; align-items: baseline; }
     .profile-label { color: var(--neutral-foreground-hint); min-width: 120px; }
     .profile-value { font-weight: 500; }
-    .enrollment-inline { display: flex; align-items: center; gap: 0.5rem; }
+    .actions-menu { gap: 0.25rem; }
+    .actions-divider { height: 1px; background: var(--neutral-stroke-rest); margin: 0.25rem 0; }
+    .actions-toggle-row { display: flex; align-items: center; gap: 0.75rem; padding: 0.25rem 0; }
     .count-chip { background: var(--neutral-fill-secondary); border-radius: 999px; padding: 2px 10px; font-size: 0.85em; margin-right: 0.25rem; }
     .section-header { display: flex; align-items: center; justify-content: space-between; margin: 1rem 0 0.5rem; }
     .section-header h3 { margin: 0; }
@@ -334,6 +353,7 @@
     private bool _loading = true;
     private bool _isRealTenant;
     private bool _savingEnrollment;
+    private bool _actionsOpen;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -450,6 +470,19 @@
     }
 
     private void Back() => Nav.NavigateTo("/students/grade-levels");
+
+    private void GoEdit()
+    {
+        _actionsOpen = false;
+        Nav.NavigateTo($"/students/grade-levels/{Id}/edit");
+    }
+
+    private async Task ToggleEnrollmentAsync(bool blocked)
+    {
+        await ToggleEnrollmentBlockedAsync(blocked);
+        if (_disposed) return;
+        _actionsOpen = false;
+    }
 
     private async Task ToggleEnrollmentBlockedAsync(bool blocked)
     {
