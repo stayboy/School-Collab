@@ -48,6 +48,17 @@ public class GradeLevelDetailPageTests : BunitContext
         return File.ReadAllText(srcPath);
     }
 
+    private static string ReadSectionCardSource()
+    {
+        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+        var srcPath = Path.GetFullPath(Path.Combine(
+            asmDir, "..", "..", "..", "..", "..",
+            "src", "Students", "SchoolCollab.Students.Application",
+            "Components", "Students", "SectionCard.razor"));
+        File.Exists(srcPath).Should().BeTrue($"SectionCard.razor should exist at '{srcPath}'");
+        return File.ReadAllText(srcPath);
+    }
+
     private sealed class ScriptedHandler : HttpMessageHandler
     {
         public readonly List<(string Method, string Url, string? Body)> Calls = new();
@@ -232,9 +243,9 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("3 students");
 
         // Three equally-sized section cards render with titles + counts + anchors.
-        cut.Markup.Should().Contain("class=\"section-card__title\">Subjects/Curriculum</span>");
-        cut.Markup.Should().Contain("class=\"section-card__title\">Teachers</span>");
-        cut.Markup.Should().Contain("class=\"section-card__title\">Students</span>");
+        cut.Markup.Should().Contain("Subjects/Curriculum", "Subjects card title renders");
+        cut.Markup.Should().Contain("Teachers", "Teachers card title renders");
+        cut.Markup.Should().Contain("Students", "Students card title renders");
         cut.Markup.Should().Contain("View all subjects (0)");
         cut.Markup.Should().Contain("View all teachers (0)");
         cut.Markup.Should().Contain("View all students (0)");
@@ -406,12 +417,14 @@ public class GradeLevelDetailPageTests : BunitContext
     {
         var source = ReadDetailSource();
 
-        // Each card header has an add button with the correct icon and title.
-        source.Should().Contain("IconStart=\"@FluentIcons.Add\"");
-        source.Should().Contain("Title=\"Add subject\"");
-        source.Should().Contain("Title=\"Add teacher\"");
-        source.Should().Contain("IconStart=\"@FluentIcons.PersonAdd\"");
-        source.Should().Contain("Title=\"Add student\"");
+        // Each card uses the SectionCard component with add button parameters.
+        source.Should().Contain("<SectionCard", "SectionCard component is used for all three cards");
+        source.Should().Contain("OnAddClick=\"OpenTopicsDialogAsync\"", "Subjects card has add callback");
+        source.Should().Contain("OnAddClick=\"OpenTeachersDialogAsync\"", "Teachers card has add callback");
+        source.Should().Contain("OnAddClick=\"OpenAddStudentsAsync\"", "Students card has add callback");
+        source.Should().Contain("AddIcon=\"@FluentIcons.PersonAdd\"", "Students card uses PersonAdd icon");
+        source.Should().Contain("AddTitle=\"Add student\"", "Students card has add title");
+        source.Should().Contain("AddAriaLabel=\"Add student\"", "Students card has add aria-label");
     }
 
     [TestMethod]

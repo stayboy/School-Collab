@@ -1,0 +1,196 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject NavigationManager Nav
+
+<div class="section-card @Class">
+    <div class="section-card__header">
+        <FluentIcon Value="@Icon" />
+        <span class="section-card__title">@Title</span>
+        <span class="section-card__count">@Count</span>
+        @if (ShowAddButton)
+        {
+            <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                        IconStart="@AddIcon" Title="@AddTitle"
+                        AriaLabel="@AddAriaLabel" OnClick="OnAddClick" />
+        }
+    </div>
+    <div class="section-card__body">
+        @if (Loading)
+        {
+            <FluentProgressRing class="section-card__spinner" />
+        }
+        else if (!string.IsNullOrEmpty(ErrorMessage))
+        {
+            <div class="section-card__empty section-card__error">@ErrorMessage</div>
+        }
+        else if (Items is null || Items.Length == 0)
+        {
+            <div class="section-card__empty">@EmptyMessage</div>
+        }
+        else
+        {
+            @foreach (var item in Items.Take(MaxPreviewItems))
+            {
+                @ItemTemplate(item)
+            }
+        }
+    </div>
+    <div class="section-card__footer">
+        @if (ViewAllNavigationUrl is { } url)
+        {
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="@url" IconEnd="@FluentIcons.ArrowRight">
+                @ViewAllText (@Count)
+            </FluentAnchor>
+        }
+        else if (OnViewAllClick is not null)
+        {
+            <FluentButton Appearance="Appearance.Lightweight" OnClick="OnViewAllClick" IconEnd="@FluentIcons.ArrowRight">
+                @ViewAllText (@Count)
+            </FluentButton>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>
+    /// CSS class to add to the card (optional).
+    /// </summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>
+    /// Card title (e.g., "Subjects/Curriculum", "Teachers", "Students").
+    /// </summary>
+    [Parameter] public string Title { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Icon to display in the header.
+    /// </summary>
+    [Parameter] public Icon Icon { get; set; }
+
+    /// <summary>
+    /// Item count to display in the header badge.
+    /// </summary>
+    [Parameter] public int Count { get; set; }
+
+    /// <summary>
+    /// Whether to show the "Add" icon button in the header.
+    /// </summary>
+    [Parameter] public bool ShowAddButton { get; set; } = true;
+
+    /// <summary>
+    /// Icon for the "Add" button (defaults to Add).
+    /// </summary>
+    [Parameter] public Icon AddIcon { get; set; } = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.Add();
+
+    /// <summary>
+    /// Title attribute for the "Add" button.
+    /// </summary>
+    [Parameter] public string AddTitle { get; set; } = "Add";
+
+    /// <summary>
+    /// Aria-label for the "Add" button.
+    /// </summary>
+    [Parameter] public string AddAriaLabel { get; set; } = "Add";
+
+    /// <summary>
+    /// Items to display in the preview list.
+    /// </summary>
+    [Parameter] public object[]? Items { get; set; }
+
+    /// <summary>
+    /// Maximum number of items to show in the preview (default: 15).
+    /// </summary>
+    [Parameter] public int MaxPreviewItems { get; set; } = 15;
+
+    /// <summary>
+    /// Template for rendering each item in the preview list.
+    /// </summary>
+    [Parameter, EditorRequired] public RenderFragment<object>? ItemTemplate { get; set; }
+
+    /// <summary>
+    /// Loading state - shows a progress ring when true.
+    /// </summary>
+    [Parameter] public bool Loading { get; set; }
+
+    /// <summary>
+    /// Error message to display (if any).
+    /// </summary>
+    [Parameter] public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Message to display when no items are available.
+    /// </summary>
+    [Parameter] public string EmptyMessage { get; set; } = "No items yet.";
+
+    /// <summary>
+    /// Text for the "View all" link (default: "View all").
+    /// </summary>
+    [Parameter] public string ViewAllText { get; set; } = "View all";
+
+    /// <summary>
+    /// URL to navigate to for "View all" (if navigation-based).
+    /// </summary>
+    [Parameter] public string? ViewAllNavigationUrl { get; set; }
+
+    /// <summary>
+    /// Callback for "View all" click (if dialog-based).
+    /// </summary>
+    [Parameter] public Func<Task>? OnViewAllClick { get; set; }
+
+    /// <summary>
+    /// Callback for "Add" button click.
+    /// </summary>
+    [Parameter, EditorRequired] public Func<Task>? OnAddClick { get; set; }
+}
+
+<style>
+    .section-card { display: flex; flex-direction: column; margin: 0; }
+    .section-card__header {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.9rem 1rem 0.6rem;
+        border-bottom: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08));
+        color: var(--neutral-foreground-rest, #1b1b1b);
+    }
+    .section-card__title {
+        font-size: 1rem;
+        font-weight: 600;
+        flex: 1;
+        min-width: 0;
+    }
+    .section-card__count {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 24px;
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: var(--accent-fill-rest, #0f6cbd);
+        color: var(--foreground-on-accent, #ffffff);
+        font-size: 0.78rem;
+        font-weight: 600;
+    }
+    .section-card__body {
+        flex: 1;
+        padding: 0.5rem 0;
+        display: flex;
+        flex-direction: column;
+        gap: 0.15rem;
+        max-height: 380px;
+        overflow-y: auto;
+    }
+    .section-card__spinner { margin: 1rem auto; }
+    .section-card__empty {
+        color: var(--neutral-foreground-hint, #6b6b6b);
+        font-size: 0.9rem;
+        padding: 0.75rem 1rem;
+    }
+    .section-card__error { color: var(--danger-foreground-rest, #d13438); }
+    .section-card__footer {
+        display: flex;
+        justify-content: flex-end;
+        padding: 0.6rem 1rem 0.9rem;
+        border-top: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08));
+    }
+</style>

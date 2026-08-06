@@ -91,123 +91,83 @@
                             </div>
                         </FluentCard>
 
-                        @* ── Tabs (custom segmented pill control) ───────── *@
+                        @* ── Section cards (shared component) ──────────────── *@
                         <div class="section-cards">
-                            @* Topics card *@
-                            <FluentCard Class="section-card">
-                                <div class="section-card__header">
-                                    <FluentIcon Value="@FluentIcons.Book" />
-                                    <span class="section-card__title">Subjects/Curriculum</span>
-                                    <span class="section-card__count">@(_curriculum?.Length ?? 0)</span>
-                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
-                                                  IconStart="@FluentIcons.Add" Title="Add subject"
-                                                  AriaLabel="Add subject" OnClick="OpenTopicsDialogAsync" />
-                                </div>
-                                <div class="section-card__body">
-                                    @if (_curriculum is null)
-                                    {
-                                        <FluentProgressRing class="section-card__spinner" />
+                            @* Subjects/Curriculum card *@
+                            <SectionCard Title="Subjects/Curriculum"
+                                         Icon="@FluentIcons.Book"
+                                         Count="@(_curriculum?.Length ?? 0)"
+                                         OnAddClick="OpenTopicsDialogAsync"
+                                         OnViewAllClick="OpenTopicsDialogAsync"
+                                         ViewAllText="View all subjects"
+                                         Items="@(_curriculum ?? [])"
+                                         EmptyMessage="No subjects assigned to this curriculum yet."
+                                         Loading="@(_curriculum is null)">
+                                <ItemTemplate Context="item">
+                                    @{
+                                        var t = (GradeTopicCurriculumDto)item;
                                     }
-                                    else if (_curriculum.Length == 0)
-                                    {
-                                        <div class="section-card__empty">No subjects assigned to this curriculum yet.</div>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var t in _curriculum.Take(15))
-                                        {
-                                            <div class="section-card__item">
-                                                <button type="button" class="item-name" @onclick="() => OpenStrandsAsync(t)">@t.Name</button>
-                                                <div class="item-meta">
-                                                    <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
-                                                                  OnClick="@(() => OpenStrandsAsync(t))">
-                                                        @t.StrandCount strands
-                                                    </FluentButton>
-                                                    <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
-                                                                  OnClick="@(() => OpenLessonsAsync(t))">
-                                                        @t.LessonCount lessons
-                                                    </FluentButton>
-                                                </div>
-                                            </div>
-                                        }
-                                    }
-                                </div>
-                                <div class="section-card__footer">
-                                    <FluentButton Appearance="Appearance.Lightweight" OnClick="OpenTopicsDialogAsync" IconEnd="@FluentIcons.ArrowRight">
-                                        View all subjects (@(_curriculum?.Length ?? 0))
-                                    </FluentButton>
-                                </div>
-                            </FluentCard>
+                                    <div class="section-card__item">
+                                        <button type="button" class="item-name" @onclick="() => OpenStrandsAsync(t)">@t.Name</button>
+                                        <div class="item-meta">
+                                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                          OnClick="@(() => OpenStrandsAsync(t))">
+                                                @t.StrandCount strands
+                                            </FluentButton>
+                                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                          OnClick="@(() => OpenLessonsAsync(t))">
+                                                @t.LessonCount lessons
+                                            </FluentButton>
+                                        </div>
+                                    </div>
+                                </ItemTemplate>
+                            </SectionCard>
 
                             @* Teachers card *@
-                            <FluentCard Class="section-card">
-                                <div class="section-card__header">
-                                    <FluentIcon Value="@FluentIcons.People" />
-                                    <span class="section-card__title">Teachers</span>
-                                    <span class="section-card__count">@(_teachers?.Length ?? 0)</span>
-                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
-                                                  IconStart="@FluentIcons.Add" Title="Add teacher"
-                                                  AriaLabel="Add teacher" OnClick="OpenTeachersDialogAsync" />
-                                </div>
-                                <div class="section-card__body">
-                                    @if (_teachers is null || _teachers.Length == 0)
-                                    {
-                                        <div class="section-card__empty">No teachers linked to this grade yet.</div>
+                            <SectionCard Title="Teachers"
+                                         Icon="@FluentIcons.People"
+                                         Count="@(_teachers?.Length ?? 0)"
+                                         OnAddClick="OpenTeachersDialogAsync"
+                                         OnViewAllClick="OpenTeachersDialogAsync"
+                                         ViewAllText="View all teachers"
+                                         Items="@(_teachers ?? [])"
+                                         EmptyMessage="No teachers linked to this grade yet."
+                                         Loading="@(_teachers is null)">
+                                <ItemTemplate Context="item">
+                                    @{
+                                        var t = (TeacherWithRoleDto)item;
                                     }
-                                    else
-                                    {
-                                        @foreach (var t in _teachers.Take(15))
-                                        {
-                                            <a class="section-card__item" href="@($"/students/teachers/{t.Id}")">
-                                                <span class="item-main">@(t.TitleCodedValueId is { } tid && _salutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@t.FirstName @t.LastName</span>
-                                                <span class="item-meta">@(t.TeacherRoleCodedValueId is { } rid && _roleNames.TryGetValue(rid, out var r) ? r : "No role")</span>
-                                            </a>
-                                        }
-                                    }
-                                </div>
-                                <div class="section-card__footer">
-                                    <FluentButton Appearance="Appearance.Lightweight" OnClick="OpenTeachersDialogAsync" IconEnd="@FluentIcons.ArrowRight">
-                                        View all teachers (@(_teachers?.Length ?? 0))
-                                    </FluentButton>
-                                </div>
-                            </FluentCard>
+                                    <a class="section-card__item" href="@($"/students/teachers/{t.Id}")">
+                                        <span class="item-main">@(t.TitleCodedValueId is { } tid && _salutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@t.FirstName @t.LastName</span>
+                                        <span class="item-meta">@(t.TeacherRoleCodedValueId is { } rid && _roleNames.TryGetValue(rid, out var r) ? r : "No role")</span>
+                                    </a>
+                                </ItemTemplate>
+                            </SectionCard>
 
                             @* Students card *@
-                            <FluentCard Class="section-card">
-                                <div class="section-card__header">
-                                    <FluentIcon Value="@FluentIcons.Person" />
-                                    <span class="section-card__title">Students</span>
-                                    <span class="section-card__count">@(_students?.Length ?? 0)</span>
-                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
-                                                  IconStart="@FluentIcons.PersonAdd" Title="Add student"
-                                                  AriaLabel="Add student" OnClick="OpenAddStudentsAsync" />
-                                </div>
-                                <div class="section-card__body">
-                                    @if (!string.IsNullOrEmpty(_studentsError))
-                                    {
-                                        <div class="section-card__empty section-card__error">@_studentsError</div>
+                            <SectionCard Title="Students"
+                                         Icon="@FluentIcons.Person"
+                                         Count="@(_students?.Length ?? 0)"
+                                         AddIcon="@FluentIcons.PersonAdd"
+                                         AddTitle="Add student"
+                                         AddAriaLabel="Add student"
+                                         OnAddClick="OpenAddStudentsAsync"
+                                         ViewAllNavigationUrl="@($"/students?gradeLevelId={Id}")"
+                                         ViewAllText="View all students"
+                                         Items="@(_students ?? [])"
+                                         EmptyMessage="No active students in this grade for the current period."
+                                         ErrorMessage="@_studentsError"
+                                         Loading="@(_students is null)">
+                                <ItemTemplate Context="item">
+                                    @{
+                                        var st = (StudentDto)item;
                                     }
-                                    @if (_students is null || _students.Length == 0)
-                                    {
-                                        <div class="section-card__empty">No active students in this grade for the current period.</div>
-                                    }
-                                    else
-                                    {
-                                        @foreach (var st in _students.Take(15))
-                                        {
-                                            <a class="section-card__item" href="@($"/students/{st.Id}")">
-                                                <span class="item-main">@st.FirstName @st.LastName</span>
-                                                <span class="item-meta">@GetStudentDemographics(st)</span>
-                                            </a>
-                                        }
-                                    }
-                                </div>
-                                <div class="section-card__footer">
-                                    <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/students?gradeLevelId={Id}")" IconEnd="@FluentIcons.ArrowRight">
-                                        View all students (@(_students?.Length ?? 0))
-                                    </FluentAnchor>
-                                </div>
-                            </FluentCard>
+                                    <a class="section-card__item" href="@($"/students/{st.Id}")">
+                                        <span class="item-main">@st.FirstName @st.LastName</span>
+                                        <span class="item-meta">@GetStudentDemographics(st)</span>
+                                    </a>
+                                </ItemTemplate>
+                            </SectionCard>
                         </div>
                     }
                 </ChildContent>
@@ -275,10 +235,8 @@
     .dialog-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--neutral-stroke-rest); padding-top: 0.75rem; margin-top: 0.75rem; }
     .topic-dialog { min-width: 480px; }
 
-    /* ── Section cards: topics / teachers / students ───────────────
-       Three equally-sized FluentCards in a responsive auto-fit grid. Each
-       holds a top-15 preview list with a count in the header and a
-       "View all" action in the footer (FluentButton for Topics/Teachers dialogs, FluentAnchor for the Students landing). */
+    /* ── Section cards layout: 3-column row, stacking below 1100px ───────
+       CSS is now in SectionCard.razor; this keeps only the grid wrapper. */
     .section-cards {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
@@ -292,49 +250,7 @@
             grid-template-columns: 1fr;
         }
     }
-    .section-card { display: flex; flex-direction: column; margin: 0; }
-    .section-card__header {
-        display: flex;
-        align-items: center;
-        gap: 0.5rem;
-        padding: 0.9rem 1rem 0.6rem;
-        border-bottom: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08));
-        color: var(--neutral-foreground-rest, #1b1b1b);
-    }
-    .section-card__title {
-        font-size: 1rem;
-        font-weight: 600;
-        flex: 1;
-        min-width: 0;
-    }
-    .section-card__count {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        min-width: 24px;
-        height: 24px;
-        padding: 0 8px;
-        border-radius: 999px;
-        background: var(--accent-fill-rest, #0f6cbd);
-        color: var(--foreground-on-accent, #ffffff);
-        font-size: 0.78rem;
-        font-weight: 600;
-    }
-    .section-card__body {
-        flex: 1;
-        padding: 0.5rem 0;
-        display: flex;
-        flex-direction: column;
-        gap: 0.15rem;
-        max-height: 380px;
-        overflow-y: auto;
-    }
-    .section-card__spinner { margin: 1rem auto; }
-    .section-card__empty {
-        color: var(--neutral-foreground-hint, #6b6b6b);
-        font-size: 0.9rem;
-        padding: 0.75rem 1rem;
-    }
+    /* Item styles (used inside SectionCard templates) */
     .section-card__item {
         display: flex;
         flex-direction: column;
@@ -361,13 +277,6 @@
                  font-weight: 500; color: inherit; cursor: pointer; width: 100%; line-height: 1.3; }
     .item-main { font-weight: 500; line-height: 1.3; }
     .item-meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
-    .section-card__error { color: var(--danger-foreground-rest, #d13438); }
-    .section-card__footer {
-        display: flex;
-        justify-content: flex-end;
-        padding: 0.6rem 1rem 0.9rem;
-        border-top: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08));
-    }
 </style>
 
 @code {
