@@ -1,6 +1,6 @@
 # Spec: Grade-Detail Modern UI (section cards + grid actions + name polish)
 
-> Status: **Complete — cg/7 (card-based redesign) + cg/8 (UI polish) shipped + tests green (Students 185, Admin 273, Arch 14, Assignments 88, Settings 402)**
+> Status: **Complete — cg/7 (card-based redesign) + cg/8 (UI polish + shared FieldDisplay) shipped + tests green (Students 185, Admin 273, Arch 14, Assignments 88, Settings 402)**
 > Owner: Students context (grade-level detail page + shared StudentsGrid)
 > Depends on: `grade-detail-rich-grids-plan.md` (cg/2–cg/6), `landing-page-wrapper.md`
 > Branches: `cg/7-grade-tabs-grid` (PR #133), `cg/8-grade-detail-polish` (PR #134)
@@ -54,6 +54,7 @@
 | 9 | SectionCard component | Extract a shared `SectionCard.razor` component to unify the three grade-detail cards (header icon/title/count/add, preview item template, View-all footer). Wrap in `FluentCard` with explicit border so the card outline is visible. | ✅ cg/8 |
 | 10 | Subject count gap | Subject card secondary text uses wider gap + `|` divider between Strands(N) and Lessons(N) counters. Topic name is a `FluentButton` (Lightweight, no card-style plain button). | ✅ cg/8 |
 | 11 | Profile view | Grade Overview profile displays Name, Age range, Enrollment, Gender, Students; removed the redundant Level row. | ✅ cg/8 |
+| 12 | FieldDisplay component | Extract a shared read-only `FieldDisplay` component in `SchoolCollab.Admin.Shared` for label/value pairs, with Vertical (detail-card default: muted uppercase label above value) and Horizontal (review-row default: bold inline label beside value) orientations. Migrated grade, student, guardian, and teacher detail profiles. | ✅ cg/8 |
 
 ## 2. Tests
 
