@@ -158,7 +158,7 @@ public static class TopicRoutes
         {
             try
             {
-                await handler.HandleAsync(new UpdateTopic(id, req.Name, req.DisplayOrder), ct);
+                await handler.HandleAsync(new UpdateTopic(id, req.Name, req.DisplayOrder, req.CodedValueId, req.Code), ct);
                 return Results.NoContent();
             }
             catch (TopicNotFoundException)
@@ -315,7 +315,11 @@ public static class TopicRoutes
     }
 }
 
-internal record UpdateTopicRequest(string Name, int DisplayOrder);
+internal record UpdateTopicRequest(
+    string Name,
+    int DisplayOrder,
+    Guid? CodedValueId = null,
+    string? Code = null);
 internal record UpdateTopicStrandRequest(string Name, string? Description, int DisplayOrder);
 internal record UpdateTopicLessonRequest(string Name, string? Description, DateOnly? StartDate, DateOnly? EndDate, int DisplayOrder);
 internal record AssignLessonStrandRequest(Guid? StrandId);
@@ -323,13 +327,13 @@ internal record AssignLessonStrandRequest(Guid? StrandId);
 internal record CreateTopicForGradeRequest(
     Guid GradeLevelId,
     Guid? CodedValueId,
-    string Code,
+    string? Code,
     string Name,
     int DisplayOrder);
 
 internal record GetOrCreateTopicRequest(
     Guid GradeLevelId,
     Guid CodedValueId,
-    string Code,
+    string? Code,
     string Name,
     int DisplayOrder);

@@ -3,6 +3,12 @@
 ## Status
 Proposed (cg/8 follow-up). Split into shippable PRs below.
 
+**Done:** tcv/1 (#135, override `Code`), tcv/2 (#136, `WordInitials` segment),
+tcv/3 (provisional CodedValue + approval surface — see §C), tcv/4 (topic-dialog
+override-first rework — see §D), tcv/5 (template-generated topic codes in the
+add flow — see §E).
+**Complete:** all of tcv/1–tcv/5.
+
 ## Problem
 The current `TopicEditDialog` (grade-detail Subjects card kebab → "Edit name")
 renames a `Topic` directly via `UpdateTopicAsync` → `PUT /students/topics/{id}`
@@ -105,12 +111,29 @@ commit lands):
    `"computer science" → CS01`.
 3. **tcv/3 — tenant-scoped provisional CodedValue + approval.** New reserved state on
    `CodedValue`, create-when-override-impossible path, admin approval surface;
-   tests for tenancy isolation + approval.
+   tests for tenancy isolation + approval. **DONE** — dedicated `CreateProvisionalCodedValue`
+   command (does not change the tcv/1 override guard), `is_provisional` column, cross-tenant
+   `ListProvisionalCodedValues`/`ApproveProvisionalCodedValue`/`RejectProvisionalCodedValue`
+   (admin bypasses the Tenant query filter), Settings approval page at
+   `/coded-values/approvals` (Approve → global blueprint; Reject → stays tenant-scoped).
+   Tests: `ProvisionalCodedValueHandlerTests` (8) + `CodedValuesApiClientProvisionalTests` (4).
 4. **tcv/4 — topic dialog rework (override-first).** `TopicEditDialog` edits the
    tenant override (or main CodedValue when no override), code editing, fallback to
-   new tenant-scoped CodedValue; bUnit tests.
+   new tenant-scoped CodedValue; bUnit tests. **DONE** — dialog now loads the CodedValue
+   backing the topic and presents Name + Code + Description; a pure `TopicEditRouter`
+   decides Override / EditInPlace / CreateProvisional / DirectNameOnly. Override via
+   `UpsertOverrideAsync` (code edits always override), in-place via `UpdateAsync` when no
+   override, provisional (code+description both changed) via `CreateProvisionalCodedValueAsync`
+   + repoint. `UpdateTopic` now accepts optional `CodedValueId` + `Code` (repoint/sync).
+   Tests: `TopicEditRouterTests` (8) + dialog load/render/cancel tests.
 5. **tcv/5 — template-generated topic codes in the add flow.** Wire `IEntityCodeGenerator`
-   into topic creation; UI shows generated code; tests.
+   into topic creation; UI shows generated code; tests. **DONE** — `CreateTopicForGrade` and
+   `GetOrCreateTopic` commands now accept an optional (nullable) `Code`; when it is blank
+   the handler injects `IEntityCodeGenerator` and calls `GenerateWithNameAsync("TOPIC_CODE",
+   name)` so "computer science" → `CS01`. Explicit codes still pass through untouched.
+   API route DTOs (`CreateTopicForGradeRequest`/`GetOrCreateTopicRequest`) updated to
+   optional `Code`. Tests: `CreateForGrade_BlankCode_GeneratesFromNameViaTopicCodeRule`,
+   `CreateForGrade_ExplicitCode_DoesNotInvokeGenerator`, `GetOrCreate_BlankCode_GeneratesFromNameViaTopicCodeRule`.
 
 ## Open questions for the user
 - **WordInitials rules**: which words are "significant" (skip articles/prepositions)?

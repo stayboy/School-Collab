@@ -2,6 +2,8 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Students.Core.CQRS.Topics.Commands.CreateTopicForGrade;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -11,13 +13,14 @@ namespace SchoolCollab.Students.Tests.Unit;
 [TestClass]
 public class CreateTopicForGradeHandlerTests
 {
-    private static CreateTopicForGradeHandler NewHandler(StudentsTestScope s) =>
+    private static CreateTopicForGradeHandler NewHandler(StudentsTestScope s, IEntityCodeGenerator? gen = null) =>
         new(
             s.Topics,
             s.GradeTopicAssignments,
             s.GradeLevels,
             s.Cache,
             s.Tenants,
+            gen ?? new Mock<IEntityCodeGenerator>().Object,
             NullLogger<CreateTopicForGradeHandler>.Instance);
 
     private static async Task<Guid> SeedGradeLevelAsync(StudentsTestScope s, Guid codedValueId, int level, string name)
@@ -133,5 +136,45 @@ public class CreateTopicForGradeHandlerTests
         var act = async () => await h.HandleAsync(new CreateTopicForGrade(Guid.NewGuid(), null, "MATH", "Mathematics", 1));
 
         await act.Should().ThrowAsync<GradeLevelNotFoundException>();
+    }
+
+    [TestMethod]
+    public async Task CreateForGrade_BlankCode_GeneratesFromNameViaTopicCodeRule()
+    {
+        // tcv/5: a blank code is generated from the topic name via the TOPIC_CODE
+        // entity-code rule (WordInitials + NumericSequence), e.g. "computer science"
+        // → CS01. The handler must call GenerateWithNameAsync with the TOPIC_CODE
+        // rule and the topic name as the name hint.
+        using var s = new StudentsTestScope("csfg-generated");
+        var cv = Guid.NewGuid();
+        var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
+
+        var generator = new Mock<IEntityCodeGenerator>();
+        generator.Setup(g => g.GenerateWithNameAsync("TOPIC_CODE", "Computer Science", It.IsAny<CancellationToken>()))
+                 .ReturnsAsync("CS01");
+
+        var h = NewHandler(s, generator.Object);
+
+        var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, CodedValueId: null, Code: null, "Computer Science", 1));
+
+        dto.Code.Should().Be("CS01", "the generated code must be assigned to the topic");
+        (await s.Db.Topics.CountAsync()).Should().Be(1);
+        generator.Verify(g => g.GenerateWithNameAsync("TOPIC_CODE", "Computer Science", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [TestMethod]
+    public async Task CreateForGrade_ExplicitCode_DoesNotInvokeGenerator()
+    {
+        using var s = new StudentsTestScope("csfg-explicit");
+        var cv = Guid.NewGuid();
+        var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
+
+        var generator = new Mock<IEntityCodeGenerator>();
+        var h = NewHandler(s, generator.Object);
+
+        var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, CodedValueId: null, "MATH", "Mathematics", 1));
+
+        dto.Code.Should().Be("MATH");
+        generator.Verify(g => g.GenerateWithNameAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 }

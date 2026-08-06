@@ -67,12 +67,22 @@ public class TopicEditDialogTests : BunitContext
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, cv));
     }
 
-    private static string TopicJson(Guid topicId, string name) =>
+    private static string TopicJson(Guid topicId, string name, Guid? codedValueId = null) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
         {
-            ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = "MATH",
+            ["id"] = topicId, ["codedValueId"] = codedValueId, ["code"] = "MATH",
             ["name"] = name, ["description"] = (string?)null,
             ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+        });
+
+    private static string CodedValueJson(Guid id, string name, string code, string? description) =>
+        JsonSerializer.Serialize(new Dictionary<string, object?>
+        {
+            ["id"] = id, ["code"] = code, ["name"] = name, ["description"] = description,
+            ["parentId"] = (Guid?)null, ["parentCode"] = (string?)null, ["isDisabled"] = false,
+            ["displayOrder"] = 0,
+            ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
         });
 
     [TestMethod]
@@ -90,7 +100,9 @@ public class TopicEditDialogTests : BunitContext
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
         cut.Markup.Should().Contain("Mathematics", "the dialog loads the current topic name");
+        cut.Markup.Should().Contain("MATH", "the dialog loads the current topic code");
         cut.Markup.Should().Contain("Display order");
+        cut.Markup.Should().Contain("Description");
         cut.Markup.Should().Contain("Save");
 
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
@@ -100,11 +112,13 @@ public class TopicEditDialogTests : BunitContext
     }
 
     [TestMethod]
-    public async Task EditDialog_Cancel_ReturnsNull()
+    public async Task EditDialog_CodedValueBackedTopic_LoadsEffectiveNameAndCode()
     {
         var topicId = Guid.NewGuid();
+        var cvId = Guid.NewGuid();
         var handler = new ScriptedHandler();
-        handler.Map("GET", $"/students/topics/{topicId}", HttpStatusCode.OK, TopicJson(topicId, "Mathematics"));
+        handler.Map("GET", $"/students/topics/{topicId}", HttpStatusCode.OK, TopicJson(topicId, "Mathematics", cvId));
+        handler.Map("GET", $"/api/coded-values/{cvId}", HttpStatusCode.OK, CodedValueJson(cvId, "Algebra", "ALG", "Algebra subject"));
         Register(handler);
 
         var cut = Render<FluentDialogProvider>();
@@ -112,7 +126,13 @@ public class TopicEditDialogTests : BunitContext
             new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
             "Edit topic", DialogSize.Small);
 
-        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        // Wait on the resolved CodedValue code (not just the form) because the
+        // async load does two sequential HTTP calls (topic, then CodedValue). Give
+        // a generous timeout so parallel bUnit runs don't race it.
+        cut.WaitForAssertion(
+            () => cut.Markup.Should().Contain("ALG", "the dialog loads the resolved CodedValue code"),
+            TimeSpan.FromSeconds(5));
+        cut.Markup.Should().Contain("Algebra", "the dialog shows the resolved CodedValue name");
 
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
         cancelButton.Click();

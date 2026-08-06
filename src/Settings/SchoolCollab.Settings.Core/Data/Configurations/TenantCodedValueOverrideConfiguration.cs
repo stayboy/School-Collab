@@ -31,6 +31,7 @@ internal sealed class TenantCodedValueOverrideConfiguration
         builder.Property(x => x.GlobalCodedValueId).IsRequired();
         builder.Property(x => x.OverriddenName).HasMaxLength(200);
         builder.Property(x => x.OverriddenDescription).HasMaxLength(1000);
+        builder.Property(x => x.OverriddenCode).HasMaxLength(100);
 
         builder.HasIndex(x => new { x.TenantId, x.GlobalCodedValueId })
             .IsUnique()

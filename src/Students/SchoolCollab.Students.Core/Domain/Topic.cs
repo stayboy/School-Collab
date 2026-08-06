@@ -67,11 +67,15 @@ public sealed class Topic : ITenantEntity, IEntity, IAuditableEntity, IHasRowVer
         return topic;
     }
 
-    public void Update(string name, int displayOrder, string? description = null)
+    public void Update(string name, int displayOrder, string? description = null, Guid? codedValueId = null, string? code = null)
     {
         Name = name.Trim();
         DisplayOrder = displayOrder;
         Description = string.IsNullOrWhiteSpace(description) ? null : description.Trim();
+        // tcv/4: allow repointing the topic at a different CodedValue (e.g. a new
+        // tenant-scoped provisional value) and syncing its denormalized code.
+        if (codedValueId.HasValue) CodedValueId = codedValueId;
+        if (!string.IsNullOrWhiteSpace(code)) Code = code.Trim().ToUpperInvariant();
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new TopicUpdatedEvent(Id, Code));
     }
