@@ -16,7 +16,7 @@ public sealed class CodedValueResolver(ICodedValueRepository repository) : ICode
         // 1. Resolve Basic Properties (Code, Name, Description)
         var overrideValue = await repository.GetOverrideAsync(tenantId, cv.Id, ct);
 
-        string finalCode = cv.Code; // Code is generally global/immutable
+        string finalCode = overrideValue?.OverriddenCode ?? cv.Code; // Code is now tenant-overridable (tcv/1); falls back to global blueprint
         string finalName = overrideValue?.OverriddenName ?? cv.Name;
         string? finalDescription = overrideValue?.OverriddenDescription ?? cv.Description;
         bool isOverridden = overrideValue is not null;
@@ -54,6 +54,7 @@ public sealed class CodedValueResolver(ICodedValueRepository repository) : ICode
             cv.IsDeleted,
             cv.DeletedAt,
             isOverridden,
-            cv.Name); // DefaultName is the global name (before tenant override)
+            cv.Name, // DefaultName is the global name (before tenant override)
+            cv.Code); // DefaultCode is the global code (before tenant override)
     }
 }

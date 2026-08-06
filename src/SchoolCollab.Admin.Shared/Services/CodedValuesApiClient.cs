@@ -185,10 +185,10 @@ public sealed class CodedValuesApiClient(HttpClient http)
     // tenant's display-name override and returns the resolved CodedValueDto;
     // DELETE removes it (falls back to the global blueprint name). See spec §5.1.
     public async Task<CodedValueDto> UpsertOverrideAsync(
-        Guid codedValueId, string? name, string? description, CancellationToken ct = default)
+        Guid codedValueId, string? name, string? description, string? code = null, CancellationToken ct = default)
     {
         var response = await http.PutAsJsonAsync(
-            $"/api/coded-values/{codedValueId}/override", new { name, description }, ct);
+            $"/api/coded-values/{codedValueId}/override", new { name, description, code }, ct);
         if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
             throw new KeyNotFoundException($"Coded value {codedValueId} not found.");
         response.EnsureSuccessStatusCode();

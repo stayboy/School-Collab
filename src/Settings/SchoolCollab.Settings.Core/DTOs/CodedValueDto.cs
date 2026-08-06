@@ -17,5 +17,6 @@ public record CodedValueDto(
     bool IsDeleted = false,
     DateTimeOffset? DeletedAt = null,
     bool IsOverridden = false,
-    string? DefaultName = null);
+    string? DefaultName = null,
+    string? DefaultCode = null);
 

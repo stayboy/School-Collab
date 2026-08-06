@@ -53,7 +53,7 @@ public sealed class GetCodedValueByIdHandler(
 
         return new CodedValueDto(
             cv.Id,
-            cv.Code,
+            overrideVal?.OverriddenCode ?? cv.Code,
             overrideVal?.OverriddenName ?? cv.Name,
             overrideVal?.OverriddenDescription ?? cv.Description,
             cv.ParentId,
@@ -68,6 +68,7 @@ public sealed class GetCodedValueByIdHandler(
             cv.IsDeleted,
             cv.DeletedAt,
             overrideVal is not null,
-            cv.Name); // DefaultName is the global name (before tenant override)
+            cv.Name, // DefaultName is the global name (before tenant override)
+            cv.Code); // DefaultCode is the global code (before tenant override)
     }
 }

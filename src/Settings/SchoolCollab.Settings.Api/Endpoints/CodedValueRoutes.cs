@@ -242,7 +242,7 @@ public static class CodedValueRoutes
             try
             {
                 var dto = await handler.HandleAsync(
-                    new UpsertCodedValueOverride(id, req.Name, req.Description), ct);
+                    new UpsertCodedValueOverride(id, req.Name, req.Description, req.Code), ct);
                 return Results.Ok(dto);
             }
             catch (CodedValueNotFoundException)
@@ -269,6 +269,6 @@ public static class CodedValueRoutes
 }
 
 internal record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
-internal record UpsertOverrideRequest(string? Name, string? Description);
+internal record UpsertOverrideRequest(string? Name, string? Description, string? Code = null);
 internal record BulkCreateCodedValuesRequest(Guid ParentId, List<BulkCreateChildRequest> Children);
 internal record BulkCreateChildRequest(string Code, string Name, string? Description, int DisplayOrder);
