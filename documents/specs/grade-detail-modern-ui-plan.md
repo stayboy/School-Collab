@@ -49,8 +49,8 @@
 | 4 | Student name | `StudentsGrid` Name column → landing `student-full-name` pattern; drop Gender/Age columns; add `StudentsGrid.razor.css`; the Students card preview uses the same name + demographics stack | ✅ cg/7 |
 | 5 | Add icons | Add `FluentButton` add icons in each card header (Topics/Teachers: `FluentIcons.Add`, Students: `FluentIcons.PersonAdd`); wire Topics/Teachers to existing dialogs, Students to new `OpenAddStudentsAsync` (period resolution + `StudentPickerDialog` + `EnrollStudentAsync`) | ✅ cg/8 |
 | 6 | Rename Topics → Subjects/Curriculum | Visible labels only: card title "Subjects/Curriculum", empty state "No subjects assigned to this curriculum yet", View-all "View all subjects", dialog title "Subjects/Curriculum · {grade}" | ✅ cg/8 |
-| 7 | Topic secondary text | Topic preview items restructured: `<div>` container + name button + Strands(N)/Lessons(N) `FluentButton` (Lightweight, Small) navigable counts using `StrandCount`/`LessonCount` | ✅ cg/8 |
-| 8 | View-all alignment | Fix text/arrow vertical alignment via `IconEnd="@FluentIcons.ArrowRight"` (FluentButton for Topics/Teachers, FluentAnchor for Students) | ✅ cg/8 |
+| 7 | Topic secondary text | Topic preview items restructured: `<div>` container + name button + Strands(N)/Lessons(N) `FluentAnchor` (`Appearance.Hypertext`, `Href="#"`, `OnClick`) navigable counts using `StrandCount`/`LessonCount` | ✅ cg/8 |
+| 8 | View-all alignment | Fix text/arrow vertical alignment via `IconEnd="@FluentIcons.ArrowRight"` (`FluentAnchor` with `Appearance.Hypertext`, `Href="#"`, `OnClick` for Topics/Teachers; `FluentAnchor` with real `Href` for Students) | ✅ cg/8 |
 | 9 | SectionCard component | Extract a shared `SectionCard.razor` component to unify the three grade-detail cards (header icon/title/count/add, preview item template, View-all footer). Wrap in `FluentCard` with explicit border so the card outline is visible. | ✅ cg/8 |
 
 ## 2. Tests
@@ -66,12 +66,16 @@
 ## 3. Appearance rules (verified against 4.14.2)
 
 - `FluentButton` does **NOT** support `Appearance.Hypertext` — it throws
-  `ArgumentException` in `OnParametersSet`. Use `Appearance.Lightweight` for
-  link-like action buttons (View-all Topics/Teachers, dialog strand/lesson counts).
-- `FluentAnchor` supports `Hypertext` — use it for anchors that navigate via `Href`
-  (Students View-all; `GradeTeachersDialog` teacher-name link).
-- Rule: `FluentAnchor` → `FluentButton` when `OnClick` is used (no `Href`); keep
-  `FluentAnchor` when it navigates via `Href`.
+  `ArgumentException` in `OnParametersSet`.
+- For link-like actions that do **not** navigate (open dialogs, show panels, etc.),
+  use `FluentAnchor` with `Appearance.Hypertext`, `Href="#"`, and the component's
+  `OnClick` parameter. `Href="#"` is required so the anchor renders as a clickable
+  link and the component internally prevents default navigation.
+- Use `FluentAnchor` with `Appearance.Hypertext` and a real `Href` for actual
+  navigation links (Students View-all; `GradeTeachersDialog` teacher-name link).
+- Prefer the native component's parameter list first — `FluentAnchor` exposes
+  `OnClick` as a `[Parameter]`. Do not fall back to HTML `@onclick` until a
+  component parameter is confirmed absent.
 - Keep the students card test asserting the `student-full-name`-style name + demographics.
 - Add icons use `Appearance.Stealth` + `ButtonSize.Small` for compact icon-only buttons.
 
