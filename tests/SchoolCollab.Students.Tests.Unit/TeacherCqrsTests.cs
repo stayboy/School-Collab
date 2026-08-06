@@ -142,6 +142,25 @@ public class TeacherCqrsTests
     }
 
     [TestMethod]
+    public async Task LinkTopic_WithRole_PersistsRole()
+    {
+        using var s = new StudentsTestScope("teacher-topic-role");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
+        var roleId = Guid.NewGuid();
+
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId, roleId));
+
+        var link = await TeacherRepo(s).GetTopicLinkAsync(id, subjectId);
+        link.Should().NotBeNull();
+        link!.RoleCodedValueId.Should().Be(roleId);
+
+        // Re-linking the same pair without a role must still conflict.
+        var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId));
+        await act.Should().ThrowAsync<TeacherLinkAlreadyExistsException>();
+    }
+
+    [TestMethod]
     public async Task LinkAndUnlinkGradeLevel_PersistsLink()
     {
         using var s = new StudentsTestScope("teacher-grade");

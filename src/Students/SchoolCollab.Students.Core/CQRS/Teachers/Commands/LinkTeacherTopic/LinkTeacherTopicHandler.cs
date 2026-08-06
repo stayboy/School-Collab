@@ -31,7 +31,7 @@ public sealed class LinkTeacherTopicHandler(
         if (await repository.GetTopicLinkAsync(command.TeacherId, command.TopicId, cancellationToken) is not null)
             throw new TeacherLinkAlreadyExistsException(command.TeacherId, command.TopicId);
 
-        var link = TeacherTopic.Create(command.TeacherId, command.TopicId)
+        var link = TeacherTopic.Create(command.TeacherId, command.TopicId, command.RoleCodedValueId)
             .WithTenant(tenantProvider);
         await repository.AddTopicAsync(link, cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);

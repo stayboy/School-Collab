@@ -98,7 +98,7 @@ public static class TeacherRoutes
         {
             try
             {
-                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId), ct);
+                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId, req.RoleCodedValueId), ct);
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException) { return Results.NotFound(); }
@@ -179,7 +179,7 @@ internal record UpdateTeacherRequest(
     Guid? LevelOfEducationCodedValueId = null,
     Guid[]? QualificationCodedValueIds = null);
 
-internal record LinkTeacherTopicRequest(Guid TopicId);
+internal record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null);
 
 internal record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 

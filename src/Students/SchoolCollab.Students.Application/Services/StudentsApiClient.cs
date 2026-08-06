@@ -135,6 +135,13 @@ public sealed record TopicAssignmentDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
+public sealed record GradeTopicCurriculumDto(
+    Guid TopicId,
+    string Name,
+    string? Code,
+    int StrandCount,
+    int LessonCount);
+
 public sealed record StudentTopicAssignmentDto(
     Guid Id,
     Guid StudentId,
@@ -386,7 +393,7 @@ public record UpdateTeacherRequest(
     Guid? LevelOfEducationCodedValueId = null,
     Guid[]? QualificationCodedValueIds = null);
 
-public record LinkTeacherTopicRequest(Guid TopicId);
+public record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null);
 
 public record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 
@@ -1008,6 +1015,18 @@ public sealed class StudentsApiClient : IContactsClient
         return await _http.GetFromJsonAsync<TopicAssignmentDto[]>(url, ct);
     }
 
+    /// <summary>
+    /// Per-topic strand/lesson counts for a grade's assigned topics
+    /// (grade-detail-rich-grids-plan.md §4).
+    /// </summary>
+    public async Task<GradeTopicCurriculumDto[]?> ListGradeTopicCurriculumByGradeAsync(Guid gradeLevelId, DateOnly? effectiveDate = null, CancellationToken ct = default)
+    {
+        var url = effectiveDate is { } e
+            ? $"/students/grade-levels/{gradeLevelId}/curriculum?effectiveDate={e:yyyy-MM-dd}"
+            : $"/students/grade-levels/{gradeLevelId}/curriculum";
+        return await _http.GetFromJsonAsync<GradeTopicCurriculumDto[]>(url, ct);
+    }
+
     public async Task<Guid> AssignGradeTopicAsync(AssignGradeTopicRequest req, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/students/topic-assignments/grade", req, ct);
@@ -1210,8 +1229,8 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task DeleteTeacherAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{id}", ct)).EnsureSuccessStatusCode();
 
-    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId), ct)).EnsureSuccessStatusCode();
+    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId, roleCodedValueId), ct)).EnsureSuccessStatusCode();
 
     public async Task UnlinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{teacherId}/topics/{topicId}", ct)).EnsureSuccessStatusCode();

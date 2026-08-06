@@ -477,7 +477,7 @@
                     _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
                     QualificationIds()), ct);
                 await SyncLinksAsync(teacherId, _originalTopicIds, _selectedTopicIds,
-                    id => Api.LinkTeacherTopicAsync(teacherId, id, ct),
+                    id => Api.LinkTeacherTopicAsync(teacherId, id, ct: ct),
                     id => Api.UnlinkTeacherTopicAsync(teacherId, id, ct));
                 await SyncLinksAsync(teacherId, _originalGradeLevelIds, _selectedGradeLevelIds,
                     id => Api.LinkTeacherGradeLevelAsync(teacherId, id, null, ct),
@@ -492,7 +492,7 @@
                     _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
                     QualificationIds()), ct);
                 foreach (var topicId in _selectedTopicIds)
-                    await Api.LinkTeacherTopicAsync(teacherId, topicId, ct);
+                    await Api.LinkTeacherTopicAsync(teacherId, topicId, ct: ct);
                 foreach (var gradeLevelId in _selectedGradeLevelIds)
                     await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, null, ct);
             }
