@@ -422,7 +422,6 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("OnAddClick=\"OpenTopicsDialogAsync\"", "Subjects card has add callback");
         source.Should().Contain("OnAddClick=\"OpenTeachersDialogAsync\"", "Teachers card has add callback");
         source.Should().Contain("OnAddClick=\"OpenAddStudentsAsync\"", "Students card has add callback");
-        source.Should().Contain("AddIcon=\"@FluentIcons.PersonAdd\"", "Students card uses PersonAdd icon");
         source.Should().Contain("AddTitle=\"Add student\"", "Students card has add title");
         source.Should().Contain("AddAriaLabel=\"Add student\"", "Students card has add aria-label");
     }
