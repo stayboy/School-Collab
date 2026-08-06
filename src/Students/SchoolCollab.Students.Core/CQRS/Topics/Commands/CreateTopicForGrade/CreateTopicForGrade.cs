@@ -10,9 +10,15 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.CreateTopicForGrade;
 /// Topics landing page's <c>+ New Topic</c> tool (§8.1). Returns the
 /// resulting <see cref="DTOs.TopicDto"/>.
 /// </summary>
+/// <remarks>
+/// <paramref name="Code"/> is optional (tcv/5): when omitted (or blank) the
+/// handler generates it from <paramref name="Name"/> via the <c>TOPIC_CODE</c>
+/// entity-code rule (<c>IEntityCodeGenerator</c>), e.g. "computer science" →
+/// <c>CS01</c>. Pass an explicit code only to override template generation.
+/// </remarks>
 public sealed record CreateTopicForGrade(
     Guid GradeLevelId,
     Guid? CodedValueId,
-    string Code,
+    string? Code,
     string Name,
     int DisplayOrder) : ICommand;

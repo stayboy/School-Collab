@@ -126,7 +126,12 @@ public class TopicEditDialogTests : BunitContext
             new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
             "Edit topic", DialogSize.Small);
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("ALG", "the dialog loads the resolved CodedValue code"));
+        // Wait on the resolved CodedValue code (not just the form) because the
+        // async load does two sequential HTTP calls (topic, then CodedValue). Give
+        // a generous timeout so parallel bUnit runs don't race it.
+        cut.WaitForAssertion(
+            () => cut.Markup.Should().Contain("ALG", "the dialog loads the resolved CodedValue code"),
+            TimeSpan.FromSeconds(5));
         cut.Markup.Should().Contain("Algebra", "the dialog shows the resolved CodedValue name");
 
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));

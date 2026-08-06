@@ -327,13 +327,13 @@ internal record AssignLessonStrandRequest(Guid? StrandId);
 internal record CreateTopicForGradeRequest(
     Guid GradeLevelId,
     Guid? CodedValueId,
-    string Code,
+    string? Code,
     string Name,
     int DisplayOrder);
 
 internal record GetOrCreateTopicRequest(
     Guid GradeLevelId,
     Guid CodedValueId,
-    string Code,
+    string? Code,
     string Name,
     int DisplayOrder);

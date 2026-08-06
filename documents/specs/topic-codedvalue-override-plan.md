@@ -5,8 +5,9 @@ Proposed (cg/8 follow-up). Split into shippable PRs below.
 
 **Done:** tcv/1 (#135, override `Code`), tcv/2 (#136, `WordInitials` segment),
 tcv/3 (provisional CodedValue + approval surface — see §C), tcv/4 (topic-dialog
-override-first rework — see §D).
-**Deferred:** tcv/5 (template-generated topic codes in add flow).
+override-first rework — see §D), tcv/5 (template-generated topic codes in the
+add flow — see §E).
+**Complete:** all of tcv/1–tcv/5.
 
 ## Problem
 The current `TopicEditDialog` (grade-detail Subjects card kebab → "Edit name")
@@ -126,7 +127,13 @@ commit lands):
    + repoint. `UpdateTopic` now accepts optional `CodedValueId` + `Code` (repoint/sync).
    Tests: `TopicEditRouterTests` (8) + dialog load/render/cancel tests.
 5. **tcv/5 — template-generated topic codes in the add flow.** Wire `IEntityCodeGenerator`
-   into topic creation; UI shows generated code; tests.
+   into topic creation; UI shows generated code; tests. **DONE** — `CreateTopicForGrade` and
+   `GetOrCreateTopic` commands now accept an optional (nullable) `Code`; when it is blank
+   the handler injects `IEntityCodeGenerator` and calls `GenerateWithNameAsync("TOPIC_CODE",
+   name)` so "computer science" → `CS01`. Explicit codes still pass through untouched.
+   API route DTOs (`CreateTopicForGradeRequest`/`GetOrCreateTopicRequest`) updated to
+   optional `Code`. Tests: `CreateForGrade_BlankCode_GeneratesFromNameViaTopicCodeRule`,
+   `CreateForGrade_ExplicitCode_DoesNotInvokeGenerator`, `GetOrCreate_BlankCode_GeneratesFromNameViaTopicCodeRule`.
 
 ## Open questions for the user
 - **WordInitials rules**: which words are "significant" (skip articles/prepositions)?
