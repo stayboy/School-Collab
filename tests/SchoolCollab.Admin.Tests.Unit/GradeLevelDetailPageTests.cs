@@ -279,6 +279,59 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_TeachersTab_RendersDemographicColumns_WithResolvedNames()
+    {
+        var gradeId = Guid.NewGuid();
+        var teacherId = Guid.NewGuid();
+        var topicId = Guid.NewGuid();
+        var genderId = Guid.NewGuid();
+        var levelId = Guid.NewGuid();
+        var qualId = Guid.NewGuid();
+        var salutationId = Guid.NewGuid();
+
+        var (handler, _) = Register(
+            gradeId,
+            GradeJson(gradeId),
+            teachersJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["id"] = teacherId,
+                ["titleCodedValueId"] = salutationId,
+                ["firstName"] = "Jane",
+                ["lastName"] = "Doe",
+                ["displayName"] = (string?)null,
+                ["genderCodedValueId"] = genderId,
+                ["dateOfBirth"] = DateOnly.FromDateTime(new DateTime(1990, 5, 1)).ToString("yyyy-MM-dd"),
+                ["levelOfEducationCodedValueId"] = levelId,
+                ["qualificationCodedValueIds"] = new[] { qualId },
+                ["isDeleted"] = false,
+                ["teacherRoleCodedValueId"] = (Guid?)null,
+                ["assignedTopics"] = new[] { new Dictionary<string, object?>
+                {
+                    ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = (string?)null,
+                    ["name"] = "Mathematics", ["description"] = (string?)null, ["displayOrder"] = 0,
+                    ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+                } },
+                ["createdAt"] = DateTimeOffset.UnixEpoch,
+                ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            } }));
+        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
+        {
+            new { id = genderId, name = "Female" },
+            new { id = levelId, name = "Master's" },
+            new { id = qualId, name = "Mathematics Teaching" },
+            new { id = salutationId, name = "Ms" },
+        }));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Female"));
+        cut.Markup.Should().Contain("Ms Jane Doe", "salutation prepends the name");
+        cut.Markup.Should().Contain("Master's", "level of education column renders");
+        cut.Markup.Should().Contain("Mathematics Teaching", "qualification chip renders");
+        cut.Markup.Should().Contain("Gender");
+        cut.Markup.Should().Contain("Qualifications");
+    }
+
+    [TestMethod]
     public void Detail_UnlinkTeacherTopic_CallsUnlinkEndpoint()
     {
         var gradeId = Guid.NewGuid();

@@ -232,10 +232,28 @@
                                         <TemplateColumn Title="Name">
                                             <FluentAnchor Appearance="Appearance.Lightweight"
                                                           Href="@($"/students/teachers/{context.Id}")">
-                                                @context.FirstName @context.LastName
+                                                @(context.TitleCodedValueId is { } tid && _salutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@context.FirstName @context.LastName
                                             </FluentAnchor>
                                         </TemplateColumn>
                                         <TemplateColumn Title="Date of birth">@(context.DateOfBirth?.ToString("dd MMM yyyy") ?? "—")</TemplateColumn>
+                                        <TemplateColumn Title="Gender">@(context.GenderCodedValueId is { } gid && _genderNames.TryGetValue(gid, out var g) ? g : "—")</TemplateColumn>
+                                        <TemplateColumn Title="Level">@(context.LevelOfEducationCodedValueId is { } lid && _levelNames.TryGetValue(lid, out var l) ? l : "—")</TemplateColumn>
+                                        <TemplateColumn Title="Qualifications">
+            @if ((context.QualificationCodedValueIds ?? []).Length == 0)
+                                            {
+                                                <span class="muted">—</span>
+                                            }
+                                            else
+                                            {
+                                                <div class="topic-chips">
+                                                    @foreach (var qid in context.QualificationCodedValueIds ?? [])
+                                                    {
+                                                        <span class="chip">@(_qualificationNames.TryGetValue(qid, out var qn) ? qn : "•")</span>
+                                                    }
+                                                </div>
+                                            }
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Topics">@context.AssignedTopics.Length</TemplateColumn>
                                         <TemplateColumn Title="Role">
                                             <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
                                                                 SelectedId="@context.TeacherRoleCodedValueId"
@@ -375,6 +393,10 @@
     private TeacherWithRoleDto[]? _teachers;
     private StudentDto[]? _students;
     private TeacherDto[]? _allTeachers;
+    private readonly Dictionary<Guid, string> _salutationNames = new();
+    private readonly Dictionary<Guid, string> _genderNames = new();
+    private readonly Dictionary<Guid, string> _levelNames = new();
+    private readonly Dictionary<Guid, string> _qualificationNames = new();
     private bool _showTeacherPicker;
     private TeacherDto? _teacherToAdd;
     private bool _addingTeacher;
@@ -436,6 +458,11 @@
             _allTeachers = allTeachersTask.Result ?? [];
             _students = studentsTask.Result ?? [];
 
+            if (_teachers is { Length: > 0 })
+            {
+                await EnrichTeacherNamesAsync(ct);
+            }
+
             if (_grade is null) return;
 
             if (_grade.AllowedGenderCodedValueId is { } gid)
@@ -476,6 +503,45 @@
         if (min.HasValue) return $"{min}+";
         if (max.HasValue) return $"≤{max}";
         return "Any age";
+    }
+
+    /// <summary>
+    /// Resolves the coded-value display names (salutation, gender, level of
+    /// education, qualifications) for the loaded teachers in one round-trip, so
+    /// the grid can render them without per-cell lookups. The Students DB has no
+    /// CodedValue table — names come from the Admin coded-values API (mirrors
+    /// EnrichStudentsAsync).
+    /// </summary>
+    private async Task EnrichTeacherNamesAsync(CancellationToken ct)
+    {
+        var ids = new List<Guid>();
+        foreach (var t in _teachers!)
+        {
+            if (t.TitleCodedValueId is { } ti) ids.Add(ti);
+            if (t.GenderCodedValueId is { } gi) ids.Add(gi);
+            if (t.LevelOfEducationCodedValueId is { } li) ids.Add(li);
+            foreach (var q in t.QualificationCodedValueIds ?? []) ids.Add(q);
+        }
+        if (ids.Count == 0) return;
+
+        try
+        {
+            var resolved = await CodedValuesApi.GetByIdsAsync(ids, ct) ?? [];
+            foreach (var cv in resolved)
+            {
+                if (cv.Id == Guid.Empty) continue;
+                if (cv.Name is null) continue;
+                if (_teachers!.Any(x => x.TitleCodedValueId == cv.Id)) _salutationNames[cv.Id] = cv.Name;
+                if (_teachers!.Any(x => x.GenderCodedValueId == cv.Id)) _genderNames[cv.Id] = cv.Name;
+                if (_teachers!.Any(x => x.LevelOfEducationCodedValueId == cv.Id)) _levelNames[cv.Id] = cv.Name;
+                if (_teachers!.Any(x => (x.QualificationCodedValueIds ?? []).Contains(cv.Id))) _qualificationNames[cv.Id] = cv.Name;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to resolve teacher coded-value names for grade {Id}", Id);
+            // Leave the name maps empty; the grid renders "—" for unresolved cells.
+        }
     }
 
     private void Back() => Nav.NavigateTo("/students/grade-levels");
