@@ -430,9 +430,15 @@ public class GradeLevelDetailPageTests : BunitContext
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Allowed"));
 
-        // The overview switch renders and reflects the not-blocked state.
-        cut.Find("fluent-switch").Should().NotBeNull();
+        // The overview reflects the not-blocked state as a status badge, and the
+        // enrollment toggle is grouped in the header "Actions" menu (not a switch).
         cut.Markup.Should().Contain("Enrollment");
+        cut.Find("fluent-button[title='Actions']").Should().NotBeNull();
+
+        // Open the header Actions menu → Edit + the enrollment toggle render inline.
+        cut.Find("fluent-button[title='Actions']").Click();
+        cut.Markup.Should().Contain("Edit");
+        cut.Markup.Should().Contain("Block enrollment");
     }
 
     private static Dictionary<string, object?> StudentJson(
