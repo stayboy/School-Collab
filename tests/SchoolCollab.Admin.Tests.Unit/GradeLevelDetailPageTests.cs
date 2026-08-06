@@ -10,6 +10,7 @@ using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 using SchoolCollab.Students.Application.Services;
 using System.Net;
 using System.Net.Http;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -19,10 +20,11 @@ using System.Threading.Tasks;
 namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
-/// bUnit tests for the Grade-Level Detail page
-/// (grade-level-detail-view-plan.md §5): Overview card, Topics &amp; Curriculum
-/// tab, and Teachers tab wiring against the real StudentsApiClient /
-/// CodedValuesApiClient via a scripted HTTP backend.
+/// bUnit tests for the Grade-Level Detail page (grade-level-detail-view-plan.md §5):
+/// Overview card + the three equal section cards (Topics / Teachers / Students)
+/// with top-15 preview lists, count chips, and "View all" anchors. The full
+/// management grids moved into <c>GradeTopicsDialog</c> / <c>GradeTeachersDialog</c>,
+/// which are covered separately in <c>GradeDialogsBunitTests</c>.
 /// </summary>
 [TestClass]
 public class GradeLevelDetailPageTests : BunitContext
@@ -33,6 +35,17 @@ public class GradeLevelDetailPageTests : BunitContext
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+    }
+
+    private static string ReadDetailSource()
+    {
+        var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+        var srcPath = Path.GetFullPath(Path.Combine(
+            asmDir, "..", "..", "..", "..", "..",
+            "src", "Students", "SchoolCollab.Students.Application",
+            "Components", "Pages", "Students", "GradeLevels", "Detail.razor"));
+        File.Exists(srcPath).Should().BeTrue($"Detail.razor should exist at '{srcPath}'");
+        return File.ReadAllText(srcPath);
     }
 
     private sealed class ScriptedHandler : HttpMessageHandler
@@ -189,8 +202,24 @@ public class GradeLevelDetailPageTests : BunitContext
             ["updatedAt"] = DateTimeOffset.UnixEpoch,
         };
 
+    private static Dictionary<string, object?> StudentJson(
+        Guid studentId, string studentNumber, string first, string last,
+        Guid? genderId, DateOnly? dob) => new()
+    {
+        ["id"] = studentId,
+        ["studentNumber"] = studentNumber,
+        ["titleCodedValueId"] = (Guid?)null,
+        ["firstName"] = first,
+        ["lastName"] = last,
+        ["dateOfBirth"] = dob,
+        ["genderCodedValueId"] = genderId,
+        ["isDeleted"] = false,
+        ["createdAt"] = DateTimeOffset.UnixEpoch,
+        ["updatedAt"] = DateTimeOffset.UnixEpoch,
+    };
+
     [TestMethod]
-    public void Detail_Overview_ShowsGradeNameAndTabs()
+    public void Detail_Overview_ShowsGradeNameAndSectionCards()
     {
         var gradeId = Guid.NewGuid();
         Register(gradeId, GradeJson(gradeId, "Grade 5"));
@@ -201,17 +230,21 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("Level");
         cut.Markup.Should().Contain("10–12", "age range renders as min–max");
         cut.Markup.Should().Contain("3 students");
-        // Tab panel content renders server-side; the tab-header labels are
-        // JS-composed by the FluentTabs web component and are not text in markup.
-        cut.Markup.Should().Contain("Assigned Topics");
+
+        // Three equally-sized section cards render with titles + counts + anchors.
+        cut.Markup.Should().Contain("class=\"section-card__title\">Topics</span>");
+        cut.Markup.Should().Contain("class=\"section-card__title\">Teachers</span>");
+        cut.Markup.Should().Contain("class=\"section-card__title\">Students</span>");
+        cut.Markup.Should().Contain("View all topics (0)");
+        cut.Markup.Should().Contain("View all teachers (0)");
+        cut.Markup.Should().Contain("View all students (0)");
     }
 
     [TestMethod]
-    public void Detail_ModernTabs_RenderLabelsAndCounts_AndSwitchActivePane()
+    public void Detail_TopicsCard_ListsPreview_AndCount()
     {
         var gradeId = Guid.NewGuid();
         var topicId = Guid.NewGuid();
-        var assignmentId = Guid.NewGuid();
         Register(
             gradeId,
             GradeJson(gradeId),
@@ -221,204 +254,99 @@ public class GradeLevelDetailPageTests : BunitContext
                 ["name"] = "Mathematics", ["description"] = (string?)null,
                 ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
             } }),
-            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(assignmentId, topicId, gradeId) }),
+            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(Guid.NewGuid(), topicId, gradeId) }),
             curriculumJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
             {
                 ["topicId"] = topicId, ["name"] = "Mathematics", ["code"] = "MATH",
                 ["strandCount"] = 2, ["lessonCount"] = 3,
-            } }),
-            teachersJson: "[]",
-            studentsJson: "[]");
+            } }));
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topics &amp; Curriculum"));
-
-        // Custom segmented tab bar: labels + live count badges are real text now.
-        cut.Markup.Should().Contain("Topics &amp; Curriculum");
-        cut.Markup.Should().Contain(">Teachers</span>");
-        cut.Markup.Should().Contain(">Students</span>");
-        // Count badge for the assigned topic renders (1 topic).
-        cut.Markup.Should().Contain("class=\"grade-tabs__count\">1</span>");
-
-        // Topics pane is active by default.
-        cut.Find("div.grade-tabs__pane.active").TextContent.Should().Contain("Assigned Topics");
-
-        // Switching to the Teachers tab flips the active pane.
-        var teachersTab = cut.FindAll("[role='tab']").First(t => t.TextContent.Contains("Teachers"));
-        teachersTab.Click();
-        cut.WaitForAssertion(() =>
-            cut.Find("div.grade-tabs__pane.active").TextContent.Should().Contain("Teachers (0)"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all topics (1)"));
+        cut.Markup.Should().Contain("Mathematics", "top-15 preview lists the topic name");
+        cut.Markup.Should().Contain("MATH", "topic code renders in the preview");
     }
 
     [TestMethod]
-    public void Detail_TopicsTab_ShowsEmptyState_WhenNoAssignments()
+    public void Detail_TopicsCard_ShowsEmptyState_WhenNoAssignments()
     {
         var gradeId = Guid.NewGuid();
         Register(gradeId, GradeJson(gradeId), assignmentsJson: "[]");
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assigned Topics (0)"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all topics (0)"));
         cut.Markup.Should().Contain("No topics assigned to this grade yet");
     }
 
     [TestMethod]
-    public void Detail_TopicsTab_ListsAssignedTopics_AndRemove_CallsRemoveAssignment()
-    {
-        var gradeId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
-        var assignmentId = Guid.NewGuid();
-        var (handler, _) = Register(
-            gradeId,
-            GradeJson(gradeId),
-            topicsCatalogJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-            {
-                ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = "MATH",
-                ["name"] = "Mathematics", ["description"] = (string?)null,
-                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            } }),
-            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(assignmentId, topicId, gradeId) }),
-            curriculumJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-            {
-                ["topicId"] = topicId, ["name"] = "Mathematics", ["code"] = "MATH",
-                ["strandCount"] = 2, ["lessonCount"] = 3,
-            } }));
-        handler.Map("DELETE", $"/students/topic-assignments/{assignmentId}", HttpStatusCode.NoContent, "");
-
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assigned Topics (1)"));
-        cut.Markup.Should().Contain("Mathematics");
-        cut.Markup.Should().Contain(">2</", "strand count renders");
-        cut.Markup.Should().Contain(">3</", "lesson count renders");
-
-        // Open the topic row's kebab (RowActionsMenu) and click Remove.
-        cut.Find("fluent-button[title='Topic actions']").Click();
-        var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
-        removeItem.Click();
-        cut.WaitForAssertion(() =>
-            handler.Calls.Any(c => c.Method == "DELETE" && c.Url == $"/students/topic-assignments/{assignmentId}").Should().BeTrue());
-    }
-
-    [TestMethod]
-    public void Detail_TeachersTab_ListsTeachers_WithRoleDropdown()
+    public void Detail_TeachersCard_ListsPreview_AndCount()
     {
         var gradeId = Guid.NewGuid();
         var teacherId = Guid.NewGuid();
         var topicId = Guid.NewGuid();
-        var (handler, _) = Register(
+        Register(
             gradeId,
             GradeJson(gradeId),
             teachersJson: JsonSerializer.Serialize(new[]
             {
-                TeacherJson(teacherId, "Jane", "Doe", "jane@example.com", roleId: null,
-                    (topicId, "Mathematics")),
+                TeacherJson(teacherId, "Jane", "Doe", "jane@example.com", roleId: null, (topicId, "Mathematics")),
             }));
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Jane"));
-        cut.Markup.Should().Contain("Date of birth", "teacher profile column header renders");
-        cut.Markup.Should().Contain("Mathematics", "assigned-topic chip is rendered");
-        cut.Markup.Should().Contain("Role", "role column header renders");
-
-        // The TCHROLES dropdown fired one parent lookup.
-        handler.Calls.Any(c => c.Url.Contains("parentCode=TCHROLES")).Should().BeTrue();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all teachers (1)"));
+        cut.Markup.Should().Contain("Jane Doe", "top-15 preview lists the teacher name");
     }
 
     [TestMethod]
-    public void Detail_TeachersTab_RendersDemographicColumns_WithResolvedNames()
+    public void Detail_TeachersCard_ShowsEmptyState_WhenNone()
     {
         var gradeId = Guid.NewGuid();
-        var teacherId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all teachers (0)"));
+        cut.Markup.Should().Contain("No teachers linked to this grade yet");
+    }
+
+    [TestMethod]
+    public void Detail_StudentsCard_ListsStudents_WithDemographics()
+    {
+        var gradeId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
         var genderId = Guid.NewGuid();
-        var levelId = Guid.NewGuid();
-        var qualId = Guid.NewGuid();
-        var salutationId = Guid.NewGuid();
-
         var (handler, _) = Register(
             gradeId,
             GradeJson(gradeId),
-            teachersJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            studentsJson: JsonSerializer.Serialize(new[]
             {
-                ["id"] = teacherId,
-                ["titleCodedValueId"] = salutationId,
-                ["firstName"] = "Jane",
-                ["lastName"] = "Doe",
-                ["displayName"] = (string?)null,
-                ["genderCodedValueId"] = genderId,
-                ["dateOfBirth"] = DateOnly.FromDateTime(new DateTime(1990, 5, 1)).ToString("yyyy-MM-dd"),
-                ["levelOfEducationCodedValueId"] = levelId,
-                ["qualificationCodedValueIds"] = new[] { qualId },
-                ["isDeleted"] = false,
-                ["teacherRoleCodedValueId"] = (Guid?)null,
-                ["assignedTopics"] = new[] { new Dictionary<string, object?>
-                {
-                    ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = (string?)null,
-                    ["name"] = "Mathematics", ["description"] = (string?)null, ["displayOrder"] = 0,
-                    ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-                } },
-                ["createdAt"] = DateTimeOffset.UnixEpoch,
-                ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            } }));
-        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK, JsonSerializer.Serialize(new[]
-        {
-            new { id = genderId, name = "Female" },
-            new { id = levelId, name = "Master's" },
-            new { id = qualId, name = "Mathematics Teaching" },
-            new { id = salutationId, name = "Ms" },
-        }));
-
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Female"));
-        cut.Markup.Should().Contain("Ms Jane Doe", "salutation prepends the name");
-        cut.Markup.Should().Contain("Master's", "level of education column renders");
-        cut.Markup.Should().Contain("Mathematics Teaching", "qualification chip renders");
-        cut.Markup.Should().Contain("Gender");
-        cut.Markup.Should().Contain("Qualifications");
-    }
-
-    [TestMethod]
-    public void Detail_UnlinkTeacherTopic_CallsUnlinkEndpoint()
-    {
-        var gradeId = Guid.NewGuid();
-        var teacherId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
-        var (handler, _) = Register(
-            gradeId,
-            GradeJson(gradeId),
-            teachersJson: JsonSerializer.Serialize(new[]
-            {
-                TeacherJson(teacherId, "Jane", "Doe", "jane@example.com", null, (topicId, "Mathematics")),
+                StudentJson(studentId, "STU001", "Ada", "Lovelace", genderId, new DateOnly(2015, 3, 10)),
             }));
-        handler.Map("DELETE", $"/teachers/{teacherId}/topics/{topicId}", HttpStatusCode.NoContent, "");
+        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["id"] = genderId, ["code"] = "GENDERS_FEMALE", ["name"] = "Female",
+                ["parentId"] = (Guid?)null, ["parentCode"] = (string?)null,
+                ["description"] = (string?)null, ["isDisabled"] = false,
+                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch,
+                ["updatedAt"] = DateTimeOffset.UnixEpoch, ["attributes"] = Array.Empty<object>(),
+                ["childCount"] = 0,
+            } }));
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Jane"));
-
-        var chip = cut.FindAll(".chip").First();
-        chip.Click();
-        cut.WaitForAssertion(() =>
-            handler.Calls.Any(c => c.Method == "DELETE" && c.Url == $"/teachers/{teacherId}/topics/{topicId}").Should().BeTrue());
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all students (1)"));
+        cut.Markup.Should().Contain("Ada Lovelace", "top-15 preview lists the student name");
+        cut.Markup.Should().Contain("Female", "demographics suffix carries the enriched gender");
     }
 
     [TestMethod]
-    public void Detail_AddTeacher_RevealsPicker()
+    public void Detail_StudentsCard_ShowsEmptyState_WhenNoStudents()
     {
         var gradeId = Guid.NewGuid();
-        var candidateId = Guid.NewGuid();
-        var (handler, _) = Register(
-            gradeId,
-            GradeJson(gradeId),
-            teachersJson: JsonSerializer.Serialize(Array.Empty<object>()),
-            assignmentsJson: "[]");
-        // All-teachers catalog feeds the add-teacher picker.
-        handler.Map("GET", "/teachers", HttpStatusCode.OK, JsonSerializer.Serialize(new[] { TeacherJson(candidateId, "Bob", "Smith", "bob@example.com") }));
+        Register(gradeId, GradeJson(gradeId), studentsJson: "[]");
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Add Teacher"));
-
-        var addTeacher = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add Teacher"));
-        addTeacher.Click();
-        cut.Markup.Should().Contain("Choose a teacher…");
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all students (0)"));
+        cut.Markup.Should().Contain("No active students in this grade for the current period.");
     }
 
     [TestMethod]
@@ -441,64 +369,34 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("Block enrollment");
     }
 
-    private static Dictionary<string, object?> StudentJson(
-        Guid studentId, string studentNumber, string first, string last,
-        Guid? genderId, DateOnly? dob) => new()
-    {
-        ["id"] = studentId,
-        ["studentNumber"] = studentNumber,
-        ["titleCodedValueId"] = (Guid?)null,
-        ["firstName"] = first,
-        ["lastName"] = last,
-        ["dateOfBirth"] = dob,
-        ["genderCodedValueId"] = genderId,
-        ["isDeleted"] = false,
-        ["createdAt"] = DateTimeOffset.UnixEpoch,
-        ["updatedAt"] = DateTimeOffset.UnixEpoch,
-    };
-
     [TestMethod]
-    public void Detail_StudentsTab_ListsStudents_WithDemographics()
+    public void Detail_ViewAll_Wires_TopicsAndTeachers_Dialogs()
     {
-        var gradeId = Guid.NewGuid();
-        var studentId = Guid.NewGuid();
-        var genderId = Guid.NewGuid();
-        var (handler, _) = Register(
-            gradeId,
-            GradeJson(gradeId),
-            studentsJson: JsonSerializer.Serialize(new[]
-            {
-                StudentJson(studentId, "STU001", "Ada", "Lovelace", genderId, new DateOnly(2015, 3, 10)),
-            }));
-        // Age + GenderName are enriched client-side; the by-ids lookup resolves
-        // the gender coded value to its display name.
-        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-            {
-                ["id"] = genderId, ["code"] = "GENDERS_FEMALE", ["name"] = "Female",
-                ["parentId"] = (Guid?)null, ["parentCode"] = (string?)null,
-                ["description"] = (string?)null, ["isDisabled"] = false,
-                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch,
-                ["updatedAt"] = DateTimeOffset.UnixEpoch, ["attributes"] = Array.Empty<object>(),
-                ["childCount"] = 0,
-            } }));
+        var source = ReadDetailSource();
 
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Students (1)"));
-        cut.Markup.Should().Contain("Ada Lovelace");
-        cut.Markup.Should().Contain("STU001");
-        cut.Markup.Should().Contain("Female", "enriched gender name renders in the grid");
-        cut.Markup.Should().Contain("Active", "status badge renders");
-    }
+        source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
+            "the Topics card's View-all anchor opens GradeTopicsDialog via the read-only helper");
+        source.Should().Contain("ShowReadonlyDialogAsync<GradeTeachersDialog>(",
+            "the Teachers card's View-all anchor opens GradeTeachersDialog via the read-only helper");
 
-    [TestMethod]
-    public void Detail_StudentsTab_EmptyState_WhenNoStudents()
-    {
-        var gradeId = Guid.NewGuid();
-        Register(gradeId, GradeJson(gradeId), studentsJson: "[]");
+        // GradeTopicsDialog gets the assigned topics + assignable catalog + action callbacks.
+        source.Should().Contain("nameof(GradeTopicsDialog.Topics)");
+        source.Should().Contain("nameof(GradeTopicsDialog.UnassignedTopics)");
+        source.Should().Contain("nameof(GradeTopicsDialog.Remove)");
+        source.Should().Contain("nameof(GradeTopicsDialog.Assign)");
 
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Students (0)"));
-        cut.Markup.Should().Contain("No active students in this grade for the current period.");
+        // GradeTeachersDialog gets the linked teachers + catalog + name maps + callbacks.
+        source.Should().Contain("nameof(GradeTeachersDialog.Teachers)");
+        source.Should().Contain("nameof(GradeTeachersDialog.UnlinkedTeachers)");
+        source.Should().Contain("nameof(GradeTeachersDialog.RoleChanged)");
+        source.Should().Contain("nameof(GradeTeachersDialog.UnlinkTopic)");
+
+        // Students card's View-all navigates to the grade-filtered students landing.
+        source.Should().Contain("View all students");
+        source.Should().Contain("/students?gradeLevelId=");
+
+        // The old segmented pill tab control is gone.
+        source.Should().NotContain("grade-tabs__bar");
+        source.Should().NotContain("SetActiveTab");
     }
 }

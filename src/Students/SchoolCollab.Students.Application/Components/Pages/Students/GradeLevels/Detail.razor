@@ -708,6 +708,7 @@
                 { nameof(GradeTeachersDialog.SalutationNames), _salutationNames },
                 { nameof(GradeTeachersDialog.GenderNames), _genderNames },
                 { nameof(GradeTeachersDialog.LevelNames), _levelNames },
+                { nameof(GradeTeachersDialog.QualificationNames), _qualificationNames },
                 { nameof(GradeTeachersDialog.Link), new Func<Guid, Task>(LinkTeacherAsync) },
                 { nameof(GradeTeachersDialog.RoleChanged), new Func<TeacherWithRoleDto, Guid?, Task>(OnRoleChangedAsync) },
                 { nameof(GradeTeachersDialog.UnlinkTopic), new Func<TeacherWithRoleDto, Guid, Task>(UnlinkTeacherTopicAsync) },

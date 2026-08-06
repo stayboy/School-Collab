@@ -6,6 +6,7 @@
 .teacher-dialog__main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
 .teacher-dialog__name { font-weight: 500; }
 .teacher-dialog__meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; display: flex; gap: 0.4rem; }
+.teacher-dialog__quals { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 2px; }
 .teacher-dialog__topics { display: flex; flex-wrap: wrap; gap: 0.25rem; max-width: 240px; }
 .teacher-dialog__role { min-width: 140px; }
 .chip { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--neutral-fill-secondary, #f5f5f5); border-radius: 999px; padding: 2px 8px; font-size: 0.82em; cursor: pointer; }

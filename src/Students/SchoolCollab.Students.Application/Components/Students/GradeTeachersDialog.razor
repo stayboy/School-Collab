@@ -40,6 +40,15 @@
                             <span>·</span>
                             <span>@(teacher.LevelOfEducationCodedValueId is { } lid && LevelNames.TryGetValue(lid, out var l) ? l : "—")</span>
                         </div>
+                        @if ((teacher.QualificationCodedValueIds ?? []).Length > 0)
+                        {
+                            <div class="teacher-dialog__quals">
+                                @foreach (var qid in teacher.QualificationCodedValueIds ?? [])
+                                {
+                                    <span class="chip">@(QualificationNames is { } qn && qn.TryGetValue(qid, out var qv) ? qv : "•")</span>
+                                }
+                            </div>
+                        }
                     </div>
 
                     <div class="teacher-dialog__topics">
@@ -81,6 +90,7 @@
     [Parameter] public IReadOnlyDictionary<Guid, string>? SalutationNames { get; set; }
     [Parameter] public IReadOnlyDictionary<Guid, string>? GenderNames { get; set; }
     [Parameter] public IReadOnlyDictionary<Guid, string>? LevelNames { get; set; }
+    [Parameter] public IReadOnlyDictionary<Guid, string>? QualificationNames { get; set; }
     [Parameter] public Func<Guid, Task>? Link { get; set; }
     [Parameter] public Func<TeacherWithRoleDto, Guid?, Task>? RoleChanged { get; set; }
     [Parameter] public Func<TeacherWithRoleDto, Guid, Task>? UnlinkTopic { get; set; }
