@@ -155,39 +155,38 @@ public class StudentDetailSectionsTests
     {
         // The user asked for a "top-down display" of demographics:
         // label on top, value below (a stat-card / metric-card pattern).
-        // Asserted via the scoped CSS: .profile-row is column-direction,
-        // .profile-label is the small uppercase hint, .profile-value is
-        // the prominent value.
+        // The shared <FieldDisplay> component now owns the styling, so we
+        // assert on its scoped CSS: vertical orientation is column-direction,
+        // label is a small uppercase hint, value is the prominent content.
         var asmDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
         var cssPath = Path.GetFullPath(Path.Combine(
             asmDir,
             "..", "..", "..", "..", "..",
-            "src", "Students", "SchoolCollab.Students.Application",
-            "Components", "Pages", "Students", "Detail.razor.css"));
+            "src", "SchoolCollab.Admin.Shared", "Components", "FieldDisplay.razor.css"));
         File.Exists(cssPath).Should().BeTrue();
         var css = File.ReadAllText(cssPath);
 
-        // .profile-row must be a vertical flex container.
-        var rowRule = ExtractRule(css, ".profile-row");
-        rowRule.Should().NotBeNull(".profile-row is defined in the scoped CSS");
+        // .field-display-vertical must be a vertical flex container.
+        var rowRule = ExtractRule(css, ".field-display-vertical");
+        rowRule.Should().NotBeNull(".field-display-vertical is defined in FieldDisplay.razor.css");
         rowRule!.Should().Contain("flex-direction: column",
-            ".profile-row is column-direction (label stacked above value)");
+            ".field-display-vertical stacks label above value");
         rowRule!.Should().Contain("align-items: flex-start",
-            ".profile-row aligns its children to the start (left-aligned label/value stack)");
+            ".field-display-vertical aligns its children to the start (left-aligned label/value stack)");
 
-        // .profile-label should be small, muted, uppercase (the "caption" style).
-        var labelRule = ExtractRule(css, ".profile-label");
+        // .field-display__label should be small, muted, uppercase (the "caption" style).
+        var labelRule = ExtractRule(css, ".field-display__label");
         labelRule.Should().NotBeNull();
         labelRule!.Should().Contain("text-transform: uppercase",
-            ".profile-label is uppercase so it reads as a caption above the value");
+            ".field-display__label is uppercase so it reads as a caption above the value");
         labelRule!.Should().Contain("var(--neutral-foreground-hint)",
-            ".profile-label uses the muted design-system color");
+            ".field-display__label uses the muted design-system color");
 
-        // .profile-value should be prominent (heavier than the label).
-        var valueRule = ExtractRule(css, ".profile-value");
+        // .field-display__value should be prominent (heavier than the label).
+        var valueRule = ExtractRule(css, ".field-display__value");
         valueRule.Should().NotBeNull();
         valueRule!.Should().Contain("font-weight: 500",
-            ".profile-value is heavier than the label (the primary content)");
+            ".field-display__value is heavier than the label (the primary content)");
     }
 
     private static string? ExtractRule(string css, string selector)

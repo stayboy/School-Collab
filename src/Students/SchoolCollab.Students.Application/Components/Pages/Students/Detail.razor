@@ -54,34 +54,13 @@
                         @* ── Profile (FluentCard, single-page section) ─────────── *@
                         <FluentCard class="detail-card">
                             <div class="profile-grid">
-                                <div class="profile-row">
-                                    <span class="profile-label">Student #</span>
-                                    <span class="profile-value">@_student.StudentNumber</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Full name</span>
-                                    <span class="profile-value">@_student.FirstName @_student.LastName</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Date of birth</span>
-                                    <span class="profile-value">@(_student.DateOfBirth?.ToString("d") ?? "—")</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Gender</span>
-                                    <span class="profile-value">@(string.IsNullOrWhiteSpace(_student.GenderName) ? "—" : _student.GenderName)</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Status</span>
-                                    <span class="profile-value">@StatusBadge</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Created</span>
-                                    <span class="profile-value">@_student.CreatedAt.ToLocalTime().ToString("g")</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Updated</span>
-                                    <span class="profile-value">@_student.UpdatedAt.ToLocalTime().ToString("g")</span>
-                                </div>
+                                <FieldDisplay Label="Student #">@_student.StudentNumber</FieldDisplay>
+                                <FieldDisplay Label="Full name">@_student.FirstName @_student.LastName</FieldDisplay>
+                                <FieldDisplay Label="Date of birth">@(_student.DateOfBirth?.ToString("d") ?? "—")</FieldDisplay>
+                                <FieldDisplay Label="Gender">@(string.IsNullOrWhiteSpace(_student.GenderName) ? "—" : _student.GenderName)</FieldDisplay>
+                                <FieldDisplay Label="Status">@StatusBadge</FieldDisplay>
+                                <FieldDisplay Label="Created">@_student.CreatedAt.ToLocalTime().ToString("g")</FieldDisplay>
+                                <FieldDisplay Label="Updated">@_student.UpdatedAt.ToLocalTime().ToString("g")</FieldDisplay>
                             </div>
                         </FluentCard>
 

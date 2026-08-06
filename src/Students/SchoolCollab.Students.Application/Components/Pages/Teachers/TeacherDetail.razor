@@ -54,9 +54,9 @@
                     </section>
 
                     <div class="review-card">
-                        <div class="review-grid">
-                            <div class="review-row"><span class="review-label">Title</span><span class="review-value">@(_titleName ?? "—")</span></div>
-                            <div class="review-row"><span class="review-label">Date of birth</span><span class="review-value">@(_teacher.DateOfBirth?.ToString("dd MMM yyyy") ?? "—")</span></div>
+                        <div class="profile-grid">
+                            <FieldDisplay Label="Title" Orientation="FieldDisplayOrientation.Horizontal">@(_titleName ?? "—")</FieldDisplay>
+                            <FieldDisplay Label="Date of birth" Orientation="FieldDisplayOrientation.Horizontal">@(_teacher.DateOfBirth?.ToString("dd MMM yyyy") ?? "—")</FieldDisplay>
                         </div>
                     </div>
 
@@ -111,6 +111,10 @@
         <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
     </ErrorContent>
 </ErrorBoundary>
+
+<style>
+    .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 24px; }
+</style>
 
 @code {
     [Parameter] public Guid Id { get; set; }

@@ -87,11 +87,11 @@
                         {
                             <FluentCard class="detail-card">
                                 <div class="profile-grid">
-                                    @if (!string.IsNullOrWhiteSpace(_titleName)) { <div class="profile-row"><span class="profile-label">Title</span><span class="profile-value">@_titleName</span></div> }
-                                    <div class="profile-row"><span class="profile-label">Name</span><span class="profile-value">@_guardian.FirstName @_guardian.LastName</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(_guardian.DisplayName)) { <div class="profile-row"><span class="profile-label">Display name</span><span class="profile-value">@_guardian.DisplayName</span></div> }
-                                    @if (!string.IsNullOrWhiteSpace(_guardian.Address)) { <div class="profile-row"><span class="profile-label">Address</span><span class="profile-value">@_guardian.Address</span></div> }
-                                    @if (!string.IsNullOrWhiteSpace(_communityName)) { <div class="profile-row"><span class="profile-label">Community</span><span class="profile-value">@_communityName</span></div> }
+                                    @if (!string.IsNullOrWhiteSpace(_titleName)) { <FieldDisplay Label="Title" Orientation="FieldDisplayOrientation.Horizontal">@_titleName</FieldDisplay> }
+                                    <FieldDisplay Label="Name" Orientation="FieldDisplayOrientation.Horizontal">@_guardian.FirstName @_guardian.LastName</FieldDisplay>
+                                    @if (!string.IsNullOrWhiteSpace(_guardian.DisplayName)) { <FieldDisplay Label="Display name" Orientation="FieldDisplayOrientation.Horizontal">@_guardian.DisplayName</FieldDisplay> }
+                                    @if (!string.IsNullOrWhiteSpace(_guardian.Address)) { <FieldDisplay Label="Address" Orientation="FieldDisplayOrientation.Horizontal">@_guardian.Address</FieldDisplay> }
+                                    @if (!string.IsNullOrWhiteSpace(_communityName)) { <FieldDisplay Label="Community" Orientation="FieldDisplayOrientation.Horizontal">@_communityName</FieldDisplay> }
                                 </div>
                             </FluentCard>
                         }
@@ -186,8 +186,6 @@
 <style>
     .muted { color: var(--neutral-foreground-hint); }
     .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
-    .profile-row { display: flex; gap: 8px; }
-    .profile-label { font-weight: 600; min-width: 90px; }
     .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
     .timeline-item { display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; border-left: 3px solid var(--accent-fill-rest, #0f6cbd); background: var(--neutral-layer-1, #fafafa); }
     .timeline-date { margin-left: auto; color: var(--neutral-foreground-hint); font-size: 0.85em; }

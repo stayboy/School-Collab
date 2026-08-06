@@ -2,6 +2,7 @@
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Services
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
@@ -55,35 +56,20 @@
                         @* ── Overview card ─────────────────────────────────── *@
                         <FluentCard class="detail-card">
                             <div class="profile-grid">
-                                <div class="profile-row">
-                                    <span class="profile-label">Name</span>
-                                    <span class="profile-value">@_grade.Name</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Age range</span>
-                                    <span class="profile-value">@FormatAgeRange(_grade.MinAge, _grade.MaxAge)</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Gender</span>
-                                    <span class="profile-value">@(_genderName ?? "—")</span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Enrollment</span>
-                                    <span class="profile-value">
-                                        <FluentBadge Appearance="@(_grade.IsBlockedFromEnrollment ? Appearance.Neutral : Appearance.Accent)">
-                                            @(_grade.IsBlockedFromEnrollment ? "Blocked" : "Allowed")
-                                        </FluentBadge>
-                                    </span>
-                                </div>
-                                <div class="profile-row">
-                                    <span class="profile-label">Students</span>
-                                    <span class="profile-value">
-                                        <FluentAnchor Appearance="Appearance.Lightweight"
-                                                      Href="@($"/students?gradeLevelId={_grade.Id}")">
-                                            @_grade.StudentCount students
-                                        </FluentAnchor>
-                                    </span>
-                                </div>
+                                <FieldDisplay Label="Name">@_grade.Name</FieldDisplay>
+                                <FieldDisplay Label="Age range">@FormatAgeRange(_grade.MinAge, _grade.MaxAge)</FieldDisplay>
+                                <FieldDisplay Label="Gender">@(_genderName ?? "—")</FieldDisplay>
+                                <FieldDisplay Label="Enrollment">
+                                    <FluentBadge Appearance="@(_grade.IsBlockedFromEnrollment ? Appearance.Neutral : Appearance.Accent)">
+                                        @(_grade.IsBlockedFromEnrollment ? "Blocked" : "Allowed")
+                                    </FluentBadge>
+                                </FieldDisplay>
+                                <FieldDisplay Label="Students">
+                                    <FluentAnchor Appearance="Appearance.Lightweight"
+                                                  Href="@($"/students?gradeLevelId={_grade.Id}")">
+                                        @_grade.StudentCount students
+                                    </FluentAnchor>
+                                </FieldDisplay>
                             </div>
                         </FluentCard>
 
@@ -201,9 +187,6 @@
        over the value), via the shared .profile-row/.profile-label/.profile-value
        class names. Auto-fit grid so cells reflow on narrow viewports. */
     .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 24px; }
-    .profile-row { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; min-width: 0; }
-    .profile-label { color: var(--neutral-foreground-hint); font-size: 0.75rem; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; min-width: 0; line-height: 1.2; }
-    .profile-value { font-size: 1rem; font-weight: 500; word-break: break-word; line-height: 1.3; color: var(--neutral-foreground-rest); }
     /* Student-count link: the lightweight FluentAnchor carries internal control
        padding that pushes the text off the label's left edge — strip it so the
        value aligns with the label above (student-detail profile format). */
