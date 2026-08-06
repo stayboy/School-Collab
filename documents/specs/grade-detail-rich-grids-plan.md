@@ -1,6 +1,6 @@
 # Grade-Level Detail — Rich Curriculum & Teacher Grids (plan)
 
-Status: **complete — cg grids delivered** (dm phase complete; cg/2–cg/5 shipped).
+Status: **complete — cg grids + teacher dialog delivered** (dm phase complete; cg/2–cg/6 shipped).
 Parent: `grade-level-detail-view-plan.md` (Phase A) — enhances the grade-level Detail page.
 
 ## 0. Active architecture (dm — demographics phase)
@@ -107,6 +107,7 @@ Two new `CodedValueParent` entries + `ToCode` mappings + `seed.csv` rows:
 | 3 | `cg/3-topics-grid` | ✅ Topics tab → rich data-grid with Strand/Lesson count columns + `TopicStrandsDialog`/`TopicLessonsDialog` hosting the shared editors (UI + bUnit) |
 | 4 | `cg/4-teachers-grid` | ✅ Teachers tab → Title/Gender/Level/Qualifications/Topics columns resolved client-side (UI + bUnit) |
 | 5 | `cg/5-topic-teacher-roles` | ✅ Topic-teacher assignment dialog: `ListTopicTeachers` (teachers + per-topic role) + `SetTeacherTopicRole`; Topics grid gains a **Teachers** action opening `TopicTeachersDialog` (assign from the grade's teacher pool with a role, unassign, set role) — backend + client + CQRS/bUnit tests |
+| 6 | `cg/6-teacher-dialog` | ✅ Teacher create/edit dialog: profile (title/name/gender/DOB/level/qualifications) **and** the topics the teacher teaches **with per-topic roles** (plus grade levels) — `ListTeacherTopicRoles` (GET /teachers/{id}/topics/roles); opened from the Teachers grid (+ New / Edit) and teacher Detail Edit |
 
 Base for layer 1 = the branch containing the tabbed `Detail.razor` (Phase A `stack/5-create-edit`). The cg stack was rooted on the `dm/3` tip. Note: cg/1 was replaced by the dedicated `dm` phase, so the shipped cg stack is cg/2 → cg/3 → cg/4 on top of dm/1–dm/3.
 
