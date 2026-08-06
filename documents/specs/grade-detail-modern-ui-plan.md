@@ -47,11 +47,13 @@
 | 2 | Topics grid | Row actions via the repo's `RowActionsMenu` kebab (Strands, Lessons, Teachers, Remove) — rendered in `GradeTopicsDialog` | ✅ cg/7 |
 | 3 | Topic name | Stacked `.topic-name` + muted `.topic-code` cell | ✅ cg/7 |
 | 4 | Student name | `StudentsGrid` Name column → landing `student-full-name` pattern; drop Gender/Age columns; add `StudentsGrid.razor.css`; the Students card preview uses the same name + demographics stack | ✅ cg/7 |
-| 5 | Add icons | Add `FluentButton` add icons in each card header (Topics/Teachers: `FluentIcons.Add`, Students: `FluentIcons.PersonAdd`); wire Topics/Teachers to existing dialogs, Students to new `OpenAddStudentsAsync` (period resolution + `StudentPickerDialog` + `EnrollStudentAsync`) | ✅ cg/8 |
+| 5 | Add icons | Add `FluentButton` add icons in each card header (Topics/Teachers/Students: `FluentIcons.Add`); wire Topics/Teachers to existing dialogs, Students to new `OpenAddStudentsAsync` (period resolution + `StudentPickerDialog` + `EnrollStudentAsync`) | ✅ cg/8 |
 | 6 | Rename Topics → Subjects/Curriculum | Visible labels only: card title "Subjects/Curriculum", empty state "No subjects assigned to this curriculum yet", View-all "View all subjects", dialog title "Subjects/Curriculum · {grade}" | ✅ cg/8 |
 | 7 | Topic secondary text | Topic preview items restructured: `<div>` container + topic-name `FluentButton` (Lightweight) + Strands(N) and Lessons(N) `FluentAnchor` (`Appearance.Hypertext`, `Href="#"`, `OnClick`) navigable counts, separated by a `|` divider and wider gap | ✅ cg/8 |
 | 8 | View-all alignment | Fix text/arrow vertical alignment via `IconEnd="@FluentIcons.ArrowRight"` (`FluentAnchor` with `Appearance.Hypertext`, `Href="#"`, `OnClick` for Topics/Teachers; `FluentAnchor` with real `Href` for Students) | ✅ cg/8 |
 | 9 | SectionCard component | Extract a shared `SectionCard.razor` component to unify the three grade-detail cards (header icon/title/count/add, preview item template, View-all footer). Wrap in `FluentCard` with explicit border so the card outline is visible. | ✅ cg/8 |
+| 10 | Subject count gap | Subject card secondary text uses wider gap + `|` divider between Strands(N) and Lessons(N) counters. Topic name is a `FluentButton` (Lightweight, no card-style plain button). | ✅ cg/8 |
+| 11 | Profile view | Grade Overview profile displays Name, Age range, Enrollment, Gender, Students; removed the redundant Level row. | ✅ cg/8 |
 
 ## 2. Tests
 
