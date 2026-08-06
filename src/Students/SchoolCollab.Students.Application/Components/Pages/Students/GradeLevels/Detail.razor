@@ -2,6 +2,7 @@
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Services
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using TeacherWithRoleDto = SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto
@@ -112,7 +113,7 @@
                                     <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_topicsError</FluentMessageBar>
                                 }
                                 <div class="section-header">
-                                    <h3>Assigned Topics (@_assignedTopics.Count)</h3>
+                                    <h3>Assigned Topics (@(_curriculum?.Length ?? 0))</h3>
                                     <FluentButton Appearance="Appearance.Accent"
                                                   Size="ButtonSize.Small"
                                                   IconStart="@FluentIcons.Add"
@@ -136,7 +137,11 @@
                                                       OnClick="CancelAddTopic">Cancel</FluentButton>
                                     </div>
                                 }
-                                @if (_assignedTopics.Count == 0)
+                                @if (_curriculum is null)
+                                {
+                                    <div class="spinner-container"><FluentProgressRing /></div>
+                                }
+                                else if (_curriculum.Length == 0)
                                 {
                                     <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
                                         No topics assigned to this grade yet — use Add Topic to assign one.
@@ -144,38 +149,42 @@
                                 }
                                 else
                                 {
-                                    <div class="topic-list">
-                                        @foreach (var t in _assignedTopics)
-                                        {
-                                            <div class="topic-card">
-                                                <div class="topic-card-header">
-                                                    <button type="button" class="topic-expander"
-                                                            @onclick="() => ToggleTopic(t.TopicId)"
-                                                            title="Expand strands & lessons">
-                                                        <span class="expander-mark">@(_expandedTopics.Contains(t.TopicId) ? "▾" : "▸")</span>
-                                                    </button>
-                                                    <span class="topic-name">@t.Name</span>
-                                                    @if (!string.IsNullOrWhiteSpace(t.Code))
-                                                    {
-                                                        <span class="muted topic-code">@t.Code</span>
-                                                    }
-                                                    <span class="topic-actions">
-                                                        <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
-                                                                      OnClick="@(() => RemoveTopicAsync(t))"
-                                                                      Title="Unassign this topic from the grade">Remove</FluentButton>
-                                                    </span>
-                                                </div>
-                                                @if (_expandedTopics.Contains(t.TopicId))
-                                                {
-                                                    <div class="topic-card-body">
-                                                        <StrandsEditor TopicId="@t.TopicId" TopicName="@t.Name" />
-                                                        <hr class="my-3" />
-                                                        <LessonsEditor TopicId="@t.TopicId" TopicName="@t.Name" />
-                                                    </div>
-                                                }
+                                    <FluentDataGrid Items="_curriculum.AsQueryable()"
+                                                    TGridItem="GradeTopicCurriculumDto"
+                                                    Class="topics-grid">
+                                        <TemplateColumn Title="Topic">
+                                            <span class="topic-name">@context.Name</span>
+                                            @if (!string.IsNullOrWhiteSpace(context.Code))
+                                            {
+                                                <span class="muted topic-code">@context.Code</span>
+                                            }
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Strands">
+                                            <FluentAnchor Appearance="Appearance.Lightweight"
+                                                          OnClick="@(() => OpenStrandsAsync(context))">
+                                                @context.StrandCount
+                                            </FluentAnchor>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Lessons">
+                                            <FluentAnchor Appearance="Appearance.Lightweight"
+                                                          OnClick="@(() => OpenLessonsAsync(context))">
+                                                @context.LessonCount
+                                            </FluentAnchor>
+                                        </TemplateColumn>
+                                        <TemplateColumn Title="Actions" Class="topic-actions-col">
+                                            <div class="topic-actions">
+                                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                              OnClick="@(() => OpenStrandsAsync(context))"
+                                                              Title="Add or edit strands">Strands</FluentButton>
+                                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                              OnClick="@(() => OpenLessonsAsync(context))"
+                                                              Title="Add or edit lessons">Lessons</FluentButton>
+                                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                              OnClick="@(() => RemoveTopicAsync(context.TopicId))"
+                                                              Title="Unassign this topic from the grade">Remove</FluentButton>
                                             </div>
-                                        }
-                                    </div>
+                                        </TemplateColumn>
+                                    </FluentDataGrid>
                                 }
                             </FluentTab>
 
@@ -334,6 +343,11 @@
     .chip-x { opacity: 0.6; }
     .action-bar { margin-top: 1rem; }
     .teachers-grid { width: 100%; }
+    .topics-grid { width: 100%; }
+    .topic-actions { display: flex; gap: 0.25rem; }
+    .topic-actions-col { width: 1%; white-space: nowrap; }
+    .dialog-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--neutral-stroke-rest); padding-top: 0.75rem; margin-top: 0.75rem; }
+    .topic-dialog { min-width: 480px; }
 </style>
 
 @code {
@@ -350,8 +364,8 @@
 
     // ── Topics tab ──────────────────────────────────────────────────────────
     private List<AssignedTopic> _assignedTopics = new();
+    private GradeTopicCurriculumDto[]? _curriculum;
     private Dictionary<Guid, TopicDto> _catalog = new();
-    private HashSet<Guid> _expandedTopics = new();
     private bool _showTopicPicker;
     private TopicDto? _topicToAdd;
     private bool _addingTopic;
@@ -440,6 +454,7 @@
                 })
                 .OrderBy(t => t.Name)
                 .ToList();
+            _curriculum = await Api.ListGradeTopicCurriculumByGradeAsync(Id, ct: ct) ?? [];
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -527,15 +542,16 @@
         }
     }
 
-    private async Task RemoveTopicAsync(AssignedTopic topic)
+    private async Task RemoveTopicAsync(Guid topicId)
     {
         if (_disposed || _addingTopic) return;
+        var assignment = _assignedTopics.FirstOrDefault(a => a.TopicId == topicId);
+        if (assignment is null) return;
         _addingTopic = true;
         try
         {
-            await Api.RemoveTopicAssignmentAsync(topic.AssignmentId);
+            await Api.RemoveTopicAssignmentAsync(assignment.AssignmentId);
             if (_disposed) return;
-            _expandedTopics.Remove(topic.TopicId);
             await ReloadAssignedTopicsAsync();
         }
         catch (Exception ex)
@@ -562,19 +578,35 @@
             })
             .OrderBy(t => t.Name)
             .ToList();
+        _curriculum = await Api.ListGradeTopicCurriculumByGradeAsync(Id) ?? [];
     }
 
-    private void ToggleTopic(Guid topicId)
+    private async Task OpenStrandsAsync(GradeTopicCurriculumDto topic)
     {
-        if (_expandedTopics.Contains(topicId))
-        {
-            _expandedTopics.Remove(topicId);
-        }
-        else
-        {
-            // StrandsEditor / LessonsEditor mount fresh and load their own data.
-            _expandedTopics.Add(topicId);
-        }
+        await DialogService.ShowReadonlyDialogAsync<TopicStrandsDialog>(
+            $"Strands · {topic.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TopicStrandsDialog.TopicId), topic.TopicId },
+                { nameof(TopicStrandsDialog.TopicName), topic.Name },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadAssignedTopicsAsync();
+    }
+
+    private async Task OpenLessonsAsync(GradeTopicCurriculumDto topic)
+    {
+        await DialogService.ShowReadonlyDialogAsync<TopicLessonsDialog>(
+            $"Lessons · {topic.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TopicLessonsDialog.TopicId), topic.TopicId },
+                { nameof(TopicLessonsDialog.TopicName), topic.Name },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadAssignedTopicsAsync();
     }
 
     // ── Teachers: add / remove / role / topics ─────────────────────────────

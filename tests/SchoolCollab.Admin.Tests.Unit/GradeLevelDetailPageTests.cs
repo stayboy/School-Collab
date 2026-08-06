@@ -97,7 +97,8 @@ public class GradeLevelDetailPageTests : BunitContext
         string topicsCatalogJson = "[]",
         string teachersJson = "[]",
         string assignmentsJson = "[]",
-        string studentsJson = "[]")
+        string studentsJson = "[]",
+        string curriculumJson = "[]")
     {
         var auth = new MutableAuthenticationStateProvider { User = CreateUser(realTenant: true) };
         var handler = new ScriptedHandler();
@@ -107,6 +108,7 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", "/teachers", HttpStatusCode.OK, teachersJson);
         handler.Map("GET", $"/students/topic-assignments/by-grade/{gradeId}", HttpStatusCode.OK, assignmentsJson);
         handler.Map("GET", $"/students/by-grade/{gradeId}", HttpStatusCode.OK, studentsJson);
+        handler.Map("GET", $"/students/grade-levels/{gradeId}/curriculum", HttpStatusCode.OK, curriculumJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
 
@@ -230,14 +232,21 @@ public class GradeLevelDetailPageTests : BunitContext
                 ["name"] = "Mathematics", ["description"] = (string?)null,
                 ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
             } }),
-            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(assignmentId, topicId, gradeId) }));
+            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(assignmentId, topicId, gradeId) }),
+            curriculumJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["topicId"] = topicId, ["name"] = "Mathematics", ["code"] = "MATH",
+                ["strandCount"] = 2, ["lessonCount"] = 3,
+            } }));
         handler.Map("DELETE", $"/students/topic-assignments/{assignmentId}", HttpStatusCode.NoContent, "");
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assigned Topics (1)"));
         cut.Markup.Should().Contain("Mathematics");
+        cut.Markup.Should().Contain(">2</", "strand count renders");
+        cut.Markup.Should().Contain(">3</", "lesson count renders");
 
-        // Click the Remove button on the assigned-topic card.
+        // Click the Remove button in the assigned-topic grid row.
         var remove = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Remove"));
         remove.Click();
         cut.WaitForAssertion(() =>
