@@ -51,7 +51,7 @@
                                     <span class="title-sep">·</span>
                                     @FormatAgeRange(_grade.MinAge, _grade.MaxAge)
                                     <span class="title-sep">·</span>
-                                    @(_genderName ?? "Co-ed")
+                                    @(_genderName ?? "—")
                                     @if (_grade.IsBlockedFromEnrollment)
                                     {
                                         <span class="title-sep">·</span>
@@ -79,7 +79,7 @@
                                 </div>
                                 <div class="profile-row">
                                     <span class="profile-label">Gender</span>
-                                    <span class="profile-value">@(_genderName ?? "Co-ed")</span>
+                                    <span class="profile-value">@(_genderName ?? "—")</span>
                                 </div>
                                 <div class="profile-row">
                                     <span class="profile-label">Enrollment</span>
