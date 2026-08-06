@@ -17,6 +17,7 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicTeachers;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeacherTopicRoles;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Data.Repositories;
@@ -59,6 +60,8 @@ public class TeacherCqrsTests
     private static ListTeachersHandler NewList(StudentsTestScope s) =>
         new(s.Db, s.Cache);
     private static ListTopicsForTeacherHandler NewListTopics(StudentsTestScope s) =>
+        new(s.Db, s.Cache);
+    private static ListTeacherTopicRolesHandler NewListTopicRoles(StudentsTestScope s) =>
         new(s.Db, s.Cache);
     private static ListGradeLevelsForTeacherHandler NewListGrades(StudentsTestScope s) =>
         new(s.Db, s.Cache);
@@ -240,6 +243,36 @@ public class TeacherCqrsTests
 
         result.Should().BeEmpty();
         result.Should().NotContain(x => x.TeacherId == id);
+    }
+
+    [TestMethod]
+    public async Task ListTeacherTopicRoles_ReturnsTopicsWithRoles()
+    {
+        using var s = new StudentsTestScope("list-teacher-topic-roles");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        var topicA = await SeedTopicAsync(s, "MATH", "Mathematics");
+        var topicB = await SeedTopicAsync(s, "SCI", "Science");
+        var roleA = Guid.NewGuid();
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, topicA, roleA));
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, topicB));
+
+        var result = await NewListTopicRoles(s).HandleAsync(new ListTeacherTopicRoles(id));
+
+        result.Should().HaveCount(2);
+        result.Should().ContainSingle(r => r.TopicId == topicA).Which.RoleCodedValueId.Should().Be(roleA);
+        result.Should().ContainSingle(r => r.TopicId == topicB).Which.RoleCodedValueId.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task ListTeacherTopicRoles_UnlinkedTopic_NotReturned()
+    {
+        using var s = new StudentsTestScope("list-teacher-topic-roles-unlinked");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        var topicId = await SeedTopicAsync(s, "MATH", "Mathematics");
+
+        var result = await NewListTopicRoles(s).HandleAsync(new ListTeacherTopicRoles(id));
+
+        result.Should().BeEmpty();
     }
 
     [TestMethod]

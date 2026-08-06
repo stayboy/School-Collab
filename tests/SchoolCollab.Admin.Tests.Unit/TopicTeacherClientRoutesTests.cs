@@ -114,4 +114,24 @@ public class TopicTeacherClientRoutesTests
         handler.Calls.Should().ContainSingle(c =>
             c.Method == "DELETE" && c.Url == $"/teachers/{teacherId}/topics/{topicId}");
     }
+
+    [TestMethod]
+    public async Task ListTeacherTopicRoles_GETsTeacherTopicRolesEndpoint()
+    {
+        var teacherId = Guid.NewGuid();
+        var topicId = Guid.NewGuid();
+        var handler = new ScriptedHandler().Map(
+            $"/teachers/{teacherId}/topics/roles",
+            JsonSerializer.Serialize(new[]
+            {
+                new { topicId, roleCodedValueId = (Guid?)Guid.NewGuid() },
+            }));
+        var client = CreateClient(handler);
+
+        var result = await client.ListTeacherTopicRolesAsync(teacherId);
+
+        handler.Calls.Should().ContainSingle(c =>
+            c.Method == "GET" && c.Url == $"/teachers/{teacherId}/topics/roles");
+        result.Should().ContainSingle(r => r.TopicId == topicId && r.RoleCodedValueId.HasValue);
+    }
 }

@@ -1,5 +1,6 @@
 @page "/students/teachers"
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Students
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -13,7 +14,7 @@
 <LandingPage TItem="TeacherDto"
              Title="Teachers"
              CreateLabel="+ New Teacher"
-             CreateRoute="/students/teachers/create"
+             OnCreate="OpenCreateDialogAsync"
              CreateEnabled="@_isRealTenant"
              SearchEnabled="@_isRealTenant"
              EmptyMessage="@CurrentEmptyMessage"
@@ -135,13 +136,33 @@
         }
     }
 
+    private async Task OpenCreateDialogAsync()
+        => await OpenTeacherDialogAsync(null);
+
+    private async Task OpenTeacherDialogAsync(Guid? teacherId)
+    {
+        if (_disposed) return;
+        var title = teacherId.HasValue ? "Edit Teacher" : "New Teacher";
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+            title,
+            new Dictionary<string, object?>
+            {
+                { nameof(TeacherEditDialog.TeacherId), teacherId },
+            },
+            DialogSize.Large);
+        var result = await dialog.Result;
+        if (_disposed || result.Cancelled) return;
+        if (result.Data is Guid teacherIdSaved)
+            Nav.NavigateTo($"/students/teachers/{teacherIdSaved}");
+    }
+
     private IReadOnlyList<RowAction> BuildTeacherActions(TeacherDto t)
     {
         var name = $"{t.FirstName} {t.LastName}".Trim();
         return new List<RowAction>
         {
             RowAction.Navigate("View", $"/students/teachers/{t.Id}", FluentIcons.Open),
-            RowAction.Navigate("Edit", $"/students/teachers/{t.Id}/edit", FluentIcons.Edit),
+            RowAction.Callback("Edit", () => OpenTeacherDialogAsync(t.Id), FluentIcons.Edit),
             RowAction.Separator(),
             RowAction.Callback("Delete", () => OnDeleteAsync(t.Id, name), FluentIcons.Delete),
         };

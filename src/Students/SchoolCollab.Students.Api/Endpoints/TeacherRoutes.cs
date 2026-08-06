@@ -15,6 +15,7 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeacherTopicRoles;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicTeachers;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -134,6 +135,14 @@ public static class TeacherRoutes
             }
             catch (TeacherLinkNotFoundException) { return Results.NotFound(); }
         });
+
+        // Per-topic roles for a teacher (cg/6) — inverse of ListTopicTeachers,
+        // used by the teacher create/edit dialog to prefill topic roles when editing.
+        group.MapGet("/{id:guid}/topics/roles", async (
+            Guid id,
+            [FromServices] IQueryHandler<ListTeacherTopicRoles, TeacherTopicRoleDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListTeacherTopicRoles(id), ct)));
 
         // Grade-level links (spec §4.12).
         group.MapGet("/{id:guid}/grade-levels", async (

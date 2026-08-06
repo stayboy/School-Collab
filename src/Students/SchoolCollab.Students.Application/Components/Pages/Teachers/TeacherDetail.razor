@@ -1,5 +1,6 @@
 @page "/students/teachers/{Id:guid}"
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Students
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
@@ -9,6 +10,7 @@
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 @inject ILogger<TeacherDetail> Logger
 @implements IDisposable
 
@@ -40,7 +42,7 @@
                 {
                     <div class="detail-toolbar">
                         <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" IconStart="@FluentIcons.Edit" Href="@($"/students/teachers/{_teacher.Id}/edit")">Edit</FluentButton>
+                        <FluentButton Appearance="Appearance.Accent" IconStart="@FluentIcons.Edit" OnClick="OpenEditAsync">Edit</FluentButton>
                     </div>
 
                     <section class="detail-header">
@@ -163,6 +165,22 @@
     }
 
     private void Back() => Nav.NavigateTo("/students/teachers");
+
+    private async Task OpenEditAsync()
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+            "Edit Teacher",
+            new Dictionary<string, object?>
+            {
+                { nameof(TeacherEditDialog.TeacherId), Id },
+            },
+            DialogSize.Large);
+        var result = await dialog.Result;
+        if (_disposed || result.Cancelled) return;
+        if (result.Data is Guid)
+            Nav.NavigateTo($"/students/teachers/{Id}");
+    }
 
     public void Dispose()
     {

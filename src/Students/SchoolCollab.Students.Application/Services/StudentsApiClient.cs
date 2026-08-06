@@ -413,6 +413,15 @@ public sealed record TopicTeacherDto(
     string? DisplayName,
     Guid? RoleCodedValueId = null);
 
+/// <summary>
+/// The role a teacher holds on a topic (cg/6). Returned by <c>ListTeacherTopicRolesAsync</c>
+/// (GET /teachers/{id}/topics/roles) and used by the teacher create/edit dialog to prefill
+/// per-topic roles when editing.
+/// </summary>
+public sealed record TeacherTopicRoleDto(
+    Guid TopicId,
+    Guid? RoleCodedValueId = null);
+
 // ── Client ──────────────────────────────────────────────────────────────────
 
 public sealed class StudentsApiClient : IContactsClient
@@ -1262,6 +1271,10 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task<TopicDto[]?> ListTopicsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<TopicDto[]>($"/teachers/{teacherId}/topics", ct);
+
+    // Per-topic roles for a teacher (cg/6). GET /teachers/{id}/topics/roles.
+    public async Task<TeacherTopicRoleDto[]?> ListTeacherTopicRolesAsync(Guid teacherId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TeacherTopicRoleDto[]>($"/teachers/{teacherId}/topics/roles", ct);
 
     // Set/clear the coded-value role a teacher holds on a topic
     // (grade-detail-rich-grids-plan.md §5). PATCH /teachers/{id}/topics/{topicId}/role.
