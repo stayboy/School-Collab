@@ -1,6 +1,6 @@
 # Spec: Grade-Detail Modern UI (custom tabs + grid actions + name polish)
 
-> Status: **In progress**
+> Status: **Complete — all work items shipped + tests green (Students 182, Admin 264, Arch 14, Assignments 88, Settings 402)**
 > Owner: Students context (grade-level detail page + shared StudentsGrid)
 > Depends on: `grade-detail-rich-grids-plan.md` (cg/2–cg/6), `landing-page-wrapper.md`
 > Branch: `cg/7-grade-tabs-grid`
