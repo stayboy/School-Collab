@@ -38,12 +38,12 @@
                         }
                     </div>
                     <div class="topic-dialog__counts">
-                        <FluentAnchor Appearance="Appearance.Lightweight" OnClick="@(() => OpenStrandsAsync(topic))" Title="Strands">
+                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => OpenStrandsAsync(topic))" Title="Strands">
                             @topic.StrandCount strands
-                        </FluentAnchor>
-                        <FluentAnchor Appearance="Appearance.Lightweight" OnClick="@(() => OpenLessonsAsync(topic))" Title="Lessons">
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => OpenLessonsAsync(topic))" Title="Lessons">
                             @topic.LessonCount lessons
-                        </FluentAnchor>
+                        </FluentButton>
                     </div>
                     <RowActionsMenu Actions="@BuildRowActions(topic)"
                                     AriaLabel="Topic actions"

@@ -30,7 +30,7 @@
             {
                 <div class="teacher-dialog__row">
                     <div class="teacher-dialog__main">
-                        <FluentAnchor Appearance="Appearance.Lightweight"
+                        <FluentAnchor Appearance="Appearance.Hypertext"
                                       Href="@($"/students/teachers/{teacher.Id}")"
                                       class="teacher-dialog__name">
                             @(teacher.TitleCodedValueId is { } tid && SalutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@teacher.FirstName @teacher.LastName
