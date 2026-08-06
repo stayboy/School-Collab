@@ -43,7 +43,7 @@
 
 | # | Scope | Detail |
 |---|-------|--------|
-| 1 | Section cards | Replace the tab control with three equally-sized FluentCards (Topics · Teachers · Students): header icon + title + accent count chip, top-15 preview list, "View all" FluentAnchor footer. View-all opens `GradeTopicsDialog` / `GradeTeachersDialog` (full lists + management) or navigates to the grade-filtered students landing |
+| 1 | Section cards | Replace the tab control with three equally-sized FluentCards (Topics · Teachers · Students): header icon + title + accent count chip, top-15 preview list, "View all" footer. Topics/Teachers View-all are `FluentButton` (`OnClick` opens `GradeTopicsDialog` / `GradeTeachersDialog`); Students View-all is a `FluentAnchor` (navigates via `Href` to the grade-filtered students landing) |
 | 2 | Topics grid | Row actions via the repo's `RowActionsMenu` kebab (Strands, Lessons, Teachers, Remove) — rendered in `GradeTopicsDialog` |
 | 3 | Topic name | Stacked `.topic-name` + muted `.topic-code` cell |
 | 4 | Student name | `StudentsGrid` Name column → landing `student-full-name` pattern; drop Gender/Age columns; add `StudentsGrid.razor.css`; the Students card preview uses the same name + demographics stack |
@@ -57,6 +57,16 @@
 - New `GradeDialogsBunitTests` renders both dialogs directly: topic list/counts, empty
   states, remove/assign/unlink callbacks, teacher name resolution, and the TCHROLES
   role parent lookup.
+
+## 3. Appearance rules (verified against 4.14.2)
+
+- `FluentButton` does **NOT** support `Appearance.Hypertext` — it throws
+  `ArgumentException` in `OnParametersSet`. Use `Appearance.Lightweight` for
+  link-like action buttons (View-all Topics/Teachers, dialog strand/lesson counts).
+- `FluentAnchor` supports `Hypertext` — use it for anchors that navigate via `Href`
+  (Students View-all; `GradeTeachersDialog` teacher-name link).
+- Rule: `FluentAnchor` → `FluentButton` when `OnClick` is used (no `Href`); keep
+  `FluentAnchor` when it navigates via `Href`.
 - Keep the students card test asserting the `student-full-name`-style name + demographics.
 
 ## 3. Verification
