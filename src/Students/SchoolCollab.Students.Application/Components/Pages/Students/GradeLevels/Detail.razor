@@ -110,14 +110,12 @@
                                     <div class="section-card__item">
                                         <button type="button" class="item-name" @onclick="() => OpenStrandsAsync(t)">@t.Name</button>
                                         <div class="item-meta">
-                                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
-                                                          OnClick="@(() => OpenStrandsAsync(t))">
+                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="@(() => OpenStrandsAsync(t))" Title="View strands">
                                                 @t.StrandCount strands
-                                            </FluentButton>
-                                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
-                                                          OnClick="@(() => OpenLessonsAsync(t))">
+                                            </FluentAnchor>
+                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="@(() => OpenLessonsAsync(t))" Title="View lessons">
                                                 @t.LessonCount lessons
-                                            </FluentButton>
+                                            </FluentAnchor>
                                         </div>
                                     </div>
                                 </ItemTemplate>

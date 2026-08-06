@@ -44,9 +44,9 @@
         }
         else if (OnViewAllClick is not null)
         {
-            <FluentButton Appearance="Appearance.Lightweight" OnClick="OnViewAllClick" IconEnd="@FluentIcons.ArrowRight">
+            <FluentAnchor Appearance="Appearance.Hypertext" OnClick="OnViewAllClick" IconEnd="@FluentIcons.ArrowRight">
                 @ViewAllText (@Count)
-            </FluentButton>
+            </FluentAnchor>
         }
     </div>
 </div>
