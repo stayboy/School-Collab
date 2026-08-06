@@ -207,6 +207,50 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_ModernTabs_RenderLabelsAndCounts_AndSwitchActivePane()
+    {
+        var gradeId = Guid.NewGuid();
+        var topicId = Guid.NewGuid();
+        var assignmentId = Guid.NewGuid();
+        Register(
+            gradeId,
+            GradeJson(gradeId),
+            topicsCatalogJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = "MATH",
+                ["name"] = "Mathematics", ["description"] = (string?)null,
+                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            } }),
+            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(assignmentId, topicId, gradeId) }),
+            curriculumJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["topicId"] = topicId, ["name"] = "Mathematics", ["code"] = "MATH",
+                ["strandCount"] = 2, ["lessonCount"] = 3,
+            } }),
+            teachersJson: "[]",
+            studentsJson: "[]");
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Topics &amp; Curriculum"));
+
+        // Custom segmented tab bar: labels + live count badges are real text now.
+        cut.Markup.Should().Contain("Topics &amp; Curriculum");
+        cut.Markup.Should().Contain(">Teachers</span>");
+        cut.Markup.Should().Contain(">Students</span>");
+        // Count badge for the assigned topic renders (1 topic).
+        cut.Markup.Should().Contain("class=\"grade-tabs__count\">1</span>");
+
+        // Topics pane is active by default.
+        cut.Find("div.grade-tabs__pane.active").Markup.Should().Contain("Assigned Topics");
+
+        // Switching to the Teachers tab flips the active pane.
+        var teachersTab = cut.FindAll("[role='tab']").First(t => t.TextContent.Contains("Teachers"));
+        teachersTab.Click();
+        cut.WaitForAssertion(() =>
+            cut.Find("div.grade-tabs__pane.active").Markup.Should().Contain("Teachers (0)"));
+    }
+
+    [TestMethod]
     public void Detail_TopicsTab_ShowsEmptyState_WhenNoAssignments()
     {
         var gradeId = Guid.NewGuid();
@@ -246,9 +290,10 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain(">2</", "strand count renders");
         cut.Markup.Should().Contain(">3</", "lesson count renders");
 
-        // Click the Remove button in the assigned-topic grid row.
-        var remove = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Remove"));
-        remove.Click();
+        // Open the topic row's kebab (RowActionsMenu) and click Remove.
+        cut.Find("fluent-button[title='Topic actions']").Click();
+        var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
+        removeItem.Click();
         cut.WaitForAssertion(() =>
             handler.Calls.Any(c => c.Method == "DELETE" && c.Url == $"/students/topic-assignments/{assignmentId}").Should().BeTrue());
     }

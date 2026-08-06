@@ -4,20 +4,25 @@
 
 @* Shared student grid used on the grade-level detail page (and any page that
    needs to list students). Renders a FluentDataGrid over the supplied
-   students; the caller owns loading/enrichment and passes the rows in. *@
+   students; the caller owns loading/enrichment and passes the rows in.
+   The Name column follows the student-landing pattern (grade-detail-modern-ui-plan.md
+   §0.4): primary FirstName LastName over a muted "(Gender, Age)" suffix, so the
+   separate Gender/Age columns are folded into the name. *@
 <FluentDataGrid Items="@(Students.AsQueryable())"
                 TGridItem="StudentDto"
                 MultiLine="true"
                 Class="students-grid">
+    <TemplateColumn Title="Student #">
+        <code>@context.StudentNumber</code>
+    </TemplateColumn>
     <TemplateColumn Title="Name">
         <FluentAnchor Appearance="Appearance.Lightweight"
-                      Href="@($"/students/{context.Id}")">
-            @context.FirstName @context.LastName
+                      Href="@($"/students/{context.Id}")"
+                      Class="student-full-name">
+            <span class="student-full-name__name">@context.FirstName @context.LastName</span>
+            <span class="student-full-name__demographics">(@GetDemographics(context))</span>
         </FluentAnchor>
     </TemplateColumn>
-    <TemplateColumn Title="Student #">@context.StudentNumber</TemplateColumn>
-    <TemplateColumn Title="Gender">@(string.IsNullOrWhiteSpace(context.GenderName) ? "—" : context.GenderName)</TemplateColumn>
-    <TemplateColumn Title="Age">@(context.Age?.ToString() ?? "—")</TemplateColumn>
     <TemplateColumn Title="Status">
         @if (context.IsDeleted)
         {
@@ -33,5 +38,15 @@
 @code {
     [Parameter, EditorRequired] public IReadOnlyList<StudentDto> Students { get; set; } = [];
 
-    [Parameter] public bool ShowGradeColumn { get; set; } = false;
+    /// <summary>
+    /// Renders the parenthetical "Gender, Age" suffix for the Name column
+    /// (mirrors Students/Index.razor). Em-dashes fill the missing slots so the
+    /// column shape stays stable.
+    /// </summary>
+    private static string GetDemographics(StudentDto s)
+    {
+        var gender = string.IsNullOrWhiteSpace(s.GenderName) ? "—" : s.GenderName;
+        var age = s.Age.HasValue ? s.Age.Value.ToString() : "—";
+        return $"{gender}, {age}";
+    }
 }
