@@ -327,4 +327,65 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Find("fluent-switch").Should().NotBeNull();
         cut.Markup.Should().Contain("Enrollment");
     }
+
+    private static Dictionary<string, object?> StudentJson(
+        Guid studentId, string studentNumber, string first, string last,
+        Guid? genderId, DateOnly? dob) => new()
+    {
+        ["id"] = studentId,
+        ["studentNumber"] = studentNumber,
+        ["titleCodedValueId"] = (Guid?)null,
+        ["firstName"] = first,
+        ["lastName"] = last,
+        ["dateOfBirth"] = dob,
+        ["genderCodedValueId"] = genderId,
+        ["isDeleted"] = false,
+        ["createdAt"] = DateTimeOffset.UnixEpoch,
+        ["updatedAt"] = DateTimeOffset.UnixEpoch,
+    };
+
+    [TestMethod]
+    public void Detail_StudentsTab_ListsStudents_WithDemographics()
+    {
+        var gradeId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
+        var genderId = Guid.NewGuid();
+        var (handler, _) = Register(
+            gradeId,
+            GradeJson(gradeId),
+            studentsJson: JsonSerializer.Serialize(new[]
+            {
+                StudentJson(studentId, "STU001", "Ada", "Lovelace", genderId, new DateOnly(2015, 3, 10)),
+            }));
+        // Age + GenderName are enriched client-side; the by-ids lookup resolves
+        // the gender coded value to its display name.
+        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["id"] = genderId, ["code"] = "GENDERS_FEMALE", ["name"] = "Female",
+                ["parentId"] = (Guid?)null, ["parentCode"] = (string?)null,
+                ["description"] = (string?)null, ["isDisabled"] = false,
+                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch,
+                ["updatedAt"] = DateTimeOffset.UnixEpoch, ["attributes"] = Array.Empty<object>(),
+                ["childCount"] = 0,
+            } }));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Students (1)"));
+        cut.Markup.Should().Contain("Ada Lovelace");
+        cut.Markup.Should().Contain("STU001");
+        cut.Markup.Should().Contain("Female", "enriched gender name renders in the grid");
+        cut.Markup.Should().Contain("Active", "status badge renders");
+    }
+
+    [TestMethod]
+    public void Detail_StudentsTab_EmptyState_WhenNoStudents()
+    {
+        var gradeId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId), studentsJson: "[]");
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Students (0)"));
+        cut.Markup.Should().Contain("No active students in this grade for the current period.");
+    }
 }
