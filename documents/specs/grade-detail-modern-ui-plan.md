@@ -1,24 +1,31 @@
-# Spec: Grade-Detail Modern UI (custom tabs + grid actions + name polish)
+# Spec: Grade-Detail Modern UI (section cards + grid actions + name polish)
 
-> Status: **Complete — all work items shipped + tests green (Students 182, Admin 264, Arch 14, Assignments 88, Settings 402)**
+> Status: **Complete — all work items shipped + tests green (Students 185, Admin 271, Arch 14, Assignments 88, Settings 402)**
 > Owner: Students context (grade-level detail page + shared StudentsGrid)
 > Depends on: `grade-detail-rich-grids-plan.md` (cg/2–cg/6), `landing-page-wrapper.md`
 > Branch: `cg/7-grade-tabs-grid`
 
 ## 0. Decisions locked in this revision
 
-1. **Replace `FluentTabs` on the grade-level `Detail.razor` with a custom segmented
-   "pill" tab bar.** The default FluentTabs header is JS-composed by the web component
-   (labels are not text in markup, styling is shadow-DOM-limited) and reads as dated.
-   A small custom `role="tablist"` bar gives full design + a11y control:
-   icon + label + live count badge per tab, a filled accent pill for the active tab,
-   and `role="tab"/aria-selected` + arrow-key navigation. Panels stay in the DOM with
-   `display:none` on inactive panes so existing bUnit content assertions keep working.
+1. **Replace `FluentTabs` on the grade-level `Detail.razor` with three equally-sized
+   FluentCards** (one each for Topics, Teachers, Students) in a responsive auto-fit
+   grid. Each card has a header (icon + title + accent **count chip**), a **top-15
+   preview list** (clickable rows into the relevant detail), and a **"View all"
+   FluentAnchor** footer:
+   - **Topics** card → opens new `GradeTopicsDialog` (full assigned-topic list with
+     assign/remove and per-topic Strands/Lessons/Teachers dialogs).
+   - **Teachers** card → opens new `GradeTeachersDialog` (full linked-teacher list with
+     link/role/unlink/remove + resolved names).
+   - **Students** card → navigates to the grade-filtered students landing
+     (`/students?gradeLevelId={id}`).
+   The full management grids moved out of the page into the two dialogs. The custom
+   segmented pill tab bar (superseded) is removed entirely.
 2. **Topics grid gets the repo's `RowActionsMenu` kebab pattern** for its row actions.
    The inline `Strands / Lessons / Teachers / Remove` buttons move into a `RowAction`
    list built from `RowAction.Callback(...)` (the shared `RowActionsMenu` component,
    `UseMenuService="false"` like `Subjects.razor`, so items render inline + are
-   assertable). The clickable Strand/Lesson **count** cells stay.
+   assertable). The clickable Strand/Lesson **count** cells stay. (Rendered in
+   `GradeTopicsDialog` for the full list; the card preview lists topic names.)
 3. **Clean up the topic name cell** to match the landing page's "primary name + muted
    secondary" stack: name on its own line, code as a muted sub-line — no crammed inline
    `Name Code`.
@@ -28,24 +35,29 @@
    `student-full-name__demographics` "(Gender, Age)" suffix, inside a lightweight anchor
    to `/students/{id}`. The now-redundant Gender and Age columns are removed from
    `StudentsGrid` (the suffix carries them), matching the landing grid's column set.
+   On the grade-detail Students card, the preview uses the same name + demographics
+   stack.
 5. No backend changes — purely presentation + the shared `RowActionsMenu` already exists.
 
 ## 1. Work items
 
 | # | Scope | Detail |
 |---|-------|--------|
-| 1 | Tabs | Custom segmented tab bar on `Detail.razor` (Topics & Curriculum · Teachers · Students) with icon + label + count badge, accent active pill, arrow-key nav; panels rendered server-side, inactive hidden via CSS |
-| 2 | Topics grid | `Actions` column → `<RowActionsMenu Actions="BuildTopicRowActions(context)" .../>` (Strands, Lessons, Teachers, Remove) |
+| 1 | Section cards | Replace the tab control with three equally-sized FluentCards (Topics · Teachers · Students): header icon + title + accent count chip, top-15 preview list, "View all" FluentAnchor footer. View-all opens `GradeTopicsDialog` / `GradeTeachersDialog` (full lists + management) or navigates to the grade-filtered students landing |
+| 2 | Topics grid | Row actions via the repo's `RowActionsMenu` kebab (Strands, Lessons, Teachers, Remove) — rendered in `GradeTopicsDialog` |
 | 3 | Topic name | Stacked `.topic-name` + muted `.topic-code` cell |
-| 4 | Student name | `StudentsGrid` Name column → landing `student-full-name` pattern; drop Gender/Age columns; add `StudentsGrid.razor.css` |
+| 4 | Student name | `StudentsGrid` Name column → landing `student-full-name` pattern; drop Gender/Age columns; add `StudentsGrid.razor.css`; the Students card preview uses the same name + demographics stack |
 
 ## 2. Tests
 
-- Update `GradeLevelDetailPageTests` topics-row "Remove" interaction to drive the kebab
-  menu item (or assert the menu action list) instead of the inline `fluent-button`.
-- Add a bUnit test asserting the modern tab bar renders all three labels + counts and
-  that switching tabs toggles the active panel.
-- Keep the Students-tab tests green with the new name pattern (assert `student-full-name`).
+- Rewrite `GradeLevelDetailPageTests` for the card layout: overview + three cards
+  (titles, counts, top-15 previews, empty states), students landing navigation, and a
+  source-wiring test asserting the View-all anchors open `GradeTopicsDialog` /
+  `GradeTeachersDialog` (and the segmented tab bar is gone).
+- New `GradeDialogsBunitTests` renders both dialogs directly: topic list/counts, empty
+  states, remove/assign/unlink callbacks, teacher name resolution, and the TCHROLES
+  role parent lookup.
+- Keep the students card test asserting the `student-full-name`-style name + demographics.
 
 ## 3. Verification
 
