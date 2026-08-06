@@ -45,7 +45,10 @@ public record CodedValueDto(
     bool IsDeleted = false,
     DateTimeOffset? DeletedAt = null,
     bool IsOverridden = false,
-    string? DefaultName = null);
+    string? DefaultName = null,
+    string? DefaultCode = null,
+    bool IsProvisional = false,
+    Guid? TenantId = null);
 
 public record CreateCodedValueRequest(
     string Code,
@@ -55,6 +58,16 @@ public record CreateCodedValueRequest(
     int DisplayOrder = 0);
 
 public record UpdateCodedValueRequest(string Name, string? Description, int DisplayOrder);
+
+/// <summary>Create payload for a tenant-owned provisional coded value awaiting approval (tcv/3).</summary>
+public record CreateProvisionalCodedValueRequest(
+    string Code,
+    string Name,
+    string? Description,
+    Guid? ParentId,
+    int DisplayOrder = 0);
+
+internal sealed record ProvisionalCreateResponse(Guid Id);
 
 public sealed class CodedValuesApiClient(HttpClient http)
 {
@@ -197,6 +210,28 @@ public sealed class CodedValuesApiClient(HttpClient http)
 
     public async Task RemoveOverrideAsync(Guid codedValueId, CancellationToken ct = default) =>
         (await http.DeleteAsync($"/api/coded-values/{codedValueId}/override", ct)).EnsureSuccessStatusCode();
+
+    // ── Provisional coded-value approval (tcv/3) ──────────────────────────────────
+    // A tenant creates a provisional value when an override is impossible (Code AND
+    // Description both change). It stays hidden from other tenants until a Settings
+    // admin approves (promote to shared blueprint) or rejects (keep tenant-scoped).
+    public async Task<Guid> CreateProvisionalCodedValueAsync(
+        CreateProvisionalCodedValueRequest req, CancellationToken ct = default)
+    {
+        var response = await http.PostAsJsonAsync("/api/coded-values/provisional", req, ct);
+        response.EnsureSuccessStatusCode();
+        var envelope = await response.Content.ReadFromJsonAsync<ProvisionalCreateResponse>(ct);
+        return envelope?.Id ?? Guid.Empty;
+    }
+
+    public Task<CodedValueDto[]?> ListProvisionalCodedValuesAsync(CancellationToken ct = default) =>
+        http.GetFromJsonAsync<CodedValueDto[]>("/api/coded-values/provisional", ct);
+
+    public async Task ApproveProvisionalCodedValueAsync(Guid id, CancellationToken ct = default) =>
+        (await http.PostAsync($"/api/coded-values/provisional/{id}/approve", null, ct)).EnsureSuccessStatusCode();
+
+    public async Task RejectProvisionalCodedValueAsync(Guid id, CancellationToken ct = default) =>
+        (await http.PostAsync($"/api/coded-values/provisional/{id}/reject", null, ct)).EnsureSuccessStatusCode();
 }
 
 public record AttributeDefinitionRequest(

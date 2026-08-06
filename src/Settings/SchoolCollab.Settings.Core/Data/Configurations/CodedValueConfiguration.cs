@@ -64,6 +64,9 @@ internal sealed class CodedValueConfiguration : TenantOrGlobalEntityTypeConfigur
         builder.Property(x => x.IsDisabled)
             .HasDefaultValue(false);
 
+        builder.Property(x => x.IsProvisional)
+            .HasDefaultValue(false);
+
 
         builder.HasOne<CodedValue>()
             .WithMany()

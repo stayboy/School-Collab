@@ -18,5 +18,7 @@ public record CodedValueDto(
     DateTimeOffset? DeletedAt = null,
     bool IsOverridden = false,
     string? DefaultName = null,
-    string? DefaultCode = null);
+    string? DefaultCode = null,
+    bool IsProvisional = false,
+    Guid? TenantId = null);
 

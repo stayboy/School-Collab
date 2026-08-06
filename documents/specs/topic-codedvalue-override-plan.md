@@ -3,6 +3,11 @@
 ## Status
 Proposed (cg/8 follow-up). Split into shippable PRs below.
 
+**Done:** tcv/1 (#135, override `Code`), tcv/2 (#136, `WordInitials` segment),
+tcv/3 (provisional CodedValue + approval surface — see §C).
+**Deferred:** tcv/4 (topic-dialog override-first rework), tcv/5 (template-generated
+topic codes in add flow).
+
 ## Problem
 The current `TopicEditDialog` (grade-detail Subjects card kebab → "Edit name")
 renames a `Topic` directly via `UpdateTopicAsync` → `PUT /students/topics/{id}`
@@ -105,7 +110,12 @@ commit lands):
    `"computer science" → CS01`.
 3. **tcv/3 — tenant-scoped provisional CodedValue + approval.** New reserved state on
    `CodedValue`, create-when-override-impossible path, admin approval surface;
-   tests for tenancy isolation + approval.
+   tests for tenancy isolation + approval. **DONE** — dedicated `CreateProvisionalCodedValue`
+   command (does not change the tcv/1 override guard), `is_provisional` column, cross-tenant
+   `ListProvisionalCodedValues`/`ApproveProvisionalCodedValue`/`RejectProvisionalCodedValue`
+   (admin bypasses the Tenant query filter), Settings approval page at
+   `/coded-values/approvals` (Approve → global blueprint; Reject → stays tenant-scoped).
+   Tests: `ProvisionalCodedValueHandlerTests` (8) + `CodedValuesApiClientProvisionalTests` (4).
 4. **tcv/4 — topic dialog rework (override-first).** `TopicEditDialog` edits the
    tenant override (or main CodedValue when no override), code editing, fallback to
    new tenant-scoped CodedValue; bUnit tests.
