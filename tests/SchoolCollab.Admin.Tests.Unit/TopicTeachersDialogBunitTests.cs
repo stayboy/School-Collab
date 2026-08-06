@@ -82,7 +82,7 @@ public class TopicTeachersDialogBunitTests : BunitContext
         public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(new AuthenticationState(_u));
     }
 
-    private static TeacherWithRoleDto Teacher(Guid id, string first, string last) => new(
+    private static SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto Teacher(Guid id, string first, string last) => new(
         Id: id, TitleCodedValueId: null, FirstName: first, LastName: last, DisplayName: null,
         GenderCodedValueId: null, DateOfBirth: null, LevelOfEducationCodedValueId: null,
         QualificationCodedValueIds: [], IsDeleted: false, TeacherRoleCodedValueId: null,
