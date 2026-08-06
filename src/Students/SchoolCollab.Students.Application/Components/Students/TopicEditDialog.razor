@@ -1,0 +1,108 @@
+@*
+    TopicEditDialog — opens from the grade-detail Subjects card row kebab
+    "Edit name" action. Edits a topic's display name (and display order).
+    The UpdateTopic CQRS command persists Name + DisplayOrder via
+    PUT /students/topics/{id}.
+
+    The dialog loads the current topic on mount (to capture DisplayOrder and
+    the immutable fields for the synthesized result), then submits the name
+    change. The caller (Detail.razor) reloads the curriculum on a non-null
+    result.
+*@
+@inherits DialogShellBase<TopicEditDialog.TopicEditModel, TopicDto>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Students.Application.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Name" For="topic-edit-name">
+            <FluentTextField Id="topic-edit-name"
+                             @bind-Value="Model.Name"
+                             Placeholder="Topic / subject name"
+                             Required="true"
+                             Style="width: 100%" />
+        </FormRow>
+
+        <FormRow Label="Display order" For="topic-edit-order">
+            <FluentNumberField Id="topic-edit-order"
+                               @bind-Value="Model.DisplayOrder"
+                               Min="0"
+                               Style="width: 100%" />
+        </FormRow>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="Save"
+                           SavingText="Saving..."
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+<style>
+    .dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+</style>
+
+@code {
+    /// <summary>Editable form model for the topic edit dialog.</summary>
+    public sealed class TopicEditModel
+    {
+        public Guid Id { get; set; }
+        public string Name { get; set; } = string.Empty;
+        public int DisplayOrder { get; set; }
+
+        /// <summary>The pre-edit topic, used to synthesize the result DTO.</summary>
+        public TopicDto? Original { get; set; }
+    }
+
+    protected override string SubmitText => "Save";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var topic = await Api.GetTopicByIdAsync(Model.Id);
+            if (topic is not null)
+            {
+                Model.Original = topic;
+                Model.Name = topic.Name;
+                Model.DisplayOrder = topic.DisplayOrder;
+            }
+        }
+        catch (Exception ex)
+        {
+            Error = $"Could not load topic: {ex.Message}";
+        }
+    }
+
+    protected override async Task<TopicDto?> SubmitAsync(TopicEditModel model)
+    {
+        await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder));
+
+        var original = model.Original;
+        return new TopicDto(
+            model.Id,
+            original?.CodedValueId,
+            original?.Code,
+            model.Name,
+            original?.Description,
+            model.DisplayOrder,
+            original?.CreatedAt ?? DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow);
+    }
+}

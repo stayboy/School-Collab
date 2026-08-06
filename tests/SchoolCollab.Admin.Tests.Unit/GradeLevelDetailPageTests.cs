@@ -280,6 +280,42 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_TopicsCard_Row_HasKebab_WithSecondaryActions()
+    {
+        var gradeId = Guid.NewGuid();
+        var topicId = Guid.NewGuid();
+        Register(
+            gradeId,
+            GradeJson(gradeId),
+            topicsCatalogJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = "MATH",
+                ["name"] = "Mathematics", ["description"] = (string?)null,
+                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            } }),
+            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(Guid.NewGuid(), topicId, gradeId) }),
+            curriculumJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["topicId"] = topicId, ["name"] = "Mathematics", ["code"] = "MATH",
+                ["strandCount"] = 2, ["lessonCount"] = 3,
+            } }));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
+
+        // Counts are informational (not links) now.
+        cut.Markup.Should().Contain("2 strands", "strand count renders as plain text");
+        cut.Markup.Should().Contain("3 lessons", "lesson count renders as plain text");
+
+        // Open the topic row kebab to surface its inline menu items.
+        cut.Find("fluent-button[title=\"Actions for Mathematics\"]").Click();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Edit name", "kebab offers rename"));
+        cut.Markup.Should().Contain("Lessons", "kebab offers lessons");
+        cut.Markup.Should().Contain("Teachers", "kebab offers teachers");
+        cut.Markup.Should().Contain("Remove", "kebab offers remove");
+    }
+
+    [TestMethod]
     public void Detail_TopicsCard_ShowsEmptyState_WhenNoAssignments()
     {
         var gradeId = Guid.NewGuid();

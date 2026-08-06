@@ -90,19 +90,20 @@
                                         var t = (GradeTopicCurriculumDto)item;
                                     }
                                     <div class="section-card__item">
-                                        <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="item-name"
-                                                      OnClick="() => OpenStrandsAsync(t)" Title="View strands">
-                                            @t.Name
-                                        </FluentAnchor>
-                                        <div class="item-meta">
-                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="@(() => OpenStrandsAsync(t))" Title="View strands">
-                                                @t.StrandCount strands
+                                        <div class="section-card__item-main">
+                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="item-name"
+                                                          OnClick="() => OpenStrandsAsync(t)" Title="View strands">
+                                                @t.Name
                                             </FluentAnchor>
-                                            <span class="item-meta__separator" aria-hidden="true">|</span>
-                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="@(() => OpenLessonsAsync(t))" Title="View lessons">
-                                                @t.LessonCount lessons
-                                            </FluentAnchor>
+                                            <div class="item-meta">
+                                                <span class="item-meta__count" title="@t.StrandCount strands">@t.StrandCount strands</span>
+                                                <span class="item-meta__separator" aria-hidden="true">|</span>
+                                                <span class="item-meta__count" title="@t.LessonCount lessons">@t.LessonCount lessons</span>
+                                            </div>
                                         </div>
+                                        <RowActionsMenu AriaLabel="@($"Actions for {t.Name}")"
+                                                        UseMenuService="false"
+                                                        Actions="@BuildTopicRowActions(t)" />
                                     </div>
                                 </ItemTemplate>
                             </SectionCard>
@@ -233,8 +234,9 @@
     /* Item styles (used inside SectionCard templates) */
     .section-card__item {
         display: flex;
-        flex-direction: column;
-        gap: 1px;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
         padding: 0.5rem 1rem;
         background: none;
         border: none;
@@ -249,6 +251,13 @@
         -webkit-appearance: none;
         appearance: none;
     }
+    .section-card__item-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
     .section-card__item:hover {
         background: var(--neutral-fill-secondary-hover, rgba(0,0,0,0.05));
         border-left-color: var(--accent-fill-rest, #0f6cbd);
@@ -257,6 +266,7 @@
     .item-name::part(control) { padding: 0; justify-content: flex-start; }
     .item-main { font-weight: 500; line-height: 1.3; }
     .item-meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+    .item-meta__count { white-space: nowrap; }
     .item-meta__separator { color: var(--neutral-stroke-rest, rgba(0,0,0,0.3)); user-select: none; }
 </style>
 
@@ -583,6 +593,35 @@
         if (_disposed) return;
         await ReloadAssignedTopicsAsync();
     }
+
+    // Open the topic edit dialog (rename / display order). Reload the
+    // curriculum on a non-null result so the card reflects the new name.
+    private async Task OpenTopicEditAsync(GradeTopicCurriculumDto topic)
+    {
+        var updated = await DialogService.ShowShellDialogAsync<
+            TopicEditDialog,
+            TopicEditDialog.TopicEditModel,
+            TopicDto>(
+            new TopicEditDialog.TopicEditModel { Id = topic.TopicId, Name = topic.Name },
+            title: $"Edit topic · {topic.Name}",
+            size: DialogSize.Small);
+        if (updated is not null && !_disposed)
+        {
+            await ReloadAssignedTopicsAsync();
+        }
+    }
+
+    // Row kebab for a Subjects-card preview item. The topic name itself is the
+    // primary affordance (opens Strands); the kebab holds the secondary actions.
+    private IReadOnlyList<RowAction> BuildTopicRowActions(GradeTopicCurriculumDto topic) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Lessons", () => OpenLessonsAsync(topic), FluentIcons.Book),
+            RowAction.Callback("Edit name", () => OpenTopicEditAsync(topic), FluentIcons.Edit),
+            RowAction.Callback("Teachers", () => OpenTopicTeachersAsync(topic), FluentIcons.People),
+            RowAction.Separator(),
+            RowAction.Callback("Remove", () => RemoveTopicAsync(topic.TopicId), FluentIcons.Delete),
+        };
 
     // Open the topic-teachers dialog (assign teachers + their per-topic roles,
     // grade-detail-rich-grids-plan.md §5). Await the reference so we refresh the

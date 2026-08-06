@@ -304,6 +304,10 @@ public record UpdateTopicStrandRequest(
     string? Description = null,
     int DisplayOrder = 0);
 
+public record UpdateTopicRequest(
+    string Name,
+    int DisplayOrder = 0);
+
 public record CreateTopicLessonRequest(
     Guid TopicId,
     string Name,
@@ -748,6 +752,13 @@ public sealed class StudentsApiClient : IContactsClient
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<TopicDto>(ct);
+    }
+
+    /// <summary>Updates a topic's name / display order. <c>PUT /students/topics/{id}</c>.</summary>
+    public async Task UpdateTopicAsync(Guid id, UpdateTopicRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/students/topics/{id}", req, ct);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
