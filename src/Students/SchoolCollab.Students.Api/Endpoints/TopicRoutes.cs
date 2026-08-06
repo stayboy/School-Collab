@@ -18,6 +18,7 @@ using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicLessons;
 using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicStrands;
 using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopics;
 using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicsByGrade;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicTeachers;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -195,6 +196,14 @@ public static class TopicRoutes
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTopicStrands, SchoolCollab.Students.Core.DTOs.TopicStrandDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListTopicStrands(topicId), ct)));
+
+        // Teachers linked to a topic with their per-topic role
+        // (grade-detail-rich-grids-plan.md §5).
+        group.MapGet($"{prefix}/{{topicId:guid}}/teachers", async (
+            Guid topicId,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTopicTeachers, SchoolCollab.Students.Core.DTOs.TopicTeacherDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListTopicTeachers(topicId), ct)));
 
         group.MapPost($"{prefix}/strands", async (
             [FromBody] CreateTopicStrand command,

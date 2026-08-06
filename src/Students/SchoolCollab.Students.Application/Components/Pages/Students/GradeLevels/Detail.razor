@@ -180,6 +180,9 @@
                                                               OnClick="@(() => OpenLessonsAsync(context))"
                                                               Title="Add or edit lessons">Lessons</FluentButton>
                                                 <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                              OnClick="@(() => OpenTopicTeachersAsync(context))"
+                                                              Title="Assign teachers and their roles to this topic">Teachers</FluentButton>
+                                                <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
                                                               OnClick="@(() => RemoveTopicAsync(context.TopicId))"
                                                               Title="Unassign this topic from the grade">Remove</FluentButton>
                                             </div>
@@ -673,6 +676,24 @@
             DialogSize.Medium);
         if (_disposed) return;
         await ReloadAssignedTopicsAsync();
+    }
+
+    // Open the topic-teachers dialog (assign teachers + their per-topic roles,
+    // grade-detail-rich-grids-plan.md §5). Await the reference so we refresh the
+    // Teachers tab (Assigned Topics chips) once the dialog closes.
+    private async Task OpenTopicTeachersAsync(GradeTopicCurriculumDto topic)
+    {
+        await DialogService.ShowReadonlyDialogAsync<TopicTeachersDialog>(
+            $"Teachers · {topic.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TopicTeachersDialog.TopicId), topic.TopicId },
+                { nameof(TopicTeachersDialog.TopicName), topic.Name },
+                { nameof(TopicTeachersDialog.AvailableTeachers), _teachers ?? [] },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadTeachersAsync();
     }
 
     // ── Teachers: add / remove / role / topics ─────────────────────────────

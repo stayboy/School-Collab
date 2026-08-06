@@ -7,6 +7,7 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherGradeLevelRole;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherTopicRole;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
@@ -14,6 +15,7 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicTeachers;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
@@ -116,6 +118,23 @@ public static class TeacherRoutes
             return Results.NoContent();
         });
 
+        // Set/clear the coded-value role a teacher holds on a topic
+        // (grade-detail-rich-grids-plan.md §5). Idempotent at the domain layer.
+        group.MapPatch("/{id:guid}/topics/{topicId:guid}/role", async (
+            Guid id,
+            Guid topicId,
+            [FromBody] SetTeacherTopicRoleRequest req,
+            [FromServices] ICommandHandler<SetTeacherTopicRole> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new SetTeacherTopicRole(id, topicId, req.RoleCodedValueId), ct);
+                return Results.NoContent();
+            }
+            catch (TeacherLinkNotFoundException) { return Results.NotFound(); }
+        });
+
         // Grade-level links (spec §4.12).
         group.MapGet("/{id:guid}/grade-levels", async (
             Guid id,
@@ -180,6 +199,8 @@ internal record UpdateTeacherRequest(
     Guid[]? QualificationCodedValueIds = null);
 
 internal record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null);
+
+internal record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId);
 
 internal record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 

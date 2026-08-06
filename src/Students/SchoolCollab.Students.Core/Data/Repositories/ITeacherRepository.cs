@@ -13,6 +13,7 @@ public interface ITeacherRepository
 
     Task AddTopicAsync(TeacherTopic link, CancellationToken cancellationToken = default);
     Task<TeacherTopic?> GetTopicLinkAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default);
+    Task UpdateTopicAsync(TeacherTopic link, CancellationToken cancellationToken = default);
     Task RemoveTopicAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default);
 
     Task AddQualificationAsync(TeacherQualification link, CancellationToken cancellationToken = default);

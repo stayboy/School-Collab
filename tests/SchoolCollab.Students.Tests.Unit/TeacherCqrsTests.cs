@@ -10,11 +10,13 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Commands.CreateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherTopic;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherTopicRole;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicTeachers;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Data.Repositories;
@@ -44,6 +46,10 @@ public class TeacherCqrsTests
         new(TeacherRepo(s), s.Topics, s.Cache, s.Tenants, NullLogger<LinkTeacherTopicHandler>.Instance);
     private static UnlinkTeacherTopicHandler NewUnlinkTopic(StudentsTestScope s) =>
         new(TeacherRepo(s), s.Cache, NullLogger<UnlinkTeacherTopicHandler>.Instance);
+    private static SetTeacherTopicRoleHandler NewSetTopicRole(StudentsTestScope s) =>
+        new(TeacherRepo(s), s.Cache, s.Tenants, NullLogger<SetTeacherTopicRoleHandler>.Instance);
+    private static ListTopicTeachersHandler NewListTopicTeachers(StudentsTestScope s) =>
+        new(s.Db, s.Cache);
     private static LinkTeacherGradeLevelHandler NewLinkGrade(StudentsTestScope s) =>
         new(TeacherRepo(s), s.GradeLevels, s.Cache, s.Tenants, NullLogger<LinkTeacherGradeLevelHandler>.Instance);
     private static UnlinkTeacherGradeLevelHandler NewUnlinkGrade(StudentsTestScope s) =>
@@ -158,6 +164,82 @@ public class TeacherCqrsTests
         // Re-linking the same pair without a role must still conflict.
         var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId));
         await act.Should().ThrowAsync<TeacherLinkAlreadyExistsException>();
+    }
+
+    [TestMethod]
+    public async Task SetTopicRole_UpdatesRoleOnExistingLink()
+    {
+        using var s = new StudentsTestScope("teacher-topic-setrole");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        var topicId = await SeedTopicAsync(s, "MATH", "Mathematics");
+        var roleA = Guid.NewGuid();
+        var roleB = Guid.NewGuid();
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, topicId, roleA));
+
+        await NewSetTopicRole(s).HandleAsync(new SetTeacherTopicRole(id, topicId, roleB));
+
+        var link = await TeacherRepo(s).GetTopicLinkAsync(id, topicId);
+        link!.RoleCodedValueId.Should().Be(roleB);
+    }
+
+    [TestMethod]
+    public async Task SetTopicRole_ClearsRole_WhenNull()
+    {
+        using var s = new StudentsTestScope("teacher-topic-clearrole");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        var topicId = await SeedTopicAsync(s, "MATH", "Mathematics");
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, topicId, Guid.NewGuid()));
+
+        await NewSetTopicRole(s).HandleAsync(new SetTeacherTopicRole(id, topicId, null));
+
+        var link = await TeacherRepo(s).GetTopicLinkAsync(id, topicId);
+        link!.RoleCodedValueId.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task SetTopicRole_WithoutLink_ThrowsNotFound()
+    {
+        using var s = new StudentsTestScope("teacher-topic-setrole-missing");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        var topicId = await SeedTopicAsync(s, "MATH", "Mathematics");
+
+        var act = async () => await NewSetTopicRole(s).HandleAsync(new SetTeacherTopicRole(id, topicId, Guid.NewGuid()));
+
+        await act.Should().ThrowAsync<TeacherLinkNotFoundException>();
+    }
+
+    [TestMethod]
+    public async Task ListTopicTeachers_ReturnsTeachersWithRoles()
+    {
+        using var s = new StudentsTestScope("list-topic-teachers");
+        var topicId = await SeedTopicAsync(s, "MATH", "Mathematics");
+        var idA = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        var idB = await NewCreate(s).HandleAsync(new CreateTeacher(null, "John", "Smith", null));
+        var roleA = Guid.NewGuid();
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(idA, topicId, roleA));
+        await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(idB, topicId));
+
+        var result = await NewListTopicTeachers(s).HandleAsync(new ListTopicTeachers(topicId));
+
+        result.Should().HaveCount(2);
+        var jane = result.Should().ContainSingle(x => x.TeacherId == idA).Which;
+        jane.RoleCodedValueId.Should().Be(roleA);
+        var john = result.Should().ContainSingle(x => x.TeacherId == idB).Which;
+        john.RoleCodedValueId.Should().BeNull();
+        john.FirstName.Should().Be("John");
+    }
+
+    [TestMethod]
+    public async Task ListTopicTeachers_UnlinkedTeacher_NotReturned()
+    {
+        using var s = new StudentsTestScope("list-topic-teachers-unlinked");
+        var topicId = await SeedTopicAsync(s, "MATH", "Mathematics");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+
+        var result = await NewListTopicTeachers(s).HandleAsync(new ListTopicTeachers(topicId));
+
+        result.Should().BeEmpty();
+        result.Should().NotContain(x => x.TeacherId == id);
     }
 
     [TestMethod]

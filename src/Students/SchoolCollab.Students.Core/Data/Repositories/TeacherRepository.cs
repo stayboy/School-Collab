@@ -27,6 +27,12 @@ internal sealed class TeacherRepository(StudentsDbContext db)
         }
     }
 
+    public Task UpdateTopicAsync(TeacherTopic link, CancellationToken cancellationToken = default)
+    {
+        Db.TeacherTopics.Update(link);
+        return Db.SaveChangesAsync(cancellationToken);
+    }
+
     public Task AddQualificationAsync(TeacherQualification link, CancellationToken cancellationToken = default)
     {
         Db.TeacherQualifications.Add(link);
