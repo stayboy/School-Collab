@@ -252,6 +252,10 @@ public static class EntityCodePreview
                     resetPeriod: (ResetPeriod)s.ResetPeriod,
                     minWidth: Math.Max(1, s.MinWidth),
                     upperLimit: s.UpperLimit),
+                SegmentType.WordInitials => EntityCodeSegment.Sequence(
+                    s.Index, s.Role, SegmentType.WordInitials,
+                    minWidth: Math.Max(1, s.MinWidth),
+                    suffix: s.Suffix ?? ""),
                 _ => throw new InvalidOperationException($"Unknown SegmentType value {(int)s.Type}."),
             };
             rule.AddSegment(seg);
