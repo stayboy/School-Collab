@@ -46,13 +46,26 @@ public class TeacherEditDialogBunitTests : BunitContext
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var url = request.RequestUri!.PathAndQuery;
+            // Prefer exact URL matches, then longest-prefix matches, so a bare
+            // /teachers/{id} map does not shadow /teachers/{id}/topics/roles.
             foreach (var kv in _responses)
             {
                 if (kv.Key.Method != "ANY") continue;
-                if (url.Equals(kv.Key.Url, System.StringComparison.OrdinalIgnoreCase) ||
-                    url.StartsWith(kv.Key.Url, System.StringComparison.OrdinalIgnoreCase))
+                if (url.Equals(kv.Key.Url, System.StringComparison.OrdinalIgnoreCase))
                     return new HttpResponseMessage(kv.Value.Status) { Content = new StringContent(kv.Value.Body, Encoding.UTF8, "application/json") };
             }
+            string? best = null; (HttpStatusCode Status, string Body) bestResp = default;
+            foreach (var kv in _responses)
+            {
+                if (kv.Key.Method != "ANY") continue;
+                if (url.StartsWith(kv.Key.Url, System.StringComparison.OrdinalIgnoreCase) && (best is null || kv.Key.Url.Length > best.Length))
+                {
+                    best = kv.Key.Url;
+                    bestResp = kv.Value;
+                }
+            }
+            if (best is not null)
+                return new HttpResponseMessage(bestResp.Status) { Content = new StringContent(bestResp.Body, Encoding.UTF8, "application/json") };
             return new HttpResponseMessage(HttpStatusCode.NotFound) { Content = new StringContent($"Unexpected {url}", Encoding.UTF8, "application/json") };
         }
     }
