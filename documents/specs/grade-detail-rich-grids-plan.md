@@ -1,6 +1,6 @@
 # Grade-Level Detail — Rich Curriculum & Teacher Grids (plan)
 
-Status: **in progress — dm/1 (demographics)**; cg grids paused per architecture pivot.
+Status: **complete — cg grids delivered** (dm phase complete; cg/2–cg/4 shipped).
 Parent: `grade-level-detail-view-plan.md` (Phase A) — enhances the grade-level Detail page.
 
 ## 0. Active architecture (dm — demographics phase)
@@ -102,18 +102,18 @@ Two new `CodedValueParent` entries + `ToCode` mappings + `seed.csv` rows:
 
 | # | Branch | Concern |
 |---|--------|---------|
-| 1 | `cg/1-teacher-profile` | Teacher profile fields: gender, DOB, level of education, qualifications (+ new coded-value parents `EDUCLEVEL`/`QUALIF` with seeds, migration, DTOs, endpoints, teacher UI, tests) |
-| 2 | `cg/2-curriculum-aggregates` | Per-topic strand/lesson counts + `TeacherTopic.RoleCodedValueId` + teacher display-name/count resolution (backend, tests) |
-| 3 | `cg/3-topics-grid` | Topics tab → rich data-grid with add-strand/lesson/topic dialogs; topic dialog assigns teachers+roles (UI + bUnit) |
-| 4 | `cg/4-teachers-grid` | Teachers tab → Title/Gender/DOB/Level/Qualifications/Topics columns; teacher dialog edits topics+roles (UI + bUnit) |
+| 1 | `cg/1-teacher-profile` | ✅ **superseded by dm/1 + dm/2** (teacher gender/DOB/level/qualifications + contacts already landed in the demographics phase) |
+| 2 | `cg/2-curriculum-aggregates` | ✅ Per-topic strand/lesson counts (`ListGradeTopicCurriculumByGrade`) + `TeacherTopic.RoleCodedValueId` (link command/endpoint/API client) + migration + tests |
+| 3 | `cg/3-topics-grid` | ✅ Topics tab → rich data-grid with Strand/Lesson count columns + `TopicStrandsDialog`/`TopicLessonsDialog` hosting the shared editors (UI + bUnit) |
+| 4 | `cg/4-teachers-grid` | ✅ Teachers tab → Title/Gender/Level/Qualifications/Topics columns resolved client-side (UI + bUnit) |
 
-Base for layer 1 = the branch containing the tabbed `Detail.razor` (Phase A `stack/5-create-edit`, or `main` once Phase A merges) — **decision pending** alongside the current nd stack.
+Base for layer 1 = the branch containing the tabbed `Detail.razor` (Phase A `stack/5-create-edit`). The cg stack was rooted on the `dm/3` tip. Note: cg/1 was replaced by the dedicated `dm` phase, so the shipped cg stack is cg/2 → cg/3 → cg/4 on top of dm/1–dm/3.
 
 ## 7. Delivery / out of scope
 - No changes to strands/lessons CRUD semantics — only surfacing counts + authoring entry points.
 - No notification / delivery coupling.
 
 ## 8. Open items for confirmation
-1. **Add `Gender` + `DateOfBirth` to Teacher** (new migration + capture UI)? — required for the requested columns.
-2. Grids **replace** the card/expand UI (recommended) vs. keep both?
-3. Stack base: root this phase on Phase A top (`stack/5-create-edit`) like the nd stack, or wait for merges?
+1. **Add `Gender` + `DateOfBirth` to Teacher** — ✅ resolved in dm/1 (gender/DOB/level/qualifications captured).
+2. Grids **replace** the card/expand UI — ✅ resolved: cg/3 replaced the card list with the data grid; cg/4 padded the teacher grid.
+3. Stack base — ✅ resolved: the cg stack is rooted on the `dm/3` tip (after the demographics phase).
