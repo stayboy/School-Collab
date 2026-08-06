@@ -51,6 +51,7 @@
 | 6 | Rename Topics → Subjects/Curriculum | Visible labels only: card title "Subjects/Curriculum", empty state "No subjects assigned to this curriculum yet", View-all "View all subjects", dialog title "Subjects/Curriculum · {grade}" | ✅ cg/8 |
 | 7 | Topic secondary text | Topic preview items restructured: `<div>` container + name button + Strands(N)/Lessons(N) `FluentButton` (Lightweight, Small) navigable counts using `StrandCount`/`LessonCount` | ✅ cg/8 |
 | 8 | View-all alignment | Fix text/arrow vertical alignment via `IconEnd="@FluentIcons.ArrowRight"` (FluentButton for Topics/Teachers, FluentAnchor for Students) | ✅ cg/8 |
+| 9 | SectionCard component | Extract a shared `SectionCard.razor` component to unify the three grade-detail cards (header icon/title/count/add, preview item template, View-all footer). Wrap in `FluentCard` with explicit border so the card outline is visible. | ✅ cg/8 |
 
 ## 2. Tests
 
@@ -77,5 +78,7 @@
 ## 4. Verification
 
 - Full solution builds; Students + Admin + Architecture + Assignments + Settings suites green.
+- Admin suite: **273/273** tests pass (including 11 card-based `GradeLevelDetailPageTests`).
+- SectionCard renders with visible card outline/border after wrapping in `FluentCard` and adding explicit `border`/`border-radius` CSS.
 - Verified in a detached worktree (running dev-server file locks in the main tree).
 - Stacked PR on top of `cg/6` in stack #126 (cg/7 PR #133, cg/8 PR #134).
