@@ -18,6 +18,14 @@ public sealed class CodedValue : IEntity, IAuditableEntity, ISoftDeletableEntity
     public string? Description { get; private set; }
     public Guid? ParentId { get; private set; }
     public bool IsDisabled { get; private set; }
+
+    // tcv/3: a tenant-created coded value that is awaiting system-wide approval to
+    // become a shared global blueprint. While provisional it is tenant-owned (so
+    // already hidden from other tenants) and surfaces in the Settings approval
+    // queue. Promotion clears the flag and moves it to the shared blueprint;
+    // rejection keeps it tenant-scoped and clears the flag.
+    public bool IsProvisional { get; private set; }
+
     public bool IsDeleted { get; private set; }
     public DateTimeOffset? DeletedAt { get; private set; }
     public int DisplayOrder { get; private set; }
@@ -93,6 +101,47 @@ public sealed class CodedValue : IEntity, IAuditableEntity, ISoftDeletableEntity
         DisplayOrder = displayOrder;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new CodedValueUpdatedEvent(Id, Code, Name));
+    }
+
+    /// <summary>
+    /// Marks a tenant-owned value as provisional (tcv/3) — created by a tenant but
+    /// awaiting system-wide approval before it becomes a shared global blueprint.
+    /// </summary>
+    public void MarkProvisional()
+    {
+        if (IsProvisional) return;
+        IsProvisional = true;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Promotes a provisional tenant-owned value to the shared global blueprint
+    /// (tcv/3). Sets <c>TenantId = null</c> so every tenant sees it, and clears the
+    /// provisional flag. The tenant id must be non-<see cref="Guid.Empty"/> before
+    /// promotion (shared blueprints are never provisional).
+    /// </summary>
+    public void ApproveAsGlobalBlueprint()
+    {
+        if (!IsProvisional)
+            throw new InvalidOperationException("Only a provisional coded value can be approved as a global blueprint.");
+        if (TenantId is null || TenantId == Guid.Empty)
+            throw new InvalidOperationException("A shared blueprint cannot be a provisional value awaiting approval.");
+
+        SetTenant(null);
+        IsProvisional = false;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new CodedValueApprovedEvent(Id, Code, Name, ParentId));
+    }
+
+    /// <summary>
+    /// Rejects a provisional value (tcv/3): it stays tenant-scoped (isolated to its
+    /// creating tenant) but leaves the pending approval queue. No hard delete.
+    /// </summary>
+    public void RejectProvisional()
+    {
+        if (!IsProvisional) return;
+        IsProvisional = false;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void Disable()

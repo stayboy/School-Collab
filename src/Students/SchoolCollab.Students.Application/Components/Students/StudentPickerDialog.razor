@@ -225,7 +225,7 @@
     }
 
     private static SchoolCollab.Students.Core.DTOs.StudentDto ToCore(SchoolCollab.Students.Application.Services.StudentDto s) => new(
-        s.Id, s.StudentNumber, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt, s.Age, s.GenderName);
+        s.Id, s.StudentNumber, s.TitleCodedValueId, s.FirstName, s.LastName, s.DateOfBirth, s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt, s.Age, s.GenderName);
 
     private static string GetStudentNameLabel(SchoolCollab.Students.Core.DTOs.StudentDto s)
     {

@@ -28,12 +28,15 @@ public sealed class CreateTeacherHandler(
                 command.FirstName,
                 command.LastName,
                 command.DisplayName,
-                command.Email,
-                command.ContactPhone,
-                staffNumber: staffNumber)
+                staffNumber: staffNumber,
+                genderCodedValueId: command.GenderCodedValueId,
+                dateOfBirth: command.DateOfBirth,
+                levelOfEducationCodedValueId: command.LevelOfEducationCodedValueId)
             .WithTenant(tenantProvider);
 
         await repository.AddAsync(teacher, cancellationToken);
+        foreach (var q in command.QualificationCodedValueIds ?? [])
+            await repository.AddQualificationAsync(TeacherQualification.Create(teacher.Id, q), cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);
 
         logger.LogInformation("Teacher {Id} created with staff number {StaffNumber} for tenant {TenantId}",

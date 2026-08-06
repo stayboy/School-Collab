@@ -41,7 +41,40 @@ public sealed class EntityCodeRuleSeeder(
                 "Auto-generates assignment numbers",
                 stamp: "ASG",
                 ct);
+            await SeedTopicRuleAsync(ct);
         }
+    }
+
+    /// <summary>
+    /// Seeds the <c>TOPIC_CODE</c> template: a <see cref="SegmentType.WordInitials"/>
+    /// segment (initials derived from the topic name, e.g. "computer science" → "CS")
+    /// followed by a <see cref="SegmentType.NumericSequence"/> (zero-padded, e.g. "01"),
+    /// producing codes like <c>CS01</c> (tcv/2).
+    /// </summary>
+    private async Task SeedTopicRuleAsync(CancellationToken ct)
+    {
+        const string code = "TOPIC_CODE";
+        var existing = await db.EntityCodeRules
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(x => x.Code == code, ct);
+        if (existing is not null)
+        {
+            logger.LogDebug("EntityCodeRule {Code} already exists. Skipping", code);
+            return;
+        }
+
+        var rule = EntityCodeRule.Create(
+            code,
+            "Topic Code Template",
+            "Auto-generates topic codes from the topic name initials + a number",
+            isActive: true);
+        rule.AddSegment(EntityCodeSegment.Sequence(0, null, SegmentType.WordInitials, minWidth: 1));
+        rule.AddSegment(EntityCodeSegment.Sequence(1, null, SegmentType.NumericSequence, minWidth: 2));
+
+        db.EntityCodeRules.Add(rule);
+        await db.SaveChangesAsync(ct);
+
+        logger.LogInformation("Seeded EntityCodeRule {Code} (word-initials + numeric)", code);
     }
 
     private async Task SeedRuleAsync(string code, string name, string description, string stamp, CancellationToken ct)

@@ -34,7 +34,7 @@ public class CreateTeacherHandlerEntityCodeTests
             NullLogger<CreateTeacherHandler>.Instance);
 
         var id = await handler.HandleAsync(
-            new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+            new CreateTeacher(null, "Jane", "Doe", null));
 
         var teacher = s.Db.Teachers.IgnoreQueryFilters().Single(t => t.Id == id);
         teacher.StaffNumber.Should().Be("STFA01",
@@ -60,7 +60,7 @@ public class CreateTeacherHandlerEntityCodeTests
             NullLogger<CreateTeacherHandler>.Instance);
 
         var act = async () => await handler.HandleAsync(
-            new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+            new CreateTeacher(null, "Jane", "Doe", null));
 
         await act.Should().ThrowAsync<InvalidOperationException>();
         s.Db.Teachers.IgnoreQueryFilters().Should().BeEmpty(

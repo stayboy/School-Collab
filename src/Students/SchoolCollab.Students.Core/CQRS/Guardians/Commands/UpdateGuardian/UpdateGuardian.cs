@@ -9,4 +9,6 @@ public sealed record UpdateGuardian(
     string LastName,
     string? DisplayName,
     string? Address,
-    Guid? CommunityId) : ICommand;
+    Guid? CommunityId,
+    DateOnly? DateOfBirth = null,
+    Guid? GenderCodedValueId = null) : ICommand;

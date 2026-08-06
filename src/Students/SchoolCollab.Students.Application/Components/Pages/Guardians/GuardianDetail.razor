@@ -53,6 +53,17 @@
                                     <FormRow Label="Display name">
                                         <FluentTextField @bind-Value="_editDisplayName" />
                                     </FormRow>
+                                    <FormRow Label="Date of birth">
+                                        <FluentDatePicker Id="guardianEditDob"
+                                                          Value="@EditDateOfBirthAsDateTime"
+                                                          ValueChanged="@OnEditDateOfBirthChanged"
+                                                          Placeholder="Select date" />
+                                    </FormRow>
+                                    <FormRow Label="Gender">
+                                        <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                                            @bind-SelectedId="_editGenderCodedValueId"
+                                                            Placeholder="Select gender" />
+                                    </FormRow>
                                     <FormRow Label="Address">
                                         <FluentTextField @bind-Value="_editAddress" />
                                     </FormRow>
@@ -76,11 +87,11 @@
                         {
                             <FluentCard class="detail-card">
                                 <div class="profile-grid">
-                                    @if (!string.IsNullOrWhiteSpace(_titleName)) { <div class="profile-row"><span class="profile-label">Title</span><span class="profile-value">@_titleName</span></div> }
-                                    <div class="profile-row"><span class="profile-label">Name</span><span class="profile-value">@_guardian.FirstName @_guardian.LastName</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(_guardian.DisplayName)) { <div class="profile-row"><span class="profile-label">Display name</span><span class="profile-value">@_guardian.DisplayName</span></div> }
-                                    @if (!string.IsNullOrWhiteSpace(_guardian.Address)) { <div class="profile-row"><span class="profile-label">Address</span><span class="profile-value">@_guardian.Address</span></div> }
-                                    @if (!string.IsNullOrWhiteSpace(_communityName)) { <div class="profile-row"><span class="profile-label">Community</span><span class="profile-value">@_communityName</span></div> }
+                                    @if (!string.IsNullOrWhiteSpace(_titleName)) { <FieldDisplay Label="Title" Orientation="FieldDisplayOrientation.Horizontal">@_titleName</FieldDisplay> }
+                                    <FieldDisplay Label="Name" Orientation="FieldDisplayOrientation.Horizontal">@_guardian.FirstName @_guardian.LastName</FieldDisplay>
+                                    @if (!string.IsNullOrWhiteSpace(_guardian.DisplayName)) { <FieldDisplay Label="Display name" Orientation="FieldDisplayOrientation.Horizontal">@_guardian.DisplayName</FieldDisplay> }
+                                    @if (!string.IsNullOrWhiteSpace(_guardian.Address)) { <FieldDisplay Label="Address" Orientation="FieldDisplayOrientation.Horizontal">@_guardian.Address</FieldDisplay> }
+                                    @if (!string.IsNullOrWhiteSpace(_communityName)) { <FieldDisplay Label="Community" Orientation="FieldDisplayOrientation.Horizontal">@_communityName</FieldDisplay> }
                                 </div>
                             </FluentCard>
                         }
@@ -175,8 +186,6 @@
 <style>
     .muted { color: var(--neutral-foreground-hint); }
     .profile-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
-    .profile-row { display: flex; gap: 8px; }
-    .profile-label { font-weight: 600; min-width: 90px; }
     .timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
     .timeline-item { display: flex; gap: 12px; align-items: baseline; padding: 6px 10px; border-left: 3px solid var(--accent-fill-rest, #0f6cbd); background: var(--neutral-layer-1, #fafafa); }
     .timeline-date { margin-left: auto; color: var(--neutral-foreground-hint); font-size: 0.85em; }
@@ -210,6 +219,14 @@
     private string _editDisplayName = string.Empty;
     private string _editAddress = string.Empty;
     private Guid? _editCommunityId;
+    private DateOnly? _editDateOfBirth;
+    private Guid? _editGenderCodedValueId;
+
+    // DOB bridge: _editDateOfBirth is DateOnly? but FluentDatePicker.Value is DateTime?.
+    private DateTime? EditDateOfBirthAsDateTime => _editDateOfBirth?.ToDateTime(TimeOnly.MinValue);
+
+    private void OnEditDateOfBirthChanged(DateTime? value)
+        => _editDateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
 
     // Link form state.
     private SchoolCollab.Students.Application.Services.StudentDto? _newWard;
@@ -268,6 +285,8 @@
         _editDisplayName = _guardian.DisplayName ?? string.Empty;
         _editAddress = _guardian.Address ?? string.Empty;
         _editCommunityId = _guardian.CommunityId;
+        _editDateOfBirth = _guardian.DateOfBirth;
+        _editGenderCodedValueId = _guardian.GenderCodedValueId;
     }
 
     private void StartEdit() => _editing = true;
@@ -290,7 +309,7 @@
                 _editFirstName.Trim(), _editLastName.Trim(),
                 string.IsNullOrWhiteSpace(_editDisplayName) ? null : _editDisplayName.Trim(),
                 string.IsNullOrWhiteSpace(_editAddress) ? null : _editAddress.Trim(),
-                _editCommunityId));
+                _editCommunityId, _editDateOfBirth, _editGenderCodedValueId));
 
             _guardian = await Api.GetGuardianByIdAsync(_guardian.Id, default);
             if (_guardian?.TitleCodedValueId.HasValue == true)

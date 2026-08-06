@@ -442,6 +442,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date")
+                        .HasColumnName("date_of_birth");
+
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deleted_at");
@@ -454,6 +458,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("first_name");
+
+                    b.Property<Guid?>("GenderCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gender_coded_value_id");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -653,6 +661,10 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TitleCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("title_coded_value_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -957,13 +969,13 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("ContactPhone")
-                        .HasColumnType("text")
-                        .HasColumnName("contact_phone");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date")
+                        .HasColumnName("date_of_birth");
 
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -973,15 +985,14 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("text")
                         .HasColumnName("display_name");
 
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("email");
-
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("first_name");
+
+                    b.Property<Guid?>("GenderCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gender_coded_value_id");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -993,6 +1004,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("last_name");
+
+                    b.Property<Guid?>("LevelOfEducationCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("level_of_education_coded_value_id");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -1079,6 +1094,48 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("teacher_grade_levels", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherQualification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("coded_value_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TeacherId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("teacher_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_teacher_qualifications");
+
+                    b.HasIndex("TenantId", "TeacherId", "CodedValueId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_teacher_qualifications_tenant_teacher_qualification");
+
+                    b.ToTable("teacher_qualifications", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherTopic", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1088,6 +1145,10 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<Guid?>("RoleCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("role_coded_value_id");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()

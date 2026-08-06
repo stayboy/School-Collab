@@ -100,13 +100,20 @@ public sealed class GuardianContactsTeacherDomainTests
     }
 
     [TestMethod]
-    public void Teacher_Create_KeepsStaffEmailAndPhone()
+    public void Teacher_Contacts_LiveOnSharedContactTable()
     {
-        var t = Teacher.Create(null, "Ama", "Owusu", null, "ama@school.edu", "+233200000000");
+        var t = Teacher.Create(null, "Ama", "Owusu", null);
 
         t.FirstName.Should().Be("Ama");
-        t.Email.Should().Be("ama@school.edu");
-        t.ContactPhone.Should().Be("+233200000000"); // staff contact — NOT migrated to contacts table
         t.IsDeleted.Should().BeFalse();
+
+        // Teacher contact channels live on the shared Contact table keyed by
+        // ContactOwnerType.Teacher (reverses the v1 single staff email/phone).
+        var teacherId = Guid.NewGuid();
+        var email = Contact.Create(ContactOwnerType.Teacher, teacherId, ContactChannel.Email, "ama@school.edu", "Work", null);
+        email.OwnerType.Should().Be(ContactOwnerType.Teacher);
+        email.OwnerId.Should().Be(teacherId);
+        email.Channel.Should().Be(ContactChannel.Email);
+        email.IsVerified.Should().BeFalse();
     }
 }

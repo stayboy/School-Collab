@@ -39,6 +39,16 @@ public class EntityCodeGeneratorTests
         return rule;
     }
 
+    private static void SeedTopicRule(DbContextOptions<SettingsDbContext> opts)
+    {
+        using var db = new SettingsDbContext(opts, new DesignTimeTenantProvider());
+        var rule = EntityCodeRule.Create("TOPIC_CODE", "Topic Code Template", null, isActive: true);
+        rule.AddSegment(EntityCodeSegment.Sequence(0, null, SegmentType.WordInitials, minWidth: 1));
+        rule.AddSegment(EntityCodeSegment.Sequence(1, null, SegmentType.NumericSequence, minWidth: 2));
+        db.EntityCodeRules.Add(rule);
+        db.SaveChanges();
+    }
+
     [TestMethod]
     public async Task GenerateAsync_UnknownRule_ThrowsNotFoundException()
     {
@@ -76,6 +86,26 @@ public class EntityCodeGeneratorTests
         var generator = new EntityCodeGenerator(factory, NewDefaultTenant(), Mock.Of<ILogger<EntityCodeGenerator>>());
 
         (await generator.GenerateAsync("student_code")).Should().Be("STUA01");
+    }
+
+    [TestMethod]
+    public async Task GenerateWithNameAsync_WordInitialsRule_DerivesInitialsPlusNumber()
+    {
+        // tcv/2: TOPIC_CODE renders name-derived initials + a zero-padded
+        // number (e.g. "Computer Science" → CS01).
+        var opts = NewOptions();
+        SeedTopicRule(opts);
+        var factory = new DbContextFactoryMock(opts);
+        var generator = new EntityCodeGenerator(factory, NewDefaultTenant(), Mock.Of<ILogger<EntityCodeGenerator>>());
+
+        // Multi-word: first letter of each significant word.
+        (await generator.GenerateWithNameAsync("TOPIC_CODE", "Computer Science")).Should().Be("CS01");
+
+        // Single word: first two letters.
+        (await generator.GenerateWithNameAsync("TOPIC_CODE", "Mathematics")).Should().Be("MA02");
+
+        // Articles/prepositions (and/of/the) are skipped.
+        (await generator.GenerateWithNameAsync("TOPIC_CODE", "Science and Art of Music")).Should().Be("SAM03");
     }
 
     [TestMethod]

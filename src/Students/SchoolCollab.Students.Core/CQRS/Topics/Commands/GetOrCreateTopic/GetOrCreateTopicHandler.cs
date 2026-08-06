@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
@@ -24,6 +25,7 @@ public sealed class GetOrCreateTopicHandler(
     IGradeLevelRepository gradeLevelRepository,
     HybridCache cache,
     ITenantProvider tenantProvider,
+    IEntityCodeGenerator entityCodeGenerator,
     ILogger<GetOrCreateTopicHandler> logger) : ICommandHandler<GetOrCreateTopic, TopicDto>
 {
     public async Task<TopicDto> HandleAsync(
@@ -58,9 +60,15 @@ public sealed class GetOrCreateTopicHandler(
         }
         else
         {
+            // tcv/5: when no explicit code is supplied, generate one from the topic
+            // name via the seeded TOPIC_CODE rule (e.g. "computer science" → CS01).
+            var code = !string.IsNullOrWhiteSpace(command.Code)
+                ? command.Code.Trim()
+                : await entityCodeGenerator.GenerateWithNameAsync("TOPIC_CODE", command.Name, cancellationToken);
+
             subject = Topic.Create(
                     command.CodedValueId,
-                    command.Code,
+                    code,
                     command.Name,
                     command.DisplayOrder)
                 .WithTenant(tenantProvider);

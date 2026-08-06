@@ -8,7 +8,7 @@ namespace SchoolCollab.Students.Core.Domain;
 /// the <see cref="Contact"/> table. Soft-delete blocks the guardian but preserves
 /// history, links, and contacts (no cascade).
 /// </summary>
-public sealed class Guardian : ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
+public sealed class Guardian : PersonDemographic, ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
     private readonly List<GuardianNameHistory> _nameHistory = [];
@@ -16,9 +16,6 @@ public sealed class Guardian : ITenantEntity, IEntity, IAuditableEntity, ISoftDe
     private Guardian() { }
 
     public Guid Id { get; private set; }
-    public Guid? TitleCodedValueId { get; private set; }
-    public string FirstName { get; private set; } = default!;
-    public string LastName { get; private set; } = default!;
     public string? DisplayName { get; private set; }
     public string? Address { get; private set; }
     public Guid? CommunityId { get; private set; }
@@ -40,22 +37,23 @@ public sealed class Guardian : ITenantEntity, IEntity, IAuditableEntity, ISoftDe
         string lastName,
         string? displayName,
         string? address,
-        Guid? communityId)
+        Guid? communityId,
+        DateOnly? dateOfBirth = null,
+        Guid? genderCodedValueId = null)
     {
         var now = DateTimeOffset.UtcNow;
-        return new Guardian
+        var guardian = new Guardian
         {
             Id = Guid.NewGuid(),
-            TitleCodedValueId = titleCodedValueId,
-            FirstName = firstName.Trim(),
-            LastName = lastName.Trim(),
-            DisplayName = displayName?.Trim(),
             Address = address?.Trim(),
             CommunityId = communityId,
             IsDeleted = false,
             CreatedAt = now,
             UpdatedAt = now
         };
+        guardian.SetDemographics(titleCodedValueId, firstName, lastName, dateOfBirth, genderCodedValueId);
+        guardian.DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
+        return guardian;
     }
 
     /// <summary>Appends the initial name-history snapshot (spec §16 Phase 4). Call after <see cref="ITenantEntity"/> tenant assignment.</summary>
@@ -67,7 +65,7 @@ public sealed class Guardian : ITenantEntity, IEntity, IAuditableEntity, ISoftDe
     {
         FirstName = firstName.Trim();
         LastName = lastName.Trim();
-        DisplayName = displayName?.Trim();
+        DisplayName = string.IsNullOrWhiteSpace(displayName) ? null : displayName.Trim();
         UpdatedAt = DateTimeOffset.UtcNow;
         _nameHistory.Add(GuardianNameHistory.Create(Id, TenantId, FirstName, LastName, DisplayName));
     }
@@ -80,11 +78,13 @@ public sealed class Guardian : ITenantEntity, IEntity, IAuditableEntity, ISoftDe
     }
 
     /// <summary>Full update used by <c>UpdateGuardian</c>. Appends a name-history row only when the name actually changes (spec §7).</summary>
-    public void Update(Guid? titleCodedValueId, string firstName, string lastName, string? displayName, string? address, Guid? communityId)
+    public void Update(Guid? titleCodedValueId, string firstName, string lastName, string? displayName, string? address, Guid? communityId, DateOnly? dateOfBirth = null, Guid? genderCodedValueId = null)
     {
         TitleCodedValueId = titleCodedValueId;
         Address = address?.Trim();
         CommunityId = communityId;
+        DateOfBirth = dateOfBirth;
+        GenderCodedValueId = genderCodedValueId;
 
         var trimmedFirst = firstName.Trim();
         var trimmedLast = lastName.Trim();

@@ -11,6 +11,7 @@ using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelById;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevels;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevelsForLanding;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
+using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicCurriculumByGrade;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -76,6 +77,16 @@ public static class GradeLevelRoutes
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTeachersForGradeLevel, SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListTeachersForGradeLevel(id), ct)));
+
+        // Per-topic strand/lesson counts for the grade's assigned topics
+        // (grade-detail-rich-grids-plan.md §4).
+        group.MapGet("/grade-levels/{id:guid}/curriculum", async (
+            Guid id,
+            DateOnly? effectiveDate,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListGradeTopicCurriculumByGrade, SchoolCollab.Students.Core.DTOs.GradeTopicCurriculumDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(
+                new ListGradeTopicCurriculumByGrade(id, effectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow)), ct)));
 
         group.MapPost("/grade-levels", async (
             [FromBody] CreateGradeLevel command,

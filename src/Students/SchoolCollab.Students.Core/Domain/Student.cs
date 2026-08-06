@@ -4,7 +4,7 @@ using SchoolCollab.Students.Core.Domain.Events;
 
 namespace SchoolCollab.Students.Core.Domain;
 
-public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
+public sealed class Student : PersonDemographic, ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
     private readonly List<IDomainEvent> _domainEvents = [];
 
@@ -12,10 +12,6 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
 
     public Guid Id { get; private set; }
     public string StudentNumber { get; private set; } = default!;
-    public string FirstName { get; private set; } = default!;
-    public string LastName { get; private set; } = default!;
-    public DateOnly? DateOfBirth { get; private set; }
-    public Guid? GenderCodedValueId { get; private set; }
 
     // Multi-tenancy: each student belongs to a tenant (e.g., school)
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
@@ -33,7 +29,8 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         string firstName,
         string lastName,
         DateOnly? dateOfBirth,
-        Guid? genderCodedValueId)
+        Guid? genderCodedValueId,
+        Guid? titleCodedValueId = null)
     {
         if (string.IsNullOrWhiteSpace(studentNumber))
             throw new ArgumentException("Student number is required.", nameof(studentNumber));
@@ -51,15 +48,12 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         {
             Id = Guid.NewGuid(),
             StudentNumber = studentNumber.Trim(),
-            FirstName = firstName.Trim(),
-            LastName = lastName.Trim(),
-            DateOfBirth = dateOfBirth,
-            GenderCodedValueId = genderCodedValueId,
             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             IsDeleted = false,
             CreatedAt = now,
             UpdatedAt = now
         };
+        student.SetDemographics(titleCodedValueId, firstName, lastName, dateOfBirth, genderCodedValueId);
 
         student._domainEvents.Add(new StudentCreatedEvent(student.Id, student.StudentNumber));
         return student;
@@ -69,7 +63,8 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         string firstName,
         string lastName,
         DateOnly? dateOfBirth,
-        Guid? genderCodedValueId)
+        Guid? genderCodedValueId,
+        Guid? titleCodedValueId = null)
     {
         if (string.IsNullOrWhiteSpace(firstName))
             throw new ArgumentException("First name is required.", nameof(firstName));
@@ -80,10 +75,7 @@ public sealed class Student : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
         if (genderCodedValueId is null)
             throw new ArgumentException("Gender is required.", nameof(genderCodedValueId));
 
-        FirstName = firstName.Trim();
-        LastName = lastName.Trim();
-        DateOfBirth = dateOfBirth;
-        GenderCodedValueId = genderCodedValueId;
+        SetDemographics(titleCodedValueId, firstName, lastName, dateOfBirth, genderCodedValueId);
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new StudentUpdatedEvent(Id, StudentNumber));
     }

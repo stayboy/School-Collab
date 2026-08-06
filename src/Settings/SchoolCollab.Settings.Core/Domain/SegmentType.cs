@@ -18,5 +18,14 @@ public enum SegmentType
     /// Auto-incrementing prefix+number with rollover
     /// (e.g. A01, A02, …, A09, B01, B02, …).
     /// </summary>
-    AlphanumericSequence = 3
+    AlphanumericSequence = 3,
+
+    /// <summary>
+    /// Initials derived from the entity's display name (e.g. "computer science"
+    /// → <c>CS</c>, single-word "Mathematics" → <c>MA</c>). Rendered at generation
+    /// time from the <c>nameHint</c> supplied to the generator; the segment carries
+    /// no sequence state of its own — pair it with a <see cref="NumericSequence"/>
+    /// to get e.g. <c>CS01</c>. Articles/prepositions (and, of, the) are skipped.
+    /// </summary>
+    WordInitials = 4
 }

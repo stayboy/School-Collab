@@ -453,7 +453,7 @@
             return new GuardianDto(
                 kv.Key, kv.Value.TitleCodedValueId,
                 kv.Value.FirstName, kv.Value.LastName,
-                null, null, null, false,
+                null, null, null, null, null, false,
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
             { Contacts = summaries.AsReadOnly() };
         }).ToArray();
@@ -571,7 +571,7 @@
         var synthetic = new GuardianDto(
             tempId, _newGuardian.TitleCodedValueId,
             _newGuardian.FirstName!.Trim(), _newGuardian.LastName!.Trim(),
-            null, null, null, false,
+            null, null, null, null, null, false,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
         { Contacts = contactSummaries.AsReadOnly() };
         _items = new[] { synthetic }.Concat(_items).ToArray();

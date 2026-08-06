@@ -16,6 +16,8 @@ public sealed record GuardianDto(
     string FirstName,
     string LastName,
     string? DisplayName,
+    DateOnly? DateOfBirth,
+    Guid? GenderCodedValueId,
     string? Address,
     Guid? CommunityId,
     bool IsDeleted,

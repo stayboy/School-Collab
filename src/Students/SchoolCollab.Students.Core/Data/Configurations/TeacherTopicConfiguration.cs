@@ -22,6 +22,7 @@ internal sealed class TeacherTopicConfiguration : TenantEntityTypeConfigurationB
 
         builder.Property(x => x.TeacherId).IsRequired();
         builder.Property(x => x.TopicId).IsRequired();
+        builder.Property(x => x.RoleCodedValueId);
 
         builder.HasIndex(x => new { x.TenantId, x.TeacherId, x.TopicId })
             .IsUnique()

@@ -40,7 +40,7 @@
                                 <FluentIcon Icon="@(Icons.Regular.Size24.Person)" Color="@Color.Accent" />
                                 <div>
                                     <h3>Teacher profile</h3>
-                                    <p class="wizard-hint">Title, name and the single staff email / phone used to identify the teacher.</p>
+                                    <p class="wizard-hint">Title, name and profile details used to identify the teacher. Contact channels (email / SMS / WhatsApp) are managed on the teacher's profile page.</p>
                                 </div>
                             </div>
 
@@ -58,11 +58,43 @@
                                 <FormRow Label="Display name">
                                     <FluentTextField @bind-Value="_displayName" Placeholder="e.g. Mr. Smith (optional)" />
                                 </FormRow>
-                                <FormRow Label="Email" Required>
-                                    <FluentTextField @bind-Value="_email" Required Type="InputType.Email" Placeholder="staff@example.com" />
+                                <FormRow Label="Gender">
+                                    <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                                        @bind-SelectedId="_genderCodedValueId" />
                                 </FormRow>
-                                <FormRow Label="Contact phone">
-                                    <FluentTextField @bind-Value="_contactPhone" Placeholder="Phone (optional)" />
+                                <FormRow Label="Date of birth">
+                                    <FluentDatePicker Id="teacherWizardDob"
+                                                      Value="@DateOfBirthAsDateTime"
+                                                      ValueChanged="@OnDateOfBirthChanged"
+                                                      Placeholder="Select date" />
+                                </FormRow>
+                                <FormRow Label="Level of education">
+                                    <CodedValueDropdown Parent="CodedValueParent.EducLevel"
+                                                        @bind-SelectedId="_levelOfEducationCodedValueId" />
+                                </FormRow>
+                                <FormRow Label="Qualifications">
+                                    <div class="qual-list">
+                                        @if (_allQualifications is null)
+                                        {
+                                            <FluentProgressRing />
+                                        }
+                                        else if (_allQualifications.Length == 0)
+                                        {
+                                            <span class="muted">No qualification options in this tenant yet.</span>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var q in _allQualifications)
+                                            {
+                                                <label class="qual-row">
+                                                    <input type="checkbox"
+                                                           checked="@_selectedQualificationIds.Contains(q.Id)"
+                                                           @onchange="e => OnQualificationToggled(q.Id, e.Value is true)" />
+                                                    <span>@q.Name</span>
+                                                </label>
+                                            }
+                                        }
+                                    </div>
                                 </FormRow>
                             </FluentStack>
 
@@ -170,11 +202,6 @@
                                     {
                                         <div class="review-row"><span class="review-label">Display name</span><span class="review-value">@_displayName</span></div>
                                     }
-                                    <div class="review-row"><span class="review-label">Email</span><span class="review-value">@_email</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(_contactPhone))
-                                    {
-                                        <div class="review-row"><span class="review-label">Phone</span><span class="review-value">@_contactPhone</span></div>
-                                    }
                                 </div>
                             </div>
 
@@ -281,8 +308,11 @@
     private string _firstName = string.Empty;
     private string _lastName = string.Empty;
     private string _displayName = string.Empty;
-    private string _email = string.Empty;
-    private string _contactPhone = string.Empty;
+    private Guid? _genderCodedValueId;
+    private DateOnly? _dateOfBirth;
+    private Guid? _levelOfEducationCodedValueId;
+    private SchoolCollab.Admin.Shared.Services.CodedValueDto[]? _allQualifications;
+    private HashSet<Guid> _selectedQualificationIds = new();
 
     // Topics / grade levels.
     private TopicDto[]? _allTopics;
@@ -307,6 +337,7 @@
         {
             _allTopics = await Api.ListTopicsAsync(ct) ?? [];
             _allGradeLevels = await Api.ListGradeLevelsAsync(ct) ?? [];
+            _allQualifications = await CodedValuesApi.GetChildrenByParentCodeAsync("QUALIF", ct) ?? [];
 
             if (_isEdit && Id is not null)
             {
@@ -317,8 +348,10 @@
                     _firstName = t.FirstName;
                     _lastName = t.LastName;
                     _displayName = t.DisplayName ?? string.Empty;
-                    _email = t.Email;
-                    _contactPhone = t.ContactPhone ?? string.Empty;
+                    _genderCodedValueId = t.GenderCodedValueId;
+                    _dateOfBirth = t.DateOfBirth;
+                    _levelOfEducationCodedValueId = t.LevelOfEducationCodedValueId;
+                    _selectedQualificationIds = (t.QualificationCodedValueIds ?? []).ToHashSet();
                 }
 
                 var existingTopics = await Api.ListTopicsForTeacherAsync(Id.Value, ct) ?? [];
@@ -365,10 +398,10 @@
 
     private Task OnProfileChangingAsync(FluentWizardStepChangeEventArgs args)
     {
-        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName) || string.IsNullOrWhiteSpace(_email))
+        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName))
         {
             args.IsCancelled = true;
-            _profileError = "First name, last name and email are required.";
+            _profileError = "First name and last name are required.";
             return Task.CompletedTask;
         }
         _profileError = null;
@@ -405,6 +438,21 @@
         StateHasChanged();
     }
 
+    private void OnQualificationToggled(Guid codedValueId, bool selected)
+    {
+        if (selected)
+            _selectedQualificationIds.Add(codedValueId);
+        else
+            _selectedQualificationIds.Remove(codedValueId);
+        StateHasChanged();
+    }
+
+    // DOB bridge: _dateOfBirth is DateOnly? but FluentDatePicker.Value is DateTime?.
+    private DateTime? DateOfBirthAsDateTime => _dateOfBirth?.ToDateTime(TimeOnly.MinValue);
+
+    private void OnDateOfBirthChanged(DateTime? value)
+        => _dateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
+
     private async Task GoToStepAsync(int step)
     {
         if (_wizard is not null)
@@ -426,10 +474,10 @@
                 await Api.UpdateTeacherAsync(teacherId, new UpdateTeacherRequest(
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
+                    _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
+                    QualificationIds()), ct);
                 await SyncLinksAsync(teacherId, _originalTopicIds, _selectedTopicIds,
-                    id => Api.LinkTeacherTopicAsync(teacherId, id, ct),
+                    id => Api.LinkTeacherTopicAsync(teacherId, id, ct: ct),
                     id => Api.UnlinkTeacherTopicAsync(teacherId, id, ct));
                 await SyncLinksAsync(teacherId, _originalGradeLevelIds, _selectedGradeLevelIds,
                     id => Api.LinkTeacherGradeLevelAsync(teacherId, id, null, ct),
@@ -441,10 +489,10 @@
                     _titleCodedValueId,
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
+                    _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
+                    QualificationIds()), ct);
                 foreach (var topicId in _selectedTopicIds)
-                    await Api.LinkTeacherTopicAsync(teacherId, topicId, ct);
+                    await Api.LinkTeacherTopicAsync(teacherId, topicId, ct: ct);
                 foreach (var gradeLevelId in _selectedGradeLevelIds)
                     await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, null, ct);
             }
@@ -464,6 +512,9 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private Guid[]? QualificationIds()
+        => _selectedQualificationIds.Count == 0 ? null : _selectedQualificationIds.ToArray();
 
     private async Task SyncLinksAsync(
         Guid teacherId,

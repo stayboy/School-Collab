@@ -5,4 +5,5 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.UpsertCodedValueO
 public sealed record UpsertCodedValueOverride(
     Guid GlobalCodedValueId,
     string? Name,
-    string? Description) : ICommand;
+    string? Description,
+    string? Code = null) : ICommand;

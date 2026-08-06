@@ -149,6 +149,12 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("is_disabled");
 
+                    b.Property<bool>("IsProvisional")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_provisional");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -496,6 +502,11 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.Property<Guid>("GlobalCodedValueId")
                         .HasColumnType("uuid")
                         .HasColumnName("global_coded_value_id");
+
+                    b.Property<string>("OverriddenCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("overridden_code");
 
                     b.Property<string>("OverriddenDescription")
                         .HasMaxLength(1000)

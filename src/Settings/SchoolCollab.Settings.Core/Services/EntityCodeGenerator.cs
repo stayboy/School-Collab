@@ -29,7 +29,14 @@ public sealed class EntityCodeGenerator(
 {
     private const int MaxAttempts = 3;
 
-    public async Task<string> GenerateAsync(string ruleCode, CancellationToken cancellationToken = default)
+    public Task<string> GenerateAsync(string ruleCode, CancellationToken cancellationToken = default)
+        => GenerateCoreAsync(ruleCode, nameHint: null, cancellationToken);
+
+    public Task<string> GenerateWithNameAsync(string ruleCode, string? nameHint, CancellationToken cancellationToken = default)
+        => GenerateCoreAsync(ruleCode, nameHint, cancellationToken);
+
+    private async Task<string> GenerateCoreAsync(
+        string ruleCode, string? nameHint, CancellationToken cancellationToken)
     {
         var normalised = ruleCode.Trim().ToUpperInvariant();
         var attempt = 0;
@@ -71,8 +78,8 @@ public sealed class EntityCodeGenerator(
             try
             {
                 code = overridesBySegment.Count == 0
-                    ? rule.GenerateNext(now)
-                    : rule.GenerateNextWithOverrides(now, overridesBySegment);
+                    ? rule.GenerateNext(now, nameHint)
+                    : rule.GenerateNextWithOverrides(now, overridesBySegment, nameHint);
             }
             catch (EntityCodeGenerationCollisionException ex)
             {

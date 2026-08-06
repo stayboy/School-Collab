@@ -1,0 +1,26 @@
+@* Dialog hosting the shared <StrandsEditor> for a single topic, replacing the
+   inline expand-card strands section on the grade Detail page (grade-detail-
+   rich-grids-plan.md §5). The editor is self-contained (loads + CRUD via the
+   StudentsApiClient), so this dialog only passes TopicId/TopicName through and
+   owns the Close affordance. Not a DialogShellBase (no model/form/result) —
+   mirrors GuardianContactsDialog and is opened via ShowReadonlyDialogAsync. *@
+@implements IDialogContentComponent<DialogParameters>
+@using SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="topic-dialog">
+    <StrandsEditor TopicId="@TopicId" TopicName="@TopicName" />
+    <div class="dialog-footer">
+        <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public Guid TopicId { get; set; }
+    [Parameter] public string? TopicName { get; set; }
+
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    public DialogParameters Content { get; set; } = default!;
+
+    private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+}

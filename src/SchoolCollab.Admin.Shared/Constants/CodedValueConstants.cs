@@ -19,7 +19,13 @@ public enum CodedValueParent
     GradeStrands = 11,
     /// <summary>Teacher roles on a grade link (children of <c>TCHROLES</c>).
     /// Nullable FK on <c>TeacherGradeLevel.TeacherRoleCodedValueId</c>.</summary>
-    TeacherRoles = 12
+    TeacherRoles = 12,
+    /// <summary>Teacher level of education (children of <c>EDUCLEVEL</c>).
+    /// Single value on <c>Teacher.LevelOfEducationCodedValueId</c>.</summary>
+    EducLevel = 13,
+    /// <summary>Teacher qualifications / specialties (children of <c>QUALIF</c>).
+    /// Many-to-many via <c>TeacherQualification</c>.</summary>
+    Qualification = 14
 }
 
 public static class CodedValueParentExtensions
@@ -39,6 +45,8 @@ public static class CodedValueParentExtensions
         CodedValueParent.CountryCallingCodes => "CNCODES",
         CodedValueParent.GradeStrands => "GRSTRNDS",
         CodedValueParent.TeacherRoles => "TCHROLES",
+        CodedValueParent.EducLevel => "EDUCLEVEL",
+        CodedValueParent.Qualification => "QUALIF",
         _ => throw new ArgumentOutOfRangeException(nameof(parent))
     };
 }

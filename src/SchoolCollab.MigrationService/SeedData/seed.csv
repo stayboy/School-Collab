@@ -126,3 +126,18 @@ TCHROLE_HOG,Head of Grade,,TCHROLES,1
 TCHROLE_CT,Class Teacher,,TCHROLES,2
 TCHROLE_AT,Assistant Teacher,,TCHROLES,3
 TCHROLE_SL,Subject Lead,,TCHROLES,4
+EDUCLEVEL,Level of Education,Highest level of education attained,,0
+EDUCLEVEL_CERTIFICATE,Certificate,,EDUCLEVEL,1
+EDUCLEVEL_DIPLOMA,Diploma,,EDUCLEVEL,2
+EDUCLEVEL_BACHELOR,Bachelor's Degree,,EDUCLEVEL,3
+EDUCLEVEL_HONOURS,Honours Degree,,EDUCLEVEL,4
+EDUCLEVEL_MASTER,Master's Degree,,EDUCLEVEL,5
+EDUCLEVEL_DOCTORATE,Doctorate,,EDUCLEVEL,6
+QUALIF,Qualification,Teaching qualifications or specialties,,0
+QUALIF_MATH,Mathematics Teaching,,QUALIF,1
+QUALIF_PHYSICAL_SCI,Physical Sciences Teaching,,QUALIF,2
+QUALIF_LIFE_SCI,Life Sciences Teaching,,QUALIF,3
+QUALIF_LANGUAGES,Languages Teaching,,QUALIF,4
+QUALIF_HUMANITIES,Humanities Teaching,,QUALIF,5
+QUALIF_ARTS,Arts Teaching,,QUALIF,6
+QUALIF_SPECIAL_ED,Special Education,,QUALIF,7

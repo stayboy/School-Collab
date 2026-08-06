@@ -1,0 +1,15 @@
+.teacher-dialog { display: flex; flex-direction: column; gap: 0.75rem; }
+.picker-row { display: flex; align-items: center; gap: 0.5rem; }
+.teacher-dialog__list { display: flex; flex-direction: column; gap: 0.25rem; max-height: 55vh; overflow-y: auto; padding-right: 0.25rem; }
+.teacher-dialog__row { display: flex; align-items: center; gap: 0.75rem; padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08)); }
+.teacher-dialog__row:last-child { border-bottom: none; }
+.teacher-dialog__main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.teacher-dialog__name { font-weight: 500; }
+.teacher-dialog__meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; display: flex; gap: 0.4rem; }
+.teacher-dialog__quals { display: flex; flex-wrap: wrap; gap: 0.25rem; margin-top: 2px; }
+.teacher-dialog__topics { display: flex; flex-wrap: wrap; gap: 0.25rem; max-width: 240px; }
+.teacher-dialog__role { min-width: 140px; }
+.chip { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--neutral-fill-secondary, #f5f5f5); border-radius: 999px; padding: 2px 8px; font-size: 0.82em; cursor: pointer; }
+.chip-x { opacity: 0.6; }
+.muted { color: var(--neutral-foreground-hint, #6b6b6b); }
+.dialog-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08)); padding-top: 0.75rem; }

@@ -191,7 +191,7 @@ public class GradeLevelsLandingValidationTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("Any age"), TimeSpan.FromSeconds(2));
 
         cut.Markup.Should().Contain("Any age");
-        cut.Markup.Should().Contain("Co-ed");
+        cut.Markup.Should().Contain("—");
     }
 
     [TestMethod]

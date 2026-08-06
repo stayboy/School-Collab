@@ -259,6 +259,52 @@ public class CodedValueOverrideHandlerTests
         resolved!.Name.Should().Be("Real-Name");
     }
 
+    [TestMethod]
+    public async Task Upsert_ForRealTenant_OverridesCode()
+    {
+        using var s = new Scope("override-code-create");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_A", "Grade A");
+
+        var dto = await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, null, null, "GRADE_A1"));
+
+        dto.Code.Should().Be("GRADE_A1", "the resolved code reflects the tenant override");
+        dto.DefaultCode.Should().Be("GRADE_A", "the blueprint code is preserved for the UI");
+        var row = s.Db.TenantCodedValueOverrides.Single(o => o.GlobalCodedValueId == id);
+        row.OverriddenCode.Should().Be("GRADE_A1");
+    }
+
+    [TestMethod]
+    public async Task Upsert_ForRealTenant_UpdatesExistingCodeOverride()
+    {
+        using var s = new Scope("override-code-update");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_B", "Grade B");
+
+        await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, null, null, "GRADE_B1"));
+        var dto = await s.Upsert.HandleAsync(new UpsertCodedValueOverride(id, null, null, "GRADE_B2"));
+
+        dto.Code.Should().Be("GRADE_B2");
+        s.Db.TenantCodedValueOverrides.Should().ContainSingle(o => o.GlobalCodedValueId == id);
+    }
+
+    [TestMethod]
+    public async Task Upsert_RejectsOverridingCodeAndDescriptionTogether()
+    {
+        // A tenant may override Name, Description, or Code — but not both Code
+        // AND Description at once (that is a new tenant-scoped coded value, tcv/3).
+        using var s = new Scope("override-code-desc-reject");
+        s.Tenants.Current = new TenantContext(Guid.NewGuid(), "Hydeson", TenantType.School);
+        var id = await SeedCodedValueAsync(s.Db, "GRADE_C", "Grade C");
+
+        var act = async () => await s.Upsert.HandleAsync(
+            new UpsertCodedValueOverride(id, null, "Renamed", "GRADE_C1"));
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*Cannot override both Code and Description*");
+        s.Db.TenantCodedValueOverrides.Should().BeEmpty("no partial override may be persisted");
+    }
+
     // ── Common error path ────────────────────────────────────────────────────
 
     [TestMethod]

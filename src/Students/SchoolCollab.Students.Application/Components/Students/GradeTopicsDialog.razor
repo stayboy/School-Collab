@@ -1,0 +1,134 @@
+@using Microsoft.FluentUI.AspNetCore.Components
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using GradeTopicCurriculumDto = SchoolCollab.Students.Application.Services.GradeTopicCurriculumDto
+@implements IDialogContentComponent<DialogParameters>
+
+@* Full list of topics assigned to a grade, shown from the Topics section card's
+   "View all" anchor (grade-detail-modern-ui-plan.md §0.4). The page owns the
+   API/enrichment and passes the data + action callbacks so this dialog stays
+   thin. Reuses the per-topic Strands / Lessons / Teachers dialogs and the
+   Remove flow (RemoveTopicAsync on the page). *@
+<div class="topic-dialog">
+    <div class="picker-row">
+        <FluentSelect TOption="TopicDto"
+                      Items="UnassignedTopics"
+                      OptionText="@(t => t.Name)"
+                      OptionValue="@(t => t.Id.ToString())"
+                      @bind-SelectedOption="_topicToAdd"
+                      Placeholder="Add a topic…" />
+        <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+                      OnClick="ConfirmAssignAsync" Disabled="@(_topicToAdd is null || _adding)">Assign</FluentButton>
+    </div>
+
+    @if (Topics.Length == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">No topics assigned to this grade yet.</FluentMessageBar>
+    }
+    else
+    {
+        <div class="topic-dialog__list">
+            @foreach (var topic in Topics)
+            {
+                <div class="topic-dialog__row">
+                    <div class="topic-dialog__main">
+                        <span class="topic-name">@topic.Name</span>
+                        @if (!string.IsNullOrWhiteSpace(topic.Code))
+                        {
+                            <span class="topic-code">@topic.Code</span>
+                        }
+                    </div>
+                    <div class="topic-dialog__counts">
+                        <FluentAnchor Appearance="Appearance.Hypertext" OnClick="@(() => OpenStrandsAsync(topic))" Title="Strands">
+                            @topic.StrandCount strands
+                        </FluentAnchor>
+                        <FluentAnchor Appearance="Appearance.Hypertext" OnClick="@(() => OpenLessonsAsync(topic))" Title="Lessons">
+                            @topic.LessonCount lessons
+                        </FluentAnchor>
+                    </div>
+                    <RowActionsMenu Actions="@BuildRowActions(topic)"
+                                    AriaLabel="Topic actions"
+                                    UseMenuService="false" />
+                </div>
+            }
+        </div>
+    }
+    <div class="dialog-footer">
+        <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
+    </div>
+</div>
+
+@code {
+    [Parameter] public GradeTopicCurriculumDto[] Topics { get; set; } = [];
+    [Parameter] public TopicDto[] UnassignedTopics { get; set; } = [];
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenStrands { get; set; }
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenLessons { get; set; }
+    [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenTeachers { get; set; }
+    [Parameter] public Func<Guid, Task>? Remove { get; set; }
+    [Parameter] public Func<Guid, Task>? Assign { get; set; }
+    [Parameter] public Func<Task>? OnChanged { get; set; }
+
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    public DialogParameters Content { get; set; } = default!;
+
+    private TopicDto? _topicToAdd;
+    private bool _adding;
+
+    private async Task OpenStrandsAsync(GradeTopicCurriculumDto topic)
+    {
+        if (OpenStrands is not null) await OpenStrands(topic);
+    }
+
+    private async Task OpenLessonsAsync(GradeTopicCurriculumDto topic)
+    {
+        if (OpenLessons is not null) await OpenLessons(topic);
+    }
+
+    private async Task OpenTeachersAsync(GradeTopicCurriculumDto topic)
+    {
+        if (OpenTeachers is not null) await OpenTeachers(topic);
+    }
+
+    private IReadOnlyList<RowAction> BuildRowActions(GradeTopicCurriculumDto topic) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
+            RowAction.Callback("Lessons", () => OpenLessonsAsync(topic), FluentIcons.Book),
+            RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People),
+            RowAction.Separator(),
+            RowAction.Callback("Remove", () => RemoveAsync(topic), FluentIcons.Delete),
+        };
+
+    private async Task RemoveAsync(GradeTopicCurriculumDto topic)
+    {
+        if (_adding || Remove is null) return;
+        _adding = true;
+        try
+        {
+            await Remove(topic.TopicId);
+            Topics = Topics.Where(t => t.TopicId != topic.TopicId).ToArray();
+            if (OnChanged is not null) await OnChanged();
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    private async Task ConfirmAssignAsync()
+    {
+        if (_adding || _topicToAdd is not { } topic || Assign is null) return;
+        _adding = true;
+        try
+        {
+            await Assign(topic.Id);
+            _topicToAdd = null;
+            if (OnChanged is not null) await OnChanged();
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+}

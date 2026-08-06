@@ -7,6 +7,7 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherGradeLevelRole;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherTopicRole;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
@@ -14,6 +15,8 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeacherTopicRoles;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicTeachers;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
@@ -55,7 +58,10 @@ public static class TeacherRoutes
         {
             try
             {
-                await handler.HandleAsync(new UpdateTeacher(id, req.FirstName, req.LastName, req.DisplayName, req.Email, req.ContactPhone), ct);
+                await handler.HandleAsync(new UpdateTeacher(
+                    id, req.FirstName, req.LastName, req.DisplayName,
+                    req.GenderCodedValueId, req.DateOfBirth, req.LevelOfEducationCodedValueId,
+                    req.QualificationCodedValueIds), ct);
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException)
@@ -95,7 +101,7 @@ public static class TeacherRoutes
         {
             try
             {
-                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId), ct);
+                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId, req.RoleCodedValueId), ct);
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException) { return Results.NotFound(); }
@@ -112,6 +118,31 @@ public static class TeacherRoutes
             await handler.HandleAsync(new UnlinkTeacherTopic(id, topicId), ct);
             return Results.NoContent();
         });
+
+        // Set/clear the coded-value role a teacher holds on a topic
+        // (grade-detail-rich-grids-plan.md §5). Idempotent at the domain layer.
+        group.MapPatch("/{id:guid}/topics/{topicId:guid}/role", async (
+            Guid id,
+            Guid topicId,
+            [FromBody] SetTeacherTopicRoleRequest req,
+            [FromServices] ICommandHandler<SetTeacherTopicRole> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new SetTeacherTopicRole(id, topicId, req.RoleCodedValueId), ct);
+                return Results.NoContent();
+            }
+            catch (TeacherLinkNotFoundException) { return Results.NotFound(); }
+        });
+
+        // Per-topic roles for a teacher (cg/6) — inverse of ListTopicTeachers,
+        // used by the teacher create/edit dialog to prefill topic roles when editing.
+        group.MapGet("/{id:guid}/topics/roles", async (
+            Guid id,
+            [FromServices] IQueryHandler<ListTeacherTopicRoles, TeacherTopicRoleDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListTeacherTopicRoles(id), ct)));
 
         // Grade-level links (spec §4.12).
         group.MapGet("/{id:guid}/grade-levels", async (
@@ -171,10 +202,14 @@ internal record UpdateTeacherRequest(
     string FirstName,
     string LastName,
     string? DisplayName,
-    string Email,
-    string? ContactPhone);
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
-internal record LinkTeacherTopicRequest(Guid TopicId);
+internal record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null);
+
+internal record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId);
 
 internal record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 

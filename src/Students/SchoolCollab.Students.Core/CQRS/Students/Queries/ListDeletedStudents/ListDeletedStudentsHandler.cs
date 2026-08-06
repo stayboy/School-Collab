@@ -42,6 +42,7 @@ public sealed class ListDeletedStudentsHandler(
                 return results.Select(s => new StudentDto(
                     s.Id,
                     s.StudentNumber,
+                    s.TitleCodedValueId,
                     s.FirstName,
                     s.LastName,
                     s.DateOfBirth,

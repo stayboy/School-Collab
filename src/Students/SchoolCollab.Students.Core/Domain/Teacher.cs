@@ -5,27 +5,26 @@ namespace SchoolCollab.Students.Core.Domain;
 
 /// <summary>
 /// A teacher (spec §4.12). Referenced by Assignments.Core via <c>Guid</c>.
-/// Keeps a single staff email/phone (not migrated to the <see cref="Contact"/>
-/// table — teachers are not notification recipients in v1). Linked to the
-/// existing staff auth via <see cref="StaffUserId"/>.
+/// Contact channels (Email/SMS/WhatsApp) live on the shared <see cref="Contact"/>
+/// table keyed by <see cref="ContactOwnerType.Teacher"/>, so teachers can be
+/// notification recipients like students and guardians. Linked to the existing
+/// staff auth via <see cref="StaffUserId"/>.
 /// </summary>
-public sealed class Teacher : ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
+public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
     private readonly List<TeacherTopic> _topics = [];
     private readonly List<TeacherGradeLevel> _gradeLevels = [];
+    private readonly List<TeacherQualification> _qualifications = [];
 
     private Teacher() { }
 
     public Guid Id { get; private set; }
-    public Guid? TitleCodedValueId { get; private set; }
-    public string FirstName { get; private set; } = default!;
-    public string LastName { get; private set; } = default!;
     public string? DisplayName { get; private set; }
-    public string Email { get; private set; } = default!;
-    public string? ContactPhone { get; private set; }
     public Guid? StaffUserId { get; private set; }
     /// <summary>Auto-generated staff number (e.g. STFA01) — spec §3.6.</summary>
     public string? StaffNumber { get; private set; }
+    /// <summary>Highest level of education (coded value, <c>EDUCLEVEL</c> parent).</summary>
+    public Guid? LevelOfEducationCodedValueId { get; private set; }
 
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
     public Guid TenantId { get; private set; }
@@ -37,37 +36,48 @@ public sealed class Teacher : ITenantEntity, IEntity, IAuditableEntity, ISoftDel
 
     public IReadOnlyList<TeacherTopic> Topics => _topics.AsReadOnly();
     public IReadOnlyList<TeacherGradeLevel> GradeLevels => _gradeLevels.AsReadOnly();
+    public IReadOnlyList<TeacherQualification> Qualifications => _qualifications.AsReadOnly();
 
     public static Teacher Create(
-        Guid? titleCodedValueId, string firstName, string lastName, string? displayName, string email, string? contactPhone,
-        string? staffNumber = null)
+        Guid? titleCodedValueId, string firstName, string lastName, string? displayName,
+        string? staffNumber = null, Guid? genderCodedValueId = null, DateOnly? dateOfBirth = null,
+        Guid? levelOfEducationCodedValueId = null)
     {
         var now = DateTimeOffset.UtcNow;
-        return new Teacher
+        var teacher = new Teacher
         {
             Id = Guid.NewGuid(),
-            TitleCodedValueId = titleCodedValueId,
-            FirstName = firstName.Trim(),
-            LastName = lastName.Trim(),
-            DisplayName = displayName?.Trim(),
-            Email = email.Trim(),
-            ContactPhone = contactPhone?.Trim(),
             StaffNumber = staffNumber?.Trim(),
+            LevelOfEducationCodedValueId = levelOfEducationCodedValueId,
             IsDeleted = false,
             CreatedAt = now,
             UpdatedAt = now
         };
+        teacher.SetDemographics(titleCodedValueId, firstName, lastName, dateOfBirth, genderCodedValueId);
+        teacher.DisplayName = displayName?.Trim();
+        return teacher;
     }
 
-    public void Update(string firstName, string lastName, string? displayName, string email, string? contactPhone)
+    public void Update(string firstName, string lastName, string? displayName,
+        Guid? genderCodedValueId = null, DateOnly? dateOfBirth = null, Guid? levelOfEducationCodedValueId = null)
     {
         FirstName = firstName.Trim();
         LastName = lastName.Trim();
         DisplayName = displayName?.Trim();
-        Email = email.Trim();
-        ContactPhone = contactPhone?.Trim();
+        GenderCodedValueId = genderCodedValueId;
+        DateOfBirth = dateOfBirth;
+        LevelOfEducationCodedValueId = levelOfEducationCodedValueId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    public void LinkQualification(Guid codedValueId)
+    {
+        if (_qualifications.All(q => q.CodedValueId != codedValueId))
+            _qualifications.Add(TeacherQualification.Create(Id, codedValueId));
+    }
+
+    public void UnlinkQualification(Guid codedValueId)
+        => _qualifications.RemoveAll(q => q.CodedValueId == codedValueId);
 
     public void LinkTopic(Guid topicId) => _topics.Add(TeacherTopic.Create(Id, topicId));
     public void UnlinkTopic(Guid topicId) => _topics.RemoveAll(s => s.TopicId == topicId);

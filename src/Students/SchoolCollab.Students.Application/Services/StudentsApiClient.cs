@@ -26,7 +26,9 @@ public sealed record StudentDto(
     // Current grade enrollment info, populated client-side from enrollments
     GradeLevelDto? CurrentGrade = null,
     // Guardian count, populated client-side from the bulk guardian-counts endpoint
-    int? GuardianCount = null);
+    int? GuardianCount = null,
+    // Title salutation (SALUTS parent), projected server-side.
+    Guid? TitleCodedValueId = null);
 
 public sealed record GradeLevelDto(
     Guid Id,
@@ -133,6 +135,13 @@ public sealed record TopicAssignmentDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
+public sealed record GradeTopicCurriculumDto(
+    Guid TopicId,
+    string Name,
+    string? Code,
+    int StrandCount,
+    int LessonCount);
+
 public sealed record StudentTopicAssignmentDto(
     Guid Id,
     Guid StudentId,
@@ -172,13 +181,15 @@ public record CreateStudentRequest(
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,
-    Guid? GenderCodedValueId);
+    Guid? GenderCodedValueId,
+    Guid? TitleCodedValueId = null);
 
 public record UpdateStudentRequest(
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,
-    Guid? GenderCodedValueId);
+    Guid? GenderCodedValueId,
+    Guid? TitleCodedValueId = null);
 
 public record CreateGradeLevelRequest(
     Guid CodedValueId,
@@ -293,6 +304,12 @@ public record UpdateTopicStrandRequest(
     string? Description = null,
     int DisplayOrder = 0);
 
+public record UpdateTopicRequest(
+    string Name,
+    int DisplayOrder = 0,
+    Guid? CodedValueId = null,
+    string? Code = null);
+
 public record CreateTopicLessonRequest(
     Guid TopicId,
     string Name,
@@ -320,7 +337,9 @@ public record CreateGuardianRequest(
     string LastName,
     string? DisplayName,
     string? Address,
-    Guid? CommunityId);
+    Guid? CommunityId,
+    DateOnly? DateOfBirth = null,
+    Guid? GenderCodedValueId = null);
 
 public record UpdateGuardianRequest(
     Guid? TitleCodedValueId,
@@ -328,7 +347,9 @@ public record UpdateGuardianRequest(
     string LastName,
     string? DisplayName,
     string? Address,
-    Guid? CommunityId);
+    Guid? CommunityId,
+    DateOnly? DateOfBirth = null,
+    Guid? GenderCodedValueId = null);
 
 public record LinkGuardianRequest(
     Guid StudentId,
@@ -351,32 +372,61 @@ public sealed record TeacherDto(
     string FirstName,
     string LastName,
     string? DisplayName,
-    string Email,
-    string? ContactPhone,
     bool IsDeleted,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
 public record CreateTeacherRequest(
     Guid? TitleCodedValueId,
     string FirstName,
     string LastName,
     string? DisplayName,
-    string Email,
-    string? ContactPhone);
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
 public record UpdateTeacherRequest(
     string FirstName,
     string LastName,
     string? DisplayName,
-    string Email,
-    string? ContactPhone);
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null);
 
-public record LinkTeacherTopicRequest(Guid TopicId);
+public record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null);
 
 public record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 
 public record SetTeacherGradeLevelRoleRequest(Guid? TeacherRoleCodedValueId);
+
+public record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId);
+
+/// <summary>
+/// A teacher linked to a topic, with their per-topic role
+/// (grade-detail-rich-grids-plan.md §5). Returned by <c>ListTopicTeachersAsync</c>.
+/// </summary>
+public sealed record TopicTeacherDto(
+    Guid TeacherId,
+    Guid? TitleCodedValueId,
+    string FirstName,
+    string LastName,
+    string? DisplayName,
+    Guid? RoleCodedValueId = null);
+
+/// <summary>
+/// The role a teacher holds on a topic (cg/6). Returned by <c>ListTeacherTopicRolesAsync</c>
+/// (GET /teachers/{id}/topics/roles) and used by the teacher create/edit dialog to prefill
+/// per-topic roles when editing.
+/// </summary>
+public sealed record TeacherTopicRoleDto(
+    Guid TopicId,
+    Guid? RoleCodedValueId = null);
 
 // ── Client ──────────────────────────────────────────────────────────────────
 
@@ -706,6 +756,13 @@ public sealed class StudentsApiClient : IContactsClient
         return await response.Content.ReadFromJsonAsync<TopicDto>(ct);
     }
 
+    /// <summary>Updates a topic's name / display order. <c>PUT /students/topics/{id}</c>.</summary>
+    public async Task UpdateTopicAsync(Guid id, UpdateTopicRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/students/topics/{id}", req, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<SubjectDto[]>("/students/subjects", ct);
 
@@ -994,6 +1051,18 @@ public sealed class StudentsApiClient : IContactsClient
         return await _http.GetFromJsonAsync<TopicAssignmentDto[]>(url, ct);
     }
 
+    /// <summary>
+    /// Per-topic strand/lesson counts for a grade's assigned topics
+    /// (grade-detail-rich-grids-plan.md §4).
+    /// </summary>
+    public async Task<GradeTopicCurriculumDto[]?> ListGradeTopicCurriculumByGradeAsync(Guid gradeLevelId, DateOnly? effectiveDate = null, CancellationToken ct = default)
+    {
+        var url = effectiveDate is { } e
+            ? $"/students/grade-levels/{gradeLevelId}/curriculum?effectiveDate={e:yyyy-MM-dd}"
+            : $"/students/grade-levels/{gradeLevelId}/curriculum";
+        return await _http.GetFromJsonAsync<GradeTopicCurriculumDto[]>(url, ct);
+    }
+
     public async Task<Guid> AssignGradeTopicAsync(AssignGradeTopicRequest req, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/students/topic-assignments/grade", req, ct);
@@ -1196,8 +1265,8 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task DeleteTeacherAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{id}", ct)).EnsureSuccessStatusCode();
 
-    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId), ct)).EnsureSuccessStatusCode();
+    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId, roleCodedValueId), ct)).EnsureSuccessStatusCode();
 
     public async Task UnlinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{teacherId}/topics/{topicId}", ct)).EnsureSuccessStatusCode();
@@ -1215,6 +1284,20 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task<TopicDto[]?> ListTopicsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<TopicDto[]>($"/teachers/{teacherId}/topics", ct);
+
+    // Per-topic roles for a teacher (cg/6). GET /teachers/{id}/topics/roles.
+    public async Task<TeacherTopicRoleDto[]?> ListTeacherTopicRolesAsync(Guid teacherId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TeacherTopicRoleDto[]>($"/teachers/{teacherId}/topics/roles", ct);
+
+    // Set/clear the coded-value role a teacher holds on a topic
+    // (grade-detail-rich-grids-plan.md §5). PATCH /teachers/{id}/topics/{topicId}/role.
+    public async Task SetTeacherTopicRoleAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId, CancellationToken ct = default) =>
+        (await _http.PatchAsJsonAsync($"/teachers/{teacherId}/topics/{topicId}/role", new SetTeacherTopicRoleRequest(roleCodedValueId), ct)).EnsureSuccessStatusCode();
+
+    // Teachers linked to a topic with their per-topic role
+    // (grade-detail-rich-grids-plan.md §5). GET /topics/{id}/teachers.
+    public async Task<TopicTeacherDto[]?> ListTopicTeachersAsync(Guid topicId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TopicTeacherDto[]>($"/students/topics/{topicId}/teachers", ct);
 
     // Teachers linked to a grade level with their role + assigned topics
     // (grade-level-detail-view-plan.md §3.2). GET /grade-levels/{id}/teachers.

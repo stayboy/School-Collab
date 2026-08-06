@@ -1,0 +1,10 @@
+.topic-dialog { display: flex; flex-direction: column; gap: 0.75rem; }
+.picker-row { display: flex; align-items: center; gap: 0.5rem; }
+.topic-dialog__list { display: flex; flex-direction: column; gap: 0.25rem; max-height: 50vh; overflow-y: auto; padding-right: 0.25rem; }
+.topic-dialog__row { display: flex; align-items: center; gap: 1rem; padding: 0.5rem 0.25rem; border-bottom: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08)); }
+.topic-dialog__row:last-child { border-bottom: none; }
+.topic-dialog__main { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.topic-name { font-weight: 600; }
+.topic-code { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; }
+.topic-dialog__counts { display: flex; gap: 0.75rem; white-space: nowrap; }
+.dialog-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08)); padding-top: 0.75rem; }
