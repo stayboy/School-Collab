@@ -1,8 +1,9 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject NavigationManager Nav
 
-<div class="section-card @Class">
-    <div class="section-card__header">
+<FluentCard class="section-card-wrapper" AreaRestricted="false">
+    <div class="section-card @Class">
+        <div class="section-card__header">
         <FluentIcon Value="@Icon" />
         <span class="section-card__title">@Title</span>
         <span class="section-card__count">@Count</span>
@@ -49,6 +50,7 @@
         }
     </div>
 </div>
+</FluentCard>
 
 @code {
     /// <summary>
@@ -143,7 +145,14 @@
 }
 
 <style>
-    .section-card { display: flex; flex-direction: column; margin: 0; }
+    .section-card-wrapper {
+        height: 100%;
+        border: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.1));
+        border-radius: var(--border-radius, 8px);
+        box-sizing: border-box;
+        overflow: hidden;
+    }
+    .section-card { display: flex; flex-direction: column; margin: 0; height: 100%; }
     .section-card__header {
         display: flex;
         align-items: center;
