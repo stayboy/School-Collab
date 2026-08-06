@@ -5,4 +5,6 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.UpdateTopic;
 public sealed record UpdateTopic(
     Guid Id,
     string Name,
-    int DisplayOrder) : ICommand;
+    int DisplayOrder,
+    Guid? CodedValueId = null,
+    string? Code = null) : ICommand;

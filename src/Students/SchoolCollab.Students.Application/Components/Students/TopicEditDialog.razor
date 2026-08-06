@@ -1,21 +1,28 @@
 @*
     TopicEditDialog — opens from the grade-detail Subjects card row kebab
-    "Edit name" action. Edits a topic's display name (and display order).
-    The UpdateTopic CQRS command persists Name + DisplayOrder via
-    PUT /students/topics/{id}.
+    "Edit name" action. Edits a topic's display name, code, and description.
 
-    The dialog loads the current topic on mount (to capture DisplayOrder and
-    the immutable fields for the synthesized result), then submits the name
-    change. The caller (Detail.razor) reloads the curriculum on a non-null
-    result.
+    Topic edits go through the CodedValue + tenancy-override mechanism (tcv/4):
+      • the dialog loads the CodedValue backing the topic (Topic.CodedValueId);
+      • presents Name + Code + Description;
+      • on save it routes via TopicEditRouter to the tenant override
+        (UpsertOverrideAsync), an in-place main-CodedValue edit (UpdateAsync),
+        or a new tenant-scoped provisional CodedValue (CreateProvisionalCodedValueAsync)
+        when both code AND description change;
+      • the topic's denormalized name/code (and CodedValueId on repoint) are synced
+        via UpdateTopicAsync so the curriculum reloads show the resolved values.
+
+    The caller (Detail.razor) reloads the curriculum on a non-null result.
 *@
 @inherits DialogShellBase<TopicEditDialog.TopicEditModel, TopicDto>
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Application.Services
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValues
 
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
@@ -27,6 +34,19 @@
                              Placeholder="Topic / subject name"
                              Required="true"
                              Style="width: 100%" />
+        </FormRow>
+
+        <FormRow Label="Code" For="topic-edit-code">
+            <FluentTextField Id="topic-edit-code"
+                             @bind-Value="Model.Code"
+                             Placeholder="e.g. CS01"
+                             Style="width: 100%" />
+        </FormRow>
+
+        <FormRow Label="Description" For="topic-edit-description">
+            <FluentTextArea Id="topic-edit-description"
+                            @bind-Value="Model.Description"
+                            Style="width: 100%" />
         </FormRow>
 
         <FormRow Label="Display order" For="topic-edit-order">
@@ -54,10 +74,15 @@
     {
         public Guid Id { get; set; }
         public string Name { get; set; } = string.Empty;
+        public string? Code { get; set; }
+        public string? Description { get; set; }
         public int DisplayOrder { get; set; }
 
         /// <summary>The pre-edit topic, used to synthesize the result DTO.</summary>
         public TopicDto? Original { get; set; }
+
+        /// <summary>The CodedValue backing the topic (effective/resolved), if any.</summary>
+        public CodedValueDto? CodedValue { get; set; }
     }
 
     protected override string SubmitText => "Save";
@@ -81,7 +106,24 @@
             {
                 Model.Original = topic;
                 Model.Name = topic.Name;
+                Model.Code = topic.Code;
+                Model.Description = topic.Description;
                 Model.DisplayOrder = topic.DisplayOrder;
+
+                // Load the CodedValue backing the topic so edits route through the
+                // tenancy-override mechanism (tcv/4). If the topic has no CodedValue
+                // peer, fall back to a direct name/display-order edit.
+                if (topic.CodedValueId is Guid cvId)
+                {
+                    var cv = await CodedValues.GetByIdAsync(cvId);
+                    if (cv is not null)
+                    {
+                        Model.CodedValue = cv;
+                        Model.Code = cv.Code;
+                        Model.Description = cv.Description;
+                        Model.Name = cv.Name;
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -92,15 +134,58 @@
 
     protected override async Task<TopicDto?> SubmitAsync(TopicEditModel model)
     {
-        await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder));
+        var plan = TopicEditRouter.Decide(
+            model.CodedValue, model.Name, model.Code, model.Description, model.DisplayOrder);
+
+        Guid? repointedCodedValueId = null;
+        string? effectiveCode = null;
+
+        switch (plan.Action)
+        {
+            case TopicEditRouter.Action.DirectNameOnly:
+                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder));
+                effectiveCode = model.Code;
+                break;
+
+            case TopicEditRouter.Action.Override:
+                await CodedValues.UpsertOverrideAsync(
+                    plan.CodedValueId!.Value,
+                    plan.Name,
+                    plan.Description,
+                    plan.Code);
+                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder, Code: plan.Code));
+                effectiveCode = plan.Code ?? model.Original?.Code;
+                break;
+
+            case TopicEditRouter.Action.EditInPlace:
+                await CodedValues.UpdateAsync(
+                    plan.CodedValueId!.Value,
+                    new UpdateCodedValueRequest(plan.Name, plan.Description, plan.DisplayOrder));
+                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder));
+                effectiveCode = model.Code;
+                break;
+
+            case TopicEditRouter.Action.CreateProvisional:
+                var newId = await CodedValues.CreateProvisionalCodedValueAsync(
+                    new CreateProvisionalCodedValueRequest(
+                        plan.Code ?? string.Empty,
+                        plan.Name,
+                        plan.Description,
+                        plan.ParentId,
+                        plan.DisplayOrder));
+                repointedCodedValueId = newId;
+                effectiveCode = plan.Code;
+                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder, newId, plan.Code));
+                break;
+        }
 
         var original = model.Original;
         return new TopicDto(
             model.Id,
-            original?.CodedValueId,
-            original?.Code,
+            repointedCodedValueId ?? original?.CodedValueId,
+            effectiveCode,
             model.Name,
-            original?.Description,
+            model.Description,
             model.DisplayOrder,
             original?.CreatedAt ?? DateTimeOffset.UtcNow,
             DateTimeOffset.UtcNow);

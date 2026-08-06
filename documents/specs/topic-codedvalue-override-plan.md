@@ -4,9 +4,9 @@
 Proposed (cg/8 follow-up). Split into shippable PRs below.
 
 **Done:** tcv/1 (#135, override `Code`), tcv/2 (#136, `WordInitials` segment),
-tcv/3 (provisional CodedValue + approval surface — see §C).
-**Deferred:** tcv/4 (topic-dialog override-first rework), tcv/5 (template-generated
-topic codes in add flow).
+tcv/3 (provisional CodedValue + approval surface — see §C), tcv/4 (topic-dialog
+override-first rework — see §D).
+**Deferred:** tcv/5 (template-generated topic codes in add flow).
 
 ## Problem
 The current `TopicEditDialog` (grade-detail Subjects card kebab → "Edit name")
@@ -118,7 +118,13 @@ commit lands):
    Tests: `ProvisionalCodedValueHandlerTests` (8) + `CodedValuesApiClientProvisionalTests` (4).
 4. **tcv/4 — topic dialog rework (override-first).** `TopicEditDialog` edits the
    tenant override (or main CodedValue when no override), code editing, fallback to
-   new tenant-scoped CodedValue; bUnit tests.
+   new tenant-scoped CodedValue; bUnit tests. **DONE** — dialog now loads the CodedValue
+   backing the topic and presents Name + Code + Description; a pure `TopicEditRouter`
+   decides Override / EditInPlace / CreateProvisional / DirectNameOnly. Override via
+   `UpsertOverrideAsync` (code edits always override), in-place via `UpdateAsync` when no
+   override, provisional (code+description both changed) via `CreateProvisionalCodedValueAsync`
+   + repoint. `UpdateTopic` now accepts optional `CodedValueId` + `Code` (repoint/sync).
+   Tests: `TopicEditRouterTests` (8) + dialog load/render/cancel tests.
 5. **tcv/5 — template-generated topic codes in the add flow.** Wire `IEntityCodeGenerator`
    into topic creation; UI shows generated code; tests.
 

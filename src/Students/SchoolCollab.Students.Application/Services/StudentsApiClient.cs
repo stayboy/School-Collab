@@ -306,7 +306,9 @@ public record UpdateTopicStrandRequest(
 
 public record UpdateTopicRequest(
     string Name,
-    int DisplayOrder = 0);
+    int DisplayOrder = 0,
+    Guid? CodedValueId = null,
+    string? Code = null);
 
 public record CreateTopicLessonRequest(
     Guid TopicId,
