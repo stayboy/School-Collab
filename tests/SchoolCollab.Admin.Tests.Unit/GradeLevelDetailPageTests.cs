@@ -241,13 +241,13 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("class=\"grade-tabs__count\">1</span>");
 
         // Topics pane is active by default.
-        cut.Find("div.grade-tabs__pane.active").Markup.Should().Contain("Assigned Topics");
+        cut.Find("div.grade-tabs__pane.active").TextContent.Should().Contain("Assigned Topics");
 
         // Switching to the Teachers tab flips the active pane.
         var teachersTab = cut.FindAll("[role='tab']").First(t => t.TextContent.Contains("Teachers"));
         teachersTab.Click();
         cut.WaitForAssertion(() =>
-            cut.Find("div.grade-tabs__pane.active").Markup.Should().Contain("Teachers (0)"));
+            cut.Find("div.grade-tabs__pane.active").TextContent.Should().Contain("Teachers (0)"));
     }
 
     [TestMethod]
