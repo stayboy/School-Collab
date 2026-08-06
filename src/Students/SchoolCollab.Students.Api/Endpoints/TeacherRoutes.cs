@@ -56,7 +56,7 @@ public static class TeacherRoutes
             try
             {
                 await handler.HandleAsync(new UpdateTeacher(
-                    id, req.FirstName, req.LastName, req.DisplayName, req.Email, req.ContactPhone,
+                    id, req.FirstName, req.LastName, req.DisplayName,
                     req.GenderCodedValueId, req.DateOfBirth, req.LevelOfEducationCodedValueId,
                     req.QualificationCodedValueIds), ct);
                 return Results.NoContent();
@@ -174,8 +174,6 @@ internal record UpdateTeacherRequest(
     string FirstName,
     string LastName,
     string? DisplayName,
-    string Email,
-    string? ContactPhone,
     Guid? GenderCodedValueId = null,
     DateOnly? DateOfBirth = null,
     Guid? LevelOfEducationCodedValueId = null,

@@ -261,7 +261,7 @@ public class GradeLevelDetailPageTests : BunitContext
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Jane"));
-        cut.Markup.Should().Contain("jane@example.com");
+        cut.Markup.Should().Contain("Date of birth", "teacher profile column header renders");
         cut.Markup.Should().Contain("Mathematics", "assigned-topic chip is rendered");
         cut.Markup.Should().Contain("Role", "role column header renders");
 

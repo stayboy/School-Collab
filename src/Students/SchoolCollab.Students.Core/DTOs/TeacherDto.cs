@@ -7,8 +7,6 @@ public sealed record TeacherDto(
     string FirstName,
     string LastName,
     string? DisplayName,
-    string Email,
-    string? ContactPhone,
     Guid? GenderCodedValueId,
     DateOnly? DateOfBirth,
     Guid? LevelOfEducationCodedValueId,

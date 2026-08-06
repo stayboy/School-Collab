@@ -40,7 +40,7 @@
                                 <FluentIcon Icon="@(Icons.Regular.Size24.Person)" Color="@Color.Accent" />
                                 <div>
                                     <h3>Teacher profile</h3>
-                                    <p class="wizard-hint">Title, name and the single staff email / phone used to identify the teacher.</p>
+                                    <p class="wizard-hint">Title, name and profile details used to identify the teacher. Contact channels (email / SMS / WhatsApp) are managed on the teacher's profile page.</p>
                                 </div>
                             </div>
 
@@ -57,12 +57,6 @@
                                 </FormRow>
                                 <FormRow Label="Display name">
                                     <FluentTextField @bind-Value="_displayName" Placeholder="e.g. Mr. Smith (optional)" />
-                                </FormRow>
-                                <FormRow Label="Email" Required>
-                                    <FluentTextField @bind-Value="_email" Required Type="InputType.Email" Placeholder="staff@example.com" />
-                                </FormRow>
-                                <FormRow Label="Contact phone">
-                                    <FluentTextField @bind-Value="_contactPhone" Placeholder="Phone (optional)" />
                                 </FormRow>
                                 <FormRow Label="Gender">
                                     <CodedValueDropdown Parent="CodedValueParent.Genders"
@@ -208,11 +202,6 @@
                                     {
                                         <div class="review-row"><span class="review-label">Display name</span><span class="review-value">@_displayName</span></div>
                                     }
-                                    <div class="review-row"><span class="review-label">Email</span><span class="review-value">@_email</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(_contactPhone))
-                                    {
-                                        <div class="review-row"><span class="review-label">Phone</span><span class="review-value">@_contactPhone</span></div>
-                                    }
                                 </div>
                             </div>
 
@@ -319,8 +308,6 @@
     private string _firstName = string.Empty;
     private string _lastName = string.Empty;
     private string _displayName = string.Empty;
-    private string _email = string.Empty;
-    private string _contactPhone = string.Empty;
     private Guid? _genderCodedValueId;
     private DateOnly? _dateOfBirth;
     private Guid? _levelOfEducationCodedValueId;
@@ -361,8 +348,6 @@
                     _firstName = t.FirstName;
                     _lastName = t.LastName;
                     _displayName = t.DisplayName ?? string.Empty;
-                    _email = t.Email;
-                    _contactPhone = t.ContactPhone ?? string.Empty;
                     _genderCodedValueId = t.GenderCodedValueId;
                     _dateOfBirth = t.DateOfBirth;
                     _levelOfEducationCodedValueId = t.LevelOfEducationCodedValueId;
@@ -413,10 +398,10 @@
 
     private Task OnProfileChangingAsync(FluentWizardStepChangeEventArgs args)
     {
-        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName) || string.IsNullOrWhiteSpace(_email))
+        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName))
         {
             args.IsCancelled = true;
-            _profileError = "First name, last name and email are required.";
+            _profileError = "First name and last name are required.";
             return Task.CompletedTask;
         }
         _profileError = null;
@@ -489,8 +474,6 @@
                 await Api.UpdateTeacherAsync(teacherId, new UpdateTeacherRequest(
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim(),
                     _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
                     QualificationIds()), ct);
                 await SyncLinksAsync(teacherId, _originalTopicIds, _selectedTopicIds,
@@ -506,8 +489,6 @@
                     _titleCodedValueId,
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim(),
                     _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
                     QualificationIds()), ct);
                 foreach (var topicId in _selectedTopicIds)

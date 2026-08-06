@@ -3,6 +3,8 @@
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Students.Core.Domain
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
@@ -52,9 +54,13 @@
                     <div class="review-card">
                         <div class="review-grid">
                             <div class="review-row"><span class="review-label">Title</span><span class="review-value">@(_titleName ?? "—")</span></div>
-                            <div class="review-row"><span class="review-label">Email</span><span class="review-value">@(_teacher.Email ?? "—")</span></div>
-                            <div class="review-row"><span class="review-label">Phone</span><span class="review-value">@(_teacher.ContactPhone ?? "—")</span></div>
+                            <div class="review-row"><span class="review-label">Date of birth</span><span class="review-value">@(_teacher.DateOfBirth?.ToString("dd MMM yyyy") ?? "—")</span></div>
                         </div>
+                    </div>
+
+                    <div class="review-card">
+                        <h4>Contacts</h4>
+                        <ContactsEditor OwnerType="ContactOwnerType.Teacher" OwnerId="@_teacher.Id" />
                     </div>
 
                     <div class="review-card">

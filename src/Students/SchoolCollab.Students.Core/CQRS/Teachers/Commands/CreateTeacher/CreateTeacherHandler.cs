@@ -28,8 +28,6 @@ public sealed class CreateTeacherHandler(
                 command.FirstName,
                 command.LastName,
                 command.DisplayName,
-                command.Email,
-                command.ContactPhone,
                 staffNumber: staffNumber,
                 genderCodedValueId: command.GenderCodedValueId,
                 dateOfBirth: command.DateOfBirth,

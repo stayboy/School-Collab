@@ -17,7 +17,7 @@ public sealed class UpdateTeacherHandler(
         var teacher = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new TeacherNotFoundException(command.Id);
 
-        teacher.Update(command.FirstName, command.LastName, command.DisplayName, command.Email, command.ContactPhone,
+        teacher.Update(command.FirstName, command.LastName, command.DisplayName,
             command.GenderCodedValueId, command.DateOfBirth, command.LevelOfEducationCodedValueId);
         await repository.UpdateAsync(teacher, cancellationToken);
 

@@ -16,7 +16,7 @@ public sealed class GetTeacherByIdHandler(
     }
 
     internal static TeacherDto ToDto(SchoolCollab.Students.Core.Domain.Teacher t, Guid[] qualificationCodedValueIds) => new(
-        t.Id, t.TitleCodedValueId, t.FirstName, t.LastName, t.DisplayName, t.Email, t.ContactPhone,
+        t.Id, t.TitleCodedValueId, t.FirstName, t.LastName, t.DisplayName,
         t.GenderCodedValueId, t.DateOfBirth, t.LevelOfEducationCodedValueId,
         qualificationCodedValueIds,
         t.IsDeleted, t.CreatedAt, t.UpdatedAt);

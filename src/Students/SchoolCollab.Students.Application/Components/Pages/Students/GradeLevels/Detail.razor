@@ -226,7 +226,7 @@
                                                 @context.FirstName @context.LastName
                                             </FluentAnchor>
                                         </TemplateColumn>
-                                        <TemplateColumn Title="Email">@context.Email</TemplateColumn>
+                                        <TemplateColumn Title="Date of birth">@(context.DateOfBirth?.ToString("dd MMM yyyy") ?? "—")</TemplateColumn>
                                         <TemplateColumn Title="Role">
                                             <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
                                                                 SelectedId="@context.TeacherRoleCodedValueId"

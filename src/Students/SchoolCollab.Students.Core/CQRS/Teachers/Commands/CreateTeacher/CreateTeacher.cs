@@ -8,8 +8,6 @@ public sealed record CreateTeacher(
     string FirstName,
     string LastName,
     string? DisplayName,
-    string Email,
-    string? ContactPhone,
     Guid? GenderCodedValueId = null,
     DateOnly? DateOfBirth = null,
     Guid? LevelOfEducationCodedValueId = null,

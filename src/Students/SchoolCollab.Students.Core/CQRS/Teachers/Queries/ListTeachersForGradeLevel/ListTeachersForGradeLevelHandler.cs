@@ -51,8 +51,6 @@ public sealed class ListTeachersForGradeLevelHandler(
                         t.FirstName,
                         t.LastName,
                         t.DisplayName,
-                        t.Email,
-                        t.ContactPhone,
                         t.GenderCodedValueId,
                         t.DateOfBirth,
                         t.LevelOfEducationCodedValueId,

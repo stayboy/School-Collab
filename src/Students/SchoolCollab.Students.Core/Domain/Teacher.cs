@@ -5,9 +5,10 @@ namespace SchoolCollab.Students.Core.Domain;
 
 /// <summary>
 /// A teacher (spec §4.12). Referenced by Assignments.Core via <c>Guid</c>.
-/// Keeps a single staff email/phone (not migrated to the <see cref="Contact"/>
-/// table — teachers are not notification recipients in v1). Linked to the
-/// existing staff auth via <see cref="StaffUserId"/>.
+/// Contact channels (Email/SMS/WhatsApp) live on the shared <see cref="Contact"/>
+/// table keyed by <see cref="ContactOwnerType.Teacher"/>, so teachers can be
+/// notification recipients like students and guardians. Linked to the existing
+/// staff auth via <see cref="StaffUserId"/>.
 /// </summary>
 public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
@@ -19,8 +20,6 @@ public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAudita
 
     public Guid Id { get; private set; }
     public string? DisplayName { get; private set; }
-    public string Email { get; private set; } = default!;
-    public string? ContactPhone { get; private set; }
     public Guid? StaffUserId { get; private set; }
     /// <summary>Auto-generated staff number (e.g. STFA01) — spec §3.6.</summary>
     public string? StaffNumber { get; private set; }
@@ -40,7 +39,7 @@ public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAudita
     public IReadOnlyList<TeacherQualification> Qualifications => _qualifications.AsReadOnly();
 
     public static Teacher Create(
-        Guid? titleCodedValueId, string firstName, string lastName, string? displayName, string email, string? contactPhone,
+        Guid? titleCodedValueId, string firstName, string lastName, string? displayName,
         string? staffNumber = null, Guid? genderCodedValueId = null, DateOnly? dateOfBirth = null,
         Guid? levelOfEducationCodedValueId = null)
     {
@@ -48,8 +47,6 @@ public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAudita
         var teacher = new Teacher
         {
             Id = Guid.NewGuid(),
-            Email = email.Trim(),
-            ContactPhone = contactPhone?.Trim(),
             StaffNumber = staffNumber?.Trim(),
             LevelOfEducationCodedValueId = levelOfEducationCodedValueId,
             IsDeleted = false,
@@ -61,7 +58,7 @@ public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAudita
         return teacher;
     }
 
-    public void Update(string firstName, string lastName, string? displayName, string email, string? contactPhone,
+    public void Update(string firstName, string lastName, string? displayName,
         Guid? genderCodedValueId = null, DateOnly? dateOfBirth = null, Guid? levelOfEducationCodedValueId = null)
     {
         FirstName = firstName.Trim();
@@ -69,8 +66,6 @@ public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAudita
         DisplayName = displayName?.Trim();
         GenderCodedValueId = genderCodedValueId;
         DateOfBirth = dateOfBirth;
-        Email = email.Trim();
-        ContactPhone = contactPhone?.Trim();
         LevelOfEducationCodedValueId = levelOfEducationCodedValueId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }

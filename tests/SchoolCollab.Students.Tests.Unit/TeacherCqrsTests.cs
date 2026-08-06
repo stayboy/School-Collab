@@ -77,12 +77,11 @@ public class TeacherCqrsTests
     public async Task CreateTeacher_CreatesTeacher_WithTenant()
     {
         using var s = new StudentsTestScope("teacher-create");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
 
         var teacher = s.Db.Teachers.IgnoreQueryFilters().Single(t => t.Id == id);
         teacher.FirstName.Should().Be("Jane");
         teacher.LastName.Should().Be("Doe");
-        teacher.Email.Should().Be("jane@school.edu");
         teacher.TenantId.Should().Be(s.Tenants.GetTenantContext().TenantId);
         teacher.IsDeleted.Should().BeFalse();
     }
@@ -91,23 +90,21 @@ public class TeacherCqrsTests
     public async Task UpdateTeacher_ChangesFields()
     {
         using var s = new StudentsTestScope("teacher-update");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", "123"));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
 
-        await NewUpdate(s).HandleAsync(new UpdateTeacher(id, "Janet", "Smith", "Ms. Doe", "janet@school.edu", "999"));
+        await NewUpdate(s).HandleAsync(new UpdateTeacher(id, "Janet", "Smith", "Ms. Doe"));
 
         var teacher = s.Db.Teachers.IgnoreQueryFilters().Single(t => t.Id == id);
         teacher.FirstName.Should().Be("Janet");
         teacher.LastName.Should().Be("Smith");
         teacher.DisplayName.Should().Be("Ms. Doe");
-        teacher.Email.Should().Be("janet@school.edu");
-        teacher.ContactPhone.Should().Be("999");
     }
 
     [TestMethod]
     public async Task UpdateTeacher_MissingTeacher_Throws()
     {
         using var s = new StudentsTestScope("teacher-update-missing");
-        var act = async () => await NewUpdate(s).HandleAsync(new UpdateTeacher(Guid.NewGuid(), "A", "B", null, "a@b.c", null));
+        var act = async () => await NewUpdate(s).HandleAsync(new UpdateTeacher(Guid.NewGuid(), "A", "B", null));
         await act.Should().ThrowAsync<TeacherNotFoundException>();
     }
 
@@ -115,7 +112,7 @@ public class TeacherCqrsTests
     public async Task DeleteTeacher_SoftDeletes()
     {
         using var s = new StudentsTestScope("teacher-delete");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
 
         await NewDelete(s).HandleAsync(new DeleteTeacher(id));
 
@@ -132,7 +129,7 @@ public class TeacherCqrsTests
     public async Task LinkAndUnlinkTopic_PersistsLink()
     {
         using var s = new StudentsTestScope("teacher-subject");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
         var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
         await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId));
@@ -148,7 +145,7 @@ public class TeacherCqrsTests
     public async Task LinkAndUnlinkGradeLevel_PersistsLink()
     {
         using var s = new StudentsTestScope("teacher-grade");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
         var gradeId = await SeedGradeLevelAsync(s, 5, "Grade 5");
 
         await NewLinkGrade(s).HandleAsync(new LinkTeacherGradeLevel(id, gradeId));
@@ -164,15 +161,13 @@ public class TeacherCqrsTests
     public async Task GetTeacherById_ReturnsMappedDto()
     {
         using var s = new StudentsTestScope("teacher-get");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(Guid.NewGuid(), "Jane", "Doe", "Ms. Doe", "jane@school.edu", "555"));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(Guid.NewGuid(), "Jane", "Doe", "Ms. Doe"));
 
         var dto = await NewGetById(s).HandleAsync(new GetTeacherById(id));
         dto.Should().NotBeNull();
         dto!.FirstName.Should().Be("Jane");
         dto!.LastName.Should().Be("Doe");
         dto!.DisplayName.Should().Be("Ms. Doe");
-        dto!.Email.Should().Be("jane@school.edu");
-        dto!.ContactPhone.Should().Be("555");
         dto!.IsDeleted.Should().BeFalse();
     }
 
@@ -180,8 +175,8 @@ public class TeacherCqrsTests
     public async Task ListTeachers_ReturnsAllForTenant()
     {
         using var s = new StudentsTestScope("teacher-list");
-        await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
-        await NewCreate(s).HandleAsync(new CreateTeacher(null, "John", "Roe", null, "john@school.edu", null));
+        await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+        await NewCreate(s).HandleAsync(new CreateTeacher(null, "John", "Roe", null));
 
         var listed = await NewList(s).HandleAsync(new ListTeachers());
         listed.Should().HaveCount(2);
@@ -202,7 +197,7 @@ public class TeacherCqrsTests
     public async Task LinkTopic_MissingTopic_Throws()
     {
         using var s = new StudentsTestScope("teacher-link-missing-subject");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
 
         var act = async () => await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, Guid.NewGuid()));
         await act.Should().ThrowAsync<TopicNotFoundException>();
@@ -212,7 +207,7 @@ public class TeacherCqrsTests
     public async Task LinkTopic_DuplicateLink_Throws()
     {
         using var s = new StudentsTestScope("teacher-link-duplicate");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
         var subjectId = await SeedTopicAsync(s, "MATH", "Mathematics");
 
         await NewLinkTopic(s).HandleAsync(new LinkTeacherTopic(id, subjectId));
@@ -224,7 +219,7 @@ public class TeacherCqrsTests
     public async Task LinkGradeLevel_DuplicateLink_Throws()
     {
         using var s = new StudentsTestScope("teacher-grade-duplicate");
-        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null, "jane@school.edu", null));
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
         var gradeId = await SeedGradeLevelAsync(s, 5, "Grade 5");
 
         await NewLinkGrade(s).HandleAsync(new LinkTeacherGradeLevel(id, gradeId));
