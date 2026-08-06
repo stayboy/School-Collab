@@ -90,10 +90,10 @@
                                         var t = (GradeTopicCurriculumDto)item;
                                     }
                                     <div class="section-card__item">
-                                        <FluentButton Appearance="Appearance.Lightweight" Class="item-name"
-                                                      OnClick="() => OpenStrandsAsync(t)">
+                                        <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="item-name"
+                                                      OnClick="() => OpenStrandsAsync(t)" Title="View strands">
                                             @t.Name
-                                        </FluentButton>
+                                        </FluentAnchor>
                                         <div class="item-meta">
                                             <FluentAnchor Appearance="Appearance.Hypertext" Href="#" OnClick="@(() => OpenStrandsAsync(t))" Title="View strands">
                                                 @t.StrandCount strands
@@ -253,8 +253,7 @@
         background: var(--neutral-fill-secondary-hover, rgba(0,0,0,0.05));
         border-left-color: var(--accent-fill-rest, #0f6cbd);
     }
-    .item-name { background: none; border: none; padding: 0; text-align: left; font: inherit;
-                 font-weight: 500; color: inherit; cursor: pointer; width: 100%; line-height: 1.3; }
+    .item-name { font: inherit; font-weight: 500; line-height: 1.3; width: 100%; display: inline-flex; }
     .item-name::part(control) { padding: 0; justify-content: flex-start; }
     .item-main { font-weight: 500; line-height: 1.3; }
     .item-meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
