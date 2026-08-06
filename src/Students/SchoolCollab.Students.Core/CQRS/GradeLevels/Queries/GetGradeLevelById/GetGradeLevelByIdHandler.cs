@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelById;
@@ -39,8 +40,14 @@ public sealed class GetGradeLevelByIdHandler(
                     return null;
 
                 var studentCount = await db.StudentEnrollments
-                    .IgnoreQueryFilters(new[] { "Tenant" })
-                    .CountAsync(se => se.GradeLevelId == id && se.TenantId == tenantId, ct);
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(se => se.GradeLevelId == id && se.Status == EnrollmentStatus.Active)
+                    .Join(db.Students.IgnoreQueryFilters(["Tenant"]).AsNoTracking()
+                            .Where(s => s.TenantId == tenantId),
+                        se => se.StudentId,
+                        s => s.Id,
+                        (se, _) => se)
+                    .CountAsync(ct);
 
                 return new GradeLevelDto(
                     gradeLevel.Id,
