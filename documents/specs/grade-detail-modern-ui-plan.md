@@ -1,9 +1,9 @@
 # Spec: Grade-Detail Modern UI (section cards + grid actions + name polish)
 
-> Status: **Complete — all work items shipped + tests green (Students 185, Admin 271, Arch 14, Assignments 88, Settings 402)**
+> Status: **Complete — cg/7 (card-based redesign) + cg/8 (UI polish) shipped + tests green (Students 185, Admin 273, Arch 14, Assignments 88, Settings 402)**
 > Owner: Students context (grade-level detail page + shared StudentsGrid)
 > Depends on: `grade-detail-rich-grids-plan.md` (cg/2–cg/6), `landing-page-wrapper.md`
-> Branch: `cg/7-grade-tabs-grid`
+> Branches: `cg/7-grade-tabs-grid` (PR #133), `cg/8-grade-detail-polish` (PR #134)
 
 ## 0. Decisions locked in this revision
 
@@ -41,12 +41,16 @@
 
 ## 1. Work items
 
-| # | Scope | Detail |
-|---|-------|--------|
-| 1 | Section cards | Replace the tab control with three equally-sized FluentCards (Topics · Teachers · Students): header icon + title + accent count chip, top-15 preview list, "View all" footer. Topics/Teachers View-all are `FluentButton` (`OnClick` opens `GradeTopicsDialog` / `GradeTeachersDialog`); Students View-all is a `FluentAnchor` (navigates via `Href` to the grade-filtered students landing) |
-| 2 | Topics grid | Row actions via the repo's `RowActionsMenu` kebab (Strands, Lessons, Teachers, Remove) — rendered in `GradeTopicsDialog` |
-| 3 | Topic name | Stacked `.topic-name` + muted `.topic-code` cell |
-| 4 | Student name | `StudentsGrid` Name column → landing `student-full-name` pattern; drop Gender/Age columns; add `StudentsGrid.razor.css`; the Students card preview uses the same name + demographics stack |
+| # | Scope | Detail | Status |
+|---|-------|--------|--------|
+| 1 | Section cards | Replace the tab control with three equally-sized FluentCards (Topics · Teachers · Students): header icon + title + accent count chip, top-15 preview list, "View all" footer. Topics/Teachers View-all are `FluentButton` (`OnClick` opens `GradeTopicsDialog` / `GradeTeachersDialog`); Students View-all is a `FluentAnchor` (navigates via `Href` to the grade-filtered students landing) | ✅ cg/7 |
+| 2 | Topics grid | Row actions via the repo's `RowActionsMenu` kebab (Strands, Lessons, Teachers, Remove) — rendered in `GradeTopicsDialog` | ✅ cg/7 |
+| 3 | Topic name | Stacked `.topic-name` + muted `.topic-code` cell | ✅ cg/7 |
+| 4 | Student name | `StudentsGrid` Name column → landing `student-full-name` pattern; drop Gender/Age columns; add `StudentsGrid.razor.css`; the Students card preview uses the same name + demographics stack | ✅ cg/7 |
+| 5 | Add icons | Add `FluentButton` add icons in each card header (Topics/Teachers: `FluentIcons.Add`, Students: `FluentIcons.PersonAdd`); wire Topics/Teachers to existing dialogs, Students to new `OpenAddStudentsAsync` (period resolution + `StudentPickerDialog` + `EnrollStudentAsync`) | ✅ cg/8 |
+| 6 | Rename Topics → Subjects/Curriculum | Visible labels only: card title "Subjects/Curriculum", empty state "No subjects assigned to this curriculum yet", View-all "View all subjects", dialog title "Subjects/Curriculum · {grade}" | ✅ cg/8 |
+| 7 | Topic secondary text | Topic preview items restructured: `<div>` container + name button + Strands(N)/Lessons(N) `FluentButton` (Lightweight, Small) navigable counts using `StrandCount`/`LessonCount` | ✅ cg/8 |
+| 8 | View-all alignment | Fix text/arrow vertical alignment via `IconEnd="@FluentIcons.ArrowRight"` (FluentButton for Topics/Teachers, FluentAnchor for Students) | ✅ cg/8 |
 
 ## 2. Tests
 
@@ -68,9 +72,10 @@
 - Rule: `FluentAnchor` → `FluentButton` when `OnClick` is used (no `Href`); keep
   `FluentAnchor` when it navigates via `Href`.
 - Keep the students card test asserting the `student-full-name`-style name + demographics.
+- Add icons use `Appearance.Stealth` + `ButtonSize.Small` for compact icon-only buttons.
 
-## 3. Verification
+## 4. Verification
 
 - Full solution builds; Students + Admin + Architecture + Assignments + Settings suites green.
 - Verified in a detached worktree (running dev-server file locks in the main tree).
-- Stacked PR on top of `cg/6` in stack #126.
+- Stacked PR on top of `cg/6` in stack #126 (cg/7 PR #133, cg/8 PR #134).
