@@ -232,10 +232,10 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("3 students");
 
         // Three equally-sized section cards render with titles + counts + anchors.
-        cut.Markup.Should().Contain("class=\"section-card__title\">Topics</span>");
+        cut.Markup.Should().Contain("class=\"section-card__title\">Subjects/Curriculum</span>");
         cut.Markup.Should().Contain("class=\"section-card__title\">Teachers</span>");
         cut.Markup.Should().Contain("class=\"section-card__title\">Students</span>");
-        cut.Markup.Should().Contain("View all topics (0)");
+        cut.Markup.Should().Contain("View all subjects (0)");
         cut.Markup.Should().Contain("View all teachers (0)");
         cut.Markup.Should().Contain("View all students (0)");
     }
@@ -262,9 +262,10 @@ public class GradeLevelDetailPageTests : BunitContext
             } }));
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all topics (1)"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
         cut.Markup.Should().Contain("Mathematics", "top-15 preview lists the topic name");
-        cut.Markup.Should().Contain("MATH", "topic code renders in the preview");
+        cut.Markup.Should().Contain("2 strands", "topic strand count renders");
+        cut.Markup.Should().Contain("3 lessons", "topic lesson count renders");
     }
 
     [TestMethod]
@@ -274,8 +275,8 @@ public class GradeLevelDetailPageTests : BunitContext
         Register(gradeId, GradeJson(gradeId), assignmentsJson: "[]");
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all topics (0)"));
-        cut.Markup.Should().Contain("No topics assigned to this grade yet");
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (0)"));
+        cut.Markup.Should().Contain("No subjects assigned to this curriculum yet");
     }
 
     [TestMethod]
@@ -375,9 +376,9 @@ public class GradeLevelDetailPageTests : BunitContext
         var source = ReadDetailSource();
 
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
-            "the Topics card's View-all anchor opens GradeTopicsDialog via the read-only helper");
+            "the Subjects/Curriculum card's View-all button opens GradeTopicsDialog via the read-only helper");
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTeachersDialog>(",
-            "the Teachers card's View-all anchor opens GradeTeachersDialog via the read-only helper");
+            "the Teachers card's View-all button opens GradeTeachersDialog via the read-only helper");
 
         // GradeTopicsDialog gets the assigned topics + assignable catalog + action callbacks.
         source.Should().Contain("nameof(GradeTopicsDialog.Topics)");
@@ -398,5 +399,37 @@ public class GradeLevelDetailPageTests : BunitContext
         // The old segmented pill tab control is gone.
         source.Should().NotContain("grade-tabs__bar");
         source.Should().NotContain("SetActiveTab");
+    }
+
+    [TestMethod]
+    public void Detail_SectionCards_HaveAddIconButtons()
+    {
+        var source = ReadDetailSource();
+
+        // Each card header has an add button with the correct icon and title.
+        source.Should().Contain("IconStart=\"@FluentIcons.Add\"");
+        source.Should().Contain("Title=\"Add subject\"");
+        source.Should().Contain("Title=\"Add teacher\"");
+        source.Should().Contain("IconStart=\"@FluentIcons.PersonAdd\"");
+        source.Should().Contain("Title=\"Add student\"");
+    }
+
+    [TestMethod]
+    public void Detail_StudentAdd_Wires_StudentPickerDialog_AndEnroll()
+    {
+        var source = ReadDetailSource();
+
+        source.Should().Contain("OpenAddStudentsAsync",
+            "the Students card add button calls OpenAddStudentsAsync");
+        source.Should().Contain("ListPeriodsAsync",
+            "OpenAddStudentsAsync resolves the active period first");
+        source.Should().Contain("StudentPickerDialog",
+            "OpenAddStudentsAsync opens StudentPickerDialog to select students");
+        source.Should().Contain("EnrollStudentAsync",
+            "OpenAddStudentsAsync enrolls each selected student via EnrollStudentAsync");
+        source.Should().Contain("EnrollStudentRequest",
+            "enrollment uses EnrollStudentRequest with PeriodId, GradeLevelId, StudentId");
+        source.Should().Contain("ReloadStudentsAsync",
+            "after enrollment, the students list is reloaded");
     }
 }

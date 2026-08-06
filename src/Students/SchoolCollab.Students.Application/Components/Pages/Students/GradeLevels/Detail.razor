@@ -97,8 +97,11 @@
                             <FluentCard Class="section-card">
                                 <div class="section-card__header">
                                     <FluentIcon Value="@FluentIcons.Book" />
-                                    <span class="section-card__title">Topics</span>
+                                    <span class="section-card__title">Subjects/Curriculum</span>
                                     <span class="section-card__count">@(_curriculum?.Length ?? 0)</span>
+                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                                  IconStart="@FluentIcons.Add" Title="Add subject"
+                                                  AriaLabel="Add subject" OnClick="OpenTopicsDialogAsync" />
                                 </div>
                                 <div class="section-card__body">
                                     @if (_curriculum is null)
@@ -107,22 +110,31 @@
                                     }
                                     else if (_curriculum.Length == 0)
                                     {
-                                        <div class="section-card__empty">No topics assigned to this grade yet.</div>
+                                        <div class="section-card__empty">No subjects assigned to this curriculum yet.</div>
                                     }
                                     else
                                     {
                                         @foreach (var t in _curriculum.Take(15))
                                         {
-                                            <button type="button" class="section-card__item" @onclick="() => OpenStrandsAsync(t)">
-                                                <span class="item-main">@t.Name</span>
-                                                <span class="item-meta">@t.Code</span>
-                                            </button>
+                                            <div class="section-card__item">
+                                                <button type="button" class="item-name" @onclick="() => OpenStrandsAsync(t)">@t.Name</button>
+                                                <div class="item-meta">
+                                                    <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                                  OnClick="@(() => OpenStrandsAsync(t))">
+                                                        @t.StrandCount strands
+                                                    </FluentButton>
+                                                    <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                                                  OnClick="@(() => OpenLessonsAsync(t))">
+                                                        @t.LessonCount lessons
+                                                    </FluentButton>
+                                                </div>
+                                            </div>
                                         }
                                     }
                                 </div>
                                 <div class="section-card__footer">
-                                    <FluentButton Appearance="Appearance.Lightweight" OnClick="OpenTopicsDialogAsync">
-                                        View all topics (@(_curriculum?.Length ?? 0)) <FluentIcon Value="@FluentIcons.ArrowRight" />
+                                    <FluentButton Appearance="Appearance.Lightweight" OnClick="OpenTopicsDialogAsync" IconEnd="@FluentIcons.ArrowRight">
+                                        View all subjects (@(_curriculum?.Length ?? 0))
                                     </FluentButton>
                                 </div>
                             </FluentCard>
@@ -133,6 +145,9 @@
                                     <FluentIcon Value="@FluentIcons.People" />
                                     <span class="section-card__title">Teachers</span>
                                     <span class="section-card__count">@(_teachers?.Length ?? 0)</span>
+                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                                  IconStart="@FluentIcons.Add" Title="Add teacher"
+                                                  AriaLabel="Add teacher" OnClick="OpenTeachersDialogAsync" />
                                 </div>
                                 <div class="section-card__body">
                                     @if (_teachers is null || _teachers.Length == 0)
@@ -151,8 +166,8 @@
                                     }
                                 </div>
                                 <div class="section-card__footer">
-                                    <FluentButton Appearance="Appearance.Lightweight" OnClick="OpenTeachersDialogAsync">
-                                        View all teachers (@(_teachers?.Length ?? 0)) <FluentIcon Value="@FluentIcons.ArrowRight" />
+                                    <FluentButton Appearance="Appearance.Lightweight" OnClick="OpenTeachersDialogAsync" IconEnd="@FluentIcons.ArrowRight">
+                                        View all teachers (@(_teachers?.Length ?? 0))
                                     </FluentButton>
                                 </div>
                             </FluentCard>
@@ -163,8 +178,15 @@
                                     <FluentIcon Value="@FluentIcons.Person" />
                                     <span class="section-card__title">Students</span>
                                     <span class="section-card__count">@(_students?.Length ?? 0)</span>
+                                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                                  IconStart="@FluentIcons.PersonAdd" Title="Add student"
+                                                  AriaLabel="Add student" OnClick="OpenAddStudentsAsync" />
                                 </div>
                                 <div class="section-card__body">
+                                    @if (!string.IsNullOrEmpty(_studentsError))
+                                    {
+                                        <div class="section-card__empty section-card__error">@_studentsError</div>
+                                    }
                                     @if (_students is null || _students.Length == 0)
                                     {
                                         <div class="section-card__empty">No active students in this grade for the current period.</div>
@@ -181,8 +203,8 @@
                                     }
                                 </div>
                                 <div class="section-card__footer">
-                                    <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/students?gradeLevelId={Id}")">
-                                        View all students (@(_students?.Length ?? 0)) <FluentIcon Value="@FluentIcons.ArrowRight" />
+                                    <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/students?gradeLevelId={Id}")" IconEnd="@FluentIcons.ArrowRight">
+                                        View all students (@(_students?.Length ?? 0))
                                     </FluentAnchor>
                                 </div>
                             </FluentCard>
@@ -335,8 +357,11 @@
         background: var(--neutral-fill-secondary-hover, rgba(0,0,0,0.05));
         border-left-color: var(--accent-fill-rest, #0f6cbd);
     }
+    .item-name { background: none; border: none; padding: 0; text-align: left; font: inherit;
+                 font-weight: 500; color: inherit; cursor: pointer; width: 100%; line-height: 1.3; }
     .item-main { font-weight: 500; line-height: 1.3; }
-    .item-meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; }
+    .item-meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; display: flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; }
+    .section-card__error { color: var(--danger-foreground-rest, #d13438); }
     .section-card__footer {
         display: flex;
         justify-content: flex-end;
@@ -373,6 +398,7 @@
     private readonly Dictionary<Guid, string> _qualificationNames = new();
     private readonly Dictionary<Guid, string> _roleNames = new();
     private string? _teachersError;
+    private string? _studentsError;
 
     private sealed class AssignedTopic
     {
@@ -589,7 +615,7 @@
     private async Task OpenTopicsDialogAsync()
     {
         await DialogService.ShowReadonlyDialogAsync<GradeTopicsDialog>(
-            $"Topics · {_grade!.Name}",
+            $"Subjects/Curriculum · {_grade!.Name}",
             new Dictionary<string, object?>
             {
                 { nameof(GradeTopicsDialog.Topics), _curriculum ?? [] },
@@ -782,6 +808,55 @@
         {
             if (_disposed) return;
             _teachersError = $"Could not reload teachers: {ex.Message}";
+        }
+    }
+
+    // ── Students: add (enroll) ───────────────────────────────────────────────
+    private async Task OpenAddStudentsAsync()
+    {
+        if (_disposed || _grade is null) return;
+        _studentsError = null;
+        try
+        {
+            var periods = await Api.ListPeriodsAsync() ?? [];
+            var active = periods.FirstOrDefault(p => p.Status == "Active");
+            if (active is null)
+            {
+                _studentsError = "No active period to enroll students into.";
+                return;
+            }
+            var model = new StudentPickerModel(
+                ExcludedStudentIds: _students?.Select(s => s.Id) ?? [],
+                PeriodId: active.Id);
+            var selected = await DialogService.ShowShellDialogAsync<StudentPickerDialog, StudentPickerModel, StudentDto[]>(
+                model, $"Enroll students · {_grade.Name}", DialogSize.Large);
+            if (selected is null || selected.Length == 0) return;
+            foreach (var s in selected)
+            {
+                await Api.EnrollStudentAsync(new EnrollStudentRequest(
+                    s.Id, active.Id, Id, GradeStrandCodedValueId: null, DateOnly.FromDateTime(DateTime.UtcNow)));
+            }
+            if (_disposed) return;
+            await ReloadStudentsAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to enroll students in grade {Id}", Id);
+            _studentsError = $"Could not enroll students: {ex.Message}";
+        }
+    }
+
+    private async Task ReloadStudentsAsync()
+    {
+        try
+        {
+            _students = await Api.ListStudentsByGradeAsync(Id) ?? [];
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _studentsError = $"Could not reload students: {ex.Message}";
         }
     }
 
