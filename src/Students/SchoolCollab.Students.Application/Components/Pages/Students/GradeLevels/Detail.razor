@@ -75,8 +75,8 @@
 
                         @* ── Section cards (shared component) ──────────────── *@
                         <div class="section-cards">
-                            @* Subjects/Curriculum card *@
-                            <SectionCard Title="Subjects/Curriculum"
+                            @* Subjects card *@
+                            <SectionCard Title="Subjects"
                                          Icon="@FluentIcons.Book"
                                          Count="@(_curriculum?.Length ?? 0)"
                                          OnAddClick="OpenTopicsDialogAsync"
@@ -152,6 +152,29 @@
                                     </a>
                                 </ItemTemplate>
                             </SectionCard>
+
+                            @* Strands card (grade strands = GRSTRNDS coded values for this grade) *@
+                            <SectionCard Title="Strands"
+                                         Icon="@FluentIcons.TextBulletList"
+                                         Count="@(_gradeStrands?.Length ?? 0)"
+                                         AddTitle="Manage strands"
+                                         AddAriaLabel="Manage strands"
+                                         OnAddClick="OpenGradeStrandsAsync"
+                                         ViewAllNavigationUrl="/coded-values/GRSTRNDS/children"
+                                         ViewAllText="Manage strands"
+                                         Items="@(_gradeStrands ?? [])"
+                                         EmptyMessage="No strands defined for this grade yet."
+                                         Loading="@(_gradeStrands is null)">
+                                <ItemTemplate Context="item">
+                                    @{
+                                        var gs = (CodedValueDto)item;
+                                    }
+                                    <div class="section-card__item">
+                                        <span class="item-main">@gs.Name</span>
+                                        <span class="item-meta">@gs.Code</span>
+                                    </div>
+                                </ItemTemplate>
+                            </SectionCard>
                         </div>
 
                         @* ── Notification & Delivery card (nd/4) ─────────── *@
@@ -208,6 +231,7 @@
     // ── Teachers / Students ────────────────────────────────────────────────
     private TeacherWithRoleDto[]? _teachers;
     private StudentDto[]? _students;
+    private CodedValueDto[]? _gradeStrands;
     private TeacherDto[]? _allTeachers;
     private readonly Dictionary<Guid, string> _salutationNames = new();
     private readonly Dictionary<Guid, string> _genderNames = new();
@@ -279,6 +303,20 @@
             }
 
             if (_grade is null) return;
+
+            // Grade strands (GRSTRNDS coded values whose gradeLevel attribute
+            // references this grade). Loaded separately so a failure here only
+            // empties the Strands card rather than failing the whole page.
+            try
+            {
+                _gradeStrands = await CodedValuesApi.GetChildrenByParentCodeFilteredByAttributeAsync(
+                    CodedValueParent.GradeStrands.ToCode(), "gradeLevel", _grade.CodedValueId.ToString(), ct) ?? [];
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to load grade strands for grade {Id}", Id);
+                _gradeStrands = [];
+            }
 
             if (_grade.AllowedGenderCodedValueId is { } gid)
             {
@@ -371,6 +409,16 @@
     private void Back() => Nav.NavigateTo("/students/grade-levels");
 
     /// <summary>
+    /// Strands card "Add" affordance — grade strands are managed as coded
+    /// values in Settings, so this jumps to the GRSTRNDS children page.
+    /// </summary>
+    private Task OpenGradeStrandsAsync()
+    {
+        Nav.NavigateTo("/coded-values/GRSTRNDS/children");
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
     /// Builds the grade-level header "Actions" menu: Edit (navigate) and the
     /// enrollment-block toggle. Positioned far-right of the title row via the
     /// RowActionsMenu trigger.
@@ -432,7 +480,7 @@
     private async Task OpenTopicsDialogAsync()
     {
         await DialogService.ShowReadonlyDialogAsync<GradeTopicsDialog>(
-            $"Subjects/Curriculum · {_grade!.Name}",
+            $"Subjects · {_grade!.Name}",
             new Dictionary<string, object?>
             {
                 { nameof(GradeTopicsDialog.Topics), _curriculum ?? [] },

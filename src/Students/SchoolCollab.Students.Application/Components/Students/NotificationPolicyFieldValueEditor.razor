@@ -1,0 +1,94 @@
+@*
+    NotificationPolicyFieldValueEditor — renders the single field's value
+    editor for ONE scope (global default or per-grade override). Used twice by
+    NotificationPolicyFieldEditDialog, which lays the two instances out
+    side-by-side. The editor shape is driven by Kind:
+
+      • Channels — a checkbox list over the NotificationChannel enum.
+      • Int      — a FluentNumberField (Min = 0).
+      • Time     — a native <input type="time">.
+
+    All three value channels are parameters so the same component is reusable;
+    only the one matching Kind is rendered/used. Two-way binding is optional and
+    driven by the parent via @bind-Channels / @bind-IntValue / @bind-TimeText,
+    so a single tenant-global field and a per-grade field stay independent.
+*@
+@namespace SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Core.Notifications
+@using System.ComponentModel
+@using System.Linq
+
+@if (Kind == NotificationPolicyFieldEditDialog.FieldKind.Channels)
+{
+    <div class="channel-grid">
+        @foreach (var channel in AllChannels)
+        {
+            <label class="channel-option">
+                <input type="checkbox" checked="@Channels.Contains(channel)"
+                       @onchange="e => OnToggleChannel(channel, e.Value is true)" />
+                <span>@ChannelName(channel)</span>
+            </label>
+        }
+    </div>
+}
+else if (Kind == NotificationPolicyFieldEditDialog.FieldKind.Int)
+{
+    <FluentNumberField Id="@InputId" @bind-Value="IntValue" Min="0" Style="width: 100%" />
+}
+else
+{
+    <input type="time" class="time-input" value="@TimeText"
+           @onchange="e => TimeTextChanged.InvokeAsync(e.Value?.ToString())" />
+}
+
+<style>
+    .channel-grid { display: flex; flex-direction: column; gap: 0.4rem; }
+    .channel-option { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; }
+    .channel-option input { flex: 0 0 auto; }
+    .time-input { padding: 0.4rem 0.5rem; border: 1px solid var(--neutral-stroke-rest); border-radius: 4px; width: 100%; box-sizing: border-box; }
+</style>
+
+@code {
+    /// <summary>The current channel selection (one-way, via <c>ChannelsChanged</c>).</summary>
+    [Parameter] public List<NotificationChannel> Channels { get; set; } = new();
+    [Parameter] public EventCallback<List<NotificationChannel>> ChannelsChanged { get; set; }
+
+    /// <summary>The current integer value (one-way, via <c>IntValueChanged</c>).</summary>
+    [Parameter] public int? IntValue { get; set; }
+    [Parameter] public EventCallback<int?> IntValueChanged { get; set; }
+
+    /// <summary>The current time text, <c>"HH:mm"</c> (one-way, via <c>TimeTextChanged</c>).</summary>
+    [Parameter] public string? TimeText { get; set; }
+    [Parameter] public EventCallback<string?> TimeTextChanged { get; set; }
+
+    /// <summary>Which editor shape to render.</summary>
+    [Parameter] public NotificationPolicyFieldEditDialog.FieldKind Kind { get; set; }
+
+    /// <summary>Optional DOM id for the value input (unique per side in the dialog).</summary>
+    [Parameter] public string? InputId { get; set; }
+
+    private static readonly NotificationChannel[] AllChannels =
+        [NotificationChannel.Email, NotificationChannel.SMS, NotificationChannel.WhatsApp];
+
+    private void OnToggleChannel(NotificationChannel channel, bool on)
+    {
+        var updated = new List<NotificationChannel>(Channels);
+        if (on)
+        {
+            if (!updated.Contains(channel)) updated.Add(channel);
+        }
+        else
+        {
+            updated.Remove(channel);
+        }
+        ChannelsChanged.InvokeAsync(updated);
+    }
+
+    private static string ChannelName(NotificationChannel ch)
+    {
+        var member = ch.GetType().GetMember(ch.ToString())[0];
+        var attr = member.GetCustomAttributes(typeof(DescriptionAttribute), false).FirstOrDefault() as DescriptionAttribute;
+        return attr?.Description ?? ch.ToString();
+    }
+}

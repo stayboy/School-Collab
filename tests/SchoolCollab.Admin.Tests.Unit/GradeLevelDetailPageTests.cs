@@ -135,6 +135,8 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", $"/students/grade-levels/{gradeId}/curriculum", HttpStatusCode.OK, curriculumJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
+        // Grade strands (GRSTRNDS) for the Strands card.
+        handler.Map("/api/coded-values/by-parent?parentCode=GRSTRNDS", HttpStatusCode.OK, "[]");
         // Notification &amp; Delivery editor: no tenant default / no grade override.
         handler.Map("GET", "/api/settings/notification-policy", HttpStatusCode.NoContent, "");
         handler.Map("GET", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.NoContent, "");
@@ -248,7 +250,7 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("3 students");
 
         // Three equally-sized section cards render with titles + counts + anchors.
-        cut.Markup.Should().Contain("Subjects/Curriculum", "Subjects card title renders");
+        cut.Markup.Should().Contain("Subjects", "Subjects card title renders");
         cut.Markup.Should().Contain("Teachers", "Teachers card title renders");
         cut.Markup.Should().Contain("Students", "Students card title renders");
         cut.Markup.Should().Contain("View all subjects (0)");
@@ -404,6 +406,48 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_StrandsCard_ListsGradeStrands()
+    {
+        var gradeId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId));
+        handler.Map("/api/coded-values/by-parent?parentCode=GRSTRNDS", HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["id"] = Guid.NewGuid(), ["code"] = "GR5A", ["name"] = "Grade 5A",
+                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTRNDS",
+                    ["isDisabled"] = false, ["displayOrder"] = 0,
+                    ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+                    ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
+                },
+                new Dictionary<string, object?>
+                {
+                    ["id"] = Guid.NewGuid(), ["code"] = "GR5B", ["name"] = "Grade 5B",
+                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTRNDS",
+                    ["isDisabled"] = false, ["displayOrder"] = 1,
+                    ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+                    ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
+                },
+            }));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 5A"));
+        cut.Markup.Should().Contain("Grade 5B", "strand card lists both grade strands");
+        cut.Markup.Should().Contain("Manage strands", "strand card offers a manage affordance");
+    }
+
+    [TestMethod]
+    public void Detail_StrandsCard_ShowsEmptyState_WhenNone()
+    {
+        var gradeId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No strands defined for this grade yet."));
+    }
+
+    [TestMethod]
     public void Detail_EnrollmentToggle_ReflectsBlockedState()
     {
         var gradeId = Guid.NewGuid();
@@ -429,7 +473,7 @@ public class GradeLevelDetailPageTests : BunitContext
         var source = ReadDetailSource();
 
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
-            "the Subjects/Curriculum card's View-all button opens GradeTopicsDialog via the read-only helper");
+            "the Subjects card's View-all button opens GradeTopicsDialog via the read-only helper");
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTeachersDialog>(",
             "the Teachers card's View-all button opens GradeTeachersDialog via the read-only helper");
 

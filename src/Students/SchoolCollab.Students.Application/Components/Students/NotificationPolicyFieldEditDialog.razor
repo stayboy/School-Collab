@@ -1,0 +1,235 @@
+@*
+    NotificationPolicyFieldEditDialog — opens from the grade-detail
+    "Notification & Delivery" grid "Edit" action. Edits ONE setting's value for
+    BOTH scopes at once, laid out side-by-side (Global settings | This grade)
+    and separated by a vertical bar.
+
+      • Global settings — upserts the tenant-global default via
+        NotificationPolicyApiClient.UpsertAsync (preserving the other fields).
+      • This grade       — upserts the per-grade override via
+        StudentsApiClient.UpsertGradeNotificationPolicyAsync (preserving the
+        other fields; null/blank on an int/time, or an empty channel list,
+        clears that scope's value).
+
+    Save writes each scope ONLY if its value changed, so opening the dialog and
+    saving without edits never creates or mutates a policy. The caller
+    (GradeNotificationPolicyEditor) reloads on a non-null result.
+*@
+@inherits DialogShellBase<NotificationPolicyFieldEditDialog.EditModel, NotificationPolicyFieldEditDialog.EditResult>
+@namespace SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Core.Notifications
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.DTOs
+@using System.Linq
+@inject StudentsApiClient Api
+@inject NotificationPolicyApiClient SettingsApi
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <div class="panel-caption">
+            <strong>@Model.Label</strong>
+            <span class="muted"> — set the value for the tenant-global default, this grade, or both. Save writes each changed side.</span>
+        </div>
+
+        <div class="split">
+            <div class="split__panel split__panel--global">
+                <div class="panel-head">
+                    <div class="panel-title">Global settings</div>
+                    <div class="muted panel-subtitle">Tenant default used by every grade.</div>
+                </div>
+                <NotificationPolicyFieldValueEditor Kind="Model.Kind" InputId="ndp-global"
+                    @bind-Channels="_globalChannels"
+                    @bind-IntValue="_globalInt"
+                    @bind-TimeText="_globalTime" />
+            </div>
+
+            <div class="split__divider" role="separator" aria-orientation="vertical"></div>
+
+            <div class="split__panel split__panel--grade">
+                <div class="panel-head">
+                    <div class="panel-title">This grade</div>
+                    <div class="muted panel-subtitle">Override for this grade only.</div>
+                </div>
+                <NotificationPolicyFieldValueEditor Kind="Model.Kind" InputId="ndp-grade"
+                    @bind-Channels="_gradeChannels"
+                    @bind-IntValue="_gradeInt"
+                    @bind-TimeText="_gradeTime" />
+            </div>
+        </div>
+
+        <DialogShellFooter Saving="Saving" Error="Error" SubmitText="Save"
+                           SavingText="Saving..." OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+<style>
+    .dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+    .muted { color: var(--neutral-foreground-hint); }
+    .panel-caption { margin-bottom: 1rem; font-size: 0.9rem; }
+    .split { display: flex; align-items: stretch; gap: 1.25rem; }
+    .split__panel { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+    .split__divider { width: 1px; background: var(--neutral-stroke-rest); }
+    .panel-head { margin-bottom: 0.75rem; }
+    .panel-title { font-weight: 600; margin-bottom: 0.25rem; }
+    .panel-subtitle { font-size: 0.8rem; }
+</style>
+@code {
+    public enum FieldKind { Channels, Int, Time }
+
+    /// <summary>Immutable inputs for a single-field edit request.</summary>
+    public sealed record EditModel(
+        string Key,
+        string Label,
+        FieldKind Kind,
+        Guid GradeId,
+        TenantNotificationPolicyDto? TenantDefault,
+        GradeNotificationPolicyDto? GradeOverride);
+
+    /// <summary>Returned to the caller so it can reload after a successful save.</summary>
+    public sealed record EditResult(string Key);
+
+    // Global-scope state.
+    private List<NotificationChannel> _globalChannels = new();
+    private int? _globalInt;
+    private string? _globalTime = string.Empty;
+
+    // Grade-scope state.
+    private List<NotificationChannel> _gradeChannels = new();
+    private int? _gradeInt;
+    private string? _gradeTime = string.Empty;
+
+    protected override void OnModelInitialized(EditModel model)
+    {
+        var global = GetValue(model.Key, model.TenantDefault);
+        var grade = GetValue(model.Key, model.GradeOverride);
+
+        _globalChannels = ChannelsFrom(global);
+        _globalInt = IntFrom(global);
+        _globalTime = TimeFrom(global);
+
+        _gradeChannels = ChannelsFrom(grade);
+        _gradeInt = IntFrom(grade);
+        _gradeTime = TimeFrom(grade);
+    }
+
+    protected override async Task<EditResult?> SubmitAsync(EditModel model)
+    {
+        var globalInitial = GetValue(model.Key, model.TenantDefault);
+        var gradeInitial = GetValue(model.Key, model.GradeOverride);
+
+        var globalChanged = ValueChanged(model, globalInitial, _globalChannels, _globalInt, _globalTime);
+        var gradeChanged = ValueChanged(model, gradeInitial, _gradeChannels, _gradeInt, _gradeTime);
+
+        if (globalChanged)
+            await SettingsApi.UpsertAsync(BuildTenantRequest(model));
+
+        if (gradeChanged)
+            await Api.UpsertGradeNotificationPolicyAsync(model.GradeId, BuildGradeRequest(model));
+
+        return new EditResult(model.Key);
+    }
+
+    private UpsertGradeNotificationPolicyRequest BuildGradeRequest(EditModel model)
+    {
+        var g = model.GradeOverride;
+        var (pc, bc, mn, mr, ri, lv, st, si) = (
+            g?.PreferredChannelOrder, g?.BlockedChannels, g?.MaxNotifications,
+            g?.MaxReminders, g?.ReminderIntervalHours, g?.LinkValidityDays,
+            g?.SendoutTimeOfDay, g?.SendoutIntervalMinutes);
+        ApplyEditedValue(model, ref pc, ref bc, ref mn, ref mr, ref ri, ref lv, ref st, ref si,
+            _gradeChannels, _gradeInt, _gradeTime);
+        return new UpsertGradeNotificationPolicyRequest(pc, bc, mn, mr, ri, lv, st, si);
+    }
+
+    private UpsertNotificationPolicyRequest BuildTenantRequest(EditModel model)
+    {
+        var t = model.TenantDefault;
+        var (pc, bc, mn, mr, ri, lv, st, si) = (
+            t?.PreferredChannelOrder, t?.BlockedChannels, t?.MaxNotifications,
+            t?.MaxReminders, t?.ReminderIntervalHours, t?.LinkValidityDays,
+            t?.SendoutTimeOfDay, t?.SendoutIntervalMinutes);
+        ApplyEditedValue(model, ref pc, ref bc, ref mn, ref mr, ref ri, ref lv, ref st, ref si,
+            _globalChannels, _globalInt, _globalTime);
+        return new UpsertNotificationPolicyRequest(pc, bc, mn, mr, ri, lv, st, si);
+    }
+
+    private static void ApplyEditedValue(
+        EditModel model,
+        ref NotificationChannel[]? pc, ref NotificationChannel[]? bc,
+        ref int? mn, ref int? mr, ref int? ri, ref int? lv,
+        ref TimeOnly? st, ref int? si,
+        List<NotificationChannel> channels, int? intValue, string? timeText)
+    {
+        switch (model.Key)
+        {
+            case "PreferredChannelOrder": pc = channels.ToArray(); break;
+            case "BlockedChannels": bc = channels.ToArray(); break;
+            case "MaxNotifications": mn = intValue; break;
+            case "MaxReminders": mr = intValue; break;
+            case "ReminderIntervalHours": ri = intValue; break;
+            case "LinkValidityDays": lv = intValue; break;
+            case "SendoutTimeOfDay": st = ParseTime(timeText); break;
+            case "SendoutIntervalMinutes": si = intValue; break;
+        }
+    }
+
+    private static bool ValueChanged(
+        EditModel model, object? initial,
+        List<NotificationChannel> channels, int? intValue, string? timeText) =>
+        model.Kind switch
+        {
+            FieldKind.Channels => !ChannelsEqual(channels, initial as NotificationChannel[]),
+            FieldKind.Int => intValue != IntFrom(initial),
+            FieldKind.Time => ParseTime(timeText) != TimeOnlyFrom(initial),
+            _ => false,
+        };
+
+    private static bool ChannelsEqual(List<NotificationChannel> channels, NotificationChannel[]? array)
+    {
+        if (array is null) return channels.Count == 0;
+        if (channels.Count != array.Length) return false;
+        return channels.SequenceEqual(array);
+    }
+
+    private static List<NotificationChannel> ChannelsFrom(object? value) =>
+        value is NotificationChannel[] c ? c.ToList() : new();
+
+    private static int? IntFrom(object? value) => value is int i ? i : null;
+
+    private static string? TimeFrom(object? value) =>
+        value is TimeOnly t ? t.ToString("HH:mm") : string.Empty;
+
+    private static TimeOnly? TimeOnlyFrom(object? value) => value is TimeOnly t ? t : null;
+
+    private static TimeOnly? ParseTime(string? text) => TimeOnly.TryParse(text, out var t) ? t : null;
+
+    private static object? GetValue(string key, TenantNotificationPolicyDto? p) => key switch
+    {
+        "PreferredChannelOrder" => p?.PreferredChannelOrder,
+        "BlockedChannels" => p?.BlockedChannels,
+        "MaxNotifications" => p?.MaxNotifications,
+        "MaxReminders" => p?.MaxReminders,
+        "ReminderIntervalHours" => p?.ReminderIntervalHours,
+        "LinkValidityDays" => p?.LinkValidityDays,
+        "SendoutTimeOfDay" => p?.SendoutTimeOfDay,
+        "SendoutIntervalMinutes" => p?.SendoutIntervalMinutes,
+        _ => null,
+    };
+
+    private static object? GetValue(string key, GradeNotificationPolicyDto? p) => key switch
+    {
+        "PreferredChannelOrder" => p?.PreferredChannelOrder,
+        "BlockedChannels" => p?.BlockedChannels,
+        "MaxNotifications" => p?.MaxNotifications,
+        "MaxReminders" => p?.MaxReminders,
+        "ReminderIntervalHours" => p?.ReminderIntervalHours,
+        "LinkValidityDays" => p?.LinkValidityDays,
+        "SendoutTimeOfDay" => p?.SendoutTimeOfDay,
+        "SendoutIntervalMinutes" => p?.SendoutIntervalMinutes,
+        _ => null,
+    };
+}

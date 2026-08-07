@@ -15,13 +15,13 @@
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    padding: 0.9rem 1rem 0.6rem;
+    padding: 0.6rem 1rem 0.4rem;
     border-bottom: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08));
     color: var(--neutral-foreground-rest, #1b1b1b);
 }
 .section-card__title {
-    font-size: 1rem;
-    font-weight: 600;
+    font-size: 1.05rem;
+    font-weight: 400;
     flex: 1;
     min-width: 0;
 }
@@ -40,7 +40,7 @@
 }
 .section-card__body {
     flex: 1;
-    padding: 0.5rem 0;
+    padding: 0.25rem 0;
     display: flex;
     flex-direction: column;
     gap: 0.15rem;
@@ -61,6 +61,6 @@
 .section-card__footer {
     display: flex;
     justify-content: flex-end;
-    padding: 0.6rem 1rem 0.9rem;
+    padding: 0.4rem 1rem 0.6rem;
     border-top: 1px solid var(--neutral-stroke-rest, rgba(0,0,0,0.08));
 }
