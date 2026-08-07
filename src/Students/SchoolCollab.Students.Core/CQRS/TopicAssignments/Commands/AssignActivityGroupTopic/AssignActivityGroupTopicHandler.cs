@@ -20,8 +20,7 @@ public sealed class AssignActivityGroupTopicHandler(
             command.TopicId,
             command.StartDate,
             command.EndDate,
-            command.TopicStrandId,
-            command.TopicLessonId);
+            command.TopicStrandId);
 
         await repository.AddAsync(assignment, cancellationToken);
         assignment.ClearDomainEvents();

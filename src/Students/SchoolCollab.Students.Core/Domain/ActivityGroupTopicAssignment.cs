@@ -16,19 +16,18 @@ public sealed class ActivityGroupTopicAssignment : TopicAssignment
 
     /// <summary>
     /// Creates a bridge row assigning a topic to an activity group. The
-    /// <see cref="TopicAssignment.TopicStrandId"/>/<see cref="TopicAssignment.TopicLessonId"/>
-    /// select which strand/lesson the group uses for the topic.
+    /// <see cref="TopicAssignment.TopicStrandId"/> selects which strand (or lesson,
+    /// i.e. a parented strand) the group uses for the topic.
     /// </summary>
     public static ActivityGroupTopicAssignment Create(
         Guid activityGroupId,
         Guid topicId,
         DateOnly startDate,
         DateOnly? endDate = null,
-        Guid? topicStrandId = null,
-        Guid? topicLessonId = null)
+        Guid? topicStrandId = null)
     {
         var assignment = new ActivityGroupTopicAssignment { ActivityGroupId = activityGroupId };
-        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId, topicLessonId);
+        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId);
         assignment.AddEvent(new ActivityGroupTopicAssignedEvent(
             assignment.Id, activityGroupId, topicId, startDate, endDate));
         return assignment;

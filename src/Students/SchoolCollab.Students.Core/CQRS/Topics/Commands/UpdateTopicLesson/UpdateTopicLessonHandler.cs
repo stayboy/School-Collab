@@ -9,23 +9,12 @@ public sealed class UpdateTopicLessonHandler(StudentsDbContext db) : ICommandHan
 {
     public async Task<TopicLessonDto> HandleAsync(UpdateTopicLesson command, CancellationToken ct = default)
     {
-        var lesson = await db.TopicLessons.FindAsync(new object[] { command.Id }, ct);
-        if (lesson == null) throw new KeyNotFoundException($"Topic Lesson {command.Id} not found.");
+        var strand = await db.TopicStrands.FindAsync(new object[] { command.Id }, ct);
+        if (strand == null) throw new KeyNotFoundException($"Topic Lesson {command.Id} not found.");
 
-        lesson.Update(command.Name, command.Description, command.StartDate, command.EndDate, command.DisplayOrder);
+        strand.Update(command.Name, command.Description, command.DisplayOrder, startDate: command.StartDate, endDate: command.EndDate);
         await db.SaveChangesAsync(ct);
 
-        return new TopicLessonDto(
-            lesson.Id,
-            lesson.TopicId,
-            lesson.StrandId,
-            lesson.Name,
-            lesson.Description,
-            lesson.StartDate,
-            lesson.EndDate,
-            lesson.IsOpenEnded,
-            lesson.DisplayOrder,
-            lesson.CreatedAt,
-            lesson.UpdatedAt);
+        return TopicLessonDto.FromStrand(strand);
     }
 }

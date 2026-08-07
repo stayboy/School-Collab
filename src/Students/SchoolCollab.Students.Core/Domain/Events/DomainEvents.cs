@@ -38,11 +38,6 @@ public sealed record ActivityGroupTopicAssignedEvent(Guid AssignmentId, Guid Act
 
 public sealed record StudentTopicAssignedEvent(Guid AssignmentId, Guid StudentId, Guid TopicId, Guid PeriodId) : IDomainEvent;
 
-// --- Topic Strands ---
+// --- Topic Strands (a strand with a parent is a lesson) ---
 public sealed record TopicStrandCreatedEvent(Guid StrandId, string Name, Guid TopicId) : IDomainEvent;
 public sealed record TopicStrandUpdatedEvent(Guid StrandId, string Name) : IDomainEvent;
-
-// --- Topic Lessons ---
-public sealed record TopicLessonCreatedEvent(Guid LessonId, string Name, Guid TopicId) : IDomainEvent;
-public sealed record TopicLessonUpdatedEvent(Guid LessonId, string Name) : IDomainEvent;
-public sealed record TopicLessonStrandAssignedEvent(Guid LessonId, Guid StrandId) : IDomainEvent;

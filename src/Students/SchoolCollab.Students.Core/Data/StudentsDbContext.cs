@@ -31,7 +31,6 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<TopicAssignment> TopicAssignments => Set<TopicAssignment>();
     public DbSet<StudentTopicAssignment> StudentTopicAssignments => Set<StudentTopicAssignment>();
     public DbSet<TopicStrand> TopicStrands => Set<TopicStrand>();
-    public DbSet<TopicLesson> TopicLessons => Set<TopicLesson>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<StudentTransferAuditEntry> StudentTransferAuditEntries => Set<StudentTransferAuditEntry>();
     public DbSet<ActivityGroup> ActivityGroups => Set<ActivityGroup>();
@@ -64,7 +63,6 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new ActivityGroupTopicAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new StudentTopicAssignmentConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TopicStrandConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new TopicLessonConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<StudentsDbContext>()));
         modelBuilder.ApplyConfiguration(new StudentTransferAuditEntryConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ActivityGroupConfiguration(() => CurrentTenantId));

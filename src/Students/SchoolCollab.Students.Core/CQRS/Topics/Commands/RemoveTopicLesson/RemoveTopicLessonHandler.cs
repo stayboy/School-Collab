@@ -8,10 +8,10 @@ public sealed class RemoveTopicLessonHandler(StudentsDbContext db) : ICommandHan
 {
     public async Task HandleAsync(RemoveTopicLesson command, CancellationToken ct = default)
     {
-        var lesson = await db.TopicLessons.FindAsync(new object[] { command.Id }, ct);
-        if (lesson == null) throw new KeyNotFoundException($"Topic Lesson {command.Id} not found.");
+        var strand = await db.TopicStrands.FindAsync(new object[] { command.Id }, ct);
+        if (strand == null) throw new KeyNotFoundException($"Topic Lesson {command.Id} not found.");
 
-        db.TopicLessons.Remove(lesson);
+        db.TopicStrands.Remove(strand);
         await db.SaveChangesAsync(ct);
     }
 }

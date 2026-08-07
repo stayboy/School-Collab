@@ -46,7 +46,6 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
     /// </summary>
     public DateOnly? EndDate { get; private set; }
     public Guid? TopicStrandId { get; private set; }
-    public Guid? TopicLessonId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -62,8 +61,7 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         Guid topicId,
         DateOnly startDate,
         DateOnly? endDate,
-        Guid? topicStrandId,
-        Guid? topicLessonId)
+        Guid? topicStrandId)
     {
         if (endDate is { } e && e < startDate)
             throw new ArgumentException("EndDate must be on or after StartDate.", nameof(endDate));
@@ -74,7 +72,6 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         StartDate = startDate;
         EndDate = endDate;
         TopicStrandId = topicStrandId;
-        TopicLessonId = topicLessonId;
         CreatedAt = now;
         UpdatedAt = now;
     }
@@ -102,12 +99,13 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    public void UpdateTags(Guid? strandId, Guid? lessonId)
+    /// <summary>
+    /// Sets the strand (root strand or lesson) this assignment pins for the topic.
+    /// </summary>
+    public void UpdateTags(Guid? strandId)
     {
-        if (TopicStrandId == strandId && TopicLessonId == lessonId) return;
-
+        if (TopicStrandId == strandId) return;
         TopicStrandId = strandId;
-        TopicLessonId = lessonId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

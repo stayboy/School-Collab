@@ -55,14 +55,14 @@ public sealed class ListGradeTopicCurriculumByGradeHandler(
                 var topicIds = topics.Select(x => x.Id).ToArray();
 
                 var strandCounts = await db.TopicStrands.IgnoreQueryFilters(tenantFilter)
-                    .Where(s => s.TenantId == tenantId && topicIds.Contains(s.TopicId))
+                    .Where(s => s.TenantId == tenantId && topicIds.Contains(s.TopicId) && s.ParentStrandId == null)
                     .GroupBy(s => s.TopicId)
                     .Select(g => new { TopicId = g.Key, Count = g.Count() })
                     .ToArrayAsync(ct);
 
-                var lessonCounts = await db.TopicLessons.IgnoreQueryFilters(tenantFilter)
-                    .Where(l => l.TenantId == tenantId && topicIds.Contains(l.TopicId))
-                    .GroupBy(l => l.TopicId)
+                var lessonCounts = await db.TopicStrands.IgnoreQueryFilters(tenantFilter)
+                    .Where(s => s.TenantId == tenantId && topicIds.Contains(s.TopicId) && s.ParentStrandId != null)
+                    .GroupBy(s => s.TopicId)
                     .Select(g => new { TopicId = g.Key, Count = g.Count() })
                     .ToArrayAsync(ct);
 

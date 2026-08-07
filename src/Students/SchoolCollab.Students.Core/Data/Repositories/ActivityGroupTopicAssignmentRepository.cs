@@ -17,7 +17,7 @@ internal sealed class ActivityGroupTopicAssignmentRepository(StudentsDbContext d
             .Select(x => new TopicAssignmentDto(
                 x.Id, "activity_group", null, x.ActivityGroupId, x.TopicId,
                 x.StartDate, x.EndDate,
-                x.TopicStrandId, x.TopicLessonId,
+                x.TopicStrandId,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 }

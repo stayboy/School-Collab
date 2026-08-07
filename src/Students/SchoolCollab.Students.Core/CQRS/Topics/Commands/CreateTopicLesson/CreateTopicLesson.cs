@@ -8,4 +8,5 @@ public sealed record CreateTopicLesson(
     string? Description,
     DateOnly? StartDate,
     DateOnly? EndDate,
-    int DisplayOrder) : ICommand;
+    int DisplayOrder,
+    Guid? StrandId = null) : ICommand;
