@@ -604,7 +604,7 @@
             TopicDto>(
             new TopicEditDialog.TopicEditModel { Id = topic.TopicId, Name = topic.Name },
             title: $"Edit topic · {topic.Name}",
-            size: DialogSize.Small);
+            size: DialogSize.Large);
         if (updated is not null && !_disposed)
         {
             await ReloadAssignedTopicsAsync();

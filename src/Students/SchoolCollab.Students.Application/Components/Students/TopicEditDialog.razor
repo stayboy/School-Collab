@@ -1,6 +1,8 @@
 @*
-    TopicEditDialog — opens from the grade-detail Subjects card row kebab
-    "Edit name" action. Edits a topic's display name, code, and description.
+    TopicEditDialog — opens from the grade-detail Subjects card topic-name
+    primary affordance (and the row kebab). Edits a topic's display name,
+    code, and description, and lets the user manage the topic's strands
+    inline (via the shared StrandsEditor).
 
     Topic edits go through the CodedValue + tenancy-override mechanism (tcv/4):
       • the dialog loads the CodedValue backing the topic (Topic.CodedValueId);
@@ -56,6 +58,13 @@
                                Style="width: 100%" />
         </FormRow>
 
+        @* Strands for this topic — inline CRUD via the shared StrandsEditor.
+           Its FluentButtons default to ButtonType.Button, so they never submit
+           this topic's EditForm. *@
+        <section class="strands-block" aria-label="Strands">
+            <StrandsEditor TopicId="Model.Id" TopicName="Model.Name" />
+        </section>
+
         <DialogShellFooter Saving="@Saving"
                            Error="@Error"
                            SubmitText="Save"
@@ -66,6 +75,7 @@
 
 <style>
     .dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+    .strands-block { margin-top: 0.75rem; border-top: 1px solid var(--neutral-stroke-divider, #e0e0e0); padding-top: 0.75rem; }
 </style>
 
 @code {

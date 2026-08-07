@@ -469,6 +469,8 @@ public class GradeLevelDetailPageTests : BunitContext
         // The edit handler opens TopicEditDialog through the shell dialog helper.
         source.Should().Contain("ShowShellDialogAsync<", "the topic edit handler uses the shell dialog service");
         source.Should().Contain("TopicEditDialog", "the topic edit handler opens TopicEditDialog");
+        source.Should().Contain("size: DialogSize.Large",
+            "the topic edit dialog opens large to fit the inline strands editor");
 
         // Strands stay reachable (moved to the row kebab, not removed).
         source.Should().Contain("OpenStrandsAsync", "strands remain available via the row kebab");
