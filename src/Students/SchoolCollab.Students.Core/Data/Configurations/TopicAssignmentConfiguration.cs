@@ -37,16 +37,10 @@ internal sealed class TopicAssignmentConfiguration : EntityTypeConfigurationBase
         builder.Property(x => x.StartDate).IsRequired();
         builder.Property(x => x.EndDate);
         builder.Property(x => x.TopicStrandId);
-        builder.Property(x => x.TopicLessonId);
 
         builder.HasOne<TopicStrand>()
             .WithMany()
             .HasForeignKey(x => x.TopicStrandId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        builder.HasOne<TopicLesson>()
-            .WithMany()
-            .HasForeignKey(x => x.TopicLessonId)
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasIndex(x => new { x.TenantId, x.StartDate, x.EndDate })

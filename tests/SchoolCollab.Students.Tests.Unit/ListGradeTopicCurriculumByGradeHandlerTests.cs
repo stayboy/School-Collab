@@ -41,12 +41,13 @@ public class ListGradeTopicCurriculumByGradeHandlerTests
         s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, engId, Today()));
         await s.Db.SaveChangesAsync();
 
-        // Mathematics: 2 strands + 3 lessons (lessons topic-scoped).
-        s.Db.TopicStrands.Add(TopicStrand.Create(mathId, "Numbers", null, 1));
+        // Mathematics: 2 strands + 3 lessons (lessons = parented strands).
+        var numbers = TopicStrand.Create(mathId, "Numbers", null, 1);
+        s.Db.TopicStrands.Add(numbers);
         s.Db.TopicStrands.Add(TopicStrand.Create(mathId, "Algebra", null, 2));
-        s.Db.TopicLessons.Add(TopicLesson.Create(mathId, "Add", null, null, null, 1));
-        s.Db.TopicLessons.Add(TopicLesson.Create(mathId, "Subtract", null, null, null, 2));
-        s.Db.TopicLessons.Add(TopicLesson.Create(mathId, "Multiply", null, null, null, 3));
+        s.Db.TopicStrands.Add(TopicStrand.Create(mathId, "Add", null, 1, numbers.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(mathId, "Subtract", null, 2, numbers.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(mathId, "Multiply", null, 3, numbers.Id));
         // English: 1 strand, 0 lessons.
         s.Db.TopicStrands.Add(TopicStrand.Create(engId, "Reading", null, 1));
         await s.Db.SaveChangesAsync();

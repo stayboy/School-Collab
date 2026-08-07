@@ -48,7 +48,6 @@ public sealed class ListGradeTopicAssignmentsHandler(
                     a.StartDate,
                     a.EndDate,
                     a.TopicStrandId,
-                    a.TopicLessonId,
                     a.CreatedAt,
                     a.UpdatedAt)).ToArray();
             },

@@ -13,7 +13,7 @@ public sealed class UpdateTopicAssignmentTagsHandler(StudentsDbContext db) : ICo
         var assignment = await db.TopicAssignments.FindAsync(new object[] { command.AssignmentId }, ct);
         if (assignment == null) throw new KeyNotFoundException($"TopicAssignment {command.AssignmentId} not found.");
 
-        assignment.UpdateTags(command.TopicStrandId, command.TopicLessonId);
+        assignment.UpdateTags(command.TopicStrandId);
         await db.SaveChangesAsync(ct);
 
         return assignment switch
@@ -21,11 +21,11 @@ public sealed class UpdateTopicAssignmentTagsHandler(StudentsDbContext db) : ICo
             GradeTopicAssignment grade => new TopicAssignmentDto(
                 grade.Id, "grade", grade.GradeLevelId, null,
                 grade.TopicId, grade.StartDate, grade.EndDate,
-                grade.TopicStrandId, grade.TopicLessonId, grade.CreatedAt, grade.UpdatedAt),
+                grade.TopicStrandId, grade.CreatedAt, grade.UpdatedAt),
             ActivityGroupTopicAssignment group => new TopicAssignmentDto(
                 group.Id, "activity_group", null, group.ActivityGroupId,
                 group.TopicId, group.StartDate, group.EndDate,
-                group.TopicStrandId, group.TopicLessonId, group.CreatedAt, group.UpdatedAt),
+                group.TopicStrandId, group.CreatedAt, group.UpdatedAt),
             _ => throw new InvalidOperationException($"Unknown topic assignment subtype '{assignment.GetType().Name}'.")
         };
     }

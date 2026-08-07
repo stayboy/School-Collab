@@ -17,7 +17,7 @@ internal sealed class GradeTopicAssignmentRepository(StudentsDbContext db)
             .Select(x => new TopicAssignmentDto(
                 x.Id, "grade", x.GradeLevelId, null, x.TopicId,
                 x.StartDate, x.EndDate,
-                x.TopicStrandId, x.TopicLessonId,
+                x.TopicStrandId,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 }

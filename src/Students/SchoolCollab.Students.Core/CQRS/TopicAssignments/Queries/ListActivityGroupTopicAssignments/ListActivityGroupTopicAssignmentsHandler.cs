@@ -45,7 +45,6 @@ public sealed class ListActivityGroupTopicAssignmentsHandler(
                     a.StartDate,
                     a.EndDate,
                     a.TopicStrandId,
-                    a.TopicLessonId,
                     a.CreatedAt,
                     a.UpdatedAt)).ToArray();
             },

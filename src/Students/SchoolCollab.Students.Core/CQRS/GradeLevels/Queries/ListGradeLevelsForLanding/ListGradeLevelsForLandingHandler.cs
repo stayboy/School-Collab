@@ -92,13 +92,13 @@ public sealed class ListGradeLevelsForLandingHandler(
                 //    IN-list, keeping the SQL simple and portable.
                 var strandTopicIds = await db.TopicStrands
                     .IgnoreQueryFilters(new[] { "Tenant" })
-                    .Where(ts => ts.TenantId == tenantId)
+                    .Where(ts => ts.TenantId == tenantId && ts.ParentStrandId == null)
                     .AsNoTracking()
                     .Select(ts => ts.TopicId)
                     .ToArrayAsync(ct);
-                var lessonTopicIds = await db.TopicLessons
+                var lessonTopicIds = await db.TopicStrands
                     .IgnoreQueryFilters(new[] { "Tenant" })
-                    .Where(tl => tl.TenantId == tenantId)
+                    .Where(tl => tl.TenantId == tenantId && tl.ParentStrandId != null)
                     .AsNoTracking()
                     .Select(tl => tl.TopicId)
                     .ToArrayAsync(ct);

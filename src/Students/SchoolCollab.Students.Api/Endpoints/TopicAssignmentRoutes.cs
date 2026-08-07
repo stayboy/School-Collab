@@ -64,7 +64,7 @@ public static class TopicAssignmentRoutes
         {
             try
             {
-                var result = await handler.HandleAsync(new UpdateTopicAssignmentTags(id, req.TopicStrandId, req.TopicLessonId), ct);
+                var result = await handler.HandleAsync(new UpdateTopicAssignmentTags(id, req.TopicStrandId), ct);
                 return Results.Ok(result);
             }
             catch (KeyNotFoundException)
@@ -93,4 +93,4 @@ public static class TopicAssignmentRoutes
     }
 }
 
-internal record UpdateTopicAssignmentTagsRequest(Guid? TopicStrandId, Guid? TopicLessonId);
+internal record UpdateTopicAssignmentTagsRequest(Guid? TopicStrandId);

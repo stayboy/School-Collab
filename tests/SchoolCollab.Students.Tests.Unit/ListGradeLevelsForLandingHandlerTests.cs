@@ -212,13 +212,18 @@ public class ListGradeLevelsForLandingHandlerTests
         s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topicB.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
 
         // 5 lessons on topic A, 2 lessons on topic B → LessonCount 7.
-        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 1", null, null, null, 1));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 2", null, null, null, 2));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 3", null, null, null, 3));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 4", null, null, null, 4));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "Lesson 5", null, null, null, 5));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topicB.Id, "Lesson A", null, null, null, 1));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topicB.Id, "Lesson B", null, null, null, 2));
+        // A lesson is a strand with a parent; each needs a root strand to parent it.
+        var strandA = TopicStrand.Create(topicA.Id, "Strand A", null, 1);
+        var strandB = TopicStrand.Create(topicB.Id, "Strand B", null, 1);
+        s.Db.TopicStrands.Add(strandA);
+        s.Db.TopicStrands.Add(strandB);
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Lesson 1", null, 1, strandA.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Lesson 2", null, 2, strandA.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Lesson 3", null, 3, strandA.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Lesson 4", null, 4, strandA.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Lesson 5", null, 5, strandA.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicB.Id, "Lesson A", null, 1, strandB.Id));
+        s.Db.TopicStrands.Add(TopicStrand.Create(topicB.Id, "Lesson B", null, 2, strandB.Id));
         await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
@@ -239,8 +244,9 @@ public class ListGradeLevelsForLandingHandlerTests
 
         // Archived topic: EndDate is yesterday.
         s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topic.Id, today.AddDays(-30), today.AddDays(-1)));
-        s.Db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Algebra", null, 1));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topic.Id, "Lesson 1", null, null, null, 1));
+        var strand = TopicStrand.Create(topic.Id, "Algebra", null, 1);
+        s.Db.TopicStrands.Add(strand);
+        s.Db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Lesson 1", null, 1, strand.Id));
         await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());
@@ -260,8 +266,9 @@ public class ListGradeLevelsForLandingHandlerTests
         var topic = Topic.Create(Guid.NewGuid(), "MATH", "Mathematics", 1);
         s.Db.Topics.Add(topic);
         s.Db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(glId, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
-        s.Db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Algebra", null, 1));
-        s.Db.TopicLessons.Add(TopicLesson.Create(topic.Id, "Lesson 1", null, null, null, 1));
+        var strand = TopicStrand.Create(topic.Id, "Algebra", null, 1);
+        s.Db.TopicStrands.Add(strand);
+        s.Db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Lesson 1", null, 1, strand.Id));
         await s.Db.SaveChangesAsync();
 
         var result = await NewHandler(s).HandleAsync(new ListGradeLevelsForLanding());

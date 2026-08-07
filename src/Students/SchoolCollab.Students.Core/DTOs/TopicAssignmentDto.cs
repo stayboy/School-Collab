@@ -15,7 +15,6 @@ public sealed record TopicAssignmentDto(
     DateOnly StartDate,
     DateOnly? EndDate,
     Guid? TopicStrandId,
-    Guid? TopicLessonId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 

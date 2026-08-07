@@ -10,28 +10,19 @@ public sealed class CreateTopicLessonHandler(StudentsDbContext db) : ICommandHan
 {
     public async Task<TopicLessonDto> HandleAsync(CreateTopicLesson command, CancellationToken ct = default)
     {
-        var lesson = TopicLesson.Create(
+        // A lesson is a strand that has a parent strand (strand-lesson-unification-plan.md).
+        var lesson = TopicStrand.Create(
             command.TopicId,
             command.Name,
             command.Description,
-            command.StartDate,
-            command.EndDate,
-            command.DisplayOrder);
+            command.DisplayOrder,
+            parentStrandId: command.StrandId,
+            startDate: command.StartDate,
+            endDate: command.EndDate);
 
-        db.TopicLessons.Add(lesson);
+        db.TopicStrands.Add(lesson);
         await db.SaveChangesAsync(ct);
 
-        return new TopicLessonDto(
-            lesson.Id,
-            lesson.TopicId,
-            lesson.StrandId,
-            lesson.Name,
-            lesson.Description,
-            lesson.StartDate,
-            lesson.EndDate,
-            lesson.IsOpenEnded,
-            lesson.DisplayOrder,
-            lesson.CreatedAt,
-            lesson.UpdatedAt);
+        return TopicLessonDto.FromStrand(lesson);
     }
 }

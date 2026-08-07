@@ -92,16 +92,15 @@ strand that has a parent strand**, so we use one entity.
 To keep every branch tip compiling + tests green, the foundation lands first as
 an additive, shippable step before the destructive merge:
 
-- **sl/1 — Additive data model (this PR).** Add nullable `ParentStrandId` (+ self-ref
-  FK), `StartDate`/`EndDate`/`IsOpenEnded` to `TopicStrand`. Migration 1 adds the
-  columns/index only. `TopicLesson` and `TopicLessonId` remain untouched — branch
-  is fully green.
-- **sl/2 — Merge (destructive).** Remove `TopicLesson` entity/config/table/DbSet,
-  drop `TopicLessonId` on the assignment bridge; retarget the lesson CQRS/routes to
-  parented `TopicStrand` rows (lesson = strand with a parent); curriculum counts
-  from one table. Migration 2 copies `subject_lessons` → parented `subject_strands`
-  (backfilling `TopicLessonId` → `TopicStrandId`) then drops `subject_lessons` and
-  the `TopicLessonId` column.
+- **sl/1 — Additive data model (DONE, PR #143).** Added nullable `ParentStrandId`
+  (+ self-ref FK), `StartDate`/`EndDate`/`IsOpenEnded` to `TopicStrand`. Migration 1
+  adds the columns/index only. `TopicLesson`/`TopicLessonId` untouched — fully green.
+- **sl/2 — Merge (DONE, this PR).** Removed `TopicLesson` entity/config/table/DbSet,
+  dropped `TopicLessonId` on the assignment bridge; retargeted the lesson CQRS/routes
+  to parented `TopicStrand` rows (lesson = strand with a parent); curriculum + landing
+  counts from one table. Migration 2 copies `subject_lessons` → parented
+  `subject_strands` (backfilling `TopicLessonId` → `TopicStrandId`) then drops
+  `subject_lessons` and the `TopicLessonId` column.
 - **sl/3 — CQRS + API polish.** Extend `CreateTopicStrand`/`UpdateTopicStrand` with
   optional `ParentStrandId` + validation (not self, same topic, root parent); add
   list filters; finalize DTO shape.
