@@ -153,6 +153,15 @@
                                 </ItemTemplate>
                             </SectionCard>
                         </div>
+
+                        @* ── Notification & Delivery card (nd/4) ─────────── *@
+                        <FluentCard class="detail-card notification-card">
+                            <div class="notification-title">
+                                <FluentIcon Icon="@(Icons.Regular.Size20.SlideText)" />
+                                <h3>Notification &amp; Delivery</h3>
+                            </div>
+                            <GradeNotificationPolicyEditor GradeLevelId="@Id" />
+                        </FluentCard>
                     }
                 </ChildContent>
                 <Fallback>
@@ -183,6 +192,9 @@
     .title-block { min-width: 0; }
     .page-title { margin: 0; font-size: 1.6rem; }
     .detail-card { margin-bottom: 1rem; }
+    .notification-card { padding: 1.25rem; }
+    .notification-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .notification-title h3 { margin: 0; font-size: 1.05rem; }
     /* ── Profile grid — stacked stat-card layout (label on top, value below)
        Mirrors the student-detail profile view (label small/muted/uppercase
        over the value), via the shared .profile-row/.profile-label/.profile-value

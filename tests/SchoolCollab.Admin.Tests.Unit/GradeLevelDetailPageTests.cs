@@ -135,12 +135,17 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", $"/students/grade-levels/{gradeId}/curriculum", HttpStatusCode.OK, curriculumJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
+        // Notification &amp; Delivery editor: no tenant default / no grade override.
+        handler.Map("GET", "/api/settings/notification-policy", HttpStatusCode.NoContent, "");
+        handler.Map("GET", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.NoContent, "");
+        handler.Map("PUT", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.OK, "");
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         Services.AddSingleton<AuthenticationStateProvider>(auth);
         var codedValuesClient = new CodedValuesApiClient(http);
         Services.AddSingleton(codedValuesClient);
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
+        Services.AddSingleton(new NotificationPolicyApiClient(http));
         Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
 
         return (handler, gradeId);
@@ -479,5 +484,18 @@ public class GradeLevelDetailPageTests : BunitContext
             "enrollment uses EnrollStudentRequest with PeriodId, GradeLevelId, StudentId");
         source.Should().Contain("ReloadStudentsAsync",
             "after enrollment, the students list is reloaded");
+    }
+
+    [TestMethod]
+    public void Detail_NotificationEditor_IsWired()
+    {
+        var source = ReadDetailSource();
+
+        source.Should().Contain("GradeNotificationPolicyEditor",
+            "the merged nd/4 feature hosts the per-grade notification & delivery editor on the grade detail page");
+        source.Should().Contain("notification-card",
+            "the editor is wrapped in a Notification & Delivery card below the section cards");
+        source.Should().Contain("Notification &amp; Delivery",
+            "the card is titled 'Notification & Delivery'");
     }
 }

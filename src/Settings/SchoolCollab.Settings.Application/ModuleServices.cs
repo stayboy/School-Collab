@@ -43,6 +43,11 @@ public static class ModuleServices
         services.AddHttpClient<EntityCodeRulesApiClient>(client =>
             client.BaseAddress = new Uri("https+http://settings-api"));
 
+        // NotificationPolicyApiClient (tenant-global default notification policy) —
+        // same settings-api base address. Spec notification-delivery-plan.md §4.
+        services.AddHttpClient<NotificationPolicyApiClient>(client =>
+            client.BaseAddress = new Uri("https+http://settings-api"));
+
         // VisibleTenantService: read tenant_id claim to decide whether the
         // signed-in user has a real tenant (used by the Edit page to gate
         // the per-tenant override UI). The Students module also registers

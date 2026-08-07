@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.Settings.Core.Data;
@@ -11,9 +12,11 @@ using SchoolCollab.Settings.Core.Data;
 namespace SchoolCollab.Settings.Core.Migrations
 {
     [DbContext(typeof(SettingsDbContext))]
-    partial class SettingsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260805151925_AddTenantNotificationPolicy")]
+    partial class AddTenantNotificationPolicy
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -148,12 +151,6 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("boolean")
                         .HasDefaultValue(false)
                         .HasColumnName("is_disabled");
-
-                    b.Property<bool>("IsProvisional")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("boolean")
-                        .HasDefaultValue(false)
-                        .HasColumnName("is_provisional");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -502,11 +499,6 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.Property<Guid>("GlobalCodedValueId")
                         .HasColumnType("uuid")
                         .HasColumnName("global_coded_value_id");
-
-                    b.Property<string>("OverriddenCode")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("overridden_code");
 
                     b.Property<string>("OverriddenDescription")
                         .HasMaxLength(1000)
