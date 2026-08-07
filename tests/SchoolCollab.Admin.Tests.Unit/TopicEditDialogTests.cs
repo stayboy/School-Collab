@@ -85,12 +85,24 @@ public class TopicEditDialogTests : BunitContext
             ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
         });
 
+    private static string StrandsJson(Guid strandId, string name) =>
+        JsonSerializer.Serialize(new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["id"] = strandId, ["topicId"] = Guid.NewGuid(), ["name"] = name,
+                ["description"] = (string?)null, ["displayOrder"] = 0,
+                ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            }
+        });
+
     [TestMethod]
     public async Task EditDialog_LoadsTopicName_AndRendersForm()
     {
         var topicId = Guid.NewGuid();
         var handler = new ScriptedHandler();
         handler.Map("GET", $"/students/topics/{topicId}", HttpStatusCode.OK, TopicJson(topicId, "Mathematics"));
+        handler.Map("GET", $"/students/topics/{topicId}/strands", HttpStatusCode.OK, "[]");
         Register(handler);
 
         var cut = Render<FluentDialogProvider>();
@@ -99,8 +111,13 @@ public class TopicEditDialogTests : BunitContext
             "Edit topic", DialogSize.Small);
 
         cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        // The dialog loads the topic name/code asynchronously on mount; wait for
+        // the resolved code (the StrandsEditor's own async load shares the render
+        // pipeline, so the topic load isn't synchronous with the form render).
+        cut.WaitForAssertion(
+            () => cut.Markup.Should().Contain("MATH", "the dialog loads the current topic code"),
+            TimeSpan.FromSeconds(5));
         cut.Markup.Should().Contain("Mathematics", "the dialog loads the current topic name");
-        cut.Markup.Should().Contain("MATH", "the dialog loads the current topic code");
         cut.Markup.Should().Contain("Display order");
         cut.Markup.Should().Contain("Description");
         cut.Markup.Should().Contain("Save");
@@ -119,6 +136,7 @@ public class TopicEditDialogTests : BunitContext
         var handler = new ScriptedHandler();
         handler.Map("GET", $"/students/topics/{topicId}", HttpStatusCode.OK, TopicJson(topicId, "Mathematics", cvId));
         handler.Map("GET", $"/api/coded-values/{cvId}", HttpStatusCode.OK, CodedValueJson(cvId, "Algebra", "ALG", "Algebra subject"));
+        handler.Map("GET", $"/students/topics/{topicId}/strands", HttpStatusCode.OK, "[]");
         Register(handler);
 
         var cut = Render<FluentDialogProvider>();
@@ -133,6 +151,34 @@ public class TopicEditDialogTests : BunitContext
             () => cut.Markup.Should().Contain("ALG", "the dialog loads the resolved CodedValue code"),
             TimeSpan.FromSeconds(5));
         cut.Markup.Should().Contain("Algebra", "the dialog shows the resolved CodedValue name");
+
+        var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
+        cancelButton.Click();
+        var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
+        result.Should().BeNull("cancelling closes the dialog with no result");
+    }
+
+    [TestMethod]
+    public async Task EditDialog_RendersStrandsEditor_AndLoadsStrands()
+    {
+        var topicId = Guid.NewGuid();
+        var strandId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map("GET", $"/students/topics/{topicId}", HttpStatusCode.OK, TopicJson(topicId, "Mathematics"));
+        handler.Map("GET", $"/students/topics/{topicId}/strands", HttpStatusCode.OK, StrandsJson(strandId, "Number & Operations"));
+        Register(handler);
+
+        var cut = Render<FluentDialogProvider>();
+        var task = DialogService.ShowShellDialogAsync<TopicEditDialog, TopicEditDialog.TopicEditModel, TopicDto>(
+            new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
+            "Edit topic", DialogSize.Large);
+
+        // The strands section + add affordance render on mount (deterministic),
+        // independent of the async strand-load result. The StrandsEditor's own
+        // load/CRUD is covered by its dedicated tests.
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        cut.Markup.Should().Contain("Strands (", "the topic edit dialog embeds the strands editor");
+        cut.Markup.Should().Contain("New Strand", "the strands editor offers an add affordance");
 
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
         cancelButton.Click();
