@@ -138,7 +138,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
-            TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -166,7 +166,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
-            TenantProvider(), new FakeBroadcaster(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), new FakeBroadcaster(), new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -293,7 +293,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
-            TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -386,7 +386,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
-            TenantProvider(), broadcaster, Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         // Select only the guardian contact (spec §8).
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id, new[] { ContactGuardian }));

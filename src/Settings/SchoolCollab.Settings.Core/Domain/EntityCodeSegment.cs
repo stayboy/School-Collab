@@ -46,6 +46,11 @@ public sealed class EntityCodeSegment
     public string? LastPrefix { get; private set; }
     public string? LastPeriodBucket { get; private set; }
 
+    // ── Transient generation-time state (NOT persisted) ──
+    // Set by EntityCodeRule.GenerateNext / the generator when a WordInitials
+    // segment needs the entity display name to derive its initials.
+    internal string? NameHint { get; set; }
+
     /// <summary>Factory for a Fixed segment.</summary>
     public static EntityCodeSegment Fixed(
         int index, string? role, string fixedText, string suffix = "")
@@ -103,8 +108,8 @@ public sealed class EntityCodeSegment
     /// </summary>
     public string Advance(DateTimeOffset now)
     {
-        if (Type == SegmentType.Fixed)
-            return FixedText + Suffix;
+        if (Type == SegmentType.Fixed || Type == SegmentType.WordInitials)
+            return Render();
 
         var bucket = ResetPeriod.ComputeBucket(now);
         if (bucket != LastPeriodBucket)
@@ -157,6 +162,7 @@ public sealed class EntityCodeSegment
     public string Render() => Type switch
     {
         SegmentType.Fixed => FixedText + Suffix,
+        SegmentType.WordInitials => WordInitialsFromName(NameHint),
         SegmentType.NumericSequence => Prefix + LastSequence.ToString($"D{MinWidth}") + Suffix,
         SegmentType.AlphabeticSequence => Prefix + (LastPrefix ?? "") + Suffix,
         SegmentType.AlphanumericSequence => (LastPrefix ?? Prefix ?? "A") + LastSequence.ToString($"D{MinWidth}") + Suffix,
@@ -204,6 +210,7 @@ public sealed class EntityCodeSegment
         return Type switch
         {
             SegmentType.Fixed => fixedText + suffix,
+            SegmentType.WordInitials => WordInitialsFromName(NameHint),
             SegmentType.NumericSequence => prefix + LastSequence.ToString($"D{minWidth}") + suffix,
             SegmentType.AlphabeticSequence => prefix + (LastPrefix ?? "") + suffix,
             SegmentType.AlphanumericSequence => (LastPrefix ?? prefix ?? "A") + LastSequence.ToString($"D{minWidth}") + suffix,
@@ -241,6 +248,37 @@ public sealed class EntityCodeSegment
 
     /// <summary>The maximum alphabetic prefix. Defaults to <c>"Z"</c>.</summary>
     private string MaxAlphaValue => string.IsNullOrWhiteSpace(UpperLimit) ? "Z" : UpperLimit!;
+
+    /// <summary>
+    /// Derives the initials/prefix for a <see cref="SegmentType.WordInitials"/>
+    /// segment from the entity's display name (tcv/2).
+    /// <list type="bullet">
+    ///   <item>Multi-word: the first letter of every significant word ("computer
+    ///   science" → <c>CS</c>).</item>
+    ///   <item>Single word: the first two letters ("Mathematics" → <c>MA</c>).</item>
+    ///   <item>Articles/prepositions "and", "of", "the" are skipped.</item>
+    /// </list>
+    /// Returns an empty string when the name is blank or yields no initials.
+    /// </summary>
+    private static string WordInitialsFromName(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name))
+            return string.Empty;
+
+        var skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "and", "of", "the" };
+        var words = name
+            .Split(new[] { ' ', '\t', '-', '_', '/' }, StringSplitOptions.RemoveEmptyEntries)
+            .Where(w => !skip.Contains(w))
+            .ToList();
+
+        if (words.Count == 0)
+            return string.Empty;
+
+        if (words.Count == 1)
+            return new string(words[0].Take(2).ToArray()).ToUpperInvariant();
+
+        return new string(words.Select(w => char.ToUpperInvariant(w[0])).ToArray());
+    }
 
     private string Describe() =>
         $"EntityCodeSegment {Id} (index {Index}, type {Type}) hit its upper limit '{UpperLimit}'.";

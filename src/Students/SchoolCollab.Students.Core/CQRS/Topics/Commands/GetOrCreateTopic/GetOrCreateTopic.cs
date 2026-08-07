@@ -17,6 +17,6 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Commands.GetOrCreateTopic;
 public sealed record GetOrCreateTopic(
     Guid GradeLevelId,
     Guid CodedValueId,
-    string Code,
+    string? Code,
     string Name,
     int DisplayOrder) : ICommand;

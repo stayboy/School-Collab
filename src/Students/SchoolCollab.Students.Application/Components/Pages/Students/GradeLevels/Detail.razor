@@ -1,0 +1,811 @@
+@page "/students/grade-levels/{Id:guid}"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Students
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using TeacherWithRoleDto = SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
+@inject NavigationManager Nav
+@inject ILogger<Detail> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<PageTitle>Grade Level — @(_grade?.Name ?? "Loading…")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <FluentStack Orientation="Orientation.Vertical" class="page-container">
+            <TenantGate>
+                <ChildContent>
+                    @if (_loading)
+                    {
+                        <div class="spinner-container"><FluentProgressRing /></div>
+                    }
+                    else if (!string.IsNullOrEmpty(_error))
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                        <div class="mt-3">
+                            <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to grade levels</FluentButton>
+                        </div>
+                    }
+                    else if (_grade is null)
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Warning">Grade level not found.</FluentMessageBar>
+                        <div class="mt-3">
+                            <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back to grade levels</FluentButton>
+                        </div>
+                    }
+                    else
+                    {
+                        @* ── Title row ─────────────────────────────────────── *@
+                        <div class="title-row">
+                            <div class="title-block">
+                                <h1 class="page-title">@_grade.Name</h1>
+                            </div>
+                            <RowActionsMenu AriaLabel="Actions"
+                                            UseMenuService="false"
+                                            Actions="@BuildGradeActions()" />
+                        </div>
+
+                        @* ── Overview card ─────────────────────────────────── *@
+                        <FluentCard class="detail-card">
+                            <div class="profile-grid">
+                                <FieldDisplay Label="Name">@_grade.Name</FieldDisplay>
+                                <FieldDisplay Label="Age range">@FormatAgeRange(_grade.MinAge, _grade.MaxAge)</FieldDisplay>
+                                <FieldDisplay Label="Gender">@(_genderName ?? "—")</FieldDisplay>
+                                <FieldDisplay Label="Enrollment">
+                                    <FluentBadge Appearance="@(_grade.IsBlockedFromEnrollment ? Appearance.Neutral : Appearance.Accent)">
+                                        @(_grade.IsBlockedFromEnrollment ? "Blocked" : "Allowed")
+                                    </FluentBadge>
+                                </FieldDisplay>
+                                <FieldDisplay Label="Students">
+                                    <FluentAnchor Appearance="Appearance.Lightweight"
+                                                  Href="@($"/students?gradeLevelId={_grade.Id}")">
+                                        @_grade.StudentCount students
+                                    </FluentAnchor>
+                                </FieldDisplay>
+                            </div>
+                        </FluentCard>
+
+                        @* ── Section cards (shared component) ──────────────── *@
+                        <div class="section-cards">
+                            @* Subjects/Curriculum card *@
+                            <SectionCard Title="Subjects/Curriculum"
+                                         Icon="@FluentIcons.Book"
+                                         Count="@(_curriculum?.Length ?? 0)"
+                                         OnAddClick="OpenTopicsDialogAsync"
+                                         OnViewAllClick="OpenTopicsDialogAsync"
+                                         ViewAllText="View all subjects"
+                                         Items="@(_curriculum ?? [])"
+                                         EmptyMessage="No subjects assigned to this curriculum yet."
+                                         Loading="@(_curriculum is null)">
+                                <ItemTemplate Context="item">
+                                    @{
+                                        var t = (GradeTopicCurriculumDto)item;
+                                    }
+                                    <div class="section-card__item">
+                                        <div class="section-card__item-main">
+                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="item-name"
+                                                          OnClick="() => OpenStrandsAsync(t)" Title="View strands">
+                                                @t.Name
+                                            </FluentAnchor>
+                                            <div class="item-meta">
+                                                <span class="item-meta__count" title="@t.StrandCount strands">@t.StrandCount strands</span>
+                                                <span class="item-meta__separator" aria-hidden="true">|</span>
+                                                <span class="item-meta__count" title="@t.LessonCount lessons">@t.LessonCount lessons</span>
+                                            </div>
+                                        </div>
+                                        <RowActionsMenu AriaLabel="@($"Actions for {t.Name}")"
+                                                        UseMenuService="false"
+                                                        Actions="@BuildTopicRowActions(t)" />
+                                    </div>
+                                </ItemTemplate>
+                            </SectionCard>
+
+                            @* Teachers card *@
+                            <SectionCard Title="Teachers"
+                                         Icon="@FluentIcons.People"
+                                         Count="@(_teachers?.Length ?? 0)"
+                                         OnAddClick="OpenTeachersDialogAsync"
+                                         OnViewAllClick="OpenTeachersDialogAsync"
+                                         ViewAllText="View all teachers"
+                                         Items="@(_teachers ?? [])"
+                                         EmptyMessage="No teachers linked to this grade yet."
+                                         Loading="@(_teachers is null)">
+                                <ItemTemplate Context="item">
+                                    @{
+                                        var t = (TeacherWithRoleDto)item;
+                                    }
+                                    <a class="section-card__item" href="@($"/students/teachers/{t.Id}")">
+                                        <span class="item-main">@(t.TitleCodedValueId is { } tid && _salutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@t.FirstName @t.LastName</span>
+                                        <span class="item-meta">@(t.TeacherRoleCodedValueId is { } rid && _roleNames.TryGetValue(rid, out var r) ? r : "No role")</span>
+                                    </a>
+                                </ItemTemplate>
+                            </SectionCard>
+
+                            @* Students card *@
+                            <SectionCard Title="Students"
+                                         Icon="@FluentIcons.Person"
+                                         Count="@(_students?.Length ?? 0)"
+                                         AddTitle="Add student"
+                                         AddAriaLabel="Add student"
+                                         OnAddClick="OpenAddStudentsAsync"
+                                         ViewAllNavigationUrl="@($"/students?gradeLevelId={Id}")"
+                                         ViewAllText="View all students"
+                                         Items="@(_students ?? [])"
+                                         EmptyMessage="No active students in this grade for the current period."
+                                         ErrorMessage="@_studentsError"
+                                         Loading="@(_students is null)">
+                                <ItemTemplate Context="item">
+                                    @{
+                                        var st = (StudentDto)item;
+                                    }
+                                    <a class="section-card__item" href="@($"/students/{st.Id}")">
+                                        <span class="item-main">@st.FirstName @st.LastName</span>
+                                        <span class="item-meta">@GetStudentDemographics(st)</span>
+                                    </a>
+                                </ItemTemplate>
+                            </SectionCard>
+                        </div>
+
+                        @* ── Notification & Delivery card (nd/4) ─────────── *@
+                        <FluentCard class="detail-card notification-card">
+                            <div class="notification-title">
+                                <FluentIcon Icon="@(Icons.Regular.Size20.SlideText)" />
+                                <h3>Notification &amp; Delivery</h3>
+                            </div>
+                            <GradeNotificationPolicyEditor GradeLevelId="@Id" />
+                        </FluentCard>
+                    }
+                </ChildContent>
+                <Fallback>
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
+                    </FluentMessageBar>
+                </Fallback>
+            </TenantGate>
+
+            <div class="action-bar">
+                <FluentButton Appearance="Appearance.Outline" OnClick="Back">Back to Grade Levels</FluentButton>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+            }
+        </FluentStack>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+<style>
+    .muted { color: var(--neutral-foreground-hint); }
+    .title-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+    .title-block { min-width: 0; }
+    .page-title { margin: 0; font-size: 1.6rem; }
+    .detail-card { margin-bottom: 1rem; }
+    .notification-card { padding: 1.25rem; }
+    .notification-title { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .notification-title h3 { margin: 0; font-size: 1.05rem; }
+    /* ── Profile grid — stacked stat-card layout (label on top, value below)
+       Mirrors the student-detail profile view (label small/muted/uppercase
+       over the value), via the shared .profile-row/.profile-label/.profile-value
+       class names. Auto-fit grid so cells reflow on narrow viewports. */
+    .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px 24px; }
+    /* Student-count link: the lightweight FluentAnchor carries internal control
+       padding that pushes the text off the label's left edge — strip it so the
+       value aligns with the label above (student-detail profile format). */
+    .profile-value fluent-anchor::part(control) { padding: 0; }
+    .enrollment-inline { display: flex; align-items: center; gap: 0.5rem; }
+    .count-chip { background: var(--neutral-fill-secondary); border-radius: 999px; padding: 2px 10px; font-size: 0.85em; margin-right: 0.25rem; }
+    .section-header { display: flex; align-items: center; justify-content: space-between; margin: 1rem 0 0.5rem; }
+    .section-header h3 { margin: 0; }
+    .picker-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .topic-list { display: flex; flex-direction: column; gap: 0.5rem; }
+    .topic-card { border: 1px solid var(--neutral-stroke-rest); border-radius: 8px; overflow: hidden; }
+    .topic-card-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; }
+    .topic-expander { background: none; border: none; cursor: pointer; display: inline-flex; align-items: center; padding: 0; color: var(--neutral-foreground); }
+    .expander-mark { display: inline-block; width: 14px; text-align: center; font-size: 0.9em; }
+    .topic-name { display: block; font-weight: 600; }
+    .topic-code { display: block; color: var(--neutral-foreground-hint); font-size: 0.82em; margin-top: 1px; }
+    .topic-actions { margin-left: auto; }
+    .topic-card-body { border-top: 1px solid var(--neutral-stroke-rest); padding: 0.75rem; }
+    .topic-chips { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; }
+    .chip { display: inline-flex; align-items: center; gap: 0.3rem; background: var(--neutral-fill-secondary); border-radius: 999px; padding: 2px 8px; font-size: 0.82em; cursor: pointer; }
+    .chip-x { opacity: 0.6; }
+    .action-bar { margin-top: 1rem; }
+    .teachers-grid { width: 100%; }
+    .topics-grid { width: 100%; }
+    .topic-actions-col { width: 1%; white-space: nowrap; }
+    .dialog-footer { display: flex; justify-content: flex-end; border-top: 1px solid var(--neutral-stroke-rest); padding-top: 0.75rem; margin-top: 0.75rem; }
+    .topic-dialog { min-width: 480px; }
+
+    /* ── Section cards layout: 3-column row, stacking below 1100px ───────
+       CSS is now in SectionCard.razor; this keeps only the grid wrapper. */
+    .section-cards {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 1.25rem;
+        margin-top: 1.5rem;
+        align-items: stretch;
+    }
+    /* Keep all three cards in one horizontal row until space is really tight. */
+    @@media (max-width: 1100px) {
+        .section-cards {
+            grid-template-columns: 1fr;
+        }
+    }
+    /* Item styles (used inside SectionCard templates) */
+    .section-card__item {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.5rem 1rem;
+        background: none;
+        border: none;
+        text-align: left;
+        width: 100%;
+        color: var(--neutral-foreground-rest, #1b1b1b);
+        text-decoration: none;
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        transition: background-color 0.15s ease, border-color 0.15s ease;
+        font: inherit;
+        -webkit-appearance: none;
+        appearance: none;
+    }
+    .section-card__item-main {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+    }
+    .section-card__item:hover {
+        background: var(--neutral-fill-secondary-hover, rgba(0,0,0,0.05));
+        border-left-color: var(--accent-fill-rest, #0f6cbd);
+    }
+    .item-name { font: inherit; font-weight: 500; line-height: 1.3; width: 100%; display: inline-flex; }
+    .item-name::part(control) { padding: 0; justify-content: flex-start; }
+    .item-main { font-weight: 500; line-height: 1.3; }
+    .item-meta { color: var(--neutral-foreground-hint, #6b6b6b); font-size: 0.82em; display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+    .item-meta__count { white-space: nowrap; }
+    .item-meta__separator { color: var(--neutral-stroke-rest, rgba(0,0,0,0.3)); user-select: none; }
+</style>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private GradeLevelDto? _grade;
+    private string? _genderName;
+    private string? _error;
+    private bool _loading = true;
+    private bool _isRealTenant;
+    private bool _savingEnrollment;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    // ── Topics ──────────────────────────────────────────────────────────────
+    private List<AssignedTopic> _assignedTopics = new();
+    private GradeTopicCurriculumDto[]? _curriculum;
+    private Dictionary<Guid, TopicDto> _catalog = new();
+    private string? _topicsError;
+
+    // ── Teachers / Students ────────────────────────────────────────────────
+    private TeacherWithRoleDto[]? _teachers;
+    private StudentDto[]? _students;
+    private TeacherDto[]? _allTeachers;
+    private readonly Dictionary<Guid, string> _salutationNames = new();
+    private readonly Dictionary<Guid, string> _genderNames = new();
+    private readonly Dictionary<Guid, string> _levelNames = new();
+    private readonly Dictionary<Guid, string> _qualificationNames = new();
+    private readonly Dictionary<Guid, string> _roleNames = new();
+    private string? _teachersError;
+    private string? _studentsError;
+
+    private sealed class AssignedTopic
+    {
+        public Guid TopicId { get; init; }
+        public Guid AssignmentId { get; init; }
+        public string Name { get; init; } = string.Empty;
+        public string? Code { get; init; }
+    }
+
+    private TopicDto[] _unassignedTopics =>
+        _catalog.Values
+            .Where(t => _assignedTopics.All(a => a.TopicId != t.Id))
+            .OrderBy(t => t.Name)
+            .ToArray();
+
+    private TeacherDto[] _unlinkedTeachers =>
+        (_allTeachers ?? [])
+            .Where(t => _teachers is null || _teachers.All(x => x.Id != t.Id))
+            .OrderBy(t => t.FirstName)
+            .ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loadCts?.Cancel();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+        _loading = true;
+        StateHasChanged();
+
+        try
+        {
+            var scope = await VisibleTenant.GetScopeAsync();
+            _isRealTenant = scope.IsRealTenant;
+            if (!_isRealTenant)
+            {
+                _loading = false;
+                return;
+            }
+
+            var gradeTask = Api.GetGradeLevelByIdAsync(Id, ct);
+            var catalogTask = Api.ListTopicsAsync(ct);
+            var teachersTask = Api.ListTeachersForGradeLevelAsync(Id, ct);
+            var allTeachersTask = Api.ListTeachersAsync(ct);
+            var studentsTask = Api.ListStudentsByGradeAsync(Id, ct: ct);
+            await Task.WhenAll(gradeTask, catalogTask, teachersTask, allTeachersTask, studentsTask);
+
+            _grade = gradeTask.Result;
+            _catalog = (catalogTask.Result ?? []).ToDictionary(t => t.Id);
+            _teachers = teachersTask.Result ?? [];
+            _allTeachers = allTeachersTask.Result ?? [];
+            _students = studentsTask.Result ?? [];
+
+            if (_teachers is { Length: > 0 })
+            {
+                await EnrichTeacherNamesAsync(ct);
+            }
+
+            if (_grade is null) return;
+
+            if (_grade.AllowedGenderCodedValueId is { } gid)
+            {
+                _genderName = (await CodedValuesApi.GetByIdAsync(gid, ct))?.Name;
+            }
+
+            var assignments = await Api.ListGradeTopicsByGradeAsync(Id, ct: ct) ?? [];
+            _assignedTopics = assignments
+                .Select(a => new AssignedTopic
+                {
+                    TopicId = a.TopicId,
+                    AssignmentId = a.Id,
+                    Name = _catalog.TryGetValue(a.TopicId, out var t) ? t.Name : a.TopicId.ToString()[..8],
+                    Code = _catalog.TryGetValue(a.TopicId, out var tc) ? tc.Code : null,
+                })
+                .OrderBy(t => t.Name)
+                .ToList();
+            _curriculum = await Api.ListGradeTopicCurriculumByGradeAsync(Id, ct: ct) ?? [];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load grade level {Id}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            if (!_disposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private static string FormatAgeRange(int? min, int? max)
+    {
+        if (min.HasValue && max.HasValue) return $"{min}–{max}";
+        if (min.HasValue) return $"{min}+";
+        if (max.HasValue) return $"≤{max}";
+        return "Any age";
+    }
+
+    private static string GetStudentDemographics(StudentDto s)
+    {
+        var gender = string.IsNullOrWhiteSpace(s.GenderName) ? "—" : s.GenderName;
+        var age = s.Age.HasValue ? s.Age.Value.ToString() : "—";
+        return $"{gender}, {age}";
+    }
+
+    /// <summary>
+    /// Resolves the coded-value display names (salutation, gender, level of
+    /// education, qualifications) for the loaded teachers in one round-trip, so
+    /// the grid can render them without per-cell lookups. The Students DB has no
+    /// CodedValue table — names come from the Admin coded-values API (mirrors
+    /// EnrichStudentsAsync).
+    /// </summary>
+    private async Task EnrichTeacherNamesAsync(CancellationToken ct)
+    {
+        var ids = new List<Guid>();
+        foreach (var t in _teachers!)
+        {
+            if (t.TitleCodedValueId is { } ti) ids.Add(ti);
+            if (t.GenderCodedValueId is { } gi) ids.Add(gi);
+            if (t.LevelOfEducationCodedValueId is { } li) ids.Add(li);
+            foreach (var q in t.QualificationCodedValueIds ?? []) ids.Add(q);
+            if (t.TeacherRoleCodedValueId is { } ri) ids.Add(ri);
+        }
+        if (ids.Count == 0) return;
+
+        try
+        {
+            var resolved = await CodedValuesApi.GetByIdsAsync(ids, ct) ?? [];
+            foreach (var cv in resolved)
+            {
+                if (cv.Id == Guid.Empty) continue;
+                if (cv.Name is null) continue;
+                if (_teachers!.Any(x => x.TitleCodedValueId == cv.Id)) _salutationNames[cv.Id] = cv.Name;
+                if (_teachers!.Any(x => x.GenderCodedValueId == cv.Id)) _genderNames[cv.Id] = cv.Name;
+                if (_teachers!.Any(x => x.LevelOfEducationCodedValueId == cv.Id)) _levelNames[cv.Id] = cv.Name;
+                if (_teachers!.Any(x => (x.QualificationCodedValueIds ?? []).Contains(cv.Id))) _qualificationNames[cv.Id] = cv.Name;
+                if (_teachers!.Any(x => x.TeacherRoleCodedValueId == cv.Id)) _roleNames[cv.Id] = cv.Name;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to resolve teacher coded-value names for grade {Id}", Id);
+            // Leave the name maps empty; the grid renders "—" for unresolved cells.
+        }
+    }
+
+    private void Back() => Nav.NavigateTo("/students/grade-levels");
+
+    /// <summary>
+    /// Builds the grade-level header "Actions" menu: Edit (navigate) and the
+    /// enrollment-block toggle. Positioned far-right of the title row via the
+    /// RowActionsMenu trigger.
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildGradeActions()
+    {
+        var blocked = _grade!.IsBlockedFromEnrollment;
+        return new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => Nav.NavigateTo($"/students/grade-levels/{Id}/edit"), FluentIcons.Edit),
+            RowAction.Separator(),
+            RowAction.Callback(
+                blocked ? "Allow enrollment" : "Block enrollment",
+                () => ToggleEnrollmentBlockedAsync(!blocked),
+                blocked ? FluentIcons.Checkmark : FluentIcons.Dismiss),
+        };
+    }
+
+    private async Task ToggleEnrollmentBlockedAsync(bool blocked)
+    {
+        if (_disposed || _grade is null || _savingEnrollment) return;
+        _savingEnrollment = true;
+        try
+        {
+            await Api.SetGradeLevelEnrollmentBlockedAsync(_grade.Id, blocked);
+            if (_disposed) return;
+            _grade = _grade with { IsBlockedFromEnrollment = blocked };
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to set enrollment-blocked for grade {Id}", _grade.Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _savingEnrollment = false;
+        }
+    }
+
+    // ── Topics: assign / remove ─────────────────────────────────────────────
+    private async Task AssignTopicAsync(Guid topicId)
+    {
+        if (_disposed) return;
+        try
+        {
+            await Api.AssignGradeTopicAsync(
+                new AssignGradeTopicRequest(Id, topicId, DateOnly.FromDateTime(DateTime.UtcNow)));
+            if (_disposed) return;
+            await ReloadAssignedTopicsAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _topicsError = $"Could not assign topic: {ex.Message}";
+        }
+    }
+
+    private async Task OpenTopicsDialogAsync()
+    {
+        await DialogService.ShowReadonlyDialogAsync<GradeTopicsDialog>(
+            $"Subjects/Curriculum · {_grade!.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(GradeTopicsDialog.Topics), _curriculum ?? [] },
+                { nameof(GradeTopicsDialog.UnassignedTopics), _unassignedTopics },
+                { nameof(GradeTopicsDialog.OpenStrands), new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
+                { nameof(GradeTopicsDialog.OpenLessons), new Func<GradeTopicCurriculumDto, Task>(OpenLessonsAsync) },
+                { nameof(GradeTopicsDialog.OpenTeachers), new Func<GradeTopicCurriculumDto, Task>(OpenTopicTeachersAsync) },
+                { nameof(GradeTopicsDialog.Remove), new Func<Guid, Task>(RemoveTopicAsync) },
+                { nameof(GradeTopicsDialog.Assign), new Func<Guid, Task>(AssignTopicAsync) },
+                { nameof(GradeTopicsDialog.OnChanged), new Func<Task>(ReloadAssignedTopicsAsync) },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadAssignedTopicsAsync();
+    }
+
+    private async Task RemoveTopicAsync(Guid topicId)
+    {
+        if (_disposed) return;
+        var assignment = _assignedTopics.FirstOrDefault(a => a.TopicId == topicId);
+        if (assignment is null) return;
+        try
+        {
+            await Api.RemoveTopicAssignmentAsync(assignment.AssignmentId);
+            if (_disposed) return;
+            await ReloadAssignedTopicsAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _topicsError = $"Could not unassign topic: {ex.Message}";
+        }
+    }
+
+    private async Task ReloadAssignedTopicsAsync()
+    {
+        var assignments = await Api.ListGradeTopicsByGradeAsync(Id) ?? [];
+        _assignedTopics = assignments
+            .Select(a => new AssignedTopic
+            {
+                TopicId = a.TopicId,
+                AssignmentId = a.Id,
+                Name = _catalog.TryGetValue(a.TopicId, out var t) ? t.Name : a.TopicId.ToString()[..8],
+                Code = _catalog.TryGetValue(a.TopicId, out var tc) ? tc.Code : null,
+            })
+            .OrderBy(t => t.Name)
+            .ToList();
+        _curriculum = await Api.ListGradeTopicCurriculumByGradeAsync(Id) ?? [];
+    }
+
+    private async Task OpenStrandsAsync(GradeTopicCurriculumDto topic)
+    {
+        await DialogService.ShowReadonlyDialogAsync<TopicStrandsDialog>(
+            $"Strands · {topic.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TopicStrandsDialog.TopicId), topic.TopicId },
+                { nameof(TopicStrandsDialog.TopicName), topic.Name },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadAssignedTopicsAsync();
+    }
+
+    private async Task OpenLessonsAsync(GradeTopicCurriculumDto topic)
+    {
+        await DialogService.ShowReadonlyDialogAsync<TopicLessonsDialog>(
+            $"Lessons · {topic.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TopicLessonsDialog.TopicId), topic.TopicId },
+                { nameof(TopicLessonsDialog.TopicName), topic.Name },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadAssignedTopicsAsync();
+    }
+
+    // Open the topic edit dialog (rename / display order). Reload the
+    // curriculum on a non-null result so the card reflects the new name.
+    private async Task OpenTopicEditAsync(GradeTopicCurriculumDto topic)
+    {
+        var updated = await DialogService.ShowShellDialogAsync<
+            TopicEditDialog,
+            TopicEditDialog.TopicEditModel,
+            TopicDto>(
+            new TopicEditDialog.TopicEditModel { Id = topic.TopicId, Name = topic.Name },
+            title: $"Edit topic · {topic.Name}",
+            size: DialogSize.Small);
+        if (updated is not null && !_disposed)
+        {
+            await ReloadAssignedTopicsAsync();
+        }
+    }
+
+    // Row kebab for a Subjects-card preview item. The topic name itself is the
+    // primary affordance (opens Strands); the kebab holds the secondary actions.
+    private IReadOnlyList<RowAction> BuildTopicRowActions(GradeTopicCurriculumDto topic) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Lessons", () => OpenLessonsAsync(topic), FluentIcons.Book),
+            RowAction.Callback("Edit name", () => OpenTopicEditAsync(topic), FluentIcons.Edit),
+            RowAction.Callback("Teachers", () => OpenTopicTeachersAsync(topic), FluentIcons.People),
+            RowAction.Separator(),
+            RowAction.Callback("Remove", () => RemoveTopicAsync(topic.TopicId), FluentIcons.Delete),
+        };
+
+    // Open the topic-teachers dialog (assign teachers + their per-topic roles,
+    // grade-detail-rich-grids-plan.md §5). Await the reference so we refresh the
+    // Teachers tab (Assigned Topics chips) once the dialog closes.
+    private async Task OpenTopicTeachersAsync(GradeTopicCurriculumDto topic)
+    {
+        await DialogService.ShowReadonlyDialogAsync<TopicTeachersDialog>(
+            $"Teachers · {topic.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TopicTeachersDialog.TopicId), topic.TopicId },
+                { nameof(TopicTeachersDialog.TopicName), topic.Name },
+                { nameof(TopicTeachersDialog.AvailableTeachers), _teachers ?? [] },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadTeachersAsync();
+    }
+
+    // ── Teachers: link / remove / role / topics ────────────────────────────
+    private async Task LinkTeacherAsync(Guid teacherId)
+    {
+        if (_disposed) return;
+        try
+        {
+            await Api.LinkTeacherGradeLevelAsync(teacherId, Id);
+            if (_disposed) return;
+            await ReloadTeachersAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _teachersError = $"Could not link teacher: {ex.Message}";
+        }
+    }
+
+    private async Task OpenTeachersDialogAsync()
+    {
+        await DialogService.ShowReadonlyDialogAsync<GradeTeachersDialog>(
+            $"Teachers · {_grade!.Name}",
+            new Dictionary<string, object?>
+            {
+                { nameof(GradeTeachersDialog.Teachers), _teachers ?? [] },
+                { nameof(GradeTeachersDialog.UnlinkedTeachers), _unlinkedTeachers },
+                { nameof(GradeTeachersDialog.SalutationNames), _salutationNames },
+                { nameof(GradeTeachersDialog.GenderNames), _genderNames },
+                { nameof(GradeTeachersDialog.LevelNames), _levelNames },
+                { nameof(GradeTeachersDialog.QualificationNames), _qualificationNames },
+                { nameof(GradeTeachersDialog.Link), new Func<Guid, Task>(LinkTeacherAsync) },
+                { nameof(GradeTeachersDialog.RoleChanged), new Func<TeacherWithRoleDto, Guid?, Task>(OnRoleChangedAsync) },
+                { nameof(GradeTeachersDialog.UnlinkTopic), new Func<TeacherWithRoleDto, Guid, Task>(UnlinkTeacherTopicAsync) },
+                { nameof(GradeTeachersDialog.Remove), new Func<TeacherWithRoleDto, Task>(RemoveTeacherAsync) },
+                { nameof(GradeTeachersDialog.OnChanged), new Func<Task>(ReloadTeachersAsync) },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadTeachersAsync();
+    }
+
+    private async Task RemoveTeacherAsync(TeacherWithRoleDto teacher)
+    {
+        if (_disposed) return;
+        try
+        {
+            await Api.UnlinkTeacherGradeLevelAsync(teacher.Id, Id);
+            if (_disposed) return;
+            await ReloadTeachersAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _teachersError = $"Could not remove teacher: {ex.Message}";
+        }
+    }
+
+    private async Task OnRoleChangedAsync(TeacherWithRoleDto teacher, Guid? roleCodedValueId)
+    {
+        if (_disposed) return;
+        try
+        {
+            await Api.SetTeacherGradeLevelRoleAsync(teacher.Id, Id, roleCodedValueId);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _teachersError = $"Could not update role: {ex.Message}";
+        }
+    }
+
+    private async Task UnlinkTeacherTopicAsync(TeacherWithRoleDto teacher, Guid topicId)
+    {
+        if (_disposed) return;
+        try
+        {
+            await Api.UnlinkTeacherTopicAsync(teacher.Id, topicId);
+            if (_disposed) return;
+            await ReloadTeachersAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _teachersError = $"Could not unlink topic: {ex.Message}";
+        }
+    }
+
+    private async Task ReloadTeachersAsync()
+    {
+        try
+        {
+            _teachers = await Api.ListTeachersForGradeLevelAsync(Id) ?? [];
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _teachersError = $"Could not reload teachers: {ex.Message}";
+        }
+    }
+
+    // ── Students: add (enroll) ───────────────────────────────────────────────
+    private async Task OpenAddStudentsAsync()
+    {
+        if (_disposed || _grade is null) return;
+        _studentsError = null;
+        try
+        {
+            var periods = await Api.ListPeriodsAsync() ?? [];
+            var active = periods.FirstOrDefault(p => p.Status == "Active");
+            if (active is null)
+            {
+                _studentsError = "No active period to enroll students into.";
+                return;
+            }
+            var model = new StudentPickerModel(
+                ExcludedStudentIds: _students?.Select(s => s.Id) ?? [],
+                PeriodId: active.Id);
+            var selected = await DialogService.ShowShellDialogAsync<StudentPickerDialog, StudentPickerModel, StudentDto[]>(
+                model, $"Enroll students · {_grade.Name}", DialogSize.Large);
+            if (selected is null || selected.Length == 0) return;
+            foreach (var s in selected)
+            {
+                await Api.EnrollStudentAsync(new EnrollStudentRequest(
+                    s.Id, active.Id, Id, GradeStrandCodedValueId: null, DateOnly.FromDateTime(DateTime.UtcNow)));
+            }
+            if (_disposed) return;
+            await ReloadStudentsAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to enroll students in grade {Id}", Id);
+            _studentsError = $"Could not enroll students: {ex.Message}";
+        }
+    }
+
+    private async Task ReloadStudentsAsync()
+    {
+        try
+        {
+            _students = await Api.ListStudentsByGradeAsync(Id) ?? [];
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _studentsError = $"Could not reload students: {ex.Message}";
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

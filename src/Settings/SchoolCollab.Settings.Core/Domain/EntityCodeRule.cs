@@ -147,7 +147,7 @@ public sealed class EntityCodeRule : IEntity, IAuditableEntity, ISoftDeletableEn
     /// (in index order) and returns the concatenated generated code. Mutates
     /// per-segment sequence state; the caller persists the rule.
     /// </summary>
-    public string GenerateNext(DateTimeOffset now)
+    public string GenerateNext(DateTimeOffset now, string? nameHint = null)
     {
         var ordered = _segments.OrderBy(s => s.Index).ToList();
         if (ordered.Count == 0)
@@ -155,7 +155,10 @@ public sealed class EntityCodeRule : IEntity, IAuditableEntity, ISoftDeletableEn
 
         var parts = new List<string>(ordered.Count);
         foreach (var segment in ordered)
+        {
+            segment.NameHint = nameHint;
             parts.Add(segment.Advance(now));
+        }
 
         return string.Concat(parts);
     }
@@ -181,7 +184,8 @@ public sealed class EntityCodeRule : IEntity, IAuditableEntity, ISoftDeletableEn
     /// </summary>
     public string GenerateNextWithOverrides(
         DateTimeOffset now,
-        IReadOnlyDictionary<Guid, IReadOnlyDictionary<OverrideField, string>> overridesBySegment)
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<OverrideField, string>> overridesBySegment,
+        string? nameHint = null)
     {
         ArgumentNullException.ThrowIfNull(overridesBySegment);
 
@@ -229,6 +233,7 @@ public sealed class EntityCodeRule : IEntity, IAuditableEntity, ISoftDeletableEn
             foreach (var segment in ordered)
             {
                 overridesBySegment.TryGetValue(segment.Id, out var fields);
+                segment.NameHint = nameHint;
                 segment.Advance(now);
                 parts.Add(segment.RenderWithOverrides(fields));
             }

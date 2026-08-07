@@ -3,6 +3,7 @@ namespace SchoolCollab.Students.Core.DTOs;
 public sealed record StudentDto(
     Guid Id,
     string StudentNumber,
+    Guid? TitleCodedValueId,
     string FirstName,
     string LastName,
     DateOnly? DateOfBirth,

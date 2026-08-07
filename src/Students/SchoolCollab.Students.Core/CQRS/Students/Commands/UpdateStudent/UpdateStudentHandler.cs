@@ -27,7 +27,8 @@ public sealed class UpdateStudentHandler(
             command.FirstName,
             command.LastName,
             command.DateOfBirth,
-            command.GenderCodedValueId);
+            command.GenderCodedValueId,
+            command.TitleCodedValueId);
 
         try
         {

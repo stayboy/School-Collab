@@ -1,0 +1,183 @@
+@*
+    StrandsEditor - inline strands CRUD for a topic, shown inside the expanded
+    topic region of the Grade-Level Detail page (grade-level-detail-view-plan.md
+    §5 Tab 1). Self-contained: loads its strands on first render and manages
+    create / update / delete via the StudentsApiClient.
+*@
+@using SchoolCollab.Students.Application.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject ILogger<StrandsEditor> Logger
+
+<div class="editor-block">
+    <div class="editor-header">
+        <h4>Strands (@(_items?.Length ?? 0))</h4>
+        <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                      IconStart="@FluentIcons.Add" OnClick="ToggleNewForm">New Strand</FluentButton>
+    </div>
+
+    @if (_error is not null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_error</FluentMessageBar>
+    }
+    @if (_items is null)
+    {
+        <FluentProgressRing />
+    }
+    else if (_items.Length == 0)
+    {
+        <p class="muted">No strands yet.</p>
+    }
+    else
+    {
+        <div class="strand-list">
+            @foreach (var s in _items)
+            {
+                <div class="strand-row">
+                    @if (_editingId == s.Id)
+                    {
+                        <FluentTextField @bind-Value="_editName" Placeholder="Strand name" class="strand-input" />
+                        <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" OnClick="@(() => SaveEditAsync(s))">Save</FluentButton>
+                        <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelEdit">Cancel</FluentButton>
+                    }
+                    else
+                    {
+                        <span class="strand-name">@s.Name</span>
+                        <span class="strand-actions">
+                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.Edit" Title="Rename strand"
+                                          OnClick="@(() => StartEdit(s))" />
+                            <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                          IconStart="@FluentIcons.Delete" Title="Delete strand"
+                                          OnClick="@(() => DeleteAsync(s))" />
+                        </span>
+                    }
+                </div>
+            }
+        </div>
+    }
+
+    @if (_showNewForm)
+    {
+        <div class="new-form">
+            <FluentTextField @bind-Value="_newName" Placeholder="Strand name" class="strand-input" />
+            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+                          OnClick="CreateAsync" Disabled="@string.IsNullOrWhiteSpace(_newName)">Add</FluentButton>
+            <FluentButton Appearance="Appearance.Neutral" Size="ButtonSize.Small" OnClick="CancelNew">Cancel</FluentButton>
+        </div>
+    }
+</div>
+
+<style>
+    .editor-header { display: flex; align-items: center; justify-content: space-between; }
+    .editor-header h4 { margin: 0 0 0.25rem; }
+    .muted { color: var(--neutral-foreground-hint); }
+    .strand-list { display: flex; flex-direction: column; gap: 0.25rem; }
+    .strand-row { display: flex; align-items: center; gap: 0.5rem; }
+    .strand-name { font-weight: 500; }
+    .strand-actions { margin-left: auto; display: flex; align-items: center; }
+    .strand-input { max-width: 260px; }
+    .new-form { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public Guid TopicId { get; set; }
+    [Parameter, EditorRequired] public string TopicName { get; set; } = string.Empty;
+
+    private TopicStrandDto[]? _items;
+    private string? _error;
+    private bool _showNewForm;
+    private string _newName = string.Empty;
+    private Guid? _editingId;
+    private string _editName = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _items = await Api.ListTopicStrandsAsync(TopicId) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load strands for topic {TopicId}", TopicId);
+            _error = ex.Message;
+        }
+    }
+
+    private void ToggleNewForm()
+    {
+        _showNewForm = !_showNewForm;
+        _newName = string.Empty;
+        _error = null;
+    }
+
+    private void CancelNew()
+    {
+        _showNewForm = false;
+        _newName = string.Empty;
+    }
+
+    private async Task CreateAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newName)) return;
+        try
+        {
+            await Api.CreateTopicStrandAsync(new CreateTopicStrandRequest(TopicId, _newName.Trim()));
+            _showNewForm = false;
+            _newName = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private void StartEdit(TopicStrandDto strand)
+    {
+        _editingId = strand.Id;
+        _editName = strand.Name;
+        _error = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        _editName = string.Empty;
+    }
+
+    private async Task SaveEditAsync(TopicStrandDto strand)
+    {
+        if (string.IsNullOrWhiteSpace(_editName)) return;
+        try
+        {
+            await Api.UpdateTopicStrandAsync(strand.Id, new UpdateTopicStrandRequest(_editName.Trim(), strand.Description, strand.DisplayOrder));
+            _editingId = null;
+            _editName = string.Empty;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+
+    private async Task DeleteAsync(TopicStrandDto strand)
+    {
+        try
+        {
+            await Api.DeleteTopicStrandAsync(strand.Id);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+    }
+}

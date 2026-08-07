@@ -1,0 +1,54 @@
+@*
+    Shared read-only label/value field display primitive for detail cards,
+    summary panels, and read-only review blocks across the repo.
+
+    Layout is controlled by <see cref="FieldDisplayOrientation"/>:
+
+      Vertical (default):
+        ┌─ .field-display ───────────────┐
+        │ .field-display__label          │  uppercase, muted, 0.75rem
+        │ "NAME"                         │
+        │ .field-display__value          │  1rem, neutral rest
+        │ "Grade 5"                      │
+        └────────────────────────────────┘
+
+      Horizontal:
+        ┌─ .field-display ───────────────┐
+        │ .field-display__label: "Name"  │  normal case, bold, inline
+        │ .field-display__value: "..."   │
+        └────────────────────────────────┘
+
+    Usage:
+        <FieldDisplay Label="Name">@_grade.Name</FieldDisplay>
+
+        <FieldDisplay Label="Status" Orientation="FieldDisplayOrientation.Horizontal">
+            <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
+        </FieldDisplay>
+
+    The value is supplied via ChildContent so it can contain plain text or
+    arbitrary markup (badges, anchors, icons, etc).
+*@
+
+<div class="field-display field-display-@_orientationCss @Class">
+    <span class="field-display__label">@Label</span>
+    <span class="field-display__value">@ChildContent</span>
+</div>
+
+@code {
+    /// <summary>Visible label text. Required.</summary>
+    [Parameter, EditorRequired] public string Label { get; set; } = default!;
+
+    /// <summary>
+    /// Layout orientation. Default is <see cref="FieldDisplayOrientation.Vertical"/>
+    /// (label above value, muted uppercase label style).
+    /// </summary>
+    [Parameter] public FieldDisplayOrientation Orientation { get; set; } = FieldDisplayOrientation.Vertical;
+
+    /// <summary>Optional additional CSS class on the wrapper element.</summary>
+    [Parameter] public string? Class { get; set; }
+
+    /// <summary>The field value. Can be plain text or arbitrary markup.</summary>
+    [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+
+    private string _orientationCss => Orientation.ToString().ToLowerInvariant();
+}

@@ -41,7 +41,7 @@ internal sealed class StudentRepository(StudentsDbContext db)
             .AsNoTracking()
             .OrderBy(x => x.LastName).ThenBy(x => x.FirstName)
             .Select(x => new StudentDto(
-                x.Id, x.StudentNumber, x.FirstName, x.LastName,
+                x.Id, x.StudentNumber, x.TitleCodedValueId, x.FirstName, x.LastName,
                 x.DateOfBirth, x.GenderCodedValueId,
                 x.IsDeleted, x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
@@ -53,7 +53,7 @@ internal sealed class StudentRepository(StudentsDbContext db)
             .AsNoTracking()
             .OrderBy(x => x.LastName).ThenBy(x => x.FirstName)
             .Select(x => new StudentDto(
-                x.Id, x.StudentNumber, x.FirstName, x.LastName,
+                x.Id, x.StudentNumber, x.TitleCodedValueId, x.FirstName, x.LastName,
                 x.DateOfBirth, x.GenderCodedValueId,
                 x.IsDeleted, x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);

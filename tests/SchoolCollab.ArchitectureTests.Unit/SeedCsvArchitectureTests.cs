@@ -31,6 +31,43 @@ public class SeedCsvArchitectureTests
     }
 
     [TestMethod]
+    public void SeedCsv_ContainsTeacherRoleCodedValueParentAndChildren()
+    {
+        var codes = ReadCodes(Path.Combine(SeedDataDir, "seed.csv"));
+
+        codes.Should().Contain("TCHROLES",
+            "Teacher roles is a coded-value parent for the grade-level teacher-role tag (grade-level-detail-view-plan.md §4.2).");
+        codes.Should().Contain("TCHROLE_HOG");
+        codes.Should().Contain("TCHROLE_CT");
+        codes.Should().Contain("TCHROLE_AT");
+        codes.Should().Contain("TCHROLE_SL");
+    }
+
+
+    [TestMethod]
+    public void SeedCsv_ContainsEducationLevelAndQualificationParents_WithChildren()
+    {
+        var codes = ReadCodes(Path.Combine(SeedDataDir, "seed.csv"));
+
+        codes.Should().Contain("EDUCLEVEL", "Teacher level of education is a coded-value parent (grade-detail-rich-grids-plan.md).");
+        codes.Should().Contain("EDUCLEVEL_CERTIFICATE");
+        codes.Should().Contain("EDUCLEVEL_DIPLOMA");
+        codes.Should().Contain("EDUCLEVEL_BACHELOR");
+        codes.Should().Contain("EDUCLEVEL_HONOURS");
+        codes.Should().Contain("EDUCLEVEL_MASTER");
+        codes.Should().Contain("EDUCLEVEL_DOCTORATE");
+
+        codes.Should().Contain("QUALIF", "Teacher qualifications/specialties is a coded-value parent (grade-detail-rich-grids-plan.md).");
+        codes.Should().Contain("QUALIF_MATH");
+        codes.Should().Contain("QUALIF_PHYSICAL_SCI");
+        codes.Should().Contain("QUALIF_LIFE_SCI");
+        codes.Should().Contain("QUALIF_LANGUAGES");
+        codes.Should().Contain("QUALIF_HUMANITIES");
+        codes.Should().Contain("QUALIF_ARTS");
+        codes.Should().Contain("QUALIF_SPECIAL_ED");
+    }
+
+    [TestMethod]
     public void SeedCsv_ContainsFiveAccraCommunities_AndAccraGhana()
     {
         var codes = ReadCodes(Path.Combine(SeedDataDir, "seed.csv"));

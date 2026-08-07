@@ -18,6 +18,7 @@ public sealed class PublishAssignmentCommandHandler(
     IActivityGroupLookup groupLookup,
     ITenantProvider tenantProvider,
     IAssignmentNotificationBroadcaster broadcaster,
+    INotificationPolicyResolver policyResolver,
     HybridCache cache,
     ILogger<PublishAssignmentCommandHandler> logger) : ICommandHandler<PublishAssignmentCommand>
 {
@@ -37,8 +38,15 @@ public sealed class PublishAssignmentCommandHandler(
         await submissionRepository.SaveChangesAsync(cancellationToken);
         await cache.RemoveByTagAsync("assignments", cancellationToken);
 
+        // Effective-policy resolution (notification-delivery-plan.md §3): drop blocked
+        // channels, apply preferred-channel order, cap the sendout at MaxNotifications.
+        // The persisted AssignmentRecipient rows are the full subscription set; the policy
+        // only shapes the broadcast set so a later policy change can re-broadcast.
+        var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, assignment.GradeLevelId, cancellationToken);
+        var broadcastRecipients = NotificationRecipientFilter.Apply(recipients, effectivePolicy);
+
         await broadcaster.BroadcastPublishedAsync(
-            new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, recipients),
+            new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, broadcastRecipients),
             cancellationToken);
 
         assignment.ClearDomainEvents();

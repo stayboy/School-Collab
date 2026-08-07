@@ -149,6 +149,12 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasDefaultValue(false)
                         .HasColumnName("is_disabled");
 
+                    b.Property<bool>("IsProvisional")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_provisional");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -497,6 +503,11 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("global_coded_value_id");
 
+                    b.Property<string>("OverriddenCode")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("overridden_code");
+
                     b.Property<string>("OverriddenDescription")
                         .HasMaxLength(1000)
                         .HasColumnType("character varying(1000)")
@@ -645,6 +656,85 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasFilter("is_deleted = false");
 
                     b.ToTable("tenant_flag_overrides", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.TenantNotificationPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BlockedChannels")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("blocked_channels");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<int?>("LinkValidityDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("link_validity_days");
+
+                    b.Property<int?>("MaxNotifications")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_notifications");
+
+                    b.Property<int?>("MaxReminders")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_reminders");
+
+                    b.Property<string>("PreferredChannelOrder")
+                        .IsRequired()
+                        .HasColumnType("jsonb")
+                        .HasColumnName("preferred_channel_order");
+
+                    b.Property<int?>("ReminderIntervalHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("reminder_interval_hours");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<int?>("SendoutIntervalMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("sendout_interval_minutes");
+
+                    b.Property<TimeOnly?>("SendoutTimeOfDay")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("sendout_time_of_day");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_tenant_notification_policies");
+
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_tenant_notification_policies_tenant")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("tenant_notification_policies", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Settings.Core.Domain.CodedValue", b =>

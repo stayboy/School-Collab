@@ -43,6 +43,12 @@ builder.Services.AddSettingsCore(builder.Configuration);
 builder.Services.AddHttpClient("students-api");
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolver, SchoolCollab.Assignments.Api.Services.StudentsContactResolver>();
 
+// Effective-policy resolver (notification-delivery-plan.md §3): reads the tenant
+// default (Settings API) + grade override (Students API), merges at publish time.
+builder.Services.AddHttpClient("settings-api");
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationPolicyResolver,
+    SchoolCollab.Assignments.Api.Services.NotificationPolicyResolver>();
+
 // Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
 // port (Assignments → Students) for the link command and SelectedGroups publish.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,

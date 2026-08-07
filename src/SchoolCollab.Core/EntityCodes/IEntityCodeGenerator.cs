@@ -18,4 +18,11 @@ public interface IEntityCodeGenerator
     /// <c>EntityCodeRuleNotFoundException</c> if no active rule exists.
     /// </summary>
     Task<string> GenerateAsync(string ruleCode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Like <see cref="GenerateAsync"/>, but supplies a <paramref name="nameHint"/> that
+    /// any <see cref="WordInitials"/> segments use to derive their initials (e.g.
+    /// "computer science" → <c>CS</c>). Ignored when the rule has no such segment.
+    /// </summary>
+    Task<string> GenerateWithNameAsync(string ruleCode, string? nameHint, CancellationToken cancellationToken = default);
 }

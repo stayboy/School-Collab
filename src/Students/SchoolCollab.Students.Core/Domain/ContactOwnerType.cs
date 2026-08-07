@@ -6,5 +6,6 @@ namespace SchoolCollab.Students.Core.Domain;
 public enum ContactOwnerType
 {
     Student = 0,
-    Guardian = 1
+    Guardian = 1,
+    Teacher = 2
 }

@@ -24,6 +24,8 @@ internal sealed class StudentConfiguration : TenantEntityTypeConfigurationBase<S
             .IsRequired()
             .HasMaxLength(50);
 
+        builder.Property(x => x.TitleCodedValueId);
+
         builder.Property(x => x.FirstName)
             .IsRequired()
             .HasMaxLength(200);

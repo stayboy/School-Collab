@@ -37,6 +37,9 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     public DbSet<TenantFeatureFlagOverride> TenantFlagOverrides => Set<TenantFeatureFlagOverride>();
     public DbSet<FlagAuditEntry> FlagAuditEntries => Set<FlagAuditEntry>();
 
+    // ── Notification policy (global per-tenant default) ──
+    public DbSet<TenantNotificationPolicy> TenantNotificationPolicies => Set<TenantNotificationPolicy>();
+
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -84,6 +87,9 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
         modelBuilder.ApplyConfiguration(new FeatureFlagConfiguration());
         modelBuilder.ApplyConfiguration(new TenantFeatureFlagOverrideConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new FlagAuditEntryConfiguration());
+
+        // Notification policy configuration (tenant-scoped)
+        modelBuilder.ApplyConfiguration(new TenantNotificationPolicyConfiguration(() => CurrentTenantId));
 
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<SettingsDbContext>()));
 

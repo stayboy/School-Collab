@@ -47,17 +47,27 @@ public sealed class UpsertCodedValueOverrideHandler(
         if (codedValue is null)
             throw new CodedValueNotFoundException(command.GlobalCodedValueId);
 
+        // Rule (spec §4.3): a tenant may override the display Name, the
+        // Description, or the Code — but NOT Code AND Description at the same
+        // time. Overriding both changes the value's identity wholesale, which
+        // must instead be a new tenancy-scoped CodedValue (tcv/3). Reject the
+        // illegal combination here rather than persisting a partial override.
+        if (command.Code is not null && command.Description is not null)
+            throw new ArgumentException(
+                "Cannot override both Code and Description simultaneously. " +
+                "Create a new tenant-scoped coded value instead.");
+
         var existing = await db.TenantCodedValueOverrides
             .SingleOrDefaultAsync(x => x.TenantId == tenantId && x.GlobalCodedValueId == command.GlobalCodedValueId, ct);
 
         if (existing is not null)
         {
-            existing.Update(command.Name, command.Description);
+            existing.Update(command.Name, command.Description, command.Code);
         }
         else
         {
             db.TenantCodedValueOverrides.Add(TenantCodedValueOverride.Create(
-                tenantId, command.GlobalCodedValueId, command.Name, command.Description));
+                tenantId, command.GlobalCodedValueId, command.Name, command.Description, command.Code));
         }
         logger.LogInformation(
             "Override upserted for tenant {TenantId} (isDefault={IsDefault}), coded value {Id}",

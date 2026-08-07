@@ -200,6 +200,25 @@ public class CodedValuesApiClientNotFoundTests
         await act.Should().ThrowAsync<HttpRequestException>("500 should still throw");
     }
 
+    [TestMethod]
+    public async Task Admin_UpsertOverrideAsync_SendsCodeInBody()
+    {
+        var dto = SampleAdminDto();
+        var json = JsonSerializer.Serialize(dto);
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, json);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var client = new AdminApi(http);
+
+        var result = await client.UpsertOverrideAsync(dto.Id, "New Name", null, "NEWCODE", CancellationToken.None);
+
+        result.Should().NotBeNull();
+        var req = handler.Requests.Single();
+        req.Method.Should().Be(HttpMethod.Put);
+        req.RequestUri!.PathAndQuery.Should().Be($"/api/coded-values/{dto.Id}/override");
+        var body = await req.Content!.ReadAsStringAsync();
+        body.Should().Contain("NEWCODE", "the code override is carried in the PUT body");
+    }
+
     // --- Mock HttpMessageHandler ---
 
     private class MockHttpMessageHandler : HttpMessageHandler

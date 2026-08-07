@@ -10,6 +10,10 @@ using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelByCodedVa
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.GetGradeLevelById;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevels;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Queries.ListGradeLevelsForLanding;
+using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
+using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicCurriculumByGrade;
+using SchoolCollab.Students.Core.CQRS.GradeNotificationPolicies.Commands.UpsertGradeNotificationPolicy;
+using SchoolCollab.Students.Core.CQRS.GradeNotificationPolicies.Queries.GetGradeNotificationPolicy;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -67,6 +71,24 @@ public static class GradeLevelRoutes
             var result = await handler.HandleAsync(new GetGradeLevelById(id), ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
+
+        // Teachers linked to a grade level, each carrying their coded-value role
+        // on that grade and the topics they teach (grade-level-detail-view-plan.md §3.1).
+        group.MapGet("/grade-levels/{id:guid}/teachers", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTeachersForGradeLevel, SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListTeachersForGradeLevel(id), ct)));
+
+        // Per-topic strand/lesson counts for the grade's assigned topics
+        // (grade-detail-rich-grids-plan.md §4).
+        group.MapGet("/grade-levels/{id:guid}/curriculum", async (
+            Guid id,
+            DateOnly? effectiveDate,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListGradeTopicCurriculumByGrade, SchoolCollab.Students.Core.DTOs.GradeTopicCurriculumDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(
+                new ListGradeTopicCurriculumByGrade(id, effectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow)), ct)));
 
         group.MapPost("/grade-levels", async (
             [FromBody] CreateGradeLevel command,
@@ -141,6 +163,40 @@ public static class GradeLevelRoutes
             }
         });
 
+        // ── Per-grade notification policy (override; null fields inherit tenant default) ──
+        group.MapGet("/grade-levels/{id:guid}/notification-policy", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<GetGradeNotificationPolicy, SchoolCollab.Students.Core.DTOs.GradeNotificationPolicyDto?> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(new GetGradeNotificationPolicy(id), ct);
+            return result is null ? Results.NoContent() : Results.Ok(result);
+        });
+
+        group.MapPut("/grade-levels/{id:guid}/notification-policy", async (
+            Guid id,
+            [FromBody] UpsertGradeNotificationPolicyRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<UpsertGradeNotificationPolicy, SchoolCollab.Students.Core.DTOs.GradeNotificationPolicyDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new UpsertGradeNotificationPolicy(
+                    id,
+                    req.PreferredChannelOrder,
+                    req.BlockedChannels,
+                    req.MaxNotifications,
+                    req.MaxReminders,
+                    req.ReminderIntervalHours,
+                    req.LinkValidityDays,
+                    req.SendoutTimeOfDay,
+                    req.SendoutIntervalMinutes), ct);
+                return Results.Ok(result);
+            }
+            catch (GradeLevelNotFoundException) { return Results.NotFound(); }
+            catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { ex.Message }); }
+        });
+
         return group;
     }
 }
@@ -150,3 +206,12 @@ internal record UpdateGradeLevelRequest(int Level, string Name, int DisplayOrder
 internal record GetOrCreateGradeLevelRequest(Guid CodedValueId, int Level, string Name, int DisplayOrder,
     int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);
 internal record SetEnrollmentBlockedRequest(bool Blocked);
+internal record UpsertGradeNotificationPolicyRequest(
+    SchoolCollab.Core.Notifications.NotificationChannel[]? PreferredChannelOrder,
+    SchoolCollab.Core.Notifications.NotificationChannel[]? BlockedChannels,
+    int? MaxNotifications,
+    int? MaxReminders,
+    int? ReminderIntervalHours,
+    int? LinkValidityDays,
+    TimeOnly? SendoutTimeOfDay,
+    int? SendoutIntervalMinutes);

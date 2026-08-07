@@ -16,7 +16,16 @@ public enum CodedValueParent
     /// <summary>Grade strands (children of <c>GRSTRNDS</c>). Each strand
     /// has a <c>gradeLevel</c> attribute referencing its parent grade's
     /// coded value. Picker filters by attribute when a grade is selected.</summary>
-    GradeStrands = 11
+    GradeStrands = 11,
+    /// <summary>Teacher roles on a grade link (children of <c>TCHROLES</c>).
+    /// Nullable FK on <c>TeacherGradeLevel.TeacherRoleCodedValueId</c>.</summary>
+    TeacherRoles = 12,
+    /// <summary>Teacher level of education (children of <c>EDUCLEVEL</c>).
+    /// Single value on <c>Teacher.LevelOfEducationCodedValueId</c>.</summary>
+    EducLevel = 13,
+    /// <summary>Teacher qualifications / specialties (children of <c>QUALIF</c>).
+    /// Many-to-many via <c>TeacherQualification</c>.</summary>
+    Qualification = 14
 }
 
 public static class CodedValueParentExtensions
@@ -35,6 +44,9 @@ public static class CodedValueParentExtensions
         CodedValueParent.Countries => "COUNTRYS",
         CodedValueParent.CountryCallingCodes => "CNCODES",
         CodedValueParent.GradeStrands => "GRSTRNDS",
+        CodedValueParent.TeacherRoles => "TCHROLES",
+        CodedValueParent.EducLevel => "EDUCLEVEL",
+        CodedValueParent.Qualification => "QUALIF",
         _ => throw new ArgumentOutOfRangeException(nameof(parent))
     };
 }

@@ -1,0 +1,188 @@
+@* Dialog managing which teachers are assigned to a topic and each teacher's role
+   on that topic (grade-detail-rich-grids-plan.md §5 — "topic dialog assigns teachers
+   + roles"). Self-contained: loads the topic's teachers via ListTopicTeachersAsync
+   and links / unlinks / set-roles through the StudentsApiClient. The grade's teacher
+   list is passed in as the "available" pool to add from, so only grade teachers can
+   be assigned. Mirrors GuardianContactsDialog (not a DialogShellBase — no model/form
+   result) and is opened via ShowReadonlyDialogAsync. *@
+@implements IDialogContentComponent<DialogParameters>
+@using TopicTeacherDto = SchoolCollab.Students.Application.Services.TopicTeacherDto
+@using TeacherWithRoleDto = SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="topic-dialog">
+    <h3>Teachers — @TopicName</h3>
+
+    @if (_loading)
+    {
+        <div class="spinner-container"><FluentProgressRing /></div>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+        }
+
+        @if (_items.Length == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                No teachers assigned to this topic yet — use the picker below to assign one.
+            </FluentMessageBar>
+        }
+        else
+        {
+            <div class="topic-teachers">
+                @foreach (var tt in _items)
+                {
+                    <div class="topic-teacher-row">
+                        <span class="topic-teacher-name">@(tt.DisplayName is { Length: > 0 } d ? d : $"{tt.FirstName} {tt.LastName}")</span>
+                        <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
+                                            SelectedId="@tt.RoleCodedValueId"
+                                            SelectedIdChanged="@((Guid? v) => OnRoleChangedAsync(tt, v))"
+                                            Placeholder="No role" />
+                        <FluentButton Appearance="Appearance.Lightweight" Size="ButtonSize.Small"
+                                      OnClick="@(() => RemoveTeacherAsync(tt.TeacherId))"
+                                      Title="Remove this teacher from the topic">Remove</FluentButton>
+                    </div>
+                }
+            </div>
+        }
+
+        <div class="picker-row">
+            <FluentSelect TOption="TeacherWithRoleDto"
+                          Items="_addableTeachers"
+                          OptionText="@(t => $"{t.FirstName} {t.LastName}")"
+                          OptionValue="@(t => t.Id.ToString())"
+                          @bind-SelectedOption="_teacherToAdd"
+                          Placeholder="Add a teacher…" />
+            <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
+                                SelectedId="_newRole"
+                                SelectedIdChanged="@((Guid? v) => _newRole = v)"
+                                Placeholder="Role" />
+            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+                          OnClick="AddTeacherAsync" Disabled="@(_teacherToAdd is null || _saving)">Assign</FluentButton>
+        </div>
+    }
+
+    <div class="dialog-footer">
+        <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
+    </div>
+</div>
+
+<style>
+    .topic-teachers { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.75rem; }
+    .topic-teacher-row { display: flex; align-items: center; gap: 0.75rem; }
+    .topic-teacher-name { min-width: 180px; font-weight: 500; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public Guid TopicId { get; set; }
+    [Parameter] public string? TopicName { get; set; }
+
+    /// <summary>The grade's teachers — the pool to add from (only grade teachers
+    /// can be assigned to one of the grade's topics).</summary>
+    [Parameter] public TeacherWithRoleDto[] AvailableTeachers { get; set; } = [];
+
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    public DialogParameters Content { get; set; } = default!;
+
+    [Inject] private StudentsApiClient Api { get; set; } = default!;
+    [Inject] private ILogger<TopicTeachersDialog> Logger { get; set; } = default!;
+
+    private TopicTeacherDto[] _items = [];
+    private TeacherWithRoleDto[] _addableTeachers = [];
+    private TeacherWithRoleDto? _teacherToAdd;
+    private Guid? _newRole;
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private static TeacherWithRoleDto[] FilterAddable(TeacherWithRoleDto[] available, TopicTeacherDto[] existing)
+    {
+        var existingIds = existing.Select(e => e.TeacherId).ToHashSet();
+        return (available ?? []).Where(t => !existingIds.Contains(t.Id)).ToArray();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            var existing = await Api.ListTopicTeachersAsync(TopicId) ?? [];
+            _items = existing;
+            _addableTeachers = FilterAddable(AvailableTeachers, existing);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load teachers for topic {TopicId}", TopicId);
+            _error = $"Could not load topic teachers: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task AddTeacherAsync()
+    {
+        if (_teacherToAdd is null || _saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            await Api.LinkTeacherTopicAsync(_teacherToAdd.Id, TopicId, _newRole);
+            _teacherToAdd = null;
+            _newRole = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to assign teacher {TeacherId} to topic {TopicId}", _teacherToAdd.Id, TopicId);
+            _error = $"Could not assign teacher: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task RemoveTeacherAsync(Guid teacherId)
+    {
+        try
+        {
+            await Api.UnlinkTeacherTopicAsync(teacherId, TopicId);
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to unassign teacher {TeacherId} from topic {TopicId}", teacherId, TopicId);
+            _error = $"Could not unassign teacher: {ex.Message}";
+        }
+    }
+
+    private async Task OnRoleChangedAsync(TopicTeacherDto teacher, Guid? role)
+    {
+        try
+        {
+            await Api.SetTeacherTopicRoleAsync(teacher.TeacherId, TopicId, role);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to set role on topic {TopicId} for teacher {TeacherId}", TopicId, teacher.TeacherId);
+            _error = $"Could not update role: {ex.Message}";
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _loading = true;
+        await LoadAsync();
+    }
+
+    private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+}

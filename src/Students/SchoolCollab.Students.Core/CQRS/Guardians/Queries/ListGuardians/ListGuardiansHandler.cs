@@ -125,7 +125,7 @@ public sealed class ListGuardiansHandler(
                 {
                     var list = contactsByOwner.TryGetValue(g.Id, out var l) ? l : null;
                     return new GuardianDto(
-                        g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.Address, g.CommunityId,
+                        g.Id, g.TitleCodedValueId, g.FirstName, g.LastName, g.DisplayName, g.DateOfBirth, g.GenderCodedValueId, g.Address, g.CommunityId,
                         g.IsDeleted, g.CreatedAt, g.UpdatedAt)
                     {
                         Contacts = (IReadOnlyList<GuardianContactViewDto>?)list?.AsReadOnly() ?? System.Array.Empty<GuardianContactViewDto>(),

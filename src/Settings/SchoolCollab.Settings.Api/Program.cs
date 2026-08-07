@@ -68,6 +68,8 @@ app.MapTenantEndpoints(featureFlags);
 app.MapConfigEndpoints(featureFlags);
 // Phase 3: EntityCodeRule admin endpoints (spec §4.7).
 app.MapEntityCodeRuleEndpoints(featureFlags);
+// Notification & Delivery: per-tenant global-default policy (spec §3).
+app.MapNotificationPolicyEndpoints(featureFlags);
 
 app.Run();
 

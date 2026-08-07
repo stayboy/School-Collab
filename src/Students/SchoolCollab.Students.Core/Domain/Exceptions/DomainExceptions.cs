@@ -153,6 +153,23 @@ public sealed class TeacherLinkAlreadyExistsException : Exception
 }
 
 /// <summary>
+/// Thrown when a subject or grade-level link does not exist for a teacher
+/// (spec §4.12). Mirrors <see cref="GuardianLinkNotFoundException"/>.
+/// </summary>
+public sealed class TeacherLinkNotFoundException : Exception
+{
+    public Guid TeacherId { get; }
+    public Guid RefId { get; }
+
+    public TeacherLinkNotFoundException(Guid teacherId, Guid refId)
+        : base($"No link exists between teacher '{teacherId}' and '{refId}'.")
+    {
+        TeacherId = teacherId;
+        RefId = refId;
+    }
+}
+
+/// <summary>
 /// Thrown when there is a constraint violation in a GradeLevel entity itself,
 /// such as MinAge being greater than MaxAge. Distinct from
 /// <see cref="EnrollmentValidationException"/> (which guards the *enrollment*

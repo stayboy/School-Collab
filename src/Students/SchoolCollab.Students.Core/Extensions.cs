@@ -10,6 +10,7 @@ using SchoolCollab.Students.Core.Tenancy;
 using SchoolCollab.Students.Core.Services;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Messaging;
+using SchoolCollab.Core.Notifications;
 
 namespace SchoolCollab.Students.Core;
 
@@ -61,6 +62,9 @@ public static class Extensions
 
         // Default audit actor; the API host overrides this with ClaimsPrincipalActorAccessor.
         services.AddSingleton<IActorAccessor>(_ => new SystemActorAccessor("system:students", "Students System"));
+
+        // Notification & Delivery: shared effective-policy resolver.
+        services.AddSingleton<IEffectiveNotificationPolicyResolver, EffectiveNotificationPolicyResolver>();
 
         services.AddHybridCache(options =>
         {

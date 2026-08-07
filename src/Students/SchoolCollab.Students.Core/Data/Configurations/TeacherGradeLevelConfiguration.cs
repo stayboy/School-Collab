@@ -22,9 +22,15 @@ internal sealed class TeacherGradeLevelConfiguration : TenantEntityTypeConfigura
 
         builder.Property(x => x.TeacherId).IsRequired();
         builder.Property(x => x.GradeLevelId).IsRequired();
+        builder.Property(x => x.TeacherRoleCodedValueId);
 
         builder.HasIndex(x => new { x.TenantId, x.TeacherId, x.GradeLevelId })
             .IsUnique()
             .HasDatabaseName("ix_teacher_grade_levels_tenant_teacher_grade_level");
+
+        // Supports the grade->teachers inverse query
+        // (ListTeachersForGradeLevel, grade-level-detail-view-plan.md §3.1).
+        builder.HasIndex(x => new { x.TenantId, x.GradeLevelId })
+            .HasDatabaseName("ix_teacher_grade_levels_tenant_grade_level");
     }
 }

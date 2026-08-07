@@ -1,0 +1,231 @@
+@page "/students/grade-levels/{Id:guid}/edit"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Students
+@using SchoolCollab.Admin.Shared.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject NavigationManager Nav
+@inject ILogger<Edit> Logger
+@implements IDisposable
+
+<PageTitle>Edit Grade Level</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+                @if (_loading)
+                {
+                    <div class="spinner-container"><FluentProgressRing /></div>
+                }
+                else if (_grade is null)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Warning">Grade level not found.</FluentMessageBar>
+                    <div class="mt-3">
+                        <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="GoBack">Back to grade levels</FluentButton>
+                    </div>
+                }
+                else
+                {
+                    <div class="page-heading">
+                        <h1>Edit — @_grade.Name</h1>
+                        <p class="muted">Update the grade's enrollment guard clauses and its assigned topics.</p>
+                    </div>
+
+                    <GradeLevelFormFields Model="_model"
+                                          OnValidSubmit="HandleSubmitAsync"
+                                          OnCodedValuePicked="OnGradePickedAsync"
+                                          SubmitLabel="Save"
+                                          SubmittingLabel="Saving…"
+                                          Submitting="_submitting"
+                                          ShowCancel="true"
+                                          CancelLabel="Cancel"
+                                          OnCancel="GoBack"
+                                          ErrorMessage="_error">
+                        <TopicsSection>
+                            @if (_allTopics.Length > 0)
+                            {
+                                <FormRow Label="@($"Topics ({_selectedTopicIds.Count})")" AlignTop>
+                                    <FluentListbox Items="@_allTopics"
+                                                   @bind-SelectedValues="_selectedTopicIds"
+                                                   OptionText="@(t => t.Name)"
+                                                   OptionValue="@(t => t.Id.ToString())"
+                                                   Multiple="true"
+                                                   Style="width: 100%; min-height: 160px;"
+                                                   Title="Picked topics are assigned; unchecked ones are removed on save." />
+                                </FormRow>
+                            }
+                            else
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Info" class="mt-3">
+                                    No topics exist yet.
+                                </FluentMessageBar>
+                            }
+                        </TopicsSection>
+                    </GradeLevelFormFields>
+
+                    <div class="action-bar">
+                        <FluentButton Appearance="Appearance.Outline" OnClick="GoBack">Back to Grade Levels</FluentButton>
+                    </div>
+                }
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Grade level records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+<style>
+    .muted { color: var(--neutral-foreground-hint); }
+    .page-heading h1 { margin: 0 0 0.25rem; font-size: 1.5rem; }
+    .action-bar { margin-top: 1rem; }
+</style>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private readonly GradeLevelFormFields.GradeLevelFormModel _model = new();
+    private GradeLevelDto? _grade;
+    private TopicDto[] _allTopics = [];
+    private List<Guid> _selectedTopicIds = new();
+    private Dictionary<Guid, Guid> _assignmentByTopicId = new();
+    private bool _loading = true;
+    private bool _submitting;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+        try
+        {
+            _grade = await Api.GetGradeLevelByIdAsync(Id, ct);
+            if (_grade is null) return;
+
+            var topicsTask = Api.ListTopicsAsync(ct);
+            var assignmentsTask = Api.ListGradeTopicsByGradeAsync(Id, ct: ct);
+            await Task.WhenAll(topicsTask, assignmentsTask);
+
+            _allTopics = topicsTask.Result ?? [];
+            var assignments = assignmentsTask.Result ?? [];
+
+            _model.CodedValueId = _grade.CodedValueId;
+            _model.Name = _grade.Name;
+            _model.Level = _grade.Level;
+            _model.DisplayOrder = _grade.DisplayOrder;
+            _model.MinAge = _grade.MinAge;
+            _model.MaxAge = _grade.MaxAge;
+            _model.AllowedGenderCodedValueId = _grade.AllowedGenderCodedValueId;
+
+            _selectedTopicIds = assignments.Select(a => a.TopicId).ToList();
+            _assignmentByTopicId = assignments.ToDictionary(a => a.TopicId, a => a.Id);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load grade level {Id} for edit", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            if (!_disposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    /// <summary>On Edit the coded value is immutable; ignore re-picks (Name/Level stay as loaded).</summary>
+    private Task OnGradePickedAsync(Guid? codedValueId) => Task.CompletedTask;
+
+    private async Task HandleSubmitAsync()
+    {
+        if (_submitting) return;
+        _submitting = true;
+        _error = null;
+        try
+        {
+            await Api.UpdateGradeLevelAsync(Id, new UpdateGradeLevelRequest(
+                _model.Level,
+                _model.Name ?? string.Empty,
+                _model.DisplayOrder,
+                _model.MinAge,
+                _model.MaxAge,
+                _model.AllowedGenderCodedValueId));
+
+            var warnings = await ApplyTopicDiffAsync();
+            if (!string.IsNullOrEmpty(warnings))
+            {
+                _error = warnings;
+                return;
+            }
+            if (_disposed) return;
+            Nav.NavigateTo($"/students/grade-levels/{Id}");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update grade level {Id}", Id);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private async Task<string?> ApplyTopicDiffAsync()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var baseline = await Api.ListGradeTopicsByGradeAsync(Id) ?? [];
+        var assignedIds = new HashSet<Guid>(baseline.Select(a => a.TopicId));
+        var desiredIds = new HashSet<Guid>(_selectedTopicIds);
+        var warnings = new List<string>();
+
+        foreach (var tid in desiredIds.Except(assignedIds))
+        {
+            try
+            {
+                await Api.AssignGradeTopicAsync(new AssignGradeTopicRequest(Id, tid, today));
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not assign topic {tid}: {ex.Message}");
+            }
+        }
+
+        foreach (var tid in assignedIds.Except(desiredIds))
+        {
+            if (!_assignmentByTopicId.TryGetValue(tid, out var assignmentId)) continue;
+            try
+            {
+                await Api.RemoveTopicAssignmentAsync(assignmentId);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not unassign topic {tid}: {ex.Message}");
+            }
+        }
+
+        return warnings.Count == 0 ? null : string.Join(" • ", warnings);
+    }
+
+    private void GoBack() => Nav.NavigateTo("/students/grade-levels");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

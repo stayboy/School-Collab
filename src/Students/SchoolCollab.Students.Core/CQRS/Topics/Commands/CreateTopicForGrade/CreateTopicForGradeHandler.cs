@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
@@ -23,6 +24,7 @@ public sealed class CreateTopicForGradeHandler(
     IGradeLevelRepository gradeLevelRepository,
     HybridCache cache,
     ITenantProvider tenantProvider,
+    IEntityCodeGenerator entityCodeGenerator,
     ILogger<CreateTopicForGradeHandler> logger) : ICommandHandler<CreateTopicForGrade, TopicDto>
 {
     public async Task<TopicDto> HandleAsync(
@@ -50,16 +52,17 @@ public sealed class CreateTopicForGradeHandler(
         //      peer of GradeLevel — stable reporting key, §3.2).
         //    - Otherwise fall back to lookup by Code.
         //    - If neither finds an existing Topic, create a new shared one.
-        Topic subject;
+        Topic subject = null!;
         bool subjectCreated = false;
+        string? code = null;
 
         if (command.CodedValueId.HasValue)
         {
             subject = await topicRepository.GetByCodedValueIdAsync(command.CodedValueId.Value, cancellationToken);
         }
-        else
+        else if (!string.IsNullOrWhiteSpace(command.Code))
         {
-            subject = await topicRepository.GetByCodeAsync(command.Code, cancellationToken);
+            subject = await topicRepository.GetByCodeAsync(command.Code.Trim(), cancellationToken);
         }
 
         if (subject is not null)
@@ -71,16 +74,22 @@ public sealed class CreateTopicForGradeHandler(
         }
         else
         {
+            // tcv/5: when no explicit code is supplied, generate one from the topic
+            // name via the seeded TOPIC_CODE rule (WordInitials + NumericSequence),
+            // e.g. "computer science" → CS01.
+            code = !string.IsNullOrWhiteSpace(command.Code)
+                ? command.Code.Trim()
+                : await entityCodeGenerator.GenerateWithNameAsync("TOPIC_CODE", command.Name, cancellationToken);
+
             // Verify the code is not already taken (only relevant when we looked
             // up by CodedValueId and didn't find it but the code is in use).
-            if (!string.IsNullOrWhiteSpace(command.Code) &&
-                await topicRepository.ExistsByCodeAsync(command.Code, cancellationToken))
-                throw new DuplicateTopicCodeException(command.Code);
+            if (await topicRepository.ExistsByCodeAsync(code, cancellationToken))
+                throw new DuplicateTopicCodeException(code);
 
             var codedValueId = command.CodedValueId ?? Guid.NewGuid();
             subject = Topic.Create(
                     codedValueId: codedValueId,
-                    code: command.Code,
+                    code: code,
                     name: command.Name,
                     displayOrder: command.DisplayOrder)
                 .WithTenant(tenantProvider);

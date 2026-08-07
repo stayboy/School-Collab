@@ -424,6 +424,90 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("grade_levels", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeNotificationPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<string>("BlockedChannels")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("blocked_channels");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Guid>("GradeLevelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("grade_level_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<int?>("LinkValidityDays")
+                        .HasColumnType("integer")
+                        .HasColumnName("link_validity_days");
+
+                    b.Property<int?>("MaxNotifications")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_notifications");
+
+                    b.Property<int?>("MaxReminders")
+                        .HasColumnType("integer")
+                        .HasColumnName("max_reminders");
+
+                    b.Property<string>("PreferredChannelOrder")
+                        .HasColumnType("jsonb")
+                        .HasColumnName("preferred_channel_order");
+
+                    b.Property<int?>("ReminderIntervalHours")
+                        .HasColumnType("integer")
+                        .HasColumnName("reminder_interval_hours");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<int?>("SendoutIntervalMinutes")
+                        .HasColumnType("integer")
+                        .HasColumnName("sendout_interval_minutes");
+
+                    b.Property<TimeOnly?>("SendoutTimeOfDay")
+                        .HasColumnType("time without time zone")
+                        .HasColumnName("sendout_time_of_day");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_grade_notification_policies");
+
+                    b.HasIndex("GradeLevelId")
+                        .HasDatabaseName("ix_grade_notification_policies_grade_level_id");
+
+                    b.HasIndex("TenantId", "GradeLevelId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_grade_notification_policies_tenant_grade")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("grade_notification_policies", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Guardian", b =>
                 {
                     b.Property<Guid>("Id")
@@ -442,6 +526,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date")
+                        .HasColumnName("date_of_birth");
+
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("deleted_at");
@@ -454,6 +542,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("first_name");
+
+                    b.Property<Guid?>("GenderCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gender_coded_value_id");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -653,6 +745,10 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
+
+                    b.Property<Guid?>("TitleCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("title_coded_value_id");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
@@ -957,13 +1053,13 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
-                    b.Property<string>("ContactPhone")
-                        .HasColumnType("text")
-                        .HasColumnName("contact_phone");
-
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<DateOnly?>("DateOfBirth")
+                        .HasColumnType("date")
+                        .HasColumnName("date_of_birth");
 
                     b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("timestamp with time zone")
@@ -973,15 +1069,14 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("text")
                         .HasColumnName("display_name");
 
-                    b.Property<string>("Email")
-                        .IsRequired()
-                        .HasColumnType("text")
-                        .HasColumnName("email");
-
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("first_name");
+
+                    b.Property<Guid?>("GenderCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("gender_coded_value_id");
 
                     b.Property<bool>("IsDeleted")
                         .ValueGeneratedOnAdd()
@@ -993,6 +1088,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .IsRequired()
                         .HasColumnType("text")
                         .HasColumnName("last_name");
+
+                    b.Property<Guid?>("LevelOfEducationCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("level_of_education_coded_value_id");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -1054,6 +1153,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("teacher_id");
 
+                    b.Property<Guid?>("TeacherRoleCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("teacher_role_coded_value_id");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
                         .HasColumnName("tenant_id");
@@ -1065,6 +1168,9 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_teacher_grade_levels");
 
+                    b.HasIndex("TenantId", "GradeLevelId")
+                        .HasDatabaseName("ix_teacher_grade_levels_tenant_grade_level");
+
                     b.HasIndex("TenantId", "TeacherId", "GradeLevelId")
                         .IsUnique()
                         .HasDatabaseName("ix_teacher_grade_levels_tenant_teacher_grade_level");
@@ -1072,7 +1178,49 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("teacher_grade_levels", (string)null);
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherSubject", b =>
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherQualification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("CodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("coded_value_id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TeacherId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("teacher_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_teacher_qualifications");
+
+                    b.HasIndex("TenantId", "TeacherId", "CodedValueId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_teacher_qualifications_tenant_teacher_qualification");
+
+                    b.ToTable("teacher_qualifications", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherTopic", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
@@ -1081,6 +1229,10 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
+
+                    b.Property<Guid?>("RoleCodedValueId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("role_coded_value_id");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -1105,13 +1257,13 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnName("updated_at");
 
                     b.HasKey("Id")
-                        .HasName("pk_teacher_subjects");
+                        .HasName("pk_teacher_topics");
 
                     b.HasIndex("TenantId", "TeacherId", "TopicId")
                         .IsUnique()
-                        .HasDatabaseName("ix_teacher_subjects_tenant_teacher_subject");
+                        .HasDatabaseName("ix_teacher_topics_tenant_teacher_topic");
 
-                    b.ToTable("teacher_subjects", (string)null);
+                    b.ToTable("teacher_topics", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Topic", b =>
@@ -1432,6 +1584,16 @@ namespace SchoolCollab.Students.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_activity_group_memberships_students_student_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeNotificationPolicy", b =>
+                {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.GradeLevel", null)
+                        .WithMany()
+                        .HasForeignKey("GradeLevelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_grade_notification_policies_grade_levels_grade_level_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicAssignment", b =>

@@ -32,7 +32,7 @@ public sealed class StudentsContactResolver(
             studentIds.AddRange(byGrade.Select(s => s.Id));
         }
 
-        var owners = new List<(ContactOwnerType OwnerType, Guid OwnerId, Guid StudentId)>();
+        var owners = new List<(ContactOwnerType OwnerType, Guid OwnerId, Guid? StudentId)>();
         foreach (var studentId in studentIds)
         {
             owners.Add((ContactOwnerType.Student, studentId, studentId));
@@ -52,6 +52,28 @@ public sealed class StudentsContactResolver(
 
             foreach (var g in guardians)
                 owners.Add((ContactOwnerType.Guardian, g.GuardianId, g.StudentId));
+        }
+
+        // Teachers are now notification recipients (dm/2 reverses the v1
+        // "teachers not notification recipients" carve-out). For a grade-level
+        // cohort, include the teachers linked to that grade; their contacts
+        // have no ward student, so StudentId is null.
+        if (request.GradeLevelId.HasValue)
+        {
+            TeacherWithRoleDto[] gradeTeachers = [];
+            try
+            {
+                gradeTeachers = await client.GetFromJsonAsync<TeacherWithRoleDto[]>(
+                    $"grade-levels/{request.GradeLevelId.Value}/teachers", cancellationToken)
+                    ?? [];
+            }
+            catch (HttpRequestException ex)
+            {
+                logger.LogWarning(ex, "Failed to resolve teachers for grade {GradeId}", request.GradeLevelId.Value);
+            }
+
+            foreach (var t in gradeTeachers)
+                owners.Add((ContactOwnerType.Teacher, t.Id, null));
         }
 
         var result = new List<SubscriberInfo>();

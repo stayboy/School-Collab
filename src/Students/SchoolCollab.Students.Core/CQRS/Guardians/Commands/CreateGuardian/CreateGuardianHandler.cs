@@ -26,7 +26,9 @@ public sealed class CreateGuardianHandler(
                 command.LastName,
                 command.DisplayName,
                 command.Address,
-                command.CommunityId)
+                command.CommunityId,
+                command.DateOfBirth,
+                command.GenderCodedValueId)
             .WithTenant(tenantProvider);
 
         guardian.AddInitialNameHistory();

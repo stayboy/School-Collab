@@ -347,6 +347,7 @@
                 _model.LastName = _student.LastName;
                 _model.DateOfBirth = _student.DateOfBirth;
                 _model.GenderCodedValueId = _student.GenderCodedValueId;
+                _model.TitleCodedValueId = _student.TitleCodedValueId;
                 Logger.LogInformation(
                     "Loaded student {StudentNumber} for edit with {Count} enrollment(s)",
                     _student.StudentNumber, _enrollments?.Length ?? 0);
@@ -656,7 +657,8 @@
 
         var req = new UpdateStudentRequest(
             _model.FirstName!, _model.LastName!,
-            _model.DateOfBirth, _model.GenderCodedValueId);
+            _model.DateOfBirth, _model.GenderCodedValueId,
+            _model.TitleCodedValueId);
 
         _saving = true;
         try

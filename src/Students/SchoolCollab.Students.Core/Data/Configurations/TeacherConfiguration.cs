@@ -7,8 +7,8 @@ using SchoolCollab.Students.Core.Domain;
 namespace SchoolCollab.Students.Core.Data.Configurations;
 
 /// <summary>
-/// Teacher aggregate (spec §4.12). Soft-deletable. Keeps a single staff email/phone
-/// (not migrated to the <see cref="Contact"/> table).
+/// Teacher aggregate (spec §4.12). Soft-deletable. Contact channels live on the
+/// shared <see cref="Contact"/> table keyed by <see cref="ContactOwnerType.Teacher"/>.
 /// </summary>
 internal sealed class TeacherConfiguration : TenantEntityTypeConfigurationBase<Teacher>
 {
@@ -27,8 +27,6 @@ internal sealed class TeacherConfiguration : TenantEntityTypeConfigurationBase<T
         builder.Property(x => x.FirstName).IsRequired();
         builder.Property(x => x.LastName).IsRequired();
         builder.Property(x => x.DisplayName);
-        builder.Property(x => x.Email).IsRequired();
-        builder.Property(x => x.ContactPhone);
         builder.Property(x => x.StaffUserId);
         builder.Property(x => x.StaffNumber).HasMaxLength(50);
 
@@ -37,5 +35,6 @@ internal sealed class TeacherConfiguration : TenantEntityTypeConfigurationBase<T
 
         builder.Ignore(x => x.Topics);
         builder.Ignore(x => x.GradeLevels);
+        builder.Ignore(x => x.Qualifications);
     }
 }

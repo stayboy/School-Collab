@@ -76,7 +76,7 @@ public static class GuardianRoutes
             try
             {
                 await handler.HandleAsync(new UpdateGuardian(id, req.TitleCodedValueId, req.FirstName,
-                    req.LastName, req.DisplayName, req.Address, req.CommunityId), ct);
+                    req.LastName, req.DisplayName, req.Address, req.CommunityId, req.DateOfBirth, req.GenderCodedValueId), ct);
                 return Results.NoContent();
             }
             catch (GuardianNotFoundException)
@@ -114,4 +114,4 @@ public static class GuardianRoutes
 }
 
 internal record UpdateGuardianRequest(
-    Guid? TitleCodedValueId, string FirstName, string LastName, string? DisplayName, string? Address, Guid? CommunityId);
+    Guid? TitleCodedValueId, string FirstName, string LastName, string? DisplayName, string? Address, Guid? CommunityId, DateOnly? DateOfBirth, Guid? GenderCodedValueId);

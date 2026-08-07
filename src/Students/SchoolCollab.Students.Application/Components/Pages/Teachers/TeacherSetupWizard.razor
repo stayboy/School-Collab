@@ -2,6 +2,7 @@
 @page "/students/teachers/{Id:guid}/edit"
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Constants
@@ -39,7 +40,7 @@
                                 <FluentIcon Icon="@(Icons.Regular.Size24.Person)" Color="@Color.Accent" />
                                 <div>
                                     <h3>Teacher profile</h3>
-                                    <p class="wizard-hint">Title, name and the single staff email / phone used to identify the teacher.</p>
+                                    <p class="wizard-hint">Title, name and profile details used to identify the teacher. Contact channels (email / SMS / WhatsApp) are managed on the teacher's profile page.</p>
                                 </div>
                             </div>
 
@@ -57,11 +58,43 @@
                                 <FormRow Label="Display name">
                                     <FluentTextField @bind-Value="_displayName" Placeholder="e.g. Mr. Smith (optional)" />
                                 </FormRow>
-                                <FormRow Label="Email" Required>
-                                    <FluentTextField @bind-Value="_email" Required Type="InputType.Email" Placeholder="staff@example.com" />
+                                <FormRow Label="Gender">
+                                    <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                                        @bind-SelectedId="_genderCodedValueId" />
                                 </FormRow>
-                                <FormRow Label="Contact phone">
-                                    <FluentTextField @bind-Value="_contactPhone" Placeholder="Phone (optional)" />
+                                <FormRow Label="Date of birth">
+                                    <FluentDatePicker Id="teacherWizardDob"
+                                                      Value="@DateOfBirthAsDateTime"
+                                                      ValueChanged="@OnDateOfBirthChanged"
+                                                      Placeholder="Select date" />
+                                </FormRow>
+                                <FormRow Label="Level of education">
+                                    <CodedValueDropdown Parent="CodedValueParent.EducLevel"
+                                                        @bind-SelectedId="_levelOfEducationCodedValueId" />
+                                </FormRow>
+                                <FormRow Label="Qualifications">
+                                    <div class="qual-list">
+                                        @if (_allQualifications is null)
+                                        {
+                                            <FluentProgressRing />
+                                        }
+                                        else if (_allQualifications.Length == 0)
+                                        {
+                                            <span class="muted">No qualification options in this tenant yet.</span>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var q in _allQualifications)
+                                            {
+                                                <label class="qual-row">
+                                                    <input type="checkbox"
+                                                           checked="@_selectedQualificationIds.Contains(q.Id)"
+                                                           @onchange="e => OnQualificationToggled(q.Id, e.Value is true)" />
+                                                    <span>@q.Name</span>
+                                                </label>
+                                            }
+                                        }
+                                    </div>
                                 </FormRow>
                             </FluentStack>
 
@@ -76,7 +109,7 @@
                     <FluentWizardStep Label="Subjects"
                                       Summary="Subjects taught"
                                       IconPrevious="@FluentIcons.CheckmarkCircleFilled"
-                                      OnChange="OnSubjectsChangingAsync">
+                                      OnChange="OnTopicsChangingAsync">
                         <section class="wizard-section">
                             <div class="wizard-section-header">
                                 <FluentIcon Icon="@(Icons.Regular.Size24.Book)" Color="@Color.Accent" />
@@ -86,22 +119,22 @@
                                 </div>
                             </div>
 
-                            @if (_allSubjects is null)
+                            @if (_allTopics is null)
                             {
                                 <div class="spinner-container"><FluentProgressRing /></div>
                             }
-                            else if (_allSubjects.Length == 0)
+                            else if (_allTopics.Length == 0)
                             {
                                 <FluentMessageBar Intent="MessageIntent.Info">No subjects in this tenant yet.</FluentMessageBar>
                             }
                             else
                             {
                                 <div class="check-list">
-                                    @foreach (var s in _allSubjects)
+                                    @foreach (var s in _allTopics)
                                     {
                                         <div class="check-row">
-                                            <FluentCheckbox Value="@_selectedSubjectIds.Contains(s.Id)"
-                                                            ValueChanged="@(v => OnSubjectToggled(s.Id, v))" />
+                                            <FluentCheckbox Value="@_selectedTopicIds.Contains(s.Id)"
+                                                            ValueChanged="@(v => OnTopicToggled(s.Id, v))" />
                                             <span class="check-name">@s.Name <span class="muted">@s.Code</span></span>
                                         </div>
                                     }
@@ -169,24 +202,19 @@
                                     {
                                         <div class="review-row"><span class="review-label">Display name</span><span class="review-value">@_displayName</span></div>
                                     }
-                                    <div class="review-row"><span class="review-label">Email</span><span class="review-value">@_email</span></div>
-                                    @if (!string.IsNullOrWhiteSpace(_contactPhone))
-                                    {
-                                        <div class="review-row"><span class="review-label">Phone</span><span class="review-value">@_contactPhone</span></div>
-                                    }
                                 </div>
                             </div>
 
                             <div class="review-card">
-                                <h4>Subjects (@_selectedSubjectIds.Count)</h4>
-                                @if (_selectedSubjectIds.Count == 0)
+                                <h4>Subjects (@_selectedTopicIds.Count)</h4>
+                                @if (_selectedTopicIds.Count == 0)
                                 {
                                     <FluentMessageBar Intent="MessageIntent.Info">No subjects selected.</FluentMessageBar>
                                 }
                                 else
                                 {
                                     <ul class="review-list">
-                                        @foreach (var s in _allSubjects?.Where(s => _selectedSubjectIds.Contains(s.Id)) ?? [])
+                                        @foreach (var s in _allTopics?.Where(s => _selectedTopicIds.Contains(s.Id)) ?? [])
                                         {
                                             <li>@s.Name <span class="muted">@s.Code</span></li>
                                         }
@@ -280,14 +308,17 @@
     private string _firstName = string.Empty;
     private string _lastName = string.Empty;
     private string _displayName = string.Empty;
-    private string _email = string.Empty;
-    private string _contactPhone = string.Empty;
+    private Guid? _genderCodedValueId;
+    private DateOnly? _dateOfBirth;
+    private Guid? _levelOfEducationCodedValueId;
+    private SchoolCollab.Admin.Shared.Services.CodedValueDto[]? _allQualifications;
+    private HashSet<Guid> _selectedQualificationIds = new();
 
-    // Subjects / grade levels.
-    private SubjectDto[]? _allSubjects;
+    // Topics / grade levels.
+    private TopicDto[]? _allTopics;
     private GradeLevelDto[]? _allGradeLevels;
-    private HashSet<Guid> _selectedSubjectIds = new();
-    private HashSet<Guid> _originalSubjectIds = new();
+    private HashSet<Guid> _selectedTopicIds = new();
+    private HashSet<Guid> _originalTopicIds = new();
     private HashSet<Guid> _selectedGradeLevelIds = new();
     private HashSet<Guid> _originalGradeLevelIds = new();
 
@@ -304,8 +335,9 @@
 
         try
         {
-            _allSubjects = await Api.ListSubjectsAsync(ct) ?? [];
+            _allTopics = await Api.ListTopicsAsync(ct) ?? [];
             _allGradeLevels = await Api.ListGradeLevelsAsync(ct) ?? [];
+            _allQualifications = await CodedValuesApi.GetChildrenByParentCodeAsync("QUALIF", ct) ?? [];
 
             if (_isEdit && Id is not null)
             {
@@ -316,15 +348,17 @@
                     _firstName = t.FirstName;
                     _lastName = t.LastName;
                     _displayName = t.DisplayName ?? string.Empty;
-                    _email = t.Email;
-                    _contactPhone = t.ContactPhone ?? string.Empty;
+                    _genderCodedValueId = t.GenderCodedValueId;
+                    _dateOfBirth = t.DateOfBirth;
+                    _levelOfEducationCodedValueId = t.LevelOfEducationCodedValueId;
+                    _selectedQualificationIds = (t.QualificationCodedValueIds ?? []).ToHashSet();
                 }
 
-                var existingSubjects = await Api.ListSubjectsForTeacherAsync(Id.Value, ct) ?? [];
+                var existingTopics = await Api.ListTopicsForTeacherAsync(Id.Value, ct) ?? [];
                 var existingGradeLevels = await Api.ListGradeLevelsForTeacherAsync(Id.Value, ct) ?? [];
-                _originalSubjectIds = existingSubjects.Select(s => s.Id).ToHashSet();
+                _originalTopicIds = existingTopics.Select(s => s.Id).ToHashSet();
                 _originalGradeLevelIds = existingGradeLevels.Select(g => g.Id).ToHashSet();
-                _selectedSubjectIds = new HashSet<Guid>(_originalSubjectIds);
+                _selectedTopicIds = new HashSet<Guid>(_originalTopicIds);
                 _selectedGradeLevelIds = new HashSet<Guid>(_originalGradeLevelIds);
             }
         }
@@ -364,19 +398,19 @@
 
     private Task OnProfileChangingAsync(FluentWizardStepChangeEventArgs args)
     {
-        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName) || string.IsNullOrWhiteSpace(_email))
+        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName))
         {
             args.IsCancelled = true;
-            _profileError = "First name, last name and email are required.";
+            _profileError = "First name and last name are required.";
             return Task.CompletedTask;
         }
         _profileError = null;
         return Task.CompletedTask;
     }
 
-    private Task OnSubjectsChangingAsync(FluentWizardStepChangeEventArgs args)
+    private Task OnTopicsChangingAsync(FluentWizardStepChangeEventArgs args)
     {
-        // No blocking validation — a teacher may teach zero subjects.
+        // No blocking validation — a teacher may teach zero topics.
         return Task.CompletedTask;
     }
 
@@ -386,12 +420,12 @@
         return Task.CompletedTask;
     }
 
-    private void OnSubjectToggled(Guid subjectId, bool selected)
+    private void OnTopicToggled(Guid topicId, bool selected)
     {
         if (selected)
-            _selectedSubjectIds.Add(subjectId);
+            _selectedTopicIds.Add(topicId);
         else
-            _selectedSubjectIds.Remove(subjectId);
+            _selectedTopicIds.Remove(topicId);
         StateHasChanged();
     }
 
@@ -403,6 +437,21 @@
             _selectedGradeLevelIds.Remove(gradeLevelId);
         StateHasChanged();
     }
+
+    private void OnQualificationToggled(Guid codedValueId, bool selected)
+    {
+        if (selected)
+            _selectedQualificationIds.Add(codedValueId);
+        else
+            _selectedQualificationIds.Remove(codedValueId);
+        StateHasChanged();
+    }
+
+    // DOB bridge: _dateOfBirth is DateOnly? but FluentDatePicker.Value is DateTime?.
+    private DateTime? DateOfBirthAsDateTime => _dateOfBirth?.ToDateTime(TimeOnly.MinValue);
+
+    private void OnDateOfBirthChanged(DateTime? value)
+        => _dateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
 
     private async Task GoToStepAsync(int step)
     {
@@ -425,13 +474,13 @@
                 await Api.UpdateTeacherAsync(teacherId, new UpdateTeacherRequest(
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
-                await SyncLinksAsync(teacherId, _originalSubjectIds, _selectedSubjectIds,
-                    id => Api.LinkTeacherSubjectAsync(teacherId, id, ct),
-                    id => Api.UnlinkTeacherSubjectAsync(teacherId, id, ct));
+                    _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
+                    QualificationIds()), ct);
+                await SyncLinksAsync(teacherId, _originalTopicIds, _selectedTopicIds,
+                    id => Api.LinkTeacherTopicAsync(teacherId, id, ct: ct),
+                    id => Api.UnlinkTeacherTopicAsync(teacherId, id, ct));
                 await SyncLinksAsync(teacherId, _originalGradeLevelIds, _selectedGradeLevelIds,
-                    id => Api.LinkTeacherGradeLevelAsync(teacherId, id, ct),
+                    id => Api.LinkTeacherGradeLevelAsync(teacherId, id, null, ct),
                     id => Api.UnlinkTeacherGradeLevelAsync(teacherId, id, ct));
             }
             else
@@ -440,12 +489,12 @@
                     _titleCodedValueId,
                     _firstName.Trim(), _lastName.Trim(),
                     string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _email.Trim(),
-                    string.IsNullOrWhiteSpace(_contactPhone) ? null : _contactPhone.Trim()), ct);
-                foreach (var subjectId in _selectedSubjectIds)
-                    await Api.LinkTeacherSubjectAsync(teacherId, subjectId, ct);
+                    _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
+                    QualificationIds()), ct);
+                foreach (var topicId in _selectedTopicIds)
+                    await Api.LinkTeacherTopicAsync(teacherId, topicId, ct: ct);
                 foreach (var gradeLevelId in _selectedGradeLevelIds)
-                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, ct);
+                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, null, ct);
             }
 
             Nav.NavigateTo($"/students/teachers/{teacherId}");
@@ -463,6 +512,9 @@
             await InvokeAsync(StateHasChanged);
         }
     }
+
+    private Guid[]? QualificationIds()
+        => _selectedQualificationIds.Count == 0 ? null : _selectedQualificationIds.ToArray();
 
     private async Task SyncLinksAsync(
         Guid teacherId,

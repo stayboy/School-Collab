@@ -24,6 +24,9 @@ public sealed class StudentFormModel
     [Required]
     public string? LastName { get; set; }
 
+    /// <summary>Optional salutation title (SALUTS parent). Bound to a CodedValueDropdown.</summary>
+    public Guid? TitleCodedValueId { get; set; }
+
     /// <summary>Required. Bound to a FluentDatePicker in the shared form.</summary>
     [Required(ErrorMessage = "Date of birth is required.")]
     public DateOnly? DateOfBirth { get; set; }

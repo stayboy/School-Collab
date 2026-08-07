@@ -17,42 +17,17 @@
 }
 .section-header h3 { margin: 0; flex: 1; min-width: 0; }
 
-/* ── Profile grid — stacked stat-card layout (label on top, value below)
-   The .profile-row markup is <div class="profile-row"><span class="profile-label">…</span><span class="profile-value">…</span></div>.
-   We restyle it as a vertical stat-card so each demographic reads as
-   "LABEL" (small, muted, uppercase) above the value. The grid itself
-   stays auto-fit so cells reflow on narrow viewports.
+/* ── Profile grid — stacked stat-card layout
+   The label/value pairs are rendered via the shared <FieldDisplay>
+   component (vertical orientation). The grid container stays here so
+   cells reflow on narrow viewports.
 
-   The label typography (uppercase, letter-spacing) mirrors the
-   .review-label pattern in GradeLevelWizard.razor.css so the design
-   language is consistent across detail pages. */
+   FieldDisplay typography mirrors the prior .profile-label/.profile-value
+   style: small muted uppercase label above a 1rem value. */
 .profile-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px 24px;
-}
-.profile-row {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-    min-width: 0;
-}
-.profile-label {
-    color: var(--neutral-foreground-hint);
-    font-size: 0.75rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    min-width: 0;
-    line-height: 1.2;
-}
-.profile-value {
-    font-size: 1rem;
-    font-weight: 500;
-    word-break: break-word;
-    line-height: 1.3;
-    color: var(--neutral-foreground-rest);
 }
 .muted { color: var(--neutral-foreground-hint); }
 

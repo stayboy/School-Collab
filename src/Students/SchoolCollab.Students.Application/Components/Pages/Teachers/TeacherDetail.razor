@@ -1,11 +1,16 @@
 @page "/students/teachers/{Id:guid}"
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Application.Components.Students
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Students.Core.Domain
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 @inject ILogger<TeacherDetail> Logger
 @implements IDisposable
 
@@ -37,7 +42,7 @@
                 {
                     <div class="detail-toolbar">
                         <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="Back">Back</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" IconStart="@FluentIcons.Edit" Href="@($"/students/teachers/{_teacher.Id}/edit")">Edit</FluentButton>
+                        <FluentButton Appearance="Appearance.Accent" IconStart="@FluentIcons.Edit" OnClick="OpenEditAsync">Edit</FluentButton>
                     </div>
 
                     <section class="detail-header">
@@ -49,23 +54,27 @@
                     </section>
 
                     <div class="review-card">
-                        <div class="review-grid">
-                            <div class="review-row"><span class="review-label">Title</span><span class="review-value">@(_titleName ?? "—")</span></div>
-                            <div class="review-row"><span class="review-label">Email</span><span class="review-value">@(_teacher.Email ?? "—")</span></div>
-                            <div class="review-row"><span class="review-label">Phone</span><span class="review-value">@(_teacher.ContactPhone ?? "—")</span></div>
+                        <div class="profile-grid">
+                            <FieldDisplay Label="Title" Orientation="FieldDisplayOrientation.Horizontal">@(_titleName ?? "—")</FieldDisplay>
+                            <FieldDisplay Label="Date of birth" Orientation="FieldDisplayOrientation.Horizontal">@(_teacher.DateOfBirth?.ToString("dd MMM yyyy") ?? "—")</FieldDisplay>
                         </div>
                     </div>
 
                     <div class="review-card">
-                        <h4>Subjects (@(_subjects?.Length ?? 0))</h4>
-                        @if (_subjects is null || _subjects.Length == 0)
+                        <h4>Contacts</h4>
+                        <ContactsEditor OwnerType="ContactOwnerType.Teacher" OwnerId="@_teacher.Id" />
+                    </div>
+
+                    <div class="review-card">
+                        <h4>Subjects (@(_topics?.Length ?? 0))</h4>
+                        @if (_topics is null || _topics.Length == 0)
                         {
                             <FluentMessageBar Intent="MessageIntent.Info">No subjects linked.</FluentMessageBar>
                         }
                         else
                         {
                             <ul class="review-list">
-                                @foreach (var s in _subjects)
+                                @foreach (var s in _topics)
                                 {
                                     <li>@s.Name <span class="muted">@s.Code</span></li>
                                 }
@@ -103,12 +112,16 @@
     </ErrorContent>
 </ErrorBoundary>
 
+<style>
+    .profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 24px; }
+</style>
+
 @code {
     [Parameter] public Guid Id { get; set; }
 
     private bool _loading = true;
     private TeacherDto? _teacher;
-    private SubjectDto[]? _subjects;
+    private TopicDto[]? _topics;
     private GradeLevelDto[]? _gradeLevels;
     private string? _titleName;
     private string? _error;
@@ -125,12 +138,12 @@
             // Run the three reads in parallel — the page is read-only and
             // there are no dependencies between them.
             var teacherTask = Api.GetTeacherByIdAsync(Id, ct);
-            var subjectsTask = Api.ListSubjectsForTeacherAsync(Id, ct);
+            var subjectsTask = Api.ListTopicsForTeacherAsync(Id, ct);
             var gradesTask = Api.ListGradeLevelsForTeacherAsync(Id, ct);
             await Task.WhenAll(teacherTask, subjectsTask, gradesTask);
 
             _teacher = teacherTask.Result;
-            _subjects = subjectsTask.Result ?? [];
+            _topics = subjectsTask.Result ?? [];
             _gradeLevels = gradesTask.Result ?? [];
 
             if (_teacher is not null && _teacher.TitleCodedValueId is { } titleId)
@@ -156,6 +169,22 @@
     }
 
     private void Back() => Nav.NavigateTo("/students/teachers");
+
+    private async Task OpenEditAsync()
+    {
+        if (_disposed) return;
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+            "Edit Teacher",
+            new Dictionary<string, object?>
+            {
+                { nameof(TeacherEditDialog.TeacherId), Id },
+            },
+            DialogSize.Large);
+        var result = await dialog.Result;
+        if (_disposed || result.Cancelled) return;
+        if (result.Data is Guid)
+            Nav.NavigateTo($"/students/teachers/{Id}");
+    }
 
     public void Dispose()
     {

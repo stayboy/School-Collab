@@ -19,7 +19,7 @@ public sealed class UpdateTopicHandler(
         var subject = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new TopicNotFoundException(command.Id);
 
-        subject.Update(command.Name, command.DisplayOrder);
+        subject.Update(command.Name, command.DisplayOrder, codedValueId: command.CodedValueId, code: command.Code);
 
         try
         {
