@@ -312,9 +312,11 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("2 strands", "strand count renders as plain text");
         cut.Markup.Should().Contain("3 lessons", "lesson count renders as plain text");
 
-        // Open the topic row kebab to surface its inline menu items.
+        // Open the topic row kebab to surface its inline menu items. The topic
+        // name itself is the primary affordance (opens the topic edit dialog),
+        // so the kebab hosts the remaining secondary actions.
         cut.Find("fluent-button[title=\"Actions for Mathematics\"]").Click();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Edit name", "kebab offers rename"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Strands", "kebab offers strands"));
         cut.Markup.Should().Contain("Teachers", "kebab offers teachers");
         cut.Markup.Should().Contain("Remove", "kebab offers remove");
     }
@@ -450,6 +452,28 @@ public class GradeLevelDetailPageTests : BunitContext
         // The old segmented pill tab control is gone.
         source.Should().NotContain("grade-tabs__bar");
         source.Should().NotContain("SetActiveTab");
+    }
+
+    [TestMethod]
+    public void Detail_TopicLine_OpensTopicEditDialog()
+    {
+        var source = ReadDetailSource();
+
+        // The topic name is the primary affordance in the Subjects card and opens
+        // the topic edit dialog (rename / code / description), not the strands dialog.
+        source.Should().Contain("OnClick=\"() => OpenTopicEditAsync(t)\"",
+            "the topic name click must invoke the edit-dialog handler");
+        source.Should().Contain("Title=\"Edit topic\"",
+            "the topic anchor advertises the edit affordance");
+
+        // The edit handler opens TopicEditDialog through the shell dialog helper.
+        source.Should().Contain("ShowShellDialogAsync<", "the topic edit handler uses the shell dialog service");
+        source.Should().Contain("TopicEditDialog", "the topic edit handler opens TopicEditDialog");
+
+        // Strands stay reachable (moved to the row kebab, not removed).
+        source.Should().Contain("OpenStrandsAsync", "strands remain available via the row kebab");
+        source.Should().Contain("ShowReadonlyDialogAsync<TopicStrandsDialog>",
+            "strands are opened via the read-only helper");
     }
 
     [TestMethod]

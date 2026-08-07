@@ -92,7 +92,7 @@
                                     <div class="section-card__item">
                                         <div class="section-card__item-main">
                                             <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="item-name"
-                                                          OnClick="() => OpenStrandsAsync(t)" Title="View strands">
+                                                          OnClick="() => OpenTopicEditAsync(t)" Title="Edit topic">
                                                 @t.Name
                                             </FluentAnchor>
                                             <div class="item-meta">
@@ -611,13 +611,15 @@
         }
     }
 
-    // Row kebab for a Subjects-card preview item. The topic name itself is the
-    // primary affordance (opens the unified Strands dialog, which shows the
-    // topic's strands and lessons); the kebab holds the secondary actions.
+    // Row kebab for a Subjects-card preview item. The topic name is the primary
+    // affordance (opens the topic edit dialog, which also manages strands +
+    // lessons inline); the kebab holds the secondary actions (standalone
+    // strands dialog, teachers, remove).
     private IReadOnlyList<RowAction> BuildTopicRowActions(GradeTopicCurriculumDto topic) =>
         new List<RowAction>
         {
-            RowAction.Callback("Edit name", () => OpenTopicEditAsync(topic), FluentIcons.Edit),
+            RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
+
             RowAction.Callback("Teachers", () => OpenTopicTeachersAsync(topic), FluentIcons.People),
             RowAction.Separator(),
             RowAction.Callback("Remove", () => RemoveTopicAsync(topic.TopicId), FluentIcons.Delete),
