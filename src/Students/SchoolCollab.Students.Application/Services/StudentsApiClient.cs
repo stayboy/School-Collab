@@ -155,8 +155,12 @@ public sealed record StudentTopicAssignmentDto(
 public sealed record TopicStrandDto(
     Guid Id,
     Guid TopicId,
+    Guid? ParentStrandId,
     string Name,
     string? Description,
+    DateOnly? StartDate,
+    DateOnly? EndDate,
+    bool IsLesson,
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -297,12 +301,18 @@ public record CreateTopicStrandRequest(
     Guid TopicId,
     string Name,
     string? Description = null,
-    int DisplayOrder = 0);
+    int DisplayOrder = 0,
+    Guid? ParentStrandId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null);
 
 public record UpdateTopicStrandRequest(
     string Name,
     string? Description = null,
-    int DisplayOrder = 0);
+    int DisplayOrder = 0,
+    Guid? ParentStrandId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null);
 
 public record UpdateTopicRequest(
     string Name,
@@ -840,10 +850,13 @@ public sealed class StudentsApiClient : IContactsClient
     // ── Strands ─────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Lists all strands for a topic. <c>GET /students/topics/{topicId}/strands</c>.
+    /// Lists strands for a topic, optionally filtered to a parent's children
+    /// (lessons under a strand). <c>GET /students/topics/{topicId}/strands</c>.
     /// </summary>
-    public async Task<TopicStrandDto[]?> ListTopicStrandsAsync(Guid topicId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<TopicStrandDto[]>($"/students/topics/{topicId}/strands", ct);
+    public async Task<TopicStrandDto[]?> ListTopicStrandsAsync(Guid topicId, Guid? parentStrandId = null, CancellationToken ct = default) =>
+        parentStrandId is { } pid
+            ? await _http.GetFromJsonAsync<TopicStrandDto[]>($"/students/topics/{topicId}/strands?parentStrandId={pid}", ct)
+            : await _http.GetFromJsonAsync<TopicStrandDto[]>($"/students/topics/{topicId}/strands", ct);
 
     /// <summary>
     /// Creates a new strand under a topic. <c>POST /students/topics/strands</c>.

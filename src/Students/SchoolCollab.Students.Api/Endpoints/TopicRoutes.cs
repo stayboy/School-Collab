@@ -193,9 +193,10 @@ public static class TopicRoutes
 
         group.MapGet($"{prefix}/{{topicId:guid}}/strands", async (
             Guid topicId,
+            Guid? parentStrandId,
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTopicStrands, SchoolCollab.Students.Core.DTOs.TopicStrandDto[]> handler,
             CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListTopicStrands(topicId), ct)));
+            Results.Ok(await handler.HandleAsync(new ListTopicStrands(topicId, parentStrandId), ct)));
 
         // Teachers linked to a topic with their per-topic role
         // (grade-detail-rich-grids-plan.md §5).
@@ -222,12 +223,16 @@ public static class TopicRoutes
         {
             try
             {
-                var result = await handler.HandleAsync(new UpdateTopicStrand(id, req.Name, req.Description, req.DisplayOrder), ct);
+                var result = await handler.HandleAsync(new UpdateTopicStrand(id, req.Name, req.Description, req.DisplayOrder, req.ParentStrandId, req.StartDate, req.EndDate), ct);
                 return Results.Ok(result);
             }
             catch (KeyNotFoundException)
             {
                 return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
             }
         });
 
@@ -320,7 +325,13 @@ internal record UpdateTopicRequest(
     int DisplayOrder,
     Guid? CodedValueId = null,
     string? Code = null);
-internal record UpdateTopicStrandRequest(string Name, string? Description, int DisplayOrder);
+internal record UpdateTopicStrandRequest(
+    string Name,
+    string? Description,
+    int DisplayOrder,
+    Guid? ParentStrandId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null);
 internal record UpdateTopicLessonRequest(string Name, string? Description, DateOnly? StartDate, DateOnly? EndDate, int DisplayOrder);
 internal record AssignLessonStrandRequest(Guid? StrandId);
 
