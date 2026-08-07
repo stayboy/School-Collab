@@ -1,0 +1,51 @@
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 1rem 0 0.5rem;
+}
+.section-header h3 {
+    margin: 0;
+}
+.policy-grid {
+    width: 100%;
+}
+.effective-value {
+    font-weight: 500;
+}
+.source-badge {
+}
+.override-list {
+    gap: 0.6rem;
+}
+.override-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.channel-toggle {
+    display: flex;
+    gap: 1rem;
+}
+.time-input {
+}
+.tenant-default {
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: 8px;
+    padding: 0.75rem 1.25rem;
+}
+.tenant-default ul {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+}
+.tenant-default li {
+    display: flex;
+    gap: 1rem;
+    padding: 0.25rem 0;
+}
+.td-label {
+    min-width: 220px;
+    color: var(--neutral-foreground-hint);
+}

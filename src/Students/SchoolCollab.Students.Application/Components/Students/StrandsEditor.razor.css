@@ -1,0 +1,69 @@
+.editor-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.editor-header h4 {
+    margin: 0 0 0.25rem;
+}
+.strand-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+.strand-group {
+    border-top: 1px solid var(--neutral-stroke-rest);
+    padding-top: 0.5rem;
+}
+.strand-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.strand-name {
+    font-weight: 600;
+}
+.strand-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+.strand-input {
+    max-width: 260px;
+}
+.lesson-block {
+    margin-left: 1.25rem;
+    margin-top: 0.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-start;
+}
+.lesson-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    width: 100%;
+}
+.lesson-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.lesson-name {
+    font-weight: 500;
+}
+.lesson-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+}
+.lesson-input {
+    max-width: 220px;
+}
+.new-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}

@@ -1,0 +1,34 @@
+::deep .grid-header-wrap {
+    display: inline-block;
+    width: 100%;
+    word-break: break-word;
+    white-space: normal;
+    line-height: 1.2;
+    text-align: left;
+}
+
+::deep .guardian-students-link {
+    white-space: nowrap;
+}
+
+::deep .guardian-students-none {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+}
+
+.guardian-contact-cell {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.contact-channel {
+    font-size: 0.75rem;
+    line-height: 1.2;
+}
+
+.landing-filter-chips {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-right: 8px;
+}

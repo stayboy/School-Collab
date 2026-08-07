@@ -16,6 +16,14 @@
 .mt-3 { margin-top: 1rem; }
 .my-4 { margin-top: 1.5rem; margin-bottom: 1.5rem; }
 
+/* Small shared utilities (historically repeated in inline <style> blocks).
+   Keep this file SMALL: only genuine, app-wide utility classes belong here
+   (color/spacing/wrapper helpers). Component-specific or page-layout styles
+   must go in that component's isolated .razor.css instead — do not grow this
+   file with page styles (CSS isolation is preferred for those). */
+.muted { color: var(--neutral-foreground-hint); }
+.dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+
 /* Form field sizing — used across Assignments and CodedValues modules */
 .full-width {
     min-width: 400px;

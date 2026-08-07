@@ -37,3 +37,7 @@
     overflow: auto;
     width: 100%;
 }
+
+.grade-filter {
+    min-width: 200px;
+}
