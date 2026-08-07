@@ -6,8 +6,8 @@
 @* Full list of topics assigned to a grade, shown from the Topics section card's
    "View all" anchor (grade-detail-modern-ui-plan.md §0.4). The page owns the
    API/enrichment and passes the data + action callbacks so this dialog stays
-   thin. Reuses the per-topic Strands / Lessons / Teachers dialogs and the
-   Remove flow (RemoveTopicAsync on the page). *@
+   thin. Reuses the per-topic Strands (strands + lessons, unified) / Teachers
+   dialogs and the Remove flow (RemoveTopicAsync on the page). *@
 <div class="topic-dialog">
     <div class="picker-row">
         <FluentSelect TOption="TopicDto"
@@ -41,9 +41,7 @@
                         <FluentAnchor Appearance="Appearance.Hypertext" OnClick="@(() => OpenStrandsAsync(topic))" Title="Strands">
                             @topic.StrandCount strands
                         </FluentAnchor>
-                        <FluentAnchor Appearance="Appearance.Hypertext" OnClick="@(() => OpenLessonsAsync(topic))" Title="Lessons">
-                            @topic.LessonCount lessons
-                        </FluentAnchor>
+                        <span class="topic-dialog__count" title="@topic.LessonCount lessons">@topic.LessonCount lessons</span>
                     </div>
                     <RowActionsMenu Actions="@BuildRowActions(topic)"
                                     AriaLabel="Topic actions"
@@ -61,7 +59,6 @@
     [Parameter] public GradeTopicCurriculumDto[] Topics { get; set; } = [];
     [Parameter] public TopicDto[] UnassignedTopics { get; set; } = [];
     [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenStrands { get; set; }
-    [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenLessons { get; set; }
     [Parameter] public Func<GradeTopicCurriculumDto, Task>? OpenTeachers { get; set; }
     [Parameter] public Func<Guid, Task>? Remove { get; set; }
     [Parameter] public Func<Guid, Task>? Assign { get; set; }
@@ -78,11 +75,6 @@
         if (OpenStrands is not null) await OpenStrands(topic);
     }
 
-    private async Task OpenLessonsAsync(GradeTopicCurriculumDto topic)
-    {
-        if (OpenLessons is not null) await OpenLessons(topic);
-    }
-
     private async Task OpenTeachersAsync(GradeTopicCurriculumDto topic)
     {
         if (OpenTeachers is not null) await OpenTeachers(topic);
@@ -92,7 +84,6 @@
         new List<RowAction>
         {
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
-            RowAction.Callback("Lessons", () => OpenLessonsAsync(topic), FluentIcons.Book),
             RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People),
             RowAction.Separator(),
             RowAction.Callback("Remove", () => RemoveAsync(topic), FluentIcons.Delete),

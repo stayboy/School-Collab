@@ -315,7 +315,6 @@ public class GradeLevelDetailPageTests : BunitContext
         // Open the topic row kebab to surface its inline menu items.
         cut.Find("fluent-button[title=\"Actions for Mathematics\"]").Click();
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Edit name", "kebab offers rename"));
-        cut.Markup.Should().Contain("Lessons", "kebab offers lessons");
         cut.Markup.Should().Contain("Teachers", "kebab offers teachers");
         cut.Markup.Should().Contain("Remove", "kebab offers remove");
     }
