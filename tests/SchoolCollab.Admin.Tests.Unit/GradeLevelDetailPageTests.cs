@@ -5,7 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 using SchoolCollab.Students.Application.Services;
 using System.Net;
@@ -318,6 +320,50 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("Lessons", "kebab offers lessons");
         cut.Markup.Should().Contain("Teachers", "kebab offers teachers");
         cut.Markup.Should().Contain("Remove", "kebab offers remove");
+    }
+
+    [TestMethod]
+    public void Repro_TopicNameClick_OpensStrandsDialog()
+    {
+        var gradeId = Guid.NewGuid();
+        var topicId = Guid.NewGuid();
+        Register(
+            gradeId,
+            GradeJson(gradeId),
+            topicsCatalogJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = "MATH",
+                ["name"] = "Mathematics", ["description"] = (string?)null,
+                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            } }),
+            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(Guid.NewGuid(), topicId, gradeId) }),
+            curriculumJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
+            {
+                ["topicId"] = topicId, ["name"] = "Mathematics", ["code"] = "MATH",
+                ["strandCount"] = 2, ["lessonCount"] = 3,
+            } }));
+
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<TopicStrandsDialog, DialogParameters>(
+                It.IsAny<DialogParameters>(), It.IsAny<DialogParameters>()))
+            .ReturnsAsync(Mock.Of<IDialogReference>());
+        Services.AddSingleton(dialogMock.Object);
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
+
+        cut.Find("fluent-anchor.item-name").Click();
+        cut.WaitForAssertion(() =>
+            dialogMock.Verify(d => d.ShowDialogAsync<TopicStrandsDialog, DialogParameters>(
+                It.IsAny<DialogParameters>(), It.IsAny<DialogParameters>()), Times.Once));
+
+        // Regression guard: the topic name must NOT be an href="#" anchor —
+        // default navigation to the # fragment interrupts the dialog in a real
+        // browser (Blazor Server). It is a click-only affordance, matching the
+        // GradeTopicsDialog strands/lessons anchors (no Href).
+        cut.Find("fluent-anchor.item-name").GetAttribute("href").Should().BeNull(
+            "the topic name must not be an href anchor (default nav to '#' interrupts the dialog)");
     }
 
     [TestMethod]
