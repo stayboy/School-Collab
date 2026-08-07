@@ -177,9 +177,11 @@ public class ActivityGroupsPageTests : BunitContext
         flags.Enabled = false;
 
         var cut = Render<ActivityGroups>();
-        cut.WaitForState(() => cut.Markup.Length > 0, TimeSpan.FromSeconds(1));
 
-        // FeatureFlagGate hides the LandingPage content while the flag is off.
+        // FeatureFlagGate hides the LandingPage content while the flag is off,
+        // so the page renders no content (markup stays empty). There is no
+        // longer an always-rendered inline <style> block to make markup
+        // non-empty, so we assert directly on the hidden content.
         cut.Markup.Should().NotContain("Chess Club");
         cut.Markup.Should().NotContain("New Activity Group");
     }

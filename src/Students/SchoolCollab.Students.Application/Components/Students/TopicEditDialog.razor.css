@@ -1,0 +1,7 @@
+/* .dialog-container base lives in app.css; this adds the inline-strands
+   block's spacing + divider. */
+.strands-block {
+    margin-top: 0.75rem;
+    border-top: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    padding-top: 0.75rem;
+}

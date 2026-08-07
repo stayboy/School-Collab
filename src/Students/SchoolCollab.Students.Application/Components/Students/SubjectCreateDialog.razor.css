@@ -1,0 +1,5 @@
+.hint {
+    color: var(--neutral-foreground-hint);
+    font-size: 0.85em;
+    margin-top: 4px;
+}

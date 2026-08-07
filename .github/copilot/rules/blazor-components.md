@@ -352,6 +352,46 @@ The only exceptions are truly one-off dynamic values computed in C# (e.g. a `wid
 `color` derived from data) — even then, prefer a CSS custom property set via
 `style="--my-value: @value"` and reference it in the isolated CSS.
 
+### Never put `<style>` blocks in `.razor` markup
+
+Do **not** add `<style>…</style>` blocks inside a `.razor` file. Inline `<style>`
+blocks are **unscoped** (global), so they bypass Blazor's CSS isolation and can leak
+onto every page — the same problem the `.razor.css` rule exists to prevent.
+
+```razor
+@* ❌ wrong — global, unscoped *@
+<style>.foo { color: red; }</style>
+<div class="foo">…</div>
+
+@* ✅ correct — scoped to this component *@
+<div class="foo">…</div>
+```
+
+```css
+/* In Component.razor.css */
+.foo { color: red; }
+```
+
+Keep the markup clean: every rule that an inline `<style>` block would hold belongs in
+the component's `.razor.css` file. If a component has no `.razor.css` yet, create one
+and move the styles there.
+
+### Minimise repeated styles across `.razor` files
+
+Avoid duplicating the same CSS rule across multiple `.razor.css` files. When several
+components share an identical style, prefer one of:
+
+- a **shared component/class** that owns the style once (e.g. a shared `FormRow`,
+  `SectionCard`, or dialog-shell class), or
+- a **shared utility class** in `wwwroot/app.css` (e.g. a layout/flex utility) when
+  the style is genuinely generic, or
+- keep duplication to a **bare minimum** if the styles are only cosmetically similar
+  and may diverge.
+
+Prefer the shared-class option when the shared element is already a component;
+prefer `app.css` when it is a layout/utility concern. Repeated styles should be the
+exception, not the rule.
+
 ### Use `::deep` for child-component and web-component selectors
 
 Blazor CSS isolation scopes selectors to the *component's own* elements. To target
@@ -371,7 +411,12 @@ not exist in the component's direct markup.
 
 ### Global styles in `wwwroot/app.css`
 
-Only add styles to `wwwroot/app.css` when they are truly application-wide:
+Only add styles to `wwwroot/app.css` when they are truly application-wide. Keep
+this file **small** — it is the one global stylesheet and grows page-load cost.
+Put only small, genuine utility classes here (e.g. `.muted`, spacing helpers);
+never add page-layout or component-specific styles to it. Those belong in the
+owning component's isolated `.razor.css` (CSS isolation is the preferred
+mechanism — prefer component-scoped CSS over growing the global sheet):
 
 | Keep in `app.css` (global) | Move to `.razor.css` (isolated) |
 |---|---|

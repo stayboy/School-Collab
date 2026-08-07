@@ -1,0 +1,4 @@
+/* .muted base color comes from app.css; this adds dialog-local spacing. */
+.muted {
+    margin-left: 8px;
+}

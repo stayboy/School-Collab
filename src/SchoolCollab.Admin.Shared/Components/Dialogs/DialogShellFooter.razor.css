@@ -1,0 +1,14 @@
+/* The footer renders its own .button-row element, so scoping is correct. */
+.button-row {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+    /* Horizontal separator between dialog content and the action
+       buttons. Mirrors the .form-actions border-top used by
+       StudentFormFields so every DialogShellBase dialog gets the
+       same content/actions divider. */
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+    padding-top: 16px;
+}
