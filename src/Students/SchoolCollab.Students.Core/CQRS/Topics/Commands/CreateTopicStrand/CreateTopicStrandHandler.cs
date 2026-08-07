@@ -10,22 +10,24 @@ public sealed class CreateTopicStrandHandler(StudentsDbContext db) : ICommandHan
 {
     public async Task<TopicStrandDto> HandleAsync(CreateTopicStrand command, CancellationToken ct = default)
     {
+        // A strand with a parent is a lesson; validate the parent (root, same topic, not self).
+        if (command.ParentStrandId is { } parentId)
+        {
+            await StrandParentGuard.EnsureValidParentAsync(db, parentId, command.TopicId, strandId: null, ct);
+        }
+
         var strand = TopicStrand.Create(
             command.TopicId,
             command.Name,
             command.Description,
-            command.DisplayOrder);
+            command.DisplayOrder,
+            command.ParentStrandId,
+            command.StartDate,
+            command.EndDate);
 
         db.TopicStrands.Add(strand);
         await db.SaveChangesAsync(ct);
 
-        return new TopicStrandDto(
-            strand.Id,
-            strand.TopicId,
-            strand.Name,
-            strand.Description,
-            strand.DisplayOrder,
-            strand.CreatedAt,
-            strand.UpdatedAt);
+        return TopicStrandDto.FromStrand(strand);
     }
 }

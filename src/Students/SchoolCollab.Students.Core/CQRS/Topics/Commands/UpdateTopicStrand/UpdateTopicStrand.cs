@@ -6,4 +6,7 @@ public sealed record UpdateTopicStrand(
     Guid Id,
     string Name,
     string? Description,
-    int DisplayOrder) : ICommand;
+    int DisplayOrder,
+    Guid? ParentStrandId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null) : ICommand;

@@ -12,16 +12,14 @@ public sealed class UpdateTopicStrandHandler(StudentsDbContext db) : ICommandHan
         var strand = await db.TopicStrands.FindAsync(new object[] { command.Id }, ct);
         if (strand == null) throw new KeyNotFoundException($"Topic Strand {command.Id} not found.");
 
-        strand.Update(command.Name, command.Description, command.DisplayOrder);
+        if (command.ParentStrandId is { } parentId)
+        {
+            await StrandParentGuard.EnsureValidParentAsync(db, parentId, strand.TopicId, strand.Id, ct);
+        }
+
+        strand.Update(command.Name, command.Description, command.DisplayOrder, command.ParentStrandId, command.StartDate, command.EndDate);
         await db.SaveChangesAsync(ct);
 
-        return new TopicStrandDto(
-            strand.Id,
-            strand.TopicId,
-            strand.Name,
-            strand.Description,
-            strand.DisplayOrder,
-            strand.CreatedAt,
-            strand.UpdatedAt);
+        return TopicStrandDto.FromStrand(strand);
     }
 }
