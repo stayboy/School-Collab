@@ -19,10 +19,10 @@ using System.Threading.Tasks;
 namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
-/// bUnit tests for the TopicStrandsDialog / TopicLessonsDialog that host the
-/// shared StrandsEditor / LessonsEditor (grade-detail-rich-grids-plan.md §5).
-/// Rendered directly (no FluentDialog host): the Close button guards a null
-/// cascade, and the hosted editor loads its rows via the scripted backend.
+/// bUnit tests for the TopicStrandsDialog that hosts the unified StrandsEditor
+/// (root strands + their lessons — strand-lesson-unification-plan.md). Rendered
+/// directly (no FluentDialog host): the Close button guards a null cascade, and
+/// the hosted editor loads its rows via the scripted backend.
 /// </summary>
 [TestClass]
 public class TopicDialogsBunitTests : BunitContext
@@ -80,31 +80,27 @@ public class TopicDialogsBunitTests : BunitContext
         public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(new AuthenticationState(_u));
     }
 
-    private static string StrandJson(Guid strandId, Guid topicId, string name) =>
-        JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-        {
-            ["id"] = strandId, ["topicId"] = topicId, ["name"] = name,
-            ["description"] = (string?)null, ["displayOrder"] = 0,
-            ["createdAt"] = System.DateTimeOffset.UnixEpoch, ["updatedAt"] = System.DateTimeOffset.UnixEpoch,
-        } });
+    private static Dictionary<string, object?> StrandRow(Guid strandId, Guid topicId, string name, Guid? parentStrandId) => new()
+    {
+        ["id"] = strandId, ["topicId"] = topicId, ["parentStrandId"] = parentStrandId,
+        ["name"] = name, ["description"] = (string?)null,
+        ["startDate"] = (string?)null, ["endDate"] = (string?)null,
+        ["isLesson"] = parentStrandId.HasValue, ["displayOrder"] = 0,
+        ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+    };
 
-    private static string LessonJson(Guid lessonId, Guid topicId, string name) =>
-        JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-        {
-            ["id"] = lessonId, ["topicId"] = topicId, ["strandId"] = (Guid?)null,
-            ["name"] = name, ["description"] = (string?)null,
-            ["startDate"] = (string?)null, ["endDate"] = (string?)null,
-            ["displayOrder"] = 0,
-            ["createdAt"] = System.DateTimeOffset.UnixEpoch, ["updatedAt"] = System.DateTimeOffset.UnixEpoch,
-        } });
+    private static string StrandJson(params Dictionary<string, object?>[] rows) =>
+        JsonSerializer.Serialize(rows);
 
     [TestMethod]
-    public void TopicStrandsDialog_HostsStrandsEditor_AndListsStrands()
+    public void TopicStrandsDialog_HostsStrandsEditor_AndListsStrandsAndLessons()
     {
         var topicId = Guid.NewGuid();
-        var strandId = Guid.NewGuid();
+        var rootId = Guid.NewGuid();
+        var lessonId = Guid.NewGuid();
         var handler = new ScriptedHandler();
-        handler.Map($"/students/topics/{topicId}/strands", HttpStatusCode.OK, StrandJson(strandId, topicId, "Numbers"));
+        handler.Map($"/students/topics/{topicId}/strands", HttpStatusCode.OK,
+            StrandJson(StrandRow(rootId, topicId, "Numbers", null), StrandRow(lessonId, topicId, "Add", rootId)));
         Register(handler);
 
         var cut = Render<TopicStrandsDialog>(p =>
@@ -114,27 +110,9 @@ public class TopicDialogsBunitTests : BunitContext
         });
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Numbers"));
-        cut.Markup.Should().Contain("Strands (1)");
-        cut.Markup.Should().Contain("Close");
-    }
-
-    [TestMethod]
-    public void TopicLessonsDialog_HostsLessonsEditor_AndListsLessons()
-    {
-        var topicId = Guid.NewGuid();
-        var lessonId = Guid.NewGuid();
-        var handler = new ScriptedHandler();
-        handler.Map($"/students/topics/{topicId}/lessons", HttpStatusCode.OK, LessonJson(lessonId, topicId, "Add"));
-        handler.Map($"/students/topics/{topicId}/strands", HttpStatusCode.OK, "[]");
-        Register(handler);
-
-        var cut = Render<TopicLessonsDialog>(p =>
-        {
-            p.Add(x => x.TopicId, topicId);
-            p.Add(x => x.TopicName, "Mathematics");
-        });
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Add"));
+        cut.Markup.Should().Contain("Strands (1)", "one root strand");
+        cut.Markup.Should().Contain("Add", "a lesson renders under its root strand");
+        cut.Markup.Should().Contain("New Lesson");
         cut.Markup.Should().Contain("Close");
     }
 }

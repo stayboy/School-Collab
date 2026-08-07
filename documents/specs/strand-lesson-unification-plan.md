@@ -101,12 +101,15 @@ an additive, shippable step before the destructive merge:
   counts from one table. Migration 2 copies `subject_lessons` → parented
   `subject_strands` (backfilling `TopicLessonId` → `TopicStrandId`) then drops
   `subject_lessons` and the `TopicLessonId` column.
-- **sl/3 — CQRS + API polish.** Extend `CreateTopicStrand`/`UpdateTopicStrand` with
-  optional `ParentStrandId` + validation (not self, same topic, root parent); add
-  list filters; finalize DTO shape.
-- **sl/4 — UI + tests.** Unify `StrandsEditor` (parents + lessons with parent
-  select), remove `LessonsEditor`, update dialogs/Detail kebab, update all
-  strand/lesson CQRS, route, DTO, and bUnit tests.
+- **sl/3 — CQRS + API polish (DONE).** Extended `CreateTopicStrand`/`UpdateTopicStrand`
+  with optional `ParentStrandId` + `StrandParentGuard` validation (not self, same
+  topic, root parent); `ListTopicStrands` optional parent filter; `TopicStrandDto`
+  finalised with `ParentStrandId`/`StartDate`/`EndDate`/`IsLesson`.
+- **sl/4 — UI (DONE, this PR).** Unified `StrandsEditor` to manage root strands AND
+  their lessons (each root lists its parented strands, with a "New Lesson"
+  affordance that creates a parented strand); removed `LessonsEditor` +
+  `TopicLessonsDialog`; Detail + GradeTopicsDialog drop the now-redundant
+  "Lessons" affordance (counts stay informational); tests updated.
 
 ## Risks / open questions
 - Lessons with `StrandId IS NULL` today (no parent) — after migration they become

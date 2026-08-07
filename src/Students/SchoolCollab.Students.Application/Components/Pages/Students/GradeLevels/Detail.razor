@@ -533,7 +533,6 @@
                 { nameof(GradeTopicsDialog.Topics), _curriculum ?? [] },
                 { nameof(GradeTopicsDialog.UnassignedTopics), _unassignedTopics },
                 { nameof(GradeTopicsDialog.OpenStrands), new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
-                { nameof(GradeTopicsDialog.OpenLessons), new Func<GradeTopicCurriculumDto, Task>(OpenLessonsAsync) },
                 { nameof(GradeTopicsDialog.OpenTeachers), new Func<GradeTopicCurriculumDto, Task>(OpenTopicTeachersAsync) },
                 { nameof(GradeTopicsDialog.Remove), new Func<Guid, Task>(RemoveTopicAsync) },
                 { nameof(GradeTopicsDialog.Assign), new Func<Guid, Task>(AssignTopicAsync) },
@@ -580,26 +579,15 @@
 
     private async Task OpenStrandsAsync(GradeTopicCurriculumDto topic)
     {
+        // The unified Strands editor shows root strands AND their lessons (lessons
+        // are parented strands — strand-lesson-unification-plan.md), so this dialog
+        // is the single place to manage a topic's curriculum.
         await DialogService.ShowReadonlyDialogAsync<TopicStrandsDialog>(
             $"Strands · {topic.Name}",
             new Dictionary<string, object?>
             {
                 { nameof(TopicStrandsDialog.TopicId), topic.TopicId },
                 { nameof(TopicStrandsDialog.TopicName), topic.Name },
-            },
-            DialogSize.Medium);
-        if (_disposed) return;
-        await ReloadAssignedTopicsAsync();
-    }
-
-    private async Task OpenLessonsAsync(GradeTopicCurriculumDto topic)
-    {
-        await DialogService.ShowReadonlyDialogAsync<TopicLessonsDialog>(
-            $"Lessons · {topic.Name}",
-            new Dictionary<string, object?>
-            {
-                { nameof(TopicLessonsDialog.TopicId), topic.TopicId },
-                { nameof(TopicLessonsDialog.TopicName), topic.Name },
             },
             DialogSize.Medium);
         if (_disposed) return;
@@ -624,11 +612,11 @@
     }
 
     // Row kebab for a Subjects-card preview item. The topic name itself is the
-    // primary affordance (opens Strands); the kebab holds the secondary actions.
+    // primary affordance (opens the unified Strands dialog, which shows the
+    // topic's strands and lessons); the kebab holds the secondary actions.
     private IReadOnlyList<RowAction> BuildTopicRowActions(GradeTopicCurriculumDto topic) =>
         new List<RowAction>
         {
-            RowAction.Callback("Lessons", () => OpenLessonsAsync(topic), FluentIcons.Book),
             RowAction.Callback("Edit name", () => OpenTopicEditAsync(topic), FluentIcons.Edit),
             RowAction.Callback("Teachers", () => OpenTopicTeachersAsync(topic), FluentIcons.People),
             RowAction.Separator(),

@@ -1,9 +1,11 @@
-@* Dialog hosting the shared <StrandsEditor> for a single topic, replacing the
-   inline expand-card strands section on the grade Detail page (grade-detail-
-   rich-grids-plan.md §5). The editor is self-contained (loads + CRUD via the
-   StudentsApiClient), so this dialog only passes TopicId/TopicName through and
-   owns the Close affordance. Not a DialogShellBase (no model/form/result) —
-   mirrors GuardianContactsDialog and is opened via ShowReadonlyDialogAsync. *@
+@* Dialog hosting the shared <StrandsEditor> for a single topic. The editor is
+   self-contained (loads + CRUD via the StudentsApiClient) and manages root
+   strands AND their lessons (lessons are parented strands — strand-lesson-
+   unification-plan.md), so this dialog is the single place to view/edit a topic's
+   curriculum. Replaces the separate lessons dialog. Only passes TopicId/TopicName
+   through and owns the Close affordance. Not a DialogShellBase (no
+   model/form/result) — mirrors GuardianContactsDialog and is opened via
+   ShowReadonlyDialogAsync. *@
 @implements IDialogContentComponent<DialogParameters>
 @using SchoolCollab.Students.Application.Components.Students
 @using Microsoft.FluentUI.AspNetCore.Components
