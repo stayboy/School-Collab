@@ -25,16 +25,30 @@ internal sealed class TopicStrandConfiguration : TenantEntityTypeConfigurationBa
         builder.Property(x => x.Description).HasMaxLength(1000);
         builder.Property(x => x.DisplayOrder).IsRequired();
         builder.Property(x => x.TopicId).IsRequired();
+        builder.Property(x => x.StartDate);
+        builder.Property(x => x.EndDate);
 
         builder.HasOne(x => x.Topic)
             .WithMany()
             .HasForeignKey(x => x.TopicId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        // A strand with a parent is a lesson. Self-referencing; deleting a parent
+        // leaves its child lessons stranded (SetNull) — strand-lesson-unification-plan.md.
+        builder.HasOne(x => x.Parent)
+            .WithMany()
+            .HasForeignKey(x => x.ParentStrandId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         // NFR-3 hot path (tenant_id leading).
         builder.HasIndex(x => new { x.TenantId, x.TopicId })
             .HasDatabaseName("ix_subject_strands_tenant_subject");
 
+        builder.HasIndex(x => new { x.TenantId, x.ParentStrandId })
+            .HasDatabaseName("ix_subject_strands_tenant_parent");
+
         builder.Ignore(x => x.DomainEvents);
+        builder.Ignore(x => x.IsLesson);
+        builder.Ignore(x => x.IsOpenEnded);
     }
 }
