@@ -19,7 +19,7 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
     public Guid StudentId { get; private set; }
     public Guid PeriodId { get; private set; }
     public Guid GradeLevelId { get; private set; }
-    public Guid? GradeStrandCodedValueId { get; private set; }
+    public Guid? StreamCodedValueId { get; private set; }
     public DateOnly EnrolledOn { get; private set; }
     public DateOnly? ExitDate { get; private set; }
     public EnrollmentStatus Status { get; private set; }
@@ -35,7 +35,7 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
         Guid periodId,
         Guid gradeLevelId,
         DateOnly? enrolledOn = null,
-        Guid? gradeStrandCodedValueId = null)
+        Guid? streamCodedValueId = null)
     {
         var now = DateTimeOffset.UtcNow;
         var enrollment = new StudentEnrollment
@@ -44,29 +44,29 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
             StudentId = studentId,
             PeriodId = periodId,
             GradeLevelId = gradeLevelId,
-            GradeStrandCodedValueId = gradeStrandCodedValueId,
+            StreamCodedValueId = streamCodedValueId,
             EnrolledOn = enrolledOn ?? DateOnly.FromDateTime(DateTime.UtcNow),
             Status = EnrollmentStatus.Active,
             CreatedAt = now,
             UpdatedAt = now
         };
 
-        enrollment._domainEvents.Add(new StudentEnrolledEvent(enrollment.Id, studentId, periodId, gradeLevelId, gradeStrandCodedValueId));
+        enrollment._domainEvents.Add(new StudentEnrolledEvent(enrollment.Id, studentId, periodId, gradeLevelId, streamCodedValueId));
         return enrollment;
     }
 
-    public void Transfer(Guid newGradeLevelId, DateOnly? transferDate = null, string? reason = null, Guid? newGradeStrandCodedValueId = null)
+    public void Transfer(Guid newGradeLevelId, DateOnly? transferDate = null, string? reason = null, Guid? newStreamCodedValueId = null)
     {
         if (Status != EnrollmentStatus.Active)
             throw new InvalidOperationException("Only active enrollments can be transferred.");
 
         GradeLevelId = newGradeLevelId;
-        GradeStrandCodedValueId = newGradeStrandCodedValueId;
+        StreamCodedValueId = newStreamCodedValueId;
         Status = EnrollmentStatus.Transferred;
         ExitDate = transferDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
         TransferReason = reason;
         UpdatedAt = DateTimeOffset.UtcNow;
-        _domainEvents.Add(new StudentTransferredEvent(Id, StudentId, PeriodId, newGradeLevelId, newGradeStrandCodedValueId));
+        _domainEvents.Add(new StudentTransferredEvent(Id, StudentId, PeriodId, newGradeLevelId, newStreamCodedValueId));
     }
 
     public void Withdraw(DateOnly? exitDate = null)

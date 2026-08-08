@@ -6,5 +6,5 @@ public sealed record EnrollStudent(
     Guid StudentId,
     Guid PeriodId,
     Guid GradeLevelId,
-    Guid? GradeStrandCodedValueId,
+    Guid? StreamCodedValueId,
     DateOnly? EnrolledOn) : ICommand;

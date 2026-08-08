@@ -72,38 +72,40 @@ public sealed class CodedValueSeeder(
             var inserted = 0;
 
             // Iterative topological insertion: each pass inserts rows whose parent
-            // is already known (in DB or just inserted in this session). Handles
-            // arbitrary tree depth. Fails fast if a cycle or missing parent is detected.
+            // is already known (in DB or just inserted in this session). CodedValue.Create
+            // assigns a client-generated Guid, so the parent→child link is resolved
+            // in-memory and the WHOLE pass is persisted with a single SaveChangesAsync —
+            // one round trip per tree-depth level instead of one per row. Fails fast if a
+            // cycle or missing parent is detected.
             while (pending.Count > 0)
             {
-                var progress = false;
+                var ready = pending
+                    .Where(r => string.IsNullOrEmpty(r.ParentCode) || codeToId.ContainsKey(r.ParentCode))
+                    .ToList();
 
-                foreach (var row in pending.ToList())
+                if (ready.Count == 0)
+                    throw new InvalidOperationException(
+                        $"Seeding stalled — cycle detected or parent code does not exist in the " +
+                        $"database or seed file. Remaining: {string.Join(", ", pending.Select(r => r.Code))}");
+
+                foreach (var row in ready)
                 {
-                    if (!string.IsNullOrEmpty(row.ParentCode) && !codeToId.ContainsKey(row.ParentCode))
-                        continue; // parent not yet inserted — defer to next pass
-
                     var parentId = string.IsNullOrEmpty(row.ParentCode)
                         ? (Guid?)null
                         : codeToId[row.ParentCode];
 
                     var entity = CodedValue.Create(row.Code, row.Name, row.Description, parentId, row.DisplayOrder);
-                    db.CodedValues.Add(entity);
-                    await db.SaveChangesAsync(ct);
                     entity.ClearDomainEvents(); // not dispatching events for seed data
+                    db.CodedValues.Add(entity);
 
                     codeToId[row.Code] = entity.Id;
                     pending.Remove(row);
                     inserted++;
-                    progress = true;
 
                     logger.LogDebug("Seeded {Code} ({Name})", row.Code, row.Name);
                 }
 
-                if (!progress)
-                    throw new InvalidOperationException(
-                        $"Seeding stalled — cycle detected or parent code does not exist in the " +
-                        $"database or seed file. Remaining: {string.Join(", ", pending.Select(r => r.Code))}");
+                await db.SaveChangesAsync(ct);
             }
 
             await tx.CommitAsync(ct);
@@ -131,12 +133,15 @@ public sealed class CodedValueSeeder(
         var rows = CsvSeedReader.ReadAttributeDefinitions(filePath);
         logger.LogDebug("Read {Count} attribute definition rows", rows.Count);
 
+        // Pre-load all coded values (tracked) by code once so each definition row
+        // resolves its parent in-memory instead of a round trip per row.
+        var byCode = await db.CodedValues
+            .Include(c => c.AttributeDefinitions)
+            .ToDictionaryAsync(c => c.Code, ct);
+
         foreach (var row in rows)
         {
-            var parent = await db.CodedValues
-                .FirstOrDefaultAsync(c => c.Code == row.ParentCode, ct);
-
-            if (parent is null)
+            if (!byCode.TryGetValue(row.ParentCode, out var parent))
             {
                 logger.LogWarning("Parent coded value {Code} not found for attribute definition {Key}. Skipping",
                     row.ParentCode, row.Key);
@@ -178,24 +183,20 @@ public sealed class CodedValueSeeder(
         var rows = CsvSeedReader.ReadAttributes(filePath);
         logger.LogDebug("Read {Count} attribute value rows", rows.Count);
 
-        // Pre-load definitions + code→id map so CodedValue-typed attributes can be
-        // resolved from their human-readable code (e.g. "GRADE_R") to the stored
-        // CodedValueId GUID that filters and APIs expect.
-        var parents = await db.CodedValues
-            .AsNoTracking()
+        // Pre-load ALL coded values (tracked, with definitions) in ONE query so every
+        // attribute row resolves its target in-memory instead of a round trip per row.
+        // Attributes are auto-included (see CodedValueConfiguration) so the idempotency
+        // check below is also in-memory. Two dictionaries: by code (for the target +
+        // CodedValue-typed reference resolution) and by id (for the parent lookup).
+        var entities = await db.CodedValues
             .Include(c => c.AttributeDefinitions)
-            .ToDictionaryAsync(c => c.Id, ct);
-
-        var codeToId = await db.CodedValues
-            .AsNoTracking()
-            .ToDictionaryAsync(c => c.Code, c => c.Id, ct);
+            .ToListAsync(ct);
+        var byCode = entities.ToDictionary(c => c.Code);
+        var byId = entities.ToDictionary(c => c.Id);
 
         foreach (var row in rows)
         {
-            var codedValue = await db.CodedValues
-                .FirstOrDefaultAsync(c => c.Code == row.Code, ct);
-
-            if (codedValue is null)
+            if (!byCode.TryGetValue(row.Code, out var codedValue))
             {
                 logger.LogWarning("Coded value {Code} not found for attribute {Key}. Skipping",
                     row.Code, row.Key);
@@ -213,14 +214,14 @@ public sealed class CodedValueSeeder(
             var valueToStore = row.Value;
 
             if (codedValue.ParentId is { } parentId &&
-                parents.TryGetValue(parentId, out var parent))
+                byId.TryGetValue(parentId, out var parent))
             {
                 var definition = parent.AttributeDefinitions
                     .FirstOrDefault(d => d.Key == row.Key);
 
                 if (definition?.DataType == AttributeDataType.CodedValue)
                 {
-                    if (!codeToId.TryGetValue(row.Value, out var referencedId))
+                    if (!byCode.TryGetValue(row.Value, out var referenced))
                     {
                         logger.LogWarning(
                             "Attribute {Key} on {Code} is CodedValue-typed but referenced code {ReferencedCode} was not found. Skipping",
@@ -228,10 +229,10 @@ public sealed class CodedValueSeeder(
                         continue;
                     }
 
-                    valueToStore = referencedId.ToString();
+                    valueToStore = referenced.Id.ToString();
                     logger.LogDebug(
                         "Resolved CodedValue attribute {Key} on {Code}: {ReferencedCode} -> {ReferencedId}",
-                        row.Key, row.Code, row.Value, referencedId);
+                        row.Key, row.Code, row.Value, referenced.Id);
                 }
             }
 

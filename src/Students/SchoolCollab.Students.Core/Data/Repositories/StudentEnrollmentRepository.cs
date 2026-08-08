@@ -27,7 +27,7 @@ internal sealed class StudentEnrollmentRepository(StudentsDbContext db)
             .Where(x => x.PeriodId == periodId)
             .OrderBy(x => x.StudentId)
             .Select(x => new StudentEnrollmentDto(
-                x.Id, x.StudentId, x.PeriodId, x.GradeLevelId, x.GradeStrandCodedValueId,
+                x.Id, x.StudentId, x.PeriodId, x.GradeLevelId, x.StreamCodedValueId,
                 x.EnrolledOn, x.ExitDate, x.Status.ToString(),
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
@@ -38,7 +38,7 @@ internal sealed class StudentEnrollmentRepository(StudentsDbContext db)
             .Where(x => x.StudentId == studentId)
             .OrderByDescending(x => x.EnrolledOn)
             .Select(x => new StudentEnrollmentDto(
-                x.Id, x.StudentId, x.PeriodId, x.GradeLevelId, x.GradeStrandCodedValueId,
+                x.Id, x.StudentId, x.PeriodId, x.GradeLevelId, x.StreamCodedValueId,
                 x.EnrolledOn, x.ExitDate, x.Status.ToString(),
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);

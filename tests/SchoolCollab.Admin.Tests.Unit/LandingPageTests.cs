@@ -59,7 +59,7 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: []);
 
-        cut.Find("fluent-button").Click();
+        cut.Find("fluent-anchor").Click();
 
         Services.GetRequiredService<NavigationManager>().Uri
                 .Should().EndWith("/widgets/create");
@@ -70,7 +70,7 @@ public class LandingPageTests : BunitContext
     {
         var cut = RenderWrapper(items: [], createEnabled: false);
 
-        cut.FindAll("fluent-button").Should().BeEmpty();
+        cut.FindAll("fluent-anchor").Should().BeEmpty();
     }
 
     [TestMethod]

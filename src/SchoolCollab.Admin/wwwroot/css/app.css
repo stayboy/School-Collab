@@ -22,7 +22,7 @@
    must go in that component's isolated .razor.css instead — do not grow this
    file with page styles (CSS isolation is preferred for those). */
 .muted { color: var(--neutral-foreground-hint); }
-.dialog-container { padding: 16px; box-sizing: border-box; width: 100%; }
+.dialog-container { padding: 16px 16px 0; box-sizing: border-box; width: 100%; }
 
 /* Form field sizing — used across Assignments and CodedValues modules */
 .full-width {

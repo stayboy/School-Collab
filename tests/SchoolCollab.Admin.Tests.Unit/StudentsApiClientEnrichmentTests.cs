@@ -76,7 +76,7 @@ public class StudentsApiClientEnrichmentTests
             CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow);
         var enrollment = new StudentEnrollmentDto(
             Id: Guid.NewGuid(), StudentId: studentId, PeriodId: Guid.NewGuid(), GradeLevelId: gradeId,
-            GradeStrandCodedValueId: null, EnrolledOn: new DateOnly(2024, 9, 1), ExitDate: null,
+            StreamCodedValueId: null, EnrolledOn: new DateOnly(2024, 9, 1), ExitDate: null,
             Status: "Active", CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow);
         var grade = new GradeLevelDto(
             Id: gradeId, CodedValueId: Guid.NewGuid(), Level: 5, Name: "Grade 5", DisplayOrder: 1,
@@ -112,7 +112,7 @@ public class StudentsApiClientEnrichmentTests
             CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow);
         var enrollment = new StudentEnrollmentDto(
             Id: Guid.NewGuid(), StudentId: studentId, PeriodId: Guid.NewGuid(), GradeLevelId: gradeId,
-            GradeStrandCodedValueId: null, EnrolledOn: new DateOnly(2024, 9, 1), ExitDate: null,
+            StreamCodedValueId: null, EnrolledOn: new DateOnly(2024, 9, 1), ExitDate: null,
             Status: "Active", CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow);
         var grade = new GradeLevelDto(
             Id: gradeId, CodedValueId: Guid.NewGuid(), Level: 6, Name: "Grade 6", DisplayOrder: 1,
@@ -183,7 +183,7 @@ public class StudentsApiClientEnrichmentTests
         var enrollments = students
             .Select(s => new StudentEnrollmentDto(
                 Id: Guid.NewGuid(), StudentId: s.Id, PeriodId: Guid.NewGuid(), GradeLevelId: gradeId,
-                GradeStrandCodedValueId: null, EnrolledOn: new DateOnly(2024, 9, 1), ExitDate: null,
+                StreamCodedValueId: null, EnrolledOn: new DateOnly(2024, 9, 1), ExitDate: null,
                 Status: "Active", CreatedAt: DateTimeOffset.UtcNow, UpdatedAt: DateTimeOffset.UtcNow))
             .ToArray();
         var grade = new GradeLevelDto(

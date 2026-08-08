@@ -108,9 +108,9 @@ public class EnrollStudentHandlerTests
         int? maxAge = null,
         Guid? allowedGender = null)
     {
-        // Seed a GradeLevel for strand validation. The handler resolves the
+        // Seed a GradeLevel for stream validation. The handler resolves the
         // enrollment's GradeLevelId → GradeLevel → CodedValueId, and the
-        // StubCodedValuesApiClient returns a strand whose gradeLevel
+        // StubCodedValuesApiClient returns a stream whose gradeLevel
         // attribute matches this CodedValueId. We use the factory-generated
         // Id (read back from the seeded entity) so EF InMemory doesn't
         // complain about modifying a primary key.
@@ -125,7 +125,7 @@ public class EnrollStudentHandlerTests
             allowedGender);
         s.Db.GradeLevels.Add(gradeLevel);
         s.Db.SaveChanges();
-        // The stub strand references this specific CodedValueId; the handler
+        // The stub stream references this specific CodedValueId; the handler
         // resolves enrollment.GradeLevelId → gradeLevel.CodedValueId and
         // compares. The InMemoryGradeLevelRepository reads from the same
         // DbContext, so gradeLevel.Id is discoverable via the seeded row.
@@ -455,23 +455,23 @@ public class EnrollStudentHandlerTests
     }
 
     /// <summary>Stub <see cref="ICodedValuesApiClient"/> that returns a
-    /// strand whose <c>gradeLevel</c> attribute value matches the
-    /// GradeLevel's CodedValueId seeded by the test. Strand validation
+    /// stream whose <c>gradeLevel</c> attribute value matches the
+    /// GradeLevel's CodedValueId seeded by the test. Stream validation
     /// is the only behavior exercised by these tests; the stub keeps
     /// the test hermetic (no HTTP).</summary>
     private sealed class StubCodedValuesApiClient : ICodedValuesApiClient
     {
-        public Task<StrandCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+        public Task<StreamCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
         {
             // Look up the seeded GradeLevel's CodedValueId from the test's DbContext
             // is not available here (no DI), so we use a fixed Guid that the
             // test will also use when seeding the GradeLevel. See the test
             // setup for the matching seed.
-            return Task.FromResult<StrandCodedValueDto?>(new StrandCodedValueDto(
-                id, "GRSTRNDS_TEST", "Test Strand", null,
-                null, "GRSTRNDS", false, 0,
+            return Task.FromResult<StreamCodedValueDto?>(new StreamCodedValueDto(
+                id, "GRSTREAMS_TEST", "Test Stream", null,
+                null, "GRSTREAMS", false, 0,
                 DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-                new[] { new StrandAttributeDto("gradeLevel", "22222222-2222-2222-2222-222222222223") }));
+                new[] { new StreamAttributeDto("gradeLevel", "22222222-2222-2222-2222-222222222223") }));
         }
     }
 

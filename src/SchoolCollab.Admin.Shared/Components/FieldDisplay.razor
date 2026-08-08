@@ -27,11 +27,27 @@
 
     The value is supplied via ChildContent so it can contain plain text or
     arbitrary markup (badges, anchors, icons, etc).
+
+    For a link value, pass <see cref="Href"/> and FieldDisplay renders the
+    value as a hypertext FluentAnchor to that URL (with the anchor's internal
+    left/right control padding stripped so the text left-aligns with the label
+    in the vertical layout) — callers don't wrap the value in an anchor
+    themselves.
 *@
+@using Microsoft.FluentUI.AspNetCore.Components
 
 <div class="field-display field-display-@_orientationCss @Class">
     <span class="field-display__label">@Label</span>
-    <span class="field-display__value">@ChildContent</span>
+    <span class="field-display__value">
+        @if (Href is { } href)
+        {
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="@href">@ChildContent</FluentAnchor>
+        }
+        else
+        {
+            @ChildContent
+        }
+    </span>
 </div>
 
 @code {
@@ -49,6 +65,14 @@
 
     /// <summary>The field value. Can be plain text or arbitrary markup.</summary>
     [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;
+
+    /// <summary>
+    /// Optional navigation URL. When set, the value renders as a hypertext
+    /// <c>FluentAnchor</c> link to this URL (with the anchor's internal
+    /// left/right control padding removed so the text left-aligns with the
+    /// label in the vertical layout).
+    /// </summary>
+    [Parameter] public string? Href { get; set; }
 
     private string _orientationCss => Orientation.ToString().ToLowerInvariant();
 }

@@ -37,12 +37,8 @@
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px 24px;
 }
-/* Student-count link: the lightweight FluentAnchor carries internal control
-   padding that pushes the text off the label's left edge — strip it so the
-   value aligns with the label above (student-detail profile format). */
-.profile-value fluent-anchor::part(control) {
-    padding: 0;
-}
+/* Student-count link padding is now handled by FieldDisplay.razor.css
+   (the FieldDisplay Href parameter strips the anchor's control padding). */
 .enrollment-inline {
     display: flex;
     align-items: center;
@@ -161,79 +157,16 @@
     min-width: 480px;
 }
 
-/* ── Section cards layout: 3-column row, stacking below 1100px ───────
-   CSS is now in SectionCard.razor; this keeps only the grid wrapper. */
+/* ── Section cards layout: FluentGrid (12-column, responsive) ───────
+   FluentGrid + FluentGridItem provide a deterministic 12-column grid.
+   Each card spans 3 columns on lg (4 across), 6 on sm/md (2 across), and
+   12 on xs (1 per row), so the four cards always form complete rows with
+   no ragged last-row stretching. FluentGrid's Spacing="2" handles the gap;
+   this wrapper only adds the top margin and forces full width (the outer
+   vertical FluentStack may not stretch children). */
 .section-cards {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1.25rem;
     margin-top: 1.5rem;
-    align-items: stretch;
-}
-/* Keep all three cards in one horizontal row until space is really tight. */
-@media (max-width: 1100px) {
-    .section-cards {
-        grid-template-columns: 1fr;
-    }
-}
-/* Item styles (used inside SectionCard templates) */
-.section-card__item {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1rem;
-    background: none;
-    border: none;
-    text-align: left;
     width: 100%;
-    color: var(--neutral-foreground-rest, #1b1b1b);
-    text-decoration: none;
-    cursor: pointer;
-    border-left: 3px solid transparent;
-    transition: background-color 0.15s ease, border-color 0.15s ease;
-    font: inherit;
-    -webkit-appearance: none;
-    appearance: none;
 }
-.section-card__item-main {
-    flex: 1;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-.section-card__item:hover {
-    background: var(--neutral-fill-secondary-hover, rgba(0,0,0,0.05));
-    border-left-color: var(--accent-fill-rest, #0f6cbd);
-}
-.item-name {
-    font: inherit;
-    font-weight: 500;
-    line-height: 1.3;
-    width: 100%;
-    display: inline-flex;
-}
-.item-name::part(control) {
-    padding: 0;
-    justify-content: flex-start;
-}
-.item-main {
-    font-weight: 500;
-    line-height: 1.3;
-}
-.item-meta {
-    color: var(--neutral-foreground-hint, #6b6b6b);
-    font-size: 0.82em;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    flex-wrap: wrap;
-}
-.item-meta__count {
-    white-space: nowrap;
-}
-.item-meta__separator {
-    color: var(--neutral-stroke-rest, rgba(0,0,0,0.3));
-    user-select: none;
-}
+/* Item styles (used inside SectionCard templates) — moved into SectionCard.razor.css
+   with the built-in item layout; the card now owns the section-card__item markup. */

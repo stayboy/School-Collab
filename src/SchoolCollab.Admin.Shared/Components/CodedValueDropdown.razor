@@ -80,8 +80,8 @@
     /// call still needs a parent (resolved from the filter's key context) but
     /// the dropdown does not require the caller to set the enum. When both
     /// <see cref="AttributeFilter"/> and <see cref="Parent"/> are set the
-    /// filter takes precedence (used by the strand picker, where the parent
-    /// is <c>GRSTRNDS</c> and the filter is <c>gradeLevel=&lt;selectedGrade&gt;</c>).
+    /// filter takes precedence (used by the stream picker, where the parent
+    /// is <c>GRSTREAMS</c> and the filter is <c>gradeLevel=&lt;selectedGrade&gt;</c>).
     /// </para>
     /// </summary>
     [Parameter]
@@ -93,8 +93,8 @@
     /// Optional attribute key/value filter. When set, the dropdown loads its
     /// items via the <c>attributeKey</c>/<c>attributeValue</c> query params
     /// on the Settings <c>GET /api/coded-values/by-parent</c> endpoint
-    /// instead of the unfiltered parent lookup. Used by the grade-strand
-    /// picker to show only strands whose <c>gradeLevel</c> attribute
+    /// instead of the unfiltered parent lookup. Used by the grade-stream
+    /// picker to show only streams whose <c>gradeLevel</c> attribute
     /// references the currently selected grade.
     /// </summary>
     [Parameter]
@@ -337,7 +337,7 @@
         {
             // AttributeFilter takes precedence: when set we call the
             // attribute-filtered endpoint so the dropdown shows only items
-            // that match the filter (e.g. strands whose gradeLevel attribute
+            // that match the filter (e.g. streams whose gradeLevel attribute
             // references the currently selected grade). Otherwise we fall
             // back to the unfiltered parent-children lookup.
             var items = AttributeFilter is { } f

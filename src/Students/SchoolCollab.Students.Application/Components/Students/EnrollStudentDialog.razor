@@ -347,18 +347,18 @@
                     </div>
                 </FormRow>
 
-                @* Grade strand picker. Filtered by the selected grade's
-                   CodedValueId so it shows only strands whose gradeLevel
+                @* Grade stream picker. Filtered by the selected grade's
+                   CodedValueId so it shows only streams whose gradeLevel
                    attribute matches the chosen grade. The picker is
                    disabled until a grade is picked. Uses the standard
                    CodedValueDropdown augmented with an attribute filter
                    (key=gradeLevel, value=selectedGradeCodedValueId). *@
-                <FormRow Label="Strand" For="enroll-strand">
-                    <CodedValueDropdown Parent="CodedValueParent.GradeStrands"
+                <FormRow Label="Stream" For="enroll-stream">
+                    <CodedValueDropdown Parent="CodedValueParent.Streams"
                                         AttributeFilter="@(GradeCodedValueIdForFilter is null ? null : ("gradeLevel", GradeCodedValueIdForFilter.Value.ToString()))"
-                                        EmptyFilterPlaceholder="No strands for this grade"
-                                        Placeholder="Select strand…"
-                                        @bind-SelectedId="_selectedStrand" />
+                                        EmptyFilterPlaceholder="No streams for this grade"
+                                        Placeholder="Select stream…"
+                                        @bind-SelectedId="_selectedStream" />
                 </FormRow>
 
                 <FormRow Label="Enrolled on" Required>
@@ -522,15 +522,15 @@
     /// (unreachable in the flag-OFF path because every item in that
     /// dropdown IS a GradeLevelDto).</summary>
     private GradeLevelDto? _selectedGrade;
-    private Guid? _selectedStrand;
+    private Guid? _selectedStream;
 
     /// <summary>The coded value id of the selected grade, used as the
-    /// strand picker's <c>AttributeFilter</c> value. Resolves the
+    /// stream picker's <c>AttributeFilter</c> value. Resolves the
     /// flag-ON path (where the CodedValueId comes from the coded-value
     /// dropdown before a GradeLevel row is materialized) and the
     /// flag-OFF path (where the GradeLevelDto already has CodedValueId)
     /// to a single value. Null when no grade is selected yet — the
-    /// strand picker disables itself in that case.</summary>
+    /// stream picker disables itself in that case.</summary>
     private Guid? GradeCodedValueIdForFilter =>
         _selectedGrade?.CodedValueId ?? _selectedGradeCodedValueId;
 
@@ -626,15 +626,15 @@
     /// <see cref="GradeLevelDto"/> for the actual enrollment submit.
     /// Fire-and-forget the async helper (we never want the
     /// <c>:after</c> binder to wait on our lookup).
-    /// Also clears the strand selection — a strand from the previous
-    /// grade is no longer valid (the strand's gradeLevel attribute must
+    /// Also clears the stream selection — a stream from the previous
+    /// grade is no longer valid (the stream's gradeLevel attribute must
     /// match the enrollment's grade; spec §4.3 / FR-9). The CodedValueDropdown
-    /// will reload its items because the strand picker's AttributeFilter
+    /// will reload its items because the stream picker's AttributeFilter
     /// value (GradeCodedValueIdForFilter) changed.
     /// </summary>
     private void OnGradeCodedValueChanged()
     {
-        _selectedStrand = null;
+        _selectedStream = null;
         _ = ResolveSelectedGradeAsync();
     }
 
@@ -645,9 +645,9 @@
     /// in sync via the picked <see cref="_selectedGradeLevelId"/> (linker reading).
     /// Null <see cref="_selectedGradeLevelId"/> (user cleared the dropdown) clears
     /// <see cref="_selectedGrade"/>.
-    /// Also clears the strand selection on grade change:
-    /// strands are filtered by the selected grade's <see cref="GradeLevelDto.CodedValueId"/>
-    /// so a strand from a previous grade is no longer valid (spec §4.3 / FR-9).
+    /// Also clears the stream selection on grade change:
+    /// streams are filtered by the selected grade's <see cref="GradeLevelDto.CodedValueId"/>
+    /// so a stream from a previous grade is no longer valid (spec §4.3 / FR-9).
     /// <para>
     /// The :after version of <c>@bind-SelectedValue="_selectedGradeLevelId"</c>
     /// is "side-effect only" — the binder owns <see cref="DropdownComponent{TItem, TValue}.SelectedValueChanged"/>
@@ -656,7 +656,7 @@
     /// </summary>
     private void OnGradeLevelSelectedValueChanged()
     {
-        _selectedStrand = null;
+        _selectedStream = null;
         _selectedGrade = _selectedGradeLevelId is null
             ? null
             : _gradeLevels.FirstOrDefault(g => g.Id == _selectedGradeLevelId);
@@ -770,7 +770,7 @@
                 model.StudentId,
                 _activePeriod.Id,
                 _selectedGrade.Id,
-                _selectedStrand,
+                _selectedStream,
                 enrolledOn));
             return new EnrollStudentResult(true);
         }

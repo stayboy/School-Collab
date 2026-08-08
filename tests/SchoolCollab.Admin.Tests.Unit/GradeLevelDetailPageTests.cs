@@ -135,8 +135,8 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", $"/students/grade-levels/{gradeId}/curriculum", HttpStatusCode.OK, curriculumJson);
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
-        // Grade strands (GRSTRNDS) for the Strands card.
-        handler.Map("/api/coded-values/by-parent?parentCode=GRSTRNDS", HttpStatusCode.OK, "[]");
+        // Grade streams (GRSTREAMS) for the Streams card.
+        handler.Map("/api/coded-values/by-parent?parentCode=GRSTREAMS", HttpStatusCode.OK, "[]");
         // Notification &amp; Delivery editor: no tenant default / no grade override.
         handler.Map("GET", "/api/settings/notification-policy", HttpStatusCode.NoContent, "");
         handler.Map("GET", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.NoContent, "");
@@ -406,17 +406,17 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_StrandsCard_ListsGradeStrands()
+    public void Detail_StreamsCard_ListsStreams()
     {
         var gradeId = Guid.NewGuid();
         var (handler, _) = Register(gradeId, GradeJson(gradeId));
-        handler.Map("/api/coded-values/by-parent?parentCode=GRSTRNDS", HttpStatusCode.OK,
+        handler.Map("/api/coded-values/by-parent?parentCode=GRSTREAMS", HttpStatusCode.OK,
             JsonSerializer.Serialize(new[]
             {
                 new Dictionary<string, object?>
                 {
                     ["id"] = Guid.NewGuid(), ["code"] = "GR5A", ["name"] = "Grade 5A",
-                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTRNDS",
+                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTREAMS",
                     ["isDisabled"] = false, ["displayOrder"] = 0,
                     ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
                     ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
@@ -424,7 +424,7 @@ public class GradeLevelDetailPageTests : BunitContext
                 new Dictionary<string, object?>
                 {
                     ["id"] = Guid.NewGuid(), ["code"] = "GR5B", ["name"] = "Grade 5B",
-                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTRNDS",
+                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTREAMS",
                     ["isDisabled"] = false, ["displayOrder"] = 1,
                     ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
                     ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
@@ -433,18 +433,40 @@ public class GradeLevelDetailPageTests : BunitContext
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 5A"));
-        cut.Markup.Should().Contain("Grade 5B", "strand card lists both grade strands");
-        cut.Markup.Should().Contain("Manage strands", "strand card offers a manage affordance");
+        cut.Markup.Should().Contain("Grade 5B", "stream card lists both grade streams");
+        cut.Markup.Should().Contain("Manage streams", "stream card offers a manage affordance");
     }
 
     [TestMethod]
-    public void Detail_StrandsCard_ShowsEmptyState_WhenNone()
+    public void Detail_StreamsCard_ShowsEmptyState_WhenNone()
     {
         var gradeId = Guid.NewGuid();
         Register(gradeId, GradeJson(gradeId));
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No strands defined for this grade yet."));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No streams defined for this grade yet."));
+    }
+
+    [TestMethod]
+    public void Detail_StreamsAdd_OpensCodedValueDialog_CreateMode()
+    {
+        var source = ReadDetailSource();
+
+        // The Streams card "Add" affordance must open the shared CodedValueDialog
+        // in Create mode (not navigate away to the GRSTREAMS children page).
+        source.Should().Contain("OnAddClick=\"OpenStreamCreateAsync\"",
+            "the Streams card Add button opens the create dialog, not a navigation");
+        source.Should().Contain("CodedValueFormModel.ForCreate",
+            "the create handler opens CodedValueDialog in Create mode");
+        source.Should().Contain("CodedValueParent.Streams.ToCode()",
+            "the create handler resolves the GRSTREAMS parent to create under");
+        source.Should().Contain("SetAttributeAsync",
+            "the create handler tags the new stream with the grade's gradeLevel attribute");
+        source.Should().Contain("ReloadStreamsAsync",
+            "the create handler reloads the streams card after creating");
+
+        // The old navigation-away behavior is gone.
+        source.Should().NotContain("OpenStreamsAsync", "the navigation-away handler is removed");
     }
 
     [TestMethod]
@@ -473,7 +495,7 @@ public class GradeLevelDetailPageTests : BunitContext
         var source = ReadDetailSource();
 
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
-            "the Subjects card's View-all button opens GradeTopicsDialog via the read-only helper");
+            "the Subjects card's Add button opens GradeTopicsDialog via the read-only helper");
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTeachersDialog>(",
             "the Teachers card's View-all button opens GradeTeachersDialog via the read-only helper");
 
@@ -493,9 +515,30 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("View all students");
         source.Should().Contain("/students?gradeLevelId=");
 
+        // Subjects card's View-all navigates to the subjects landing page (bug fix:
+        // it previously opened a dialog / had no navigation).
+        source.Should().Contain("ViewAllNavigationUrl=\"/students/subjects\"",
+            "the Subjects card's View-all link navigates to the subjects landing page");
+
         // The old segmented pill tab control is gone.
         source.Should().NotContain("grade-tabs__bar");
         source.Should().NotContain("SetActiveTab");
+    }
+
+    [TestMethod]
+    public void Detail_SubjectsCard_ViewAll_NavigatesToSubjectsPage()
+    {
+        var gradeId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (0)"));
+
+        // Bug fix: the Subjects card's "View all subjects" link must render as a
+        // real navigation anchor to the subjects landing page (it previously opened
+        // a dialog / had no navigation).
+        var anchor = cut.Find("fluent-anchor[href='/students/subjects']");
+        anchor.TextContent.Should().Contain("View all subjects");
     }
 
     [TestMethod]
@@ -505,9 +548,9 @@ public class GradeLevelDetailPageTests : BunitContext
 
         // The topic name is the primary affordance in the Subjects card and opens
         // the topic edit dialog (rename / code / description), not the strands dialog.
-        source.Should().Contain("OnClick=\"() => OpenTopicEditAsync(t)\"",
+        source.Should().Contain("ItemOnClick=\"t => OpenTopicEditAsync(t)\"",
             "the topic name click must invoke the edit-dialog handler");
-        source.Should().Contain("Title=\"Edit topic\"",
+        source.Should().Contain("ItemNameTitle=\"Edit topic\"",
             "the topic anchor advertises the edit affordance");
 
         // The edit handler opens TopicEditDialog through the shell dialog helper.

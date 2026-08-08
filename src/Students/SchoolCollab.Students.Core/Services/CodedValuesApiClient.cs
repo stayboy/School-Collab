@@ -8,7 +8,7 @@ namespace SchoolCollab.Students.Core.Services;
 /// REST API for strand validation. Mirrors the contract from
 /// <c>SchoolCollab.Admin.Shared.Services.CodedValueDto</c>.
 /// </summary>
-public record StrandCodedValueDto(
+public record StreamCodedValueDto(
     Guid Id,
     string Code,
     string Name,
@@ -19,9 +19,9 @@ public record StrandCodedValueDto(
     int DisplayOrder,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyCollection<StrandAttributeDto> Attributes);
+    IReadOnlyCollection<StreamAttributeDto> Attributes);
 
-public record StrandAttributeDto(string Key, string Value);
+public record StreamAttributeDto(string Key, string Value);
 
 /// <summary>
 /// HTTP client for calling the Settings Coded Values REST API from Students
@@ -32,17 +32,17 @@ public interface ICodedValuesApiClient
     /// <summary>
     /// Fetches a coded value by its ID. Returns <c>null</c> if not found.
     /// </summary>
-    Task<StrandCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
+    Task<StreamCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default);
 }
 
 public sealed class CodedValuesApiClient(HttpClient http) : ICodedValuesApiClient
 {
-    public async Task<StrandCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
+    public async Task<StreamCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var response = await http.GetAsync($"/api/coded-values/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
             return null;
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<StrandCodedValueDto>(ct);
+        return await response.Content.ReadFromJsonAsync<StreamCodedValueDto>(ct);
     }
 }

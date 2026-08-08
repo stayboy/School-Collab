@@ -24,7 +24,7 @@ internal sealed class StudentEnrollmentConfiguration : TenantEntityTypeConfigura
         builder.Property(x => x.StudentId).IsRequired();
         builder.Property(x => x.PeriodId).IsRequired();
         builder.Property(x => x.GradeLevelId).IsRequired();
-        builder.Property(x => x.GradeStrandCodedValueId);
+        builder.Property(x => x.StreamCodedValueId);
 
         builder.Property(x => x.EnrolledOn).IsRequired();
         builder.Property(x => x.ExitDate);
@@ -48,8 +48,8 @@ internal sealed class StudentEnrollmentConfiguration : TenantEntityTypeConfigura
         builder.HasIndex(x => new { x.TenantId, x.GradeLevelId })
             .HasDatabaseName("ix_student_enrollments_tenant_grade_level");
 
-        builder.HasIndex(x => new { x.TenantId, x.GradeStrandCodedValueId })
-            .HasDatabaseName("ix_student_enrollments_tenant_grade_strand");
+        builder.HasIndex(x => new { x.TenantId, x.StreamCodedValueId })
+            .HasDatabaseName("ix_student_enrollments_tenant_stream");
 
         builder.HasIndex(x => x.Status)
             .HasDatabaseName("ix_student_enrollments_status");

@@ -5,7 +5,7 @@ public sealed record StudentEnrollmentDto(
     Guid StudentId,
     Guid PeriodId,
     Guid GradeLevelId,
-    Guid? GradeStrandCodedValueId,
+    Guid? StreamCodedValueId,
     DateOnly EnrolledOn,
     DateOnly? ExitDate,
     string Status,

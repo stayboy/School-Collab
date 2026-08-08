@@ -46,3 +46,12 @@
     min-width: 0;
     word-break: break-word;
 }
+
+/* FluentAnchor rendered via the Href parameter: strip the anchor's internal
+   left/right control padding so the link text left-aligns with the label above
+   (vertical layout) instead of being pushed right by the control's default
+   padding. */
+.field-display__value fluent-anchor::part(control) {
+    padding-left: 0;
+    padding-right: 0;
+}

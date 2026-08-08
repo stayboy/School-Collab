@@ -47,6 +47,7 @@ Follow these steps **in order**. Do not skip a step unless the user explicitly a
 - After reviewing, assess whether the changes need additional tests:
   - Domain logic, command/query handlers, and API endpoints should have unit tests.
   - Blazor page lifecycle patterns (IDisposable, CancellationToken, optimistic UI) should have Playwright integration tests.
+  - **Every dialog/component mutation handler (add / assign / link / remove) must have a bUnit test that asserts the local list state updates** — e.g. after linking a teacher the dialog's linked list gains the item and the picker drops it. A mutation that only fires a callback but never updates the component's own `[Parameter]` list snapshots is a bug (the UI won't reflect the change until reopened).
 - If tests are missing, write them. Run them to confirm they pass. Commit, then ask for explicit user instruction before pushing.
 
 ### 6. EF migration guard

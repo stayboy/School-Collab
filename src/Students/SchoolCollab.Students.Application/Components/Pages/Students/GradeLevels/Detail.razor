@@ -64,52 +64,40 @@
                                         @(_grade.IsBlockedFromEnrollment ? "Blocked" : "Allowed")
                                     </FluentBadge>
                                 </FieldDisplay>
-                                <FieldDisplay Label="Students">
-                                    <FluentAnchor Appearance="Appearance.Lightweight"
-                                                  Href="@($"/students?gradeLevelId={_grade.Id}")">
-                                        @_grade.StudentCount students
-                                    </FluentAnchor>
+                                <FieldDisplay Label="Students" Href="@($"/students?gradeLevelId={_grade.Id}")">
+                                    @_grade.StudentCount students
                                 </FieldDisplay>
                             </div>
                         </FluentCard>
 
                         @* ── Section cards (shared component) ──────────────── *@
-                        <div class="section-cards">
+                        <FluentGrid Spacing="2" class="section-cards">
                             @* Subjects card *@
-                            <SectionCard Title="Subjects"
+                            <FluentGridItem xs="12" sm="6" lg="3">
+                            <SectionCard TItem="GradeTopicCurriculumDto" Title="Subjects"
                                          Icon="@FluentIcons.Book"
                                          Count="@(_curriculum?.Length ?? 0)"
                                          OnAddClick="OpenTopicsDialogAsync"
-                                         OnViewAllClick="OpenTopicsDialogAsync"
+                                         ViewAllNavigationUrl="/students/subjects"
                                          ViewAllText="View all subjects"
                                          Items="@(_curriculum ?? [])"
                                          EmptyMessage="No subjects assigned to this curriculum yet."
-                                         Loading="@(_curriculum is null)">
-                                <ItemTemplate Context="item">
-                                    @{
-                                        var t = (GradeTopicCurriculumDto)item;
-                                    }
-                                    <div class="section-card__item">
-                                        <div class="section-card__item-main">
-                                            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="item-name"
-                                                          OnClick="() => OpenTopicEditAsync(t)" Title="Edit topic">
-                                                @t.Name
-                                            </FluentAnchor>
-                                            <div class="item-meta">
-                                                <span class="item-meta__count" title="@t.StrandCount strands">@t.StrandCount strands</span>
-                                                <span class="item-meta__separator" aria-hidden="true">|</span>
-                                                <span class="item-meta__count" title="@t.LessonCount lessons">@t.LessonCount lessons</span>
-                                            </div>
-                                        </div>
-                                        <RowActionsMenu AriaLabel="@($"Actions for {t.Name}")"
-                                                        UseMenuService="false"
-                                                        Actions="@BuildTopicRowActions(t)" />
-                                    </div>
-                                </ItemTemplate>
+                                         Loading="@(_curriculum is null)"
+                                         ItemTextSelector="t => t.Name"
+                                         ItemMetaSelector="@(t => [ $"{t.StrandCount} strands", $"{t.LessonCount} lessons" ])"
+                                         ItemOnClick="t => OpenTopicEditAsync(t)"
+                                         ItemNameTitle="Edit topic">
+                                <ItemActions Context="t">
+                                    <RowActionsMenu AriaLabel="@($"Actions for {t.Name}")"
+                                                    UseMenuService="false"
+                                                    Actions="@BuildTopicRowActions(t)" />
+                                </ItemActions>
                             </SectionCard>
+                            </FluentGridItem>
 
                             @* Teachers card *@
-                            <SectionCard Title="Teachers"
+                            <FluentGridItem xs="12" sm="6" lg="3">
+                            <SectionCard TItem="TeacherWithRoleDto" Title="Teachers"
                                          Icon="@FluentIcons.People"
                                          Count="@(_teachers?.Length ?? 0)"
                                          OnAddClick="OpenTeachersDialogAsync"
@@ -117,20 +105,16 @@
                                          ViewAllText="View all teachers"
                                          Items="@(_teachers ?? [])"
                                          EmptyMessage="No teachers linked to this grade yet."
-                                         Loading="@(_teachers is null)">
-                                <ItemTemplate Context="item">
-                                    @{
-                                        var t = (TeacherWithRoleDto)item;
-                                    }
-                                    <a class="section-card__item" href="@($"/students/teachers/{t.Id}")">
-                                        <span class="item-main">@(t.TitleCodedValueId is { } tid && _salutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@t.FirstName @t.LastName</span>
-                                        <span class="item-meta">@(t.TeacherRoleCodedValueId is { } rid && _roleNames.TryGetValue(rid, out var r) ? r : "No role")</span>
-                                    </a>
-                                </ItemTemplate>
+                                         Loading="@(_teachers is null)"
+                                         ItemTextSelector="t => GetTeacherDisplayName(t)"
+                                         ItemMetaSelector="@(t => [ GetTeacherRole(t) ])"
+                                         ItemHrefSelector="@(t => $"/students/teachers/{t.Id}")">
                             </SectionCard>
+                            </FluentGridItem>
 
                             @* Students card *@
-                            <SectionCard Title="Students"
+                            <FluentGridItem xs="12" sm="6" lg="3">
+                            <SectionCard TItem="StudentDto" Title="Students"
                                          Icon="@FluentIcons.Person"
                                          Count="@(_students?.Length ?? 0)"
                                          AddTitle="Add student"
@@ -141,41 +125,33 @@
                                          Items="@(_students ?? [])"
                                          EmptyMessage="No active students in this grade for the current period."
                                          ErrorMessage="@_studentsError"
-                                         Loading="@(_students is null)">
-                                <ItemTemplate Context="item">
-                                    @{
-                                        var st = (StudentDto)item;
-                                    }
-                                    <a class="section-card__item" href="@($"/students/{st.Id}")">
-                                        <span class="item-main">@st.FirstName @st.LastName</span>
-                                        <span class="item-meta">@GetStudentDemographics(st)</span>
-                                    </a>
-                                </ItemTemplate>
+                                         Loading="@(_students is null)"
+                                         ItemTextSelector="@(st => $"{st.FirstName} {st.LastName}")"
+                                         ItemMetaSelector="@(st => [ GetStudentDemographics(st) ])"
+                                         ItemHrefSelector="@(st => $"/students/{st.Id}")"
+                                         ItemNameTitle="View student">
                             </SectionCard>
+                            </FluentGridItem>
 
-                            @* Strands card (grade strands = GRSTRNDS coded values for this grade) *@
-                            <SectionCard Title="Strands"
+                            @* Streams card *@
+                            <FluentGridItem xs="12" sm="6" lg="3">
+                            <SectionCard TItem="CodedValueDto" Title="Streams"
                                          Icon="@FluentIcons.TextBulletList"
-                                         Count="@(_gradeStrands?.Length ?? 0)"
-                                         AddTitle="Manage strands"
-                                         AddAriaLabel="Manage strands"
-                                         OnAddClick="OpenGradeStrandsAsync"
-                                         ViewAllNavigationUrl="/coded-values/GRSTRNDS/children"
-                                         ViewAllText="Manage strands"
-                                         Items="@(_gradeStrands ?? [])"
-                                         EmptyMessage="No strands defined for this grade yet."
-                                         Loading="@(_gradeStrands is null)">
-                                <ItemTemplate Context="item">
-                                    @{
-                                        var gs = (CodedValueDto)item;
-                                    }
-                                    <div class="section-card__item">
-                                        <span class="item-main">@gs.Name</span>
-                                        <span class="item-meta">@gs.Code</span>
-                                    </div>
-                                </ItemTemplate>
+                                         Count="@(_streams?.Length ?? 0)"
+                                         AddTitle="Add stream"
+                                         AddAriaLabel="Add stream"
+                                         OnAddClick="OpenStreamCreateAsync"
+                                         ViewAllNavigationUrl="/coded-values/GRSTREAMS/children"
+                                         ViewAllText="Manage streams"
+                                         Items="@(_streams ?? [])"
+                                         EmptyMessage="No streams defined for this grade yet."
+                                         Loading="@(_streams is null)"
+                                         ItemTextSelector="s => s.Name"
+                                         ItemOnClick="s => OpenStreamEditAsync(s)"
+                                         ItemNameTitle="Edit stream">
                             </SectionCard>
-                        </div>
+                            </FluentGridItem>
+                        </FluentGrid>
 
                         @* ── Notification & Delivery card (nd/4) ─────────── *@
                         <FluentCard class="detail-card notification-card">
@@ -231,7 +207,7 @@
     // ── Teachers / Students ────────────────────────────────────────────────
     private TeacherWithRoleDto[]? _teachers;
     private StudentDto[]? _students;
-    private CodedValueDto[]? _gradeStrands;
+    private CodedValueDto[]? _streams;
     private TeacherDto[]? _allTeachers;
     private readonly Dictionary<Guid, string> _salutationNames = new();
     private readonly Dictionary<Guid, string> _genderNames = new();
@@ -304,19 +280,7 @@
 
             if (_grade is null) return;
 
-            // Grade strands (GRSTRNDS coded values whose gradeLevel attribute
-            // references this grade). Loaded separately so a failure here only
-            // empties the Strands card rather than failing the whole page.
-            try
-            {
-                _gradeStrands = await CodedValuesApi.GetChildrenByParentCodeFilteredByAttributeAsync(
-                    CodedValueParent.GradeStrands.ToCode(), "gradeLevel", _grade.CodedValueId.ToString(), ct) ?? [];
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "Failed to load grade strands for grade {Id}", Id);
-                _gradeStrands = [];
-            }
+            await ReloadStreamsAsync(ct);
 
             if (_grade.AllowedGenderCodedValueId is { } gid)
             {
@@ -366,6 +330,24 @@
     }
 
     /// <summary>
+    /// Formats a teacher's display name, prefixing the salutation title when
+    /// known (e.g. "Dr. Jane Smith"). Used by the Teachers card's built-in item
+    /// layout (ItemTextSelector).
+    /// </summary>
+    private string GetTeacherDisplayName(TeacherWithRoleDto t)
+    {
+        var salutation = t.TitleCodedValueId is { } tid && _salutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "";
+        return $"{salutation}{t.FirstName} {t.LastName}";
+    }
+
+    /// <summary>
+    /// Resolves a teacher's role display name, or "No role" when unset. Used by
+    /// the Teachers card's built-in item layout (ItemMetaSelector).
+    /// </summary>
+    private string GetTeacherRole(TeacherWithRoleDto t) =>
+        t.TeacherRoleCodedValueId is { } rid && _roleNames.TryGetValue(rid, out var r) ? r : "No role";
+
+    /// <summary>
     /// Resolves the coded-value display names (salutation, gender, level of
     /// education, qualifications) for the loaded teachers in one round-trip, so
     /// the grid can render them without per-cell lookups. The Students DB has no
@@ -409,13 +391,83 @@
     private void Back() => Nav.NavigateTo("/students/grade-levels");
 
     /// <summary>
-    /// Strands card "Add" affordance — grade strands are managed as coded
-    /// values in Settings, so this jumps to the GRSTRNDS children page.
+    /// Streams card "Add" affordance — opens the shared CodedValueDialog in
+    /// Create mode to add a new stream under GRSTREAMS, then tags it with this
+    /// grade's <c>gradeLevel</c> attribute so it shows up in the card (the card
+    /// filters GRSTREAMS children by that attribute).
     /// </summary>
-    private Task OpenGradeStrandsAsync()
+    private async Task OpenStreamCreateAsync()
     {
-        Nav.NavigateTo("/coded-values/GRSTRNDS/children");
-        return Task.CompletedTask;
+        if (_disposed || _grade is null) return;
+        try
+        {
+            var parent = await CodedValuesApi.GetByCodeAsync(CodedValueParent.Streams.ToCode());
+            if (parent is null)
+            {
+                _error = "Could not locate the GRSTREAMS parent to create a stream under.";
+                return;
+            }
+
+            var created = await DialogService.ShowShellDialogAsync<
+                CodedValueDialog,
+                CodedValueFormModel,
+                CodedValueDto>(
+                CodedValueFormModel.ForCreate(parent.Id),
+                title: $"Add stream · {_grade.Name}",
+                size: DialogSize.Medium);
+
+            if (created is not null && !_disposed)
+            {
+                // Tag the new stream with this grade so it appears in the card.
+                await CodedValuesApi.SetAttributeAsync(created.Id, "gradeLevel", _grade.CodedValueId.ToString());
+                await ReloadStreamsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create stream for grade {Id}", Id);
+            _error = ex.Message;
+        }
+    }
+
+    /// <summary>
+    /// Loads the grade's streams (GRSTREAMS coded values whose gradeLevel
+    /// attribute references this grade). Loaded separately so a failure here
+    /// only empties the Streams card rather than failing the whole page.
+    /// </summary>
+    private async Task ReloadStreamsAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            _streams = await CodedValuesApi.GetChildrenByParentCodeFilteredByAttributeAsync(
+                CodedValueParent.Streams.ToCode(), "gradeLevel", _grade!.CodedValueId.ToString(), ct) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load grade streams for grade {Id}", Id);
+            _streams = [];
+        }
+    }
+
+    /// <summary>
+    /// Streams card item primary affordance — opens the shared CodedValueDialog
+    /// in Override mode to edit the stream's tenant display name. Reloads the
+    /// card on a save.
+    /// </summary>
+    private async Task OpenStreamEditAsync(CodedValueDto stream)
+    {
+        var updated = await DialogService.ShowShellDialogAsync<
+            CodedValueDialog,
+            CodedValueFormModel,
+            CodedValueDto>(
+            CodedValueFormModel.ForOverride(stream, stream.IsOverridden),
+            title: $"Edit stream · {stream.Name}",
+            size: DialogSize.Medium);
+        if (updated is not null && !_disposed)
+        {
+            await ReloadStreamsAsync();
+        }
     }
 
     /// <summary>
@@ -718,7 +770,7 @@
             foreach (var s in selected)
             {
                 await Api.EnrollStudentAsync(new EnrollStudentRequest(
-                    s.Id, active.Id, Id, GradeStrandCodedValueId: null, DateOnly.FromDateTime(DateTime.UtcNow)));
+                    s.Id, active.Id, Id, StreamCodedValueId: null, DateOnly.FromDateTime(DateTime.UtcNow)));
             }
             if (_disposed) return;
             await ReloadStudentsAsync();

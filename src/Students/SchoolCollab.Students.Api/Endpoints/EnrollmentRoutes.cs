@@ -45,7 +45,7 @@ public static class EnrollmentRoutes
             try
             {
                 var id = await handler.HandleAsync(
-                    new EnrollStudent(req.StudentId, req.PeriodId, req.GradeLevelId, req.GradeStrandCodedValueId, req.EnrolledOn), ct);
+                    new EnrollStudent(req.StudentId, req.PeriodId, req.GradeLevelId, req.StreamCodedValueId, req.EnrolledOn), ct);
                 return Results.Created($"/enrollments/{id}", new { id });
             }
             catch (StudentNotFoundException)
@@ -56,7 +56,7 @@ public static class EnrollmentRoutes
             {
                 return Results.BadRequest(new { ex.Message });
             }
-            catch (GradeStrandGradeMismatchException ex)
+            catch (StreamGradeMismatchException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }
@@ -78,14 +78,14 @@ public static class EnrollmentRoutes
         {
             try
             {
-                await handler.HandleAsync(new TransferStudent(id, req.NewGradeLevelId, req.NewGradeStrandCodedValueId, req.TransferDate, req.Reason), ct);
+                await handler.HandleAsync(new TransferStudent(id, req.NewGradeLevelId, req.NewStreamCodedValueId, req.TransferDate, req.Reason), ct);
                 return Results.NoContent();
             }
             catch (InvalidOperationException ex)
             {
                 return Results.NotFound(new { ex.Message });
             }
-            catch (GradeStrandGradeMismatchException ex)
+            catch (StreamGradeMismatchException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }
@@ -124,6 +124,6 @@ public static class EnrollmentRoutes
     }
 }
 
-internal record EnrollStudentRequest(Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? GradeStrandCodedValueId, DateOnly? EnrolledOn);
-internal record TransferStudentRequest(Guid NewGradeLevelId, Guid? NewGradeStrandCodedValueId, DateOnly? TransferDate, string Reason);
+internal record EnrollStudentRequest(Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? StreamCodedValueId, DateOnly? EnrolledOn);
+internal record TransferStudentRequest(Guid NewGradeLevelId, Guid? NewStreamCodedValueId, DateOnly? TransferDate, string Reason);
 internal record WithdrawStudentRequest(DateOnly? ExitDate);

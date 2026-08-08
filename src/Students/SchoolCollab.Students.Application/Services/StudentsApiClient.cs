@@ -112,7 +112,7 @@ public sealed record StudentEnrollmentDto(
     Guid StudentId,
     Guid PeriodId,
     Guid GradeLevelId,
-    Guid? GradeStrandCodedValueId,
+    Guid? StreamCodedValueId,
     DateOnly EnrolledOn,
     DateOnly? ExitDate,
     string Status,
@@ -270,12 +270,12 @@ public record EnrollStudentRequest(
     Guid StudentId,
     Guid PeriodId,
     Guid GradeLevelId,
-    Guid? GradeStrandCodedValueId,
+    Guid? StreamCodedValueId,
     DateOnly? EnrolledOn);
 
 public record TransferStudentRequest(
     Guid NewGradeLevelId,
-    Guid? NewGradeStrandCodedValueId,
+    Guid? NewStreamCodedValueId,
     DateOnly? TransferDate,
     string Reason);
 
