@@ -10,6 +10,7 @@
    and are assertable in the rendered markup. *@
 @using SchoolCollab.Admin.Shared.Constants
 @inject NavigationManager Nav
+@inject IDialogService DialogService
 
 <span class="row-actions-menu">
     <FluentButton Id="@_buttonId"
@@ -100,6 +101,19 @@
         }
         if (action.OnClick is not null)
         {
+            // Destructive actions (Remove / Delete) are gated by a confirmation
+            // prompt before the callback runs. Enforced here at the component
+            // level so every destructive row action is confirmed. The prompt is
+            // a modal dialog (dark overlay) that can be dismissed by clicking
+            // the overlay or pressing ESC.
+            if (action.Destructive)
+            {
+                var message = action.ConfirmMessage
+                    ?? $"Are you sure you want to {action.Label.ToLowerInvariant()}?";
+                var confirmed = await DialogService.ShowConfirmDialogAsync(
+                    message, action.Label, "Cancel", action.Label);
+                if (!confirmed) return;
+            }
             await action.OnClick.Invoke();
         }
     }

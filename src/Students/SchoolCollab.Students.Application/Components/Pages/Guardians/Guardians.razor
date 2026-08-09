@@ -9,6 +9,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Guardians> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="GuardianDto"
@@ -211,6 +212,7 @@
         try
         {
             await Api.DeleteGuardianAsync(id);
+            Toast.ShowSuccess($"Guardian '{name}' deleted.");
         }
         catch (Exception ex)
         {

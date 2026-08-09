@@ -11,6 +11,7 @@
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
+@inject IToastService Toast
 @inject NavigationManager Nav
 @inject ILogger<Detail> Logger
 @inject VisibleTenantService VisibleTenant
@@ -74,6 +75,10 @@
                         <FluentGrid Spacing="2" class="section-cards">
                             @* Subjects card *@
                             <FluentGridItem xs="12" sm="6" lg="3">
+                            @if (!string.IsNullOrEmpty(_topicsError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_topicsError</FluentMessageBar>
+                            }
                             <SectionCard TItem="GradeTopicCurriculumDto" Title="Subjects"
                                          Icon="@FluentIcons.Book"
                                          Count="@(_curriculum?.Length ?? 0)"
@@ -606,11 +611,13 @@
             await Api.RemoveTopicAssignmentAsync(assignment.AssignmentId);
             if (_disposed) return;
             await ReloadAssignedTopicsAsync();
+            Toast.ShowSuccess($"Subject '{assignment.Name}' removed from grade.");
         }
         catch (Exception ex)
         {
             if (_disposed) return;
             _topicsError = $"Could not unassign topic: {ex.Message}";
+            StateHasChanged();
         }
     }
 
@@ -628,6 +635,11 @@
             .OrderBy(t => t.Name)
             .ToList();
         _curriculum = await Api.ListGradeTopicCurriculumByGradeAsync(Id) ?? [];
+
+        // This is invoked from child components (the kebab menu, the grade topics
+        // dialog) whose events re-render THEMSELVES, not this page. Without this,
+        // the SectionCard never receives the refreshed Items after an add/remove.
+        if (!_disposed) StateHasChanged();
     }
 
     private async Task OpenStrandsAsync(GradeTopicCurriculumDto topic)
@@ -675,7 +687,12 @@
 
             RowAction.Callback("Teachers", () => OpenTopicTeachersAsync(topic), FluentIcons.People),
             RowAction.Separator(),
-            RowAction.Callback("Remove", () => RemoveTopicAsync(topic.TopicId), FluentIcons.Delete),
+            RowAction.Callback(
+                "Remove",
+                () => RemoveTopicAsync(topic.TopicId),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed."),
         };
 
     // Open the topic-teachers dialog (assign teachers + their per-topic roles,
@@ -744,6 +761,7 @@
             await Api.UnlinkTeacherGradeLevelAsync(teacher.Id, Id);
             if (_disposed) return;
             await ReloadTeachersAsync();
+            Toast.ShowSuccess($"Teacher '{teacher.FirstName} {teacher.LastName}' removed from grade.");
         }
         catch (Exception ex)
         {
@@ -774,6 +792,7 @@
             await Api.UnlinkTeacherTopicAsync(teacher.Id, topicId);
             if (_disposed) return;
             await ReloadTeachersAsync();
+            Toast.ShowSuccess("Teacher unlinked from topic.");
         }
         catch (Exception ex)
         {

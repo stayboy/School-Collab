@@ -10,6 +10,7 @@
 @inject NavigationManager Nav
 @inject ILogger<ActivityGroups> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <FeatureFlagGate Key="@FeatureFlagKeys.EnableActivityGroups">
@@ -261,6 +262,7 @@
             await Api.DeleteActivityGroupAsync(id);
             if (_disposed) return;
             Logger.LogInformation("Deleted activity group {Id}", id);
+            Toast.ShowSuccess($"Activity group '{name}' deleted.");
         }
         catch (Exception ex)
         {

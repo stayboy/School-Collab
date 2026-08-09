@@ -126,7 +126,12 @@
     private IReadOnlyList<RowAction> BuildRowActions(TeacherWithRoleDto teacher) =>
         new List<RowAction>
         {
-            RowAction.Callback("Remove", () => RemoveAsync(teacher), FluentIcons.Delete),
+            RowAction.Callback(
+                "Remove",
+                () => RemoveAsync(teacher),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: $"Remove teacher '{teacher.FirstName} {teacher.LastName}' from this grade? Only the grade assignment is removed — the teacher stays in the catalog."),
         };
 
     private async Task RemoveAsync(TeacherWithRoleDto teacher)

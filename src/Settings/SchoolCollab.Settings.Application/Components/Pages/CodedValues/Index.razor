@@ -7,6 +7,7 @@
 @inject IDialogService DialogService
 @inject AiChatHub ChatHub
 @inject NavigationManager Nav
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="CodedValueDto"
@@ -387,6 +388,7 @@
         {
             await Api.DeleteAsync(id);
             if (_disposed) return;
+            Toast.ShowSuccess($"'{code}' deleted.");
             if (_items is not null)
             {
                 _items = _items.Where(x => x.Id != id).ToArray();

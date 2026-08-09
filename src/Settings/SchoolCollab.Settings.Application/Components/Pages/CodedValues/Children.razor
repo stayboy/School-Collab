@@ -3,6 +3,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Children> Logger
 @inject IDialogService DialogService
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="CodedValueDto"
@@ -228,6 +229,7 @@
         try
         {
             await Api.DeleteAsync(id, MutationToken);
+            Toast.ShowSuccess($"'{code}' deleted.");
             if (_parent is not null && _children is not null)
             {
                 _children = _children.Where(c => c.Id != id).ToArray();

@@ -34,6 +34,20 @@ public sealed class RowAction
     /// <summary>When true, renders a horizontal divider instead of a menu item.</summary>
     public bool IsSeparator { get; init; }
 
+    /// <summary>
+    /// When true, the action is destructive (e.g. Remove / Delete) and the
+    /// <see cref="RowActionsMenu"/> shows a confirmation prompt before invoking
+    /// it. Enforced at the component level so every destructive row action is
+    /// gated by a user confirmation.
+    /// </summary>
+    public bool Destructive { get; init; }
+
+    /// <summary>
+    /// Optional custom confirmation message. When null, the menu falls back to a
+    /// generic "Are you sure you want to {label}?" prompt.
+    /// </summary>
+    public string? ConfirmMessage { get; init; }
+
     // ── Factory helpers ──────────────────────────────────────────────────
 
     /// <summary>A menu item that navigates to <paramref name="href"/>.</summary>
@@ -41,12 +55,12 @@ public sealed class RowAction
         new() { Label = label, Href = href, Icon = icon, Disabled = disabled };
 
     /// <summary>A menu item that invokes the async <paramref name="onClick"/> callback.</summary>
-    public static RowAction Callback(string label, Func<Task> onClick, Icon? icon = null, bool disabled = false) =>
-        new() { Label = label, OnClick = onClick, Icon = icon, Disabled = disabled };
+    public static RowAction Callback(string label, Func<Task> onClick, Icon? icon = null, bool disabled = false, bool destructive = false, string? confirmMessage = null) =>
+        new() { Label = label, OnClick = onClick, Icon = icon, Disabled = disabled, Destructive = destructive, ConfirmMessage = confirmMessage };
 
     /// <summary>A menu item that invokes the synchronous <paramref name="onClick"/> callback.</summary>
-    public static RowAction Callback(string label, Action onClick, Icon? icon = null, bool disabled = false) =>
-        new() { Label = label, OnClick = () => { onClick(); return Task.CompletedTask; }, Icon = icon, Disabled = disabled };
+    public static RowAction Callback(string label, Action onClick, Icon? icon = null, bool disabled = false, bool destructive = false, string? confirmMessage = null) =>
+        new() { Label = label, OnClick = () => { onClick(); return Task.CompletedTask; }, Icon = icon, Disabled = disabled, Destructive = destructive, ConfirmMessage = confirmMessage };
 
     /// <summary>A horizontal divider between groups of actions.</summary>
     public static RowAction Separator() =>

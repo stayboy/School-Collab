@@ -12,6 +12,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Subjects> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="SubjectDto"
@@ -249,7 +250,12 @@
         return new List<RowAction>
         {
             RowAction.Callback("Edit", () => OpenEditDialogAsync(row), FluentIcons.Edit),
-            RowAction.Callback("Delete", () => OnDeleteAsync(row.Id, name), FluentIcons.Delete),
+            RowAction.Callback(
+                "Delete",
+                () => OnDeleteAsync(row.Id, name),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: $"Delete subject '{name}'? This cannot be undone if it is in use."),
         };
     }
 
@@ -334,6 +340,7 @@
             await Api.DeleteSubjectAsync(id);
             if (_disposed) return;
             Logger.LogInformation("Deleted subject {Id}", id);
+            Toast.ShowSuccess($"Subject '{name}' deleted.");
         }
         catch (Exception ex)
         {

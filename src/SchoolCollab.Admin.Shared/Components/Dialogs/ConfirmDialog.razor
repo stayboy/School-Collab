@@ -1,0 +1,38 @@
+@* Reusable modal confirmation dialog. Unlike FluentUI's MessageBox, this
+   renders a dark modal overlay even when both a Primary and a Secondary button
+   are present (FluentUI's MessageBox hides the overlay whenever a secondary
+   action is defined). Shown via DialogServiceExtensions.ShowConfirmDialogAsync
+   with Modal = true and PreventDismissOnOverlayClick = false, so the user can
+   either click a button or dismiss by clicking the overlay / pressing ESC.
+
+   Result contract:
+     • Primary button  → DialogResult.Ok(true)   → Cancelled = false (proceed)
+     • Secondary button → DialogResult.Cancel()   → Cancelled = true  (abort)
+     • Overlay / ESC    → Cancelled = true         (abort)
+*@
+@using Microsoft.FluentUI.AspNetCore.Components
+@implements IDialogContentComponent<ConfirmDialogContent>
+
+<div class="confirm-dialog">
+    <FluentMessageBar Intent="MessageIntent.Warning">
+        @Content.Message
+    </FluentMessageBar>
+    <div class="confirm-dialog__actions">
+        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">
+            @Content.SecondaryText
+        </FluentButton>
+        <FluentButton Appearance="Appearance.Accent" OnClick="ConfirmAsync">
+            @Content.PrimaryText
+        </FluentButton>
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] public FluentDialog Dialog { get; set; } = default!;
+
+    [Parameter] public ConfirmDialogContent Content { get; set; } = default!;
+
+    private async Task ConfirmAsync() => await Dialog.CloseAsync(DialogResult.Ok(true));
+
+    private async Task CancelAsync() => await Dialog.CloseAsync(DialogResult.Cancel());
+}
