@@ -45,12 +45,12 @@ public sealed class EnrollStudentHandler(
                 "Enrollments must target the tenant's active period.");
         }
 
-        // FR-9: strand validation. If a GradeStrandCodedValueId is provided, the strand
-        // must be a child of GRSTRNDS and its gradeLevel attribute must reference a
+        // FR-9: stream validation. If a StreamCodedValueId is provided, the stream
+        // must be a child of GRSTREAMS and its gradeLevel attribute must reference a
         // CodedValue that matches the enrollment's GradeLevel.
-        if (command.GradeStrandCodedValueId is { } strandId)
+        if (command.StreamCodedValueId is { } streamId)
         {
-            await ValidateStrandAsync(command.GradeLevelId, strandId, cancellationToken);
+            await ValidateStreamAsync(command.GradeLevelId, streamId, cancellationToken);
         }
 
         // §6 Enrollment validation guard clauses (age, gender, single-active).
@@ -68,7 +68,7 @@ public sealed class EnrollStudentHandler(
             command.PeriodId,
             command.GradeLevelId,
             command.EnrolledOn,
-            command.GradeStrandCodedValueId);
+            command.StreamCodedValueId);
 
         await repository.AddAsync(enrollment, cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);
@@ -79,7 +79,7 @@ public sealed class EnrollStudentHandler(
                 evt.StudentId,
                 evt.PeriodId,
                 evt.GradeLevelId,
-                evt.GradeStrandCodedValueId,
+                evt.StreamCodedValueId,
                 enrollment.EnrolledOn,
                 DateTimeOffset.UtcNow), cancellationToken);
         }
@@ -151,32 +151,32 @@ public sealed class EnrollStudentHandler(
         };
     }
 
-    private async Task ValidateStrandAsync(Guid gradeLevelId, Guid strandCodedValueId, CancellationToken cancellationToken)
+    private async Task ValidateStreamAsync(Guid gradeLevelId, Guid streamCodedValueId, CancellationToken cancellationToken)
     {
         // Resolve the grade's CodedValueId via the repository.
         var gradeLevel = await gradeLevelRepository.GetAsync(gradeLevelId, cancellationToken)
             ?? throw new GradeLevelNotFoundException(gradeLevelId);
         var gradeCodedValueId = gradeLevel.CodedValueId;
 
-        // Fetch the strand coded value from the Settings API.
-        var strand = await codedValuesApi.GetByIdAsync(strandCodedValueId, cancellationToken)
-            ?? throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+        // Fetch the stream coded value from the Settings API.
+        var stream = await codedValuesApi.GetByIdAsync(streamCodedValueId, cancellationToken)
+            ?? throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
 
-        // The strand's gradeLevel attribute must reference a CodedValue whose Id
+        // The stream's gradeLevel attribute must reference a CodedValue whose Id
         // matches the enrollment's grade's CodedValueId.
-        var gradeLevelAttr = strand.Attributes
+        var gradeLevelAttr = stream.Attributes
             .FirstOrDefault(a => a.Key == "gradeLevel");
         if (gradeLevelAttr is null)
         {
-            throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
         }
 
         // The attribute value is the coded value's GUID (because DataType=CodedValue).
         // We compare as Guid.
-        if (!Guid.TryParse(gradeLevelAttr.Value, out var strandGradeCodedValueId)
-            || strandGradeCodedValueId != gradeCodedValueId)
+        if (!Guid.TryParse(gradeLevelAttr.Value, out var streamGradeCodedValueId)
+            || streamGradeCodedValueId != gradeCodedValueId)
         {
-            throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
         }
     }
 }

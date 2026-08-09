@@ -49,12 +49,12 @@
                                   OptionValue="@(g => g.Id)"
                                   Label="Transfer to grade" />
 
-                <CodedValueDropdown Parent="CodedValueParent.GradeStrands"
+                <CodedValueDropdown Parent="CodedValueParent.Streams"
                                     AttributeFilter="@(SelectedGrade is null ? null : ("gradeLevel", SelectedGrade.CodedValueId.ToString()))"
-                                    EmptyFilterPlaceholder="No strands for this grade"
-                                    Placeholder="Select strand…"
-                                    Label="Transfer to strand"
-                                    @bind-SelectedId="_selectedStrand" />
+                                    EmptyFilterPlaceholder="No streams for this grade"
+                                    Placeholder="Select stream…"
+                                    Label="Transfer to stream"
+                                    @bind-SelectedId="_selectedStream" />
 
                 <FluentTextArea @bind-Value="_model.Reason" Label="Reason" Required="true" />
             </FluentStack>
@@ -85,10 +85,10 @@
     /// <see cref="DropdownComponent{TItem, TValue}"/>. The full
     /// <see cref="GradeLevelDto"/> is resolved lazily via
     /// <see cref="SelectedGrade"/> for callers that need it
-    /// (DirectionHint, AttributeFilter on the strand picker, API call).
+    /// (DirectionHint, AttributeFilter on the stream picker, API call).
     /// </summary>
     private Guid? _selectedGradeId;
-    private Guid? _selectedStrand;
+    private Guid? _selectedStream;
 
     /// <summary>Resolves the transfer-target <see cref="GradeLevelDto"/>
     /// from <see cref="_selectedGradeId"/>. Null when the id is null or
@@ -102,13 +102,13 @@
     /// Handles the transfer-grade <see cref="DropdownComponent{TItem, TValue}"/>'s
     /// <c>@bind-SelectedValue:after</c> side-effect. Runs after the binder has
     /// written the new <see cref="_selectedGradeId"/>, so we can read the
-    /// post-bind value via the property. The strand picker's <c>AttributeFilter</c>
+    /// post-bind value via the property. The stream picker's <c>AttributeFilter</c>
     /// value is derived from <see cref="SelectedGrade"/>'s <c>CodedValueId</c>,
-    /// so a grade change re-filters the strand list automatically. We must also
-    /// clear <see cref="_selectedStrand"/> here: a strand from the previous grade
-    /// is no longer valid (the strand's <c>gradeLevel</c> attribute must match
+    /// so a grade change re-filters the stream list automatically. We must also
+    /// clear <see cref="_selectedStream"/> here: a stream from the previous grade
+    /// is no longer valid (the stream's <c>gradeLevel</c> attribute must match
     /// the new grade; spec §4.3 / FR-9). Without this clear the consumer's
-    /// strand id would persist through the re-render and reach the API as a
+    /// stream id would persist through the re-render and reach the API as a
     /// stale value.
     /// <para>
     /// Parameterless void per the repo rule: <see cref="DropdownComponent{TItem, TValue}"/>'s
@@ -117,7 +117,7 @@
     /// (mirrors the rule documented on <see cref="CodedValueDropdown"/>).
     /// </para>
     /// </summary>
-    private void OnGradeSelectedValueChanged() => _selectedStrand = null;
+    private void OnGradeSelectedValueChanged() => _selectedStream = null;
 
     protected override async Task OnInitializedAsync()
     {
@@ -186,7 +186,7 @@
 
         try
         {
-            await Api.TransferStudentAsync(_enrollment.Id, new TransferStudentRequest(SelectedGrade.Id, _selectedStrand, null, _model.Reason));
+            await Api.TransferStudentAsync(_enrollment.Id, new TransferStudentRequest(SelectedGrade.Id, _selectedStream, null, _model.Reason));
             return new StudentTransferResult(true);
         }
         catch (Exception ex)

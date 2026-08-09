@@ -50,6 +50,12 @@ not treat a bug fix as complete when it only changes production code.
      clients, etc.) in the bUnit `TestContext`.
    - Assert the bug-specific UI outcome, such as route discovery, expected headings,
      buttons, empty states, error boundaries, or disabled actions.
+   - **Dialog/component mutation handlers (add / assign / link / remove) must have a
+     bUnit test asserting the local list state updates.** A handler that fires its
+     callback but never updates the component's own `[Parameter]` list snapshots is a
+     bug — the UI won't reflect the change until the dialog is reopened. Test that the
+     added item appears in the list and leaves the picker (e.g. `Teachers` gains the
+     linked teacher and `UnlinkedTeachers` drops it).
 
 5. **No untested bug fixes.** If a bug cannot be tested directly, document why in the PR
    and add the closest available coverage, such as routing, service, or component

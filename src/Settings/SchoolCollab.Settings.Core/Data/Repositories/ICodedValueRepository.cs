@@ -41,14 +41,14 @@ public interface ICodedValueRepository
     /// <summary>
     /// Finds a sibling coded value under the given parent that has a
     /// <c>gradeLevel</c> attribute with <paramref name="gradeLevelValue"/>
-    /// AND a <c>strandVersion</c> attribute with
-    /// <paramref name="strandVersionValue"/>. Returns <see langword="null"/>
-    /// if no sibling matches. Used for per-grade strand uniqueness.
+    /// AND a <c>streamVersion</c> attribute with
+    /// <paramref name="streamVersionValue"/>. Returns <see langword="null"/>
+    /// if no sibling matches. Used for per-grade stream uniqueness.
     /// </summary>
-    Task<CodedValue?> FindStrandSiblingAsync(
+    Task<CodedValue?> FindStreamSiblingAsync(
         Guid parentId,
         string gradeLevelValue,
-        string strandVersionValue,
+        string streamVersionValue,
         CancellationToken cancellationToken = default);
     Task<List<string>> GetReferencingSourceCodesAsync(Guid codedValueId, CancellationToken cancellationToken = default);
     Task<CodedValueDto[]> ListDeletedAsync(CancellationToken cancellationToken = default);

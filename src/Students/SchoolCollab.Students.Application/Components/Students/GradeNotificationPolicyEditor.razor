@@ -1,5 +1,8 @@
 @namespace SchoolCollab.Students.Application.Components.Students
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Notifications
 @using SchoolCollab.Students.Application.Services
@@ -7,12 +10,13 @@
 @using System.ComponentModel
 @inject StudentsApiClient Api
 @inject NotificationPolicyApiClient SettingsApi
+@inject IDialogService DialogService
 @inject ILogger<GradeNotificationPolicyEditor> Logger
 
 @* Per-grade Notification & Delivery policy editor (notification-delivery-plan.md §5).
-   Shows the effective (merged) policy with per-field "uses global default" indicators,
-   a per-grade override editor (clear a field = inherit the tenant default), and a
-   read-only reference to the tenant-global default. No delivery in this phase. *@
+   A single grid lists each setting with its tenant-global value and per-grade override.
+   Row actions: Edit (opens a dialog with Global / This-grade scope) and Reset
+   (clears the per-grade override back to "inherit global"). *@
 
 @if (_loading)
 {
@@ -24,112 +28,62 @@ else if (!string.IsNullOrEmpty(_error))
 }
 else
 {
-    @* ── Effective (merged) policy ─────────────────────────────────────── *@
-    <div class="section-header">
-        <h3>Effective Policy</h3>
-        <span class="muted">What a publish sendout currently uses for this grade.</span>
-    </div>
-    <FluentDataGrid Items="_effectiveRows.AsQueryable()" TGridItem="EffectiveRow" Class="policy-grid">
-        <TemplateColumn Title="Setting">@context.Label</TemplateColumn>
-        <TemplateColumn Title="Effective value">
-            <span class="effective-value">@context.Value</span>
+    <FluentDataGrid Items="_rows.AsQueryable()" TGridItem="FieldRow" Class="policy-grid">
+        <TemplateColumn Title="Setting">
+            <FluentAnchor Appearance="Appearance.Hypertext" Href="#" Class="setting-label"
+                          Title="@($"Edit {context.Def.Label}")"
+                          OnClick="() => EditAsync(context)">@context.Def.Label</FluentAnchor>
         </TemplateColumn>
-        <TemplateColumn Title="Source">
-            <FluentBadge Appearance="@(context.FromOverride ? Appearance.Accent : (context.HasValue ? Appearance.Neutral : Appearance.Lightweight))"
-                         Class="source-badge">
-                @(context.FromOverride ? "Override" : context.HasValue ? "Global default" : "Not set")
-            </FluentBadge>
+        <TemplateColumn Title="Global settings">
+            <span class="global-value">@context.GlobalDisplay</span>
+        </TemplateColumn>
+        <TemplateColumn Title="Grade override">
+            @if (context.GradeSet)
+            {
+                <span class="grade-value">@context.GradeDisplay</span>
+            }
+            else
+            {
+                <FluentBadge Appearance="Appearance.Lightweight" Class="inherit-badge">Inherit global</FluentBadge>
+            }
+        </TemplateColumn>
+        <TemplateColumn Title="Actions">
+            <RowActionsMenu AriaLabel="@($"Actions for {context.Def.Label}")"
+                            UseMenuService="false"
+                            Actions="@BuildRowActions(context)" />
         </TemplateColumn>
     </FluentDataGrid>
-
-    @* ── Per-grade override editor ─────────────────────────────────────── *@
-    <div class="section-header">
-        <h3>Grade Overrides</h3>
-        <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" IconStart="@FluentIcons.Save"
-                      OnClick="SaveAsync" Disabled="@_saving">
-            Save overrides
-        </FluentButton>
-    </div>
-    <p class="muted">Leave a field <strong>off</strong> to use the tenant-global default. Turn it on to set a grade-specific value.</p>
-    <FluentStack Orientation="Orientation.Vertical" Class="override-list">
-        @foreach (var f in _overrides)
-        {
-            <div class="override-row">
-                <label class="override-toggle">
-                    <input type="checkbox" checked="@f.IsOverride" @onchange="e => f.IsOverride = e.Value is true" />
-                    <span>@f.Label</span>
-                </label>
-                @if (f.IsChannelList)
-                {
-                    <div class="channel-toggle">
-                        @foreach (var ch in AllChannels)
-                        {
-                            <label>
-                                <input type="checkbox" checked="@f.Channels.Contains(ch)" disabled="@(!f.IsOverride)"
-                                       @onchange="e => ToggleChannel(f, ch, e.Value is true)" />
-                                @ChannelName(ch)
-                            </label>
-                        }
-                    </div>
-                }
-                else if (f.Kind == FieldKind.Time)
-                {
-                    <input type="time" class="time-input" value="@f.TimeText" disabled="@(!f.IsOverride)"
-                           @onchange="e => f.TimeText = e.Value?.ToString()" />
-                }
-                else
-                {
-                    <input type="number" value="@(f.IntValue?.ToString())" disabled="@(!f.IsOverride)"
-                           @onchange="e => SetInt(f, e.Value?.ToString())" />
-                }
-            </div>
-        }
-    </FluentStack>
-
-    @* ── Tenant default reference (read-only) ──────────────────────────── *@
-    <div class="section-header">
-        <h3>Tenant Global Default</h3>
-        <span class="muted">Read-only reference — set this in Settings.</span>
-    </div>
-    <div class="tenant-default">
-        @if (_tenantRows.Length == 0)
-        {
-            <span class="muted">No tenant default configured — built-in defaults apply.</span>
-        }
-        else
-        {
-            <ul>
-                @foreach (var r in _tenantRows)
-                {
-                    <li><span class="td-label">@r.Label</span><span>@r.Value</span></li>
-                }
-            </ul>
-        }
-    </div>
+    <p class="muted grid-hint">
+        <strong>Edit</strong> opens a dialog where you can change the value for this grade or the tenant-global default.
+        <strong>Reset</strong> clears the per-grade override so the global value applies.
+    </p>
 }
 
+<style>
+    .muted { color: var(--neutral-foreground-hint); }
+    .policy-grid { width: 100%; }
+    .setting-label { font-weight: 500; }
+    .global-value { color: var(--neutral-foreground-hint); }
+    .grade-value { font-weight: 500; }
+    .inherit-badge { }
+    .grid-hint { margin-top: 0.75rem; font-size: 0.85rem; }
+</style>
 
 @code {
-    private enum FieldKind { Channels, Int, Time }
+    private sealed record FieldDef(string Key, string Label, NotificationPolicyFieldEditDialog.FieldKind Kind);
+    private sealed record FieldRow(FieldDef Def, string GlobalDisplay, string GradeDisplay, bool GradeSet);
 
-    private sealed record EffectiveRow(string Label, string Value, bool FromOverride, bool HasValue);
-
-    private sealed class OverrideField
-    {
-        public required string Key { get; init; }
-        public required string Label { get; init; }
-        public required FieldKind Kind { get; init; }
-        public bool IsChannelList => Kind == FieldKind.Channels;
-        public bool IsOverride { get; set; }
-        public List<NotificationChannel> Channels { get; set; } = new();
-        public int? IntValue { get; set; }
-        public string? TimeText { get; set; }
-    }
-
-    private static readonly NotificationChannel[] AllChannels =
-        [NotificationChannel.Email, NotificationChannel.SMS, NotificationChannel.WhatsApp];
-
-    private static readonly EffectiveNotificationPolicyResolver _resolver = new();
+    private static readonly FieldDef[] Fields =
+    [
+        new("PreferredChannelOrder", "Preferred Mode of Contact", NotificationPolicyFieldEditDialog.FieldKind.Channels),
+        new("BlockedChannels", "Blocked Mode of Contact", NotificationPolicyFieldEditDialog.FieldKind.Channels),
+        new("MaxNotifications", "Max notifications per sendout", NotificationPolicyFieldEditDialog.FieldKind.Int),
+        new("MaxReminders", "Max reminders", NotificationPolicyFieldEditDialog.FieldKind.Int),
+        new("ReminderIntervalHours", "Reminder interval (hours)", NotificationPolicyFieldEditDialog.FieldKind.Int),
+        new("LinkValidityDays", "Link validity (days)", NotificationPolicyFieldEditDialog.FieldKind.Int),
+        new("SendoutTimeOfDay", "Sendout time of day", NotificationPolicyFieldEditDialog.FieldKind.Time),
+        new("SendoutIntervalMinutes", "Sendout interval (minutes)", NotificationPolicyFieldEditDialog.FieldKind.Int),
+    ];
 
     [Parameter] public Guid GradeLevelId { get; set; }
 
@@ -138,11 +92,7 @@ else
     private string? _error;
     private TenantNotificationPolicyDto? _tenantDefault;
     private GradeNotificationPolicyDto? _gradeOverride;
-    private EffectiveRow[] _effectiveRows = [];
-    private TenantRow[] _tenantRows = [];
-    private List<OverrideField> _overrides = new();
-
-    private sealed record TenantRow(string Label, string Value);
+    private FieldRow[] _rows = [];
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -158,46 +108,7 @@ else
 
             _tenantDefault = tenantTask.Result;
             _gradeOverride = gradeTask.Result;
-
-            var tenantFields = ToFields(_tenantDefault);
-            var gradeFields = ToFields(_gradeOverride);
-            var effective = _resolver.Resolve(tenantFields, gradeFields);
-
-            _effectiveRows =
-            [
-                Row("Preferred channels", FormatChannels(effective.PreferredChannelOrder), effective.PreferredChannelOrderFromOverride, effective.PreferredChannelOrder.Length > 0),
-                Row("Blocked channels", FormatChannels(effective.BlockedChannels), effective.BlockedChannelsFromOverride, effective.BlockedChannels.Length > 0),
-                Row("Max notifications per sendout", FormatInt(effective.MaxNotifications), effective.MaxNotificationsFromOverride, effective.MaxNotifications.HasValue),
-                Row("Max reminders", FormatInt(effective.MaxReminders), effective.MaxRemindersFromOverride, effective.MaxReminders.HasValue),
-                Row("Reminder interval (hours)", FormatInt(effective.ReminderIntervalHours), effective.ReminderIntervalHoursFromOverride, effective.ReminderIntervalHours.HasValue),
-                Row("Link validity (days)", FormatInt(effective.LinkValidityDays), effective.LinkValidityDaysFromOverride, effective.LinkValidityDays.HasValue),
-                Row("Sendout time of day", effective.SendoutTimeOfDay is { } t ? t.ToString("HH:mm") : "Not set", effective.SendoutTimeOfDayFromOverride, effective.SendoutTimeOfDay.HasValue),
-                Row("Sendout interval (minutes)", FormatInt(effective.SendoutIntervalMinutes), effective.SendoutIntervalMinutesFromOverride, effective.SendoutIntervalMinutes.HasValue),
-            ];
-
-            _tenantRows =
-            [
-                new("Preferred channels", FormatChannelsNullable(_tenantDefault?.PreferredChannelOrder)),
-                new("Blocked channels", FormatChannelsNullable(_tenantDefault?.BlockedChannels)),
-                new("Max notifications", FormatInt(_tenantDefault?.MaxNotifications)),
-                new("Max reminders", FormatInt(_tenantDefault?.MaxReminders)),
-                new("Reminder interval (hours)", FormatInt(_tenantDefault?.ReminderIntervalHours)),
-                new("Link validity (days)", FormatInt(_tenantDefault?.LinkValidityDays)),
-                new("Sendout time of day", _tenantDefault?.SendoutTimeOfDay is { } tt ? tt.ToString("HH:mm") : "Not set"),
-                new("Sendout interval (minutes)", FormatInt(_tenantDefault?.SendoutIntervalMinutes)),
-            ];
-
-            _overrides =
-            [
-                Field("PreferredChannelOrder", "Preferred channels", FieldKind.Channels),
-                Field("BlockedChannels", "Blocked channels", FieldKind.Channels),
-                Field("MaxNotifications", "Max notifications per sendout", FieldKind.Int),
-                Field("MaxReminders", "Max reminders", FieldKind.Int),
-                Field("ReminderIntervalHours", "Reminder interval (hours)", FieldKind.Int),
-                Field("LinkValidityDays", "Link validity (days)", FieldKind.Int),
-                Field("SendoutTimeOfDay", "Sendout time of day", FieldKind.Time),
-                Field("SendoutIntervalMinutes", "Sendout interval (minutes)", FieldKind.Int),
-            ];
+            BuildRows();
         }
         catch (Exception ex)
         {
@@ -211,89 +122,60 @@ else
         }
     }
 
-    private static NotificationPolicyFields? ToFields(TenantNotificationPolicyDto? dto) => dto is null ? null : new NotificationPolicyFields
-    {
-        PreferredChannelOrder = dto.PreferredChannelOrder,
-        BlockedChannels = dto.BlockedChannels,
-        MaxNotifications = dto.MaxNotifications,
-        MaxReminders = dto.MaxReminders,
-        ReminderIntervalHours = dto.ReminderIntervalHours,
-        LinkValidityDays = dto.LinkValidityDays,
-        SendoutTimeOfDay = dto.SendoutTimeOfDay,
-        SendoutIntervalMinutes = dto.SendoutIntervalMinutes,
-    };
+    private void BuildRows() => _rows = Fields.Select(GetRow).ToArray();
 
-    private static NotificationPolicyFields? ToFields(GradeNotificationPolicyDto? dto) => dto is null ? null : new NotificationPolicyFields
+    private FieldRow GetRow(FieldDef def)
     {
-        PreferredChannelOrder = dto.PreferredChannelOrder,
-        BlockedChannels = dto.BlockedChannels,
-        MaxNotifications = dto.MaxNotifications,
-        MaxReminders = dto.MaxReminders,
-        ReminderIntervalHours = dto.ReminderIntervalHours,
-        LinkValidityDays = dto.LinkValidityDays,
-        SendoutTimeOfDay = dto.SendoutTimeOfDay,
-        SendoutIntervalMinutes = dto.SendoutIntervalMinutes,
-    };
+        var global = GetValue(def.Key, _tenantDefault);
+        var grade = GetValue(def.Key, _gradeOverride);
+        return new FieldRow(
+            def,
+            FormatDisplay(def, global),
+            grade is null ? "Inherit global" : FormatDisplay(def, grade),
+            grade is not null);
+    }
 
-    private static EffectiveRow Row(string label, string value, bool fromOverride, bool hasValue) => new(label, value, fromOverride, hasValue);
-
-    private OverrideField Field(string key, string label, FieldKind kind)
+    private async Task EditAsync(FieldRow row)
     {
-        var f = new OverrideField { Key = key, Label = label, Kind = kind };
-        var grade = _gradeOverride;
-        switch (key)
+        try
         {
-            case "PreferredChannelOrder":
-                f.IsOverride = grade?.PreferredChannelOrder != null;
-                f.Channels = (grade?.PreferredChannelOrder ?? []).ToList();
-                break;
-            case "BlockedChannels":
-                f.IsOverride = grade?.BlockedChannels != null;
-                f.Channels = (grade?.BlockedChannels ?? []).ToList();
-                break;
-            case "MaxNotifications": ApplyInt(f, grade?.MaxNotifications); break;
-            case "MaxReminders": ApplyInt(f, grade?.MaxReminders); break;
-            case "ReminderIntervalHours": ApplyInt(f, grade?.ReminderIntervalHours); break;
-            case "LinkValidityDays": ApplyInt(f, grade?.LinkValidityDays); break;
-            case "SendoutIntervalMinutes": ApplyInt(f, grade?.SendoutIntervalMinutes); break;
-            case "SendoutTimeOfDay":
-                f.IsOverride = grade?.SendoutTimeOfDay != null;
-                f.TimeText = grade?.SendoutTimeOfDay is { } t ? t.ToString("HH:mm") : "08:00";
-                break;
+            var model = new NotificationPolicyFieldEditDialog.EditModel(
+                row.Def.Key, row.Def.Label, row.Def.Kind, GradeLevelId, _tenantDefault, _gradeOverride);
+            var result = await DialogService.ShowShellDialogAsync<NotificationPolicyFieldEditDialog,
+                NotificationPolicyFieldEditDialog.EditModel,
+                NotificationPolicyFieldEditDialog.EditResult>(model, $"Edit {row.Def.Label}", DialogSize.Large);
+            if (result is not null)
+            {
+                await LoadAsync();
+            }
         }
-        return f;
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to edit notification policy field {Field} for grade {Grade}", row.Def.Key, GradeLevelId);
+            _error = ex.Message;
+        }
     }
 
-    private static void ApplyInt(OverrideField f, int? value)
-    {
-        f.IsOverride = value.HasValue;
-        f.IntValue = value;
-    }
+    private IReadOnlyList<RowAction> BuildRowActions(FieldRow row) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => EditAsync(row), FluentIcons.Edit),
+            RowAction.Callback("Reset", () => ResetAsync(row), FluentIcons.ArrowClockwise,
+                disabled: !row.GradeSet || _saving),
+        };
 
-    private void ToggleChannel(OverrideField f, NotificationChannel ch, bool on)
-    {
-        if (on) { if (!f.Channels.Contains(ch)) f.Channels.Add(ch); }
-        else f.Channels.Remove(ch);
-    }
-
-    private void SetInt(OverrideField f, string? value)
-    {
-        f.IntValue = int.TryParse(value, out var v) ? v : null;
-    }
-
-    private async Task SaveAsync()
+    private async Task ResetAsync(FieldRow row)
     {
         if (_saving) return;
         _saving = true;
         try
         {
-            var req = BuildRequest();
-            await Api.UpsertGradeNotificationPolicyAsync(GradeLevelId, req);
+            await Api.UpsertGradeNotificationPolicyAsync(GradeLevelId, BuildResetRequest(row.Def.Key));
             await LoadAsync();
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to save notification policy for grade {Grade}", GradeLevelId);
+            Logger.LogError(ex, "Failed to reset notification policy field {Field} for grade {Grade}", row.Def.Key, GradeLevelId);
             _error = ex.Message;
         }
         finally
@@ -302,32 +184,56 @@ else
         }
     }
 
-    private UpsertGradeNotificationPolicyRequest BuildRequest()
-    {
-        NotificationChannel[]? GetChannels(OverrideField f) => f.IsOverride ? f.Channels.ToArray() : null;
-        int? GetInt(OverrideField f) => f.IsOverride ? f.IntValue : null;
-        TimeOnly? GetTime(OverrideField f) => f.IsOverride && TimeOnly.TryParse(f.TimeText, out var t) ? t : null;
+    private UpsertGradeNotificationPolicyRequest BuildResetRequest(string key) =>
+        new(
+            key == "PreferredChannelOrder" ? null : _gradeOverride?.PreferredChannelOrder,
+            key == "BlockedChannels" ? null : _gradeOverride?.BlockedChannels,
+            key == "MaxNotifications" ? null : _gradeOverride?.MaxNotifications,
+            key == "MaxReminders" ? null : _gradeOverride?.MaxReminders,
+            key == "ReminderIntervalHours" ? null : _gradeOverride?.ReminderIntervalHours,
+            key == "LinkValidityDays" ? null : _gradeOverride?.LinkValidityDays,
+            key == "SendoutTimeOfDay" ? null : _gradeOverride?.SendoutTimeOfDay,
+            key == "SendoutIntervalMinutes" ? null : _gradeOverride?.SendoutIntervalMinutes);
 
-        return new UpsertGradeNotificationPolicyRequest(
-            GetChannels(Find("PreferredChannelOrder")),
-            GetChannels(Find("BlockedChannels")),
-            GetInt(Find("MaxNotifications")),
-            GetInt(Find("MaxReminders")),
-            GetInt(Find("ReminderIntervalHours")),
-            GetInt(Find("LinkValidityDays")),
-            GetTime(Find("SendoutTimeOfDay")),
-            GetInt(Find("SendoutIntervalMinutes")));
+    private static string FormatDisplay(FieldDef def, object? value)
+    {
+        if (value is null) return "Not set";
+        return def.Kind switch
+        {
+            NotificationPolicyFieldEditDialog.FieldKind.Channels => FormatChannels((NotificationChannel[])value),
+            NotificationPolicyFieldEditDialog.FieldKind.Time => ((TimeOnly)value).ToString("HH:mm"),
+            _ => ((int)value).ToString("N0"),
+        };
     }
 
-    private OverrideField Find(string key) => _overrides.First(f => f.Key == key);
+    private static object? GetValue(string key, TenantNotificationPolicyDto? p) => key switch
+    {
+        "PreferredChannelOrder" => p?.PreferredChannelOrder,
+        "BlockedChannels" => p?.BlockedChannels,
+        "MaxNotifications" => p?.MaxNotifications,
+        "MaxReminders" => p?.MaxReminders,
+        "ReminderIntervalHours" => p?.ReminderIntervalHours,
+        "LinkValidityDays" => p?.LinkValidityDays,
+        "SendoutTimeOfDay" => p?.SendoutTimeOfDay,
+        "SendoutIntervalMinutes" => p?.SendoutIntervalMinutes,
+        _ => null,
+    };
+
+    private static object? GetValue(string key, GradeNotificationPolicyDto? p) => key switch
+    {
+        "PreferredChannelOrder" => p?.PreferredChannelOrder,
+        "BlockedChannels" => p?.BlockedChannels,
+        "MaxNotifications" => p?.MaxNotifications,
+        "MaxReminders" => p?.MaxReminders,
+        "ReminderIntervalHours" => p?.ReminderIntervalHours,
+        "LinkValidityDays" => p?.LinkValidityDays,
+        "SendoutTimeOfDay" => p?.SendoutTimeOfDay,
+        "SendoutIntervalMinutes" => p?.SendoutIntervalMinutes,
+        _ => null,
+    };
 
     private static string FormatChannels(NotificationChannel[] channels) =>
         channels.Length == 0 ? "None" : string.Join(", ", channels.Select(ChannelName));
-
-    private static string FormatChannelsNullable(NotificationChannel[]? channels) =>
-        channels is null ? "Not set (built-in)" : FormatChannels(channels);
-
-    private static string FormatInt(int? v) => v.HasValue ? v.Value.ToString("N0") : "Not set";
 
     private static string ChannelName(NotificationChannel ch)
     {
@@ -336,3 +242,4 @@ else
         return attr?.Description ?? ch.ToString();
     }
 }
+

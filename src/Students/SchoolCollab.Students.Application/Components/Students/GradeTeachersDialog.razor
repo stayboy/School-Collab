@@ -152,6 +152,10 @@
         try
         {
             await Link(teacher.Id);
+            // Reflect the link in the dialog's own lists so the teacher moves
+            // from the picker into the linked list without reopening the dialog.
+            Teachers = Teachers.Append(ToWithRole(teacher)).ToArray();
+            UnlinkedTeachers = UnlinkedTeachers.Where(t => t.Id != teacher.Id).ToArray();
             _teacherToAdd = null;
             if (OnChanged is not null) await OnChanged();
         }
@@ -160,6 +164,15 @@
             _busy = false;
         }
     }
+
+    /// <summary>Converts a picker <see cref="TeacherDto"/> into a linked
+    /// <see cref="TeacherWithRoleDto"/> (no role / no topics yet) so the newly
+    /// linked teacher can be appended to the dialog's linked list.</summary>
+    private static TeacherWithRoleDto ToWithRole(TeacherDto t) =>
+        new(t.Id, t.TitleCodedValueId, t.FirstName, t.LastName, t.DisplayName,
+            t.GenderCodedValueId, t.DateOfBirth, t.LevelOfEducationCodedValueId,
+            t.QualificationCodedValueIds ?? [], t.IsDeleted, null, [],
+            t.CreatedAt, t.UpdatedAt);
 
     private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
 }

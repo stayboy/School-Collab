@@ -112,6 +112,10 @@
         try
         {
             await Assign(topic.Id);
+            // Reflect the assignment in the dialog's own lists so the topic moves
+            // from the picker into the assigned list without reopening the dialog.
+            Topics = Topics.Append(new GradeTopicCurriculumDto(topic.Id, topic.Name, topic.Code, 0, 0)).ToArray();
+            UnassignedTopics = UnassignedTopics.Where(t => t.Id != topic.Id).ToArray();
             _topicToAdd = null;
             if (OnChanged is not null) await OnChanged();
         }

@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Services;
@@ -16,10 +18,11 @@ using System.Threading.Tasks;
 namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
-/// bUnit tests for the per-grade Notification &amp; Delivery editor
-/// (notification-delivery-plan.md §5): effective-policy view with per-field
-/// "uses global default" / "Override" indicators, and the override set/clear
-/// round-trip against the scripted Students + Settings APIs.
+/// bUnit tests for the reworked per-grade Notification &amp; Delivery editor
+/// (notification-delivery-plan.md §5): a single grid with per-setting
+/// "Global settings" / "Grade override" columns and Edit / Reset row actions.
+/// The edit dialog's save logic is covered by
+/// <see cref="NotificationPolicyFieldEditDialogTests"/>.
 /// </summary>
 [TestClass]
 public class GradeNotificationPolicyEditorTests : BunitContext
@@ -90,7 +93,7 @@ public class GradeNotificationPolicyEditorTests : BunitContext
             ["updatedAt"] = System.DateTimeOffset.UnixEpoch,
         });
 
-    private static string GradeJson(int? maxNotifications, int[]? preferredChannels) =>
+    private static string GradeJson(int? maxNotifications, int? linkValidityDays, int[]? preferredChannels = null) =>
         Json(new Dictionary<string, object?>
         {
             ["gradeLevelId"] = Guid.NewGuid(),
@@ -99,7 +102,7 @@ public class GradeNotificationPolicyEditorTests : BunitContext
             ["maxNotifications"] = maxNotifications,
             ["maxReminders"] = null,
             ["reminderIntervalHours"] = null,
-            ["linkValidityDays"] = null,
+            ["linkValidityDays"] = linkValidityDays,
             ["sendoutTimeOfDay"] = null,
             ["sendoutIntervalMinutes"] = null,
             ["updatedAt"] = System.DateTimeOffset.UnixEpoch,
@@ -109,71 +112,100 @@ public class GradeNotificationPolicyEditorTests : BunitContext
         System.Text.Json.JsonSerializer.Serialize(dict);
 
     [TestMethod]
-    public void Effective_policy_shows_override_and_global_default_indicators()
+    public void Grid_shows_setting_global_and_grade_override_columns_with_values()
     {
         var (_, gradeId) = Register(
             tenantBody: TenantJson(maxNotifications: 50, linkValidityDays: 7, preferredChannels: [0]),
-            gradeBody: GradeJson(maxNotifications: 10, preferredChannels: null));
+            gradeBody: GradeJson(maxNotifications: 10, linkValidityDays: null));
 
         var cut = Render<GradeNotificationPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Effective Policy"));
-        // Grade override wins for max notifications.
-        cut.Markup.Should().Contain("10");
-        cut.Markup.Should().Contain("Override");
-        // Link validity inherits the tenant default.
-        cut.Markup.Should().Contain("Global default");
-        cut.Markup.Should().Contain("7");
-        // Tenant default reference shows 50.
-        cut.Markup.Should().Contain("Tenant Global Default");
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Global settings"));
+        cut.Markup.Should().Contain("Grade override");
+        cut.Markup.Should().Contain("Actions");
+
+        // Global column shows the tenant default (50); grade override column shows 10.
         cut.Markup.Should().Contain("50");
-        // Channel display.
+        cut.Markup.Should().Contain("10");
+        // Preferred modes of contact resolved from the tenant default (Email = value 0).
         cut.Markup.Should().Contain("Email");
+        // 'channels' is labelled 'Mode of Contact'.
+        cut.Markup.Should().Contain("Preferred Mode of Contact");
+
+        // The Actions column renders a kebab (⋮) overflow menu per row.
+        var triggers = cut.FindAll("fluent-button[title^='Actions for']");
+        triggers.Count.Should().BeGreaterThan(0, "each row exposes an overflow kebab menu");
+        triggers.First().Click();
+        cut.FindAll("fluent-menu-item").Should().Contain(i => i.TextContent.Trim() == "Edit");
+        cut.FindAll("fluent-menu-item").Should().Contain(i => i.TextContent.Trim() == "Reset");
     }
 
     [TestMethod]
-    public void Effective_policy_shows_not_set_when_no_configuration()
+    public void Grid_shows_inherit_global_badge_when_grade_has_no_override()
     {
         var (_, gradeId) = Register(
-            tenantBody: NoContent,
+            tenantBody: TenantJson(maxNotifications: 50, linkValidityDays: 7, preferredChannels: []),
             gradeBody: NoContent,
             gradeStatus: HttpStatusCode.NoContent);
 
         var cut = Render<GradeNotificationPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Effective Policy"));
-        cut.Markup.Should().Contain("Not set");
-        cut.Markup.Should().NotContain("Global default");
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Inherit global"));
     }
 
     [TestMethod]
-    public void Save_roundtrips_a_grade_override()
+    public void Reset_clears_grade_override_field_and_preserves_others()
     {
+        // Grade override row with maxNotifications=10 AND linkValidityDays=14.
         var (handler, gradeId) = Register(
-            tenantBody: TenantJson(maxNotifications: 50, linkValidityDays: null, preferredChannels: []),
+            tenantBody: TenantJson(maxNotifications: 50, linkValidityDays: 7, preferredChannels: []),
+            gradeBody: GradeJson(maxNotifications: 10, linkValidityDays: 14));
+
+        var cut = Render<GradeNotificationPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
+        cut.WaitForAssertion(() => cut.FindAll("tr.fluent-data-grid-row").Should().NotBeEmpty());
+
+        var row = cut.FindAll("tr.fluent-data-grid-row")
+            .Single(r => r.TextContent.Contains("Max notifications per sendout"));
+        row.QuerySelector("fluent-button")!.Click();   // open the row's overflow kebab menu
+
+        // Re-query the menu items globally after the click: the row reference
+        // captured above is stale once the menu-open re-render runs.
+        cut.FindAll("fluent-menu-item")
+            .Single(i => i.TextContent.Trim().Equals("Reset", System.StringComparison.OrdinalIgnoreCase))
+            .Click();
+
+        var put = handler.Calls.Should().Contain(c => c.Method == "PUT" && c.Url.Contains("notification-policy")).Which;
+        put.Body.Should().Contain("\"maxNotifications\":null", "the reset clears the per-grade override for that field");
+        put.Body.Should().Contain("\"linkValidityDays\":14", "unrelated grade overrides are preserved");
+    }
+
+    [TestMethod]
+    public void Edit_opens_the_field_edit_dialog_for_that_setting()
+    {
+        var (_, gradeId) = Register(
+            tenantBody: TenantJson(maxNotifications: 50, linkValidityDays: 7, preferredChannels: []),
             gradeBody: NoContent,
             gradeStatus: HttpStatusCode.NoContent);
 
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
+
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<NotificationPolicyFieldEditDialog, DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(
+                It.IsAny<DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(), It.IsAny<DialogParameters>()))
+            .ReturnsAsync(dialogRef.Object);
+        Services.AddSingleton(dialogMock.Object);
+
         var cut = Render<GradeNotificationPolicyEditor>(p => p.Add(x => x.GradeLevelId, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Save overrides"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Max notifications per sendout"));
 
-        // Turn on the "Max notifications per sendout" override and set it to 10.
-        var maxRow = cut.FindAll(".override-row").First(r => r.TextContent.Contains("Max notifications"));
-        var checkboxInput = maxRow.QuerySelector("input[type=checkbox]");
-        checkboxInput.Should().NotBeNull();
-        checkboxInput!.Change(true);
+        // The setting name is a hyperlink label that opens the edit dialog.
+        var row = cut.FindAll("tr.fluent-data-grid-row")
+            .Single(r => r.TextContent.Contains("Max notifications per sendout"));
+        row.QuerySelector("fluent-anchor")!.Click();
 
-        cut.WaitForAssertion(() => cut.FindAll(".override-row").First(r => r.TextContent.Contains("Max notifications"))
-            .QuerySelector("input[type=number]")!.HasAttribute("disabled").Should().BeFalse());
-        var numberInput = cut.FindAll(".override-row").First(r => r.TextContent.Contains("Max notifications"))
-            .QuerySelector("input[type=number]");
-        numberInput.Should().NotBeNull();
-        numberInput!.Change("10");
-
-        cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Save overrides")).Click();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("10"));
-
-        var put = handler.Calls.Should().Contain(c => c.Method == "PUT" && c.Url.Contains("notification-policy")).Which;
-        put.Body.Should().Contain("\"maxNotifications\":10");
+        dialogMock.Verify(d => d.ShowDialogAsync<NotificationPolicyFieldEditDialog, DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(
+            It.IsAny<DialogShellData<NotificationPolicyFieldEditDialog.EditModel>>(), It.IsAny<DialogParameters>()), Times.Once);
     }
 }

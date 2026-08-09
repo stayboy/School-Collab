@@ -38,7 +38,7 @@ public class LandingPageOnCreateTests : BunitContext
             .Add(x => x.Items, Array.Empty<TestLandingPageOnCreate.Widget>())
             .Add(x => x.OnCreate, EventCallback.Factory.Create(this, () => invoked++)));
 
-        var newButton = cut.FindAll("fluent-button")
+        var newButton = cut.FindAll("fluent-anchor")
             .First(b => b.TextContent.Contains("+ New"));
         await newButton.ClickAsync(new MouseEventArgs());
 
@@ -56,7 +56,7 @@ public class LandingPageOnCreateTests : BunitContext
             .Add(x => x.CreateEnabled, true)
             .Add(x => x.Items, Array.Empty<TestLandingPageOnCreate.Widget>()));
 
-        var newButton = cut.FindAll("fluent-button")
+        var newButton = cut.FindAll("fluent-anchor")
             .First(b => b.TextContent.Contains("+ New"));
         await newButton.ClickAsync(new MouseEventArgs());
 
@@ -74,7 +74,7 @@ public class LandingPageOnCreateTests : BunitContext
             .Add(x => x.CreateEnabled, false)
             .Add(x => x.Items, Array.Empty<TestLandingPageOnCreate.Widget>()));
 
-        cut.FindAll("fluent-button")
+        cut.FindAll("fluent-anchor")
             .Any(b => b.TextContent.Contains("+ New"))
             .Should().BeFalse("CreateEnabled=false hides the New button");
     }

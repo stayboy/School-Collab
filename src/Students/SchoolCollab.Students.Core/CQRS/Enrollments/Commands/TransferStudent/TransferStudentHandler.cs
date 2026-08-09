@@ -29,15 +29,15 @@ public sealed class TransferStudentHandler(
         var enrollment = await repository.GetAsync(command.EnrollmentId, cancellationToken)
             ?? throw new InvalidOperationException($"Enrollment with ID '{command.EnrollmentId}' not found.");
 
-        // FR-9: strand validation. If a new strand is provided, it must match the
-        // new grade. If null, the strand is cleared (grade transfer).
-        if (command.NewGradeStrandCodedValueId is { } strandId)
+        // FR-9: stream validation. If a new stream is provided, it must match the
+        // new grade. If null, the stream is cleared (grade transfer).
+        if (command.NewStreamCodedValueId is { } streamId)
         {
-            await ValidateStrandAsync(command.NewGradeLevelId, strandId, cancellationToken);
+            await ValidateStreamAsync(command.NewGradeLevelId, streamId, cancellationToken);
         }
 
         var fromGradeLevelId = enrollment.GradeLevelId;
-        enrollment.Transfer(command.NewGradeLevelId, command.TransferDate, command.Reason, command.NewGradeStrandCodedValueId);
+        enrollment.Transfer(command.NewGradeLevelId, command.TransferDate, command.Reason, command.NewStreamCodedValueId);
 
         // Audit the transfer in the same transaction as the enrollment update
         // (the repository's SaveChangesAsync flushes both tracked changes).
@@ -68,7 +68,7 @@ public sealed class TransferStudentHandler(
                 enrollment.PeriodId,
                 fromGradeLevelId,
                 evt.NewGradeLevelId,
-                evt.NewGradeStrandCodedValueId,
+                evt.NewStreamCodedValueId,
                 DateTimeOffset.UtcNow), cancellationToken);
         }
 
@@ -77,26 +77,26 @@ public sealed class TransferStudentHandler(
         logger.LogInformation("Student {StudentId} transferred from grade {FromGrade} to {ToGrade}", enrollment.StudentId, fromGradeLevelId, command.NewGradeLevelId);
     }
 
-    private async Task ValidateStrandAsync(Guid gradeLevelId, Guid strandCodedValueId, CancellationToken cancellationToken)
+    private async Task ValidateStreamAsync(Guid gradeLevelId, Guid streamCodedValueId, CancellationToken cancellationToken)
     {
         var gradeLevel = await gradeLevelRepository.GetAsync(gradeLevelId, cancellationToken)
             ?? throw new GradeLevelNotFoundException(gradeLevelId);
         var gradeCodedValueId = gradeLevel.CodedValueId;
 
-        var strand = await codedValuesApi.GetByIdAsync(strandCodedValueId, cancellationToken)
-            ?? throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+        var stream = await codedValuesApi.GetByIdAsync(streamCodedValueId, cancellationToken)
+            ?? throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
 
-        var gradeLevelAttr = strand.Attributes
+        var gradeLevelAttr = stream.Attributes
             .FirstOrDefault(a => a.Key == "gradeLevel");
         if (gradeLevelAttr is null)
         {
-            throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
         }
 
-        if (!Guid.TryParse(gradeLevelAttr.Value, out var strandGradeCodedValueId)
-            || strandGradeCodedValueId != gradeCodedValueId)
+        if (!Guid.TryParse(gradeLevelAttr.Value, out var streamGradeCodedValueId)
+            || streamGradeCodedValueId != gradeCodedValueId)
         {
-            throw new GradeStrandGradeMismatchException(strandCodedValueId, gradeLevelId);
+            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
         }
     }
 }

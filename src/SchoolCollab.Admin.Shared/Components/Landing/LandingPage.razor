@@ -16,10 +16,7 @@
             <div class="action-bar">
                 @if (CreateEnabled)
                 {
-                    <FluentButton Appearance="Appearance.Accent"
-                                  OnClick="@HandleCreateClicked">
-                        @CreateLabel
-                    </FluentButton>
+                    <FluentAnchor Appearance="Appearance.Accent" Href="#" OnClick="HandleCreateClicked">@CreateLabel</FluentAnchor>
                 }
                 @ToolbarFilters
                 <div class="spacer"></div>

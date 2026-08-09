@@ -125,6 +125,37 @@ public class GradeDialogsBunitTests : BunitContext
         cut.Markup.Should().Contain("Science", "unassigned catalog feeds the add-topic picker");
     }
 
+    [TestMethod]
+    public void TopicsDialog_Assign_MovesTopicFromPicker_ToAssignedList()
+    {
+        var topicId = Guid.NewGuid();
+        var assigned = new System.Collections.Generic.List<Guid>();
+        var cut = Render<GradeTopicsDialog>(p => p
+            .Add(x => x.Topics, Array.Empty<GradeTopicCurriculumDto>())
+            .Add(x => x.UnassignedTopics, new[] { CatalogTopic(topicId, "Science", "SCI") })
+            .Add(x => x.Assign, new System.Func<Guid, Task>(id => { assigned.Add(id); return Task.CompletedTask; })));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science"));
+
+        // The FluentSelect picker renders in shadow DOM (not directly clickable
+        // in bUnit), so simulate selecting the topic by setting the private
+        // bound field, then click Assign.
+        var field = typeof(GradeTopicsDialog).GetField("_topicToAdd",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(cut.Instance, CatalogTopic(topicId, "Science", "SCI"));
+        cut.Render();
+
+        cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Assign")).Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            assigned.Should().Contain(topicId, "the Assign callback fires with the selected topic id");
+            cut.Instance.Topics.Should().ContainSingle(t => t.TopicId == topicId,
+                "the assigned topic moves into the assigned list");
+            cut.Instance.UnassignedTopics.Should().BeEmpty();
+        });
+    }
+
     // ── GradeTeachersDialog ─────────────────────────────────────────────────
 
     [TestMethod]
@@ -238,5 +269,46 @@ public class GradeDialogsBunitTests : BunitContext
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
         removeItem.Click();
         removed.Should().Contain(teacherId);
+    }
+
+    [TestMethod]
+    public void TeachersDialog_Link_MovesTeacherFromPicker_ToLinkedList()
+    {
+        RegisterCodedValuesApi();
+        var teacherId = Guid.NewGuid();
+        var linked = new System.Collections.Generic.List<Guid>();
+        var cut = Render<GradeTeachersDialog>(p => p
+            .Add(x => x.Teachers, Array.Empty<TeacherWithRoleDto>())
+            .Add(x => x.UnlinkedTeachers, new[]
+            {
+                new TeacherDto(teacherId, null, "Jane", "Doe", null, false,
+                    DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch),
+            })
+            .Add(x => x.SalutationNames, new Dictionary<Guid, string>())
+            .Add(x => x.GenderNames, new Dictionary<Guid, string>())
+            .Add(x => x.LevelNames, new Dictionary<Guid, string>())
+            .Add(x => x.QualificationNames, new Dictionary<Guid, string>())
+            .Add(x => x.Link, new System.Func<Guid, Task>(id => { linked.Add(id); return Task.CompletedTask; })));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Jane Doe"));
+
+        // The FluentSelect picker renders in shadow DOM (not directly clickable
+        // in bUnit), so simulate selecting the teacher by setting the private
+        // bound field, then click Link.
+        var field = typeof(GradeTeachersDialog).GetField("_teacherToAdd",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        field.SetValue(cut.Instance, new TeacherDto(teacherId, null, "Jane", "Doe", null, false,
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        cut.Render();
+
+        cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Link")).Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            linked.Should().Contain(teacherId, "the Link callback fires with the selected teacher id");
+            cut.Instance.Teachers.Should().ContainSingle(t => t.Id == teacherId,
+                "the linked teacher moves into the linked list");
+            cut.Instance.UnlinkedTeachers.Should().BeEmpty();
+        });
     }
 }

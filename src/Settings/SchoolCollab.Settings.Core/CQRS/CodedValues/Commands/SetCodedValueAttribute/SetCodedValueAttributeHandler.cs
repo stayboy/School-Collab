@@ -14,30 +14,30 @@ public sealed class SetCodedValueAttributeHandler(
         var codedValue = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new CodedValueNotFoundException(command.Id);
 
-        // Strand uniqueness validation (FR-9): when setting a strandVersion on a child
-        // of GRSTRNDS, the (gradeLevel, strandVersion) pair must be unique per grade.
-        // The prefix rule is RELAXED — we do NOT validate that the strandVersion's
+        // Stream uniqueness validation (FR-9): when setting a streamVersion on a child
+        // of GRSTREAMS, the (gradeLevel, streamVersion) pair must be unique per grade.
+        // The prefix rule is RELAXED — we do NOT validate that the streamVersion's
         // leading digits match the grade's DisplayOrder.
-        if (command.Key == "strandVersion" && codedValue.ParentId is not null)
+        if (command.Key == "streamVersion" && codedValue.ParentId is not null)
         {
             var parent = await repository.GetAsync(codedValue.ParentId.Value, cancellationToken);
-            if (parent is not null && parent.Code == "GRSTRNDS")
+            if (parent is not null && parent.Code == "GRSTREAMS")
             {
                 var gradeLevelAttribute = codedValue.Attributes
                     .FirstOrDefault(a => a.Key == "gradeLevel");
                 if (gradeLevelAttribute is not null)
                 {
-                    var duplicateStrand = await repository.FindStrandSiblingAsync(
+                    var duplicateStream = await repository.FindStreamSiblingAsync(
                         codedValue.ParentId.Value,
                         gradeLevelAttribute.Value,
                         command.Value,
                         cancellationToken);
-                    if (duplicateStrand is not null && duplicateStrand.Id != codedValue.Id)
+                    if (duplicateStream is not null && duplicateStream.Id != codedValue.Id)
                     {
-                        throw new DuplicateGradeStrandException(
+                        throw new DuplicateStreamException(
                             gradeLevelAttribute.Value,
                             command.Value,
-                            duplicateStrand.Id);
+                            duplicateStream.Id);
                     }
                 }
             }

@@ -1,5 +1,6 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject NavigationManager Nav
+@typeparam TItem
 
 <FluentCard class="section-card-wrapper" AreaRestricted="false">
     <div class="section-card @Class">
@@ -31,7 +32,55 @@
         {
             @foreach (var item in Items.Take(MaxPreviewItems))
             {
-                @ItemTemplate(item)
+                if (ItemTemplate is not null)
+                {
+                    @ItemTemplate(item)
+                }
+                else
+                {
+                    <div class="section-card__item">
+                        <div class="section-card__item-main">
+                            @if (ItemTextSelector is { } textSel)
+                            {
+                                if (ItemHrefSelector is { } hrefSel && hrefSel(item) is { } href)
+                                {
+                                    <FluentAnchor Appearance="Appearance.Hypertext" Class="item-name"
+                                                  Href="@href" Title="@(ItemNameTitle ?? textSel(item))">
+                                        @textSel(item)
+                                    </FluentAnchor>
+                                }
+                                else if (ItemOnClick is { } onClick)
+                                {
+                                    <FluentAnchor Appearance="Appearance.Hypertext" Class="item-name"
+                                                  Href="#" OnClick="() => onClick(item)" Title="@(ItemNameTitle ?? textSel(item))">
+                                        @textSel(item)
+                                    </FluentAnchor>
+                                }
+                                else
+                                {
+                                    <span class="item-name">@textSel(item)</span>
+                                }
+                            }
+                            @if (ItemMetaSelector is { } metaSel && metaSel(item) is { } metaItems)
+                            {
+                                <div class="item-meta">
+                                    @for (var i = 0; i < metaItems.Length; i++)
+                                    {
+                                        <span class="item-meta__count">@metaItems[i]</span>
+                                        @if (i < metaItems.Length - 1)
+                                        {
+                                            <span class="item-meta__separator" aria-hidden="true">|</span>
+                                        }
+                                    }
+                                </div>
+                            }
+                        </div>
+                        @if (ItemActions is not null)
+                        {
+                            @ItemActions(item)
+                        }
+                    </div>
+                }
             }
         }
     </div>
@@ -59,7 +108,7 @@
     [Parameter] public string? Class { get; set; }
 
     /// <summary>
-    /// Card title (e.g., "Subjects/Curriculum", "Teachers", "Students").
+    /// Card title (e.g., "Subjects", "Teachers", "Students").
     /// </summary>
     [Parameter] public string Title { get; set; } = string.Empty;
 
@@ -96,7 +145,7 @@
     /// <summary>
     /// Items to display in the preview list.
     /// </summary>
-    [Parameter] public object[]? Items { get; set; }
+    [Parameter] public TItem[]? Items { get; set; }
 
     /// <summary>
     /// Maximum number of items to show in the preview (default: 15).
@@ -104,9 +153,47 @@
     [Parameter] public int MaxPreviewItems { get; set; } = 15;
 
     /// <summary>
-    /// Template for rendering each item in the preview list.
+    /// Template for rendering each item in the preview list. Provide this for
+    /// fully custom items, or omit it and drive the standard item layout via the
+    /// selector parameters (ItemTextSelector / ItemMetaSelector / href / click).
     /// </summary>
-    [Parameter, EditorRequired] public RenderFragment<object>? ItemTemplate { get; set; }
+    [Parameter] public RenderFragment<TItem>? ItemTemplate { get; set; }
+
+    /// <summary>
+    /// Primary display text for each item (shown as a hypertext link or span).
+    /// Used by the built-in item layout when <see cref="ItemTemplate"/> is null.
+    /// </summary>
+    [Parameter] public Func<TItem, string?>? ItemTextSelector { get; set; }
+
+    /// <summary>
+    /// Secondary/meta line parts for each item (e.g. role, demographics, counts).
+    /// Return an array of parts; the component renders them separated by a "|" divider.
+    /// </summary>
+    [Parameter] public Func<TItem, string[]?>? ItemMetaSelector { get; set; }
+
+    /// <summary>
+    /// Returns the navigation URL for each item; when set, the item name renders
+    /// as a real hypertext link that navigates to this URL.
+    /// </summary>
+    [Parameter] public Func<TItem, string?>? ItemHrefSelector { get; set; }
+
+    /// <summary>
+    /// Click handler for each item; when set, the item name renders as a
+    /// hypertext link (Href="#") that invokes this callback. Mutually exclusive
+    /// with <see cref="ItemHrefSelector"/>.
+    /// </summary>
+    [Parameter] public Func<TItem, Task>? ItemOnClick { get; set; }
+
+    /// <summary>
+    /// Tooltip (title) for the item name link; falls back to the item text.
+    /// </summary>
+    [Parameter] public string? ItemNameTitle { get; set; }
+
+    /// <summary>
+    /// Optional extra content rendered at the right of the built-in item layout
+    /// (e.g. a row-actions menu). Ignored when <see cref="ItemTemplate"/> is used.
+    /// </summary>
+    [Parameter] public RenderFragment<TItem>? ItemActions { get; set; }
 
     /// <summary>
     /// Loading state - shows a progress ring when true.

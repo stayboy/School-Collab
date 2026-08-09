@@ -37,8 +37,12 @@
             <DataAnnotationsValidator />
 
             <p class="hint">Overriding: <strong>@GetDefaultName()</strong></p>
-            <FluentTextField @bind-Value="Model.Name" Label="Override Name" Placeholder="@GetPlaceholder()" class="full-width mb-3" />
-            <FluentTextArea @bind-Value="Model.Description" Label="Description (optional)" Rows="2" class="full-width mb-3" />
+            <FormRow Label="Override Name" For="override-name">
+                <FluentTextField Id="override-name" @bind-Value="Model.Name" Placeholder="@GetPlaceholder()" />
+            </FormRow>
+            <FormRow Label="Description" For="override-description">
+                <FluentTextArea Id="override-description" @bind-Value="Model.Description" Rows="2" />
+            </FormRow>
 
             @if (_hasOverride)
             {
