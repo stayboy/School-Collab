@@ -5,3 +5,25 @@
     border-top: 1px solid var(--neutral-stroke-divider, #e0e0e0);
     padding-top: 0.75rem;
 }
+
+/* Locked subject row: the disabled CodedValueDropdown flexes to fill the row
+   and the edit-mode toggle icon button sits fixed at the right. */
+.topic-edit-pick-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.topic-edit-pick-row ::deep .coded-value-dropdown {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Horizontal separator (per dialog-ui §2) between the locked CodedValueDropdown
+   section and the topic fields below — CSS border-top, well padded. */
+.topic-fields-section {
+    margin-top: 1.25rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+}

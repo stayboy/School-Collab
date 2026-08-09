@@ -20,7 +20,12 @@ public sealed class RemoveTopicAssignmentHandler(
         // Grade/group↔topic assignments span multiple years, so we block/archive by
         // ending the effective period rather than hard-deleting the row. This
         // keeps the audit trail and any historical references intact.
-        await repository.EndAsync(assignment, DateOnly.FromDateTime(DateTime.UtcNow), cancellationToken);
+        //
+        // End the period as of YESTERDAY: an assignment's EndDate is inclusive
+        // (IsEffectiveOn(endDate) is true), so ending on today would keep the
+        // topic in the grade's curriculum for the rest of today. Ending on
+        // yesterday removes the topic immediately.
+        await repository.EndAsync(assignment, DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1), cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);
 
         logger.LogInformation("TopicAssignment {Id} ended (blocked/archived)", assignment.Id);

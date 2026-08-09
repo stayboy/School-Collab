@@ -471,6 +471,59 @@ is enough.
 For destructive actions, do not colour the link red — the confirmation dialog already
 gates the action, and the label text (`Delete`) conveys the semantics.
 
+### Destructive actions require a confirmation prompt
+
+Every destructive action (Remove, Delete, Unlink, Deactivate, etc.) MUST be gated by
+a user confirmation dialog before it runs. This is enforced at the component level in
+`RowActionsMenu` (the kebab used by `SectionCard` `ItemActions` and grid action menus):
+
+- Mark the action destructive with `RowAction.Callback("Remove", ..., destructive: true)`
+  (or pass `destructive: true` to the `Action` overload).
+- `RowActionsMenu` then shows a modal confirmation prompt via
+  `DialogServiceExtensions.ShowConfirmDialogAsync` before invoking the callback, so the
+  confirmation is enforced everywhere the kebab is used — no page-specific confirmation
+  code needed.
+- Optionally pass a custom `confirmMessage` for a specific prompt; otherwise it falls
+  back to `"Are you sure you want to {label}?"`.
+
+```razor
+RowAction.Callback("Remove", () => RemoveTopicAsync(topic.TopicId), FluentIcons.Delete, destructive: true),
+```
+
+The prompt is the reusable `ConfirmDialog` (`src/SchoolCollab.Admin.Shared/Components/Dialogs/`),
+shown via `ShowConfirmDialogAsync(message, primaryText, secondaryText, title)`. It renders a
+**modal** dialog (dark overlay, `Modal = true`) that is **dismissible by clicking the overlay**
+(`PreventDismissOnOverlayClick = false`) or pressing ESC. Do NOT use FluentUI's
+`ShowConfirmationAsync`/`ShowMessageBoxAsync` for destructive confirmations — those hide the
+dark overlay whenever a secondary (Cancel) button is present.
+
+Do NOT add a second, page-level confirmation dialog for an action already marked
+`destructive` — that would double-prompt the user. If an action is destructive, mark it
+`destructive: true` and remove any hand-rolled confirmation in the handler.
+
+### Show a success toast after successful mutations
+
+Every successful mutation (delete/remove, create, save, unlink, etc.) SHOULD surface a
+success toast via the FluentUI `IToastService`. The `FluentToastProvider` is already in
+`MainLayout.razor`, and `AddFluentUIComponents()` registers `IToastService` (scoped) — so
+just inject it and call `ShowSuccess` after the API call succeeds:
+
+```razor
+@inject IToastService Toast
+// ...
+await Api.DeleteSubjectAsync(id);
+Toast.ShowSuccess($"Subject '{name}' deleted.");
+```
+
+Guidelines:
+- Inject `IToastService`, NOT the concrete `ToastService` — `AddFluentUIComponents()`
+  registers it under the `IToastService` interface, so injecting the concrete type fails.
+- Fire the toast ONLY after the API call succeeds (inside the `try`, after the await). Do
+  not show success in the `catch` path.
+- Include the affected item's name in the message (e.g. `Subject '{name}' deleted.`).
+- For display text of a Topic entity, use the term "subject" (per the product's display
+  convention) — never "topic" in user-facing strings.
+
 ### Side-panel drawers (`FluentDialog` + `DialogType.Panel`)
 
 FluentUI Blazor has no standalone `Drawer` component. Use `FluentDialog` with
@@ -573,3 +626,46 @@ Use FluentUI's own layout components for edit/create forms:
     </FluentStack>
 </FluentEditForm>
 ```
+
+## Share form fields between create & edit forms
+
+When a create form and an edit form render the **same field set** (e.g. a
+`TopicCreateDialog` / `TopicEditDialog` pair, or routable `Create.razor` /
+`Edit.razor` pages), extract the fields into ONE shared `XxxFormFields.razor`
+component and have both forms use it — do NOT copy-paste the rows. This is a
+general Blazor pattern, not just a dialog concern.
+
+### The pattern
+
+1. **Shared component renders only the field rows** — no `<EditForm>`, no
+   `<DataAnnotationsValidator>`, no submit/cancel buttons. The owning form
+   supplies those (it already owns the submit plumbing).
+2. **Define a small interface** (e.g. `ITopicFormModel`) with the shared
+   properties (`Name`, `Code`, `Description`, `DisplayOrder`). Both the create
+   and edit models implement it, so the shared component can `@bind-Value` to
+   either without a common base class.
+3. **The shared component takes `[Parameter] IXxxFormModel Model`** and binds
+   the rows to it. Add optional display parameters (e.g. `CodePlaceholder`) for
+   create-vs-edit wording differences.
+4. **Both forms** replace their inline rows with
+   `<XxxFormFields Model="Model" />` inside their `<EditForm>`.
+5. **Form-specific extras stay in the owning form**, below the shared fields
+   (e.g. an edit-only strands editor, or a create-only grade picker).
+
+### Example (this repo)
+
+- `src/Students/SchoolCollab.Students.Application/Components/Students/TopicFormFields.razor`
+  — shared rows + `ITopicFormModel`.
+- `TopicCreateDialog.razor` / `TopicEditDialog.razor` — both models implement
+  `TopicFormFields.ITopicFormModel` and render `<TopicFormFields Model="Model" />`.
+- `GradeLevelFormFields.razor` — same idea for the routable
+  `GradeLevels/Create.razor` / `GradeLevels/Edit.razor` pages (owns the
+  `<EditForm>` + validator + action row).
+
+### Checklist
+
+- [ ] Shared fields live in ONE `XxxFormFields.razor`; no duplicated rows.
+- [ ] Create & edit models implement a shared `IXxxFormModel` interface.
+- [ ] The shared component binds to the interface, not a concrete model.
+- [ ] Form-specific extras stay in the owning form, below the shared fields.
+- [ ] Build passes; both forms render the same fields.

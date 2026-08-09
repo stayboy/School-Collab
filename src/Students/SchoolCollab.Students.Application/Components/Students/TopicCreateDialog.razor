@@ -1,0 +1,286 @@
+@*
+    TopicCreateDialog — opens from the grade-detail Subjects card's Add
+    button. Creates a brand-new topic (displayed as a subject) and wires it
+    to the grade in one atomic call via CreateTopicForGradeAsync.
+
+    This mirrors the TopicEditDialog pattern (DialogShellBase +
+    ShowShellDialogAsync) used for editing a subject on the same card, and
+    shares the same form fields via <TopicFormFields>. The subject is
+    display-only — the underlying entity is a Topic, and creating one never
+    renames an existing topic.
+
+    An optional <CodedValueDropdown> (SUBJECT parent) lets the user pick an
+    existing subject to pre-fill the fields below. The fields are shown read-only
+    (via <TopicFormFields> + FieldDisplay) by default; an edit button next to the
+    dropdown switches to the editable inputs. The dialog footer toggles like the
+    edit dialog: in display mode the Submit is a server "Create"; in edit mode it
+    becomes a LOCAL "Update Fields" that reflects edits back into the read-only
+    display section WITHOUT submitting, and Cancel reverts the user's edits.
+    Edits are saved as tenant overrides (or new coded-value rows) via
+    TopicCodedValueSaver. A refresh icon next to the Code display regenerates the
+    template code from the name via the TOPIC_CODE rule (the one edit that is NOT
+    persisted as an override).
+
+    Code is optional: when left blank the server generates it from the name
+    via the TOPIC_CODE entity-code rule (e.g. "computer science" → CS01).
+*@
+@inherits DialogShellBase<TopicCreateDialog.TopicCreateModel, TopicDto>
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValues
+@inject EntityCodeRulesApiClient EntityCodeRules
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Pick existing subject" For="topic-create-coded-value">
+            <div class="topic-create-pick-row">
+                <CodedValueDropdown @ref="_codedValueDropdown"
+                                    Parent="CodedValueParent.Subjects"
+                                    @bind-SelectedId="Model.CodedValueId"
+                                    @bind-SelectedId:after="OnCodedValuePicked"
+                                    ShowEmptyOption="true"
+                                    EmptyOptionText="None — custom topic"
+                                    Placeholder="Optional — pick an existing subject to pre-fill" />
+                <FluentButton Appearance="Appearance.Stealth"
+                              Class="topic-icon-button"
+                              IconStart="@FluentIcons.Edit"
+                              Title="Edit the topic fields"
+                              aria-label="Edit topic fields"
+                              OnClick="StartEditing" />
+            </div>
+            <p class="hint">Optional. Picking an existing subject pre-fills the fields below; you can still edit them. Leave blank to create a new subject with a generated code.</p>
+            @if (_duplicateCodedValue)
+            {
+                <FluentMessageBar Intent="MessageIntent.Warning" class="mb-2">
+                    This subject is already linked to the grade. A coded value can only be used once.
+                </FluentMessageBar>
+            }
+        </FormRow>
+
+        @* Horizontal separator (CSS border-top, per dialog-ui §2) between the
+           CodedValueDropdown picker section and the topic fields below. *@
+        <div class="topic-fields-section">
+            <TopicFormFields Model="Model"
+                             Mode="@(_editing ? TopicFormFields.TopicFormMode.Edit : TopicFormFields.TopicFormMode.Display)"
+                             CodeDisabled="@(Model.CodedValueId.HasValue)"
+                             CodePlaceholder="e.g. CS01 (optional — generated from name if blank)">
+                <CodeActions>
+                    <FluentButton Appearance="Appearance.Stealth"
+                                  Class="topic-icon-button"
+                                  IconStart="@FluentIcons.ArrowClockwise"
+                                  Title="Regenerate template code from the name"
+                                  aria-label="Regenerate template code"
+                                  OnClick="@RegenerateCodeAsync"
+                              Disabled="@_regeneratingCode" />
+            </CodeActions>
+        </TopicFormFields>
+        </div>
+
+        @* The dialog footer is always rendered. In display mode the Submit is a
+           server action ("Create" → SubmitAsync). In edit mode it becomes a LOCAL
+           action ("Update Fields") that reflects the edits back into the read-only
+           display section WITHOUT submitting to the server; Cancel reverts the
+           user's edits before switching back to display mode. The Create button
+           is disabled when a duplicate coded value is selected (warning above) or
+           when in display mode with no name to create. *@
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@(_editing ? "Update Fields" : SubmitText)"
+                           SavingText="Creating..."
+                           SubmitIsServerSubmit="@(!_editing)"
+                           OnSubmit="UpdateFields"
+                           SubmitDisabled="@(_duplicateCodedValue || (!_editing && string.IsNullOrWhiteSpace(Model.Name)))"
+                           OnCancel="HandleCancel" />
+    </EditForm>
+</div>
+
+
+@code {
+    private CodedValueDropdown? _codedValueDropdown;
+    private CodedValueDto? _pickedCodedValue;
+    private bool _regeneratingCode;
+    private bool _editing;
+    private bool _duplicateCodedValue;
+
+    // Snapshot of the pre-edit values so Cancel can revert the user's edits.
+    private string _origName = string.Empty;
+    private string? _origCode;
+    private string? _origDescription;
+    private Guid? _origCodedValueId;
+    private CodedValueDto? _origPickedCodedValue;
+
+    /// <summary>
+    /// Editable form model for the topic create dialog. Carries the grade
+    /// context so the new topic is wired to the grade in the same call.
+    /// </summary>
+    public sealed class TopicCreateModel : TopicFormFields.ITopicFormModel
+    {
+        /// <summary>The grade level the new topic (subject) is wired to.</summary>
+        public Guid GradeLevelId { get; set; }
+
+        /// <summary>
+        /// Coded value IDs already used by topics linked to this grade. Used to
+        /// reject picking a subject's coded value that would duplicate an
+        /// existing subject in the grade.
+        /// </summary>
+        public HashSet<Guid> ExistingTopicCodedValueIds { get; set; } = new();
+
+        /// <summary>
+        /// Optional SUBJECT coded value picked from the dropdown. When set, the
+        /// Code input is disabled (it derives from the coded value).
+        /// </summary>
+        public Guid? CodedValueId { get; set; }
+
+        [System.ComponentModel.DataAnnotations.Required]
+        public string Name { get; set; } = string.Empty;
+
+        public string? Code { get; set; }
+
+        public string? Description { get; set; }
+
+        public int DisplayOrder { get; set; }
+    }
+
+    protected override string SubmitText => "Create";
+
+    /// <summary>Switches from display mode to edit mode, snapshotting the
+    /// current values so Cancel can revert.</summary>
+    private void StartEditing()
+    {
+        _origName = Model.Name;
+        _origCode = Model.Code;
+        _origDescription = Model.Description;
+        _origCodedValueId = Model.CodedValueId;
+        _origPickedCodedValue = _pickedCodedValue;
+        _editing = true;
+    }
+
+    /// <summary>
+    /// Edit-mode "Update Fields" action: reflects the edited values back into
+    /// the read-only display section WITHOUT submitting to the server. The
+    /// actual creation happens later via the display-mode "Create".
+    /// </summary>
+    private void UpdateFields()
+    {
+        _editing = false;
+    }
+
+    /// <summary>
+    /// Cancel button: while editing, reverts the user's edits (restoring the
+    /// pre-edit snapshot) and switches back to display mode; otherwise closes
+    /// the dialog.
+    /// </summary>
+    private Task HandleCancel()
+    {
+        if (_editing)
+        {
+            Model.Name = _origName;
+            Model.Code = _origCode;
+            Model.Description = _origDescription;
+            Model.CodedValueId = _origCodedValueId;
+            _pickedCodedValue = _origPickedCodedValue;
+            _editing = false;
+            return Task.CompletedTask;
+        }
+        return HandleCancelAsync();
+    }
+
+    /// <summary>
+    /// Pre-fills Name / Code / Description from the picked
+    /// SUBJECT coded value (resolved from the dropdown's already-loaded items,
+    /// no extra API round-trip). Also validates that the picked coded value is
+    /// not already used by a topic in the grade — if it is, a warning is shown
+    /// and the Create button is disabled.
+    /// </summary>
+    private void OnCodedValuePicked()
+    {
+        if (Model.CodedValueId is not { } id)
+        {
+            // "None — custom topic" selected: clear any duplicate warning.
+            _duplicateCodedValue = false;
+            _pickedCodedValue = null;
+            return;
+        }
+
+        if (_codedValueDropdown is not null
+            && _codedValueDropdown.TryFindItem(id, out var cv)
+            && cv is not null)
+        {
+            _pickedCodedValue = cv;
+            Model.Name = cv.Name;
+            Model.Code = cv.Code;
+            Model.Description = cv.Description;
+        }
+
+        // Reject a coded value already used by another subject in this grade.
+        _duplicateCodedValue = Model.ExistingTopicCodedValueIds.Contains(id);
+    }
+
+    /// <summary>
+    /// Regenerates the template code from the current name via the TOPIC_CODE
+    /// rule. This is the one edit that is NOT persisted as a tenant override —
+    /// it is a pure regenerate action.
+    /// </summary>
+    private async Task RegenerateCodeAsync()
+    {
+        if (_regeneratingCode) return;
+        _regeneratingCode = true;
+        try
+        {
+            Model.Code = await EntityCodeRules.GenerateAsync("TOPIC_CODE", Model.Name);
+        }
+        catch (Exception ex)
+        {
+            Error = $"Could not generate code: {ex.Message}";
+        }
+        finally
+        {
+            _regeneratingCode = false;
+        }
+    }
+
+    protected override async Task<TopicDto?> SubmitAsync(TopicCreateModel model)
+    {
+        if (string.IsNullOrWhiteSpace(model.Name))
+        {
+            Error = "Enter a subject name.";
+            return null;
+        }
+
+        // Resolve the picked coded value (if any).
+        CodedValueDto? cv = null;
+        if (model.CodedValueId is { } id)
+        {
+            cv = _pickedCodedValue is { } p && p.Id == id ? p : await CodedValues.GetByIdAsync(id);
+            if (cv is null)
+            {
+                Error = "Could not load the subject coded value.";
+                return null;
+            }
+        }
+
+        // Save the field edits as tenant overrides / new coded-value rows (the
+        // exception is template-code generation, handled by RegenerateCodeAsync).
+        var (resolvedCvId, effectiveCode) = await TopicCodedValueSaver.SaveAsync(
+            CodedValues, cv, model.Name, model.Code, model.Description, model.DisplayOrder);
+
+        // Create (or reuse) the shared topic and wire it to the grade in one
+        // atomic call. Code is optional — the server generates it from the name
+        // when blank. A brand-new topic is created; existing topics are never
+        // renamed by this flow.
+        return await Api.CreateTopicForGradeAsync(new CreateTopicForGradeRequest(
+            model.GradeLevelId,
+            resolvedCvId,
+            effectiveCode,
+            model.Name.Trim(),
+            model.DisplayOrder));
+    }
+}

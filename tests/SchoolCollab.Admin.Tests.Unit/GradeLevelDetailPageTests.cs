@@ -495,7 +495,7 @@ public class GradeLevelDetailPageTests : BunitContext
         var source = ReadDetailSource();
 
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
-            "the Subjects card's Add button opens GradeTopicsDialog via the read-only helper");
+            "the Subjects card's View-all opens GradeTopicsDialog via the read-only helper");
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTeachersDialog>(",
             "the Teachers card's View-all button opens GradeTeachersDialog via the read-only helper");
 
@@ -515,10 +515,13 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("View all students");
         source.Should().Contain("/students?gradeLevelId=");
 
-        // Subjects card's View-all navigates to the subjects landing page (bug fix:
-        // it previously opened a dialog / had no navigation).
-        source.Should().Contain("ViewAllNavigationUrl=\"/students/subjects\"",
-            "the Subjects card's View-all link navigates to the subjects landing page");
+        // Subjects card's Add button opens the shared TopicCreateDialog (add-new
+        // subject/topic wired to the grade), and its View-all opens GradeTopicsDialog
+        // to assign existing topics / manage the assigned list.
+        source.Should().Contain("OnAddClick=\"OpenTopicCreateAsync\"",
+            "the Subjects card's Add button opens the topic create dialog");
+        source.Should().Contain("OnViewAllClick=\"OpenTopicsDialogAsync\"",
+            "the Subjects card's View-all opens GradeTopicsDialog");
 
         // The old segmented pill tab control is gone.
         source.Should().NotContain("grade-tabs__bar");
@@ -526,7 +529,7 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_SubjectsCard_ViewAll_NavigatesToSubjectsPage()
+    public void Detail_SubjectsCard_Add_OpensTopicCreateDialog()
     {
         var gradeId = Guid.NewGuid();
         Register(gradeId, GradeJson(gradeId));
@@ -534,11 +537,19 @@ public class GradeLevelDetailPageTests : BunitContext
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (0)"));
 
-        // Bug fix: the Subjects card's "View all subjects" link must render as a
-        // real navigation anchor to the subjects landing page (it previously opened
-        // a dialog / had no navigation).
-        var anchor = cut.Find("fluent-anchor[href='/students/subjects']");
-        anchor.TextContent.Should().Contain("View all subjects");
+        // Bug fix: the Subjects card's Add button must open the shared
+        // TopicCreateDialog (add-new subject/topic wired to the grade), following
+        // the same DialogShellBase pattern as the topic edit dialog — not just the
+        // assign-existing-topics GradeTopicsDialog. The subject is display-only;
+        // the underlying entity is a Topic, and creating one never renames an
+        // existing topic.
+        var source = ReadDetailSource();
+        source.Should().Contain("OnAddClick=\"OpenTopicCreateAsync\"",
+            "the Subjects card's Add button opens the topic create dialog");
+        source.Should().Contain("ShowShellDialogAsync<", "the add handler uses the shell dialog service");
+        source.Should().Contain("TopicCreateDialog", "the add handler opens TopicCreateDialog");
+        source.Should().Contain("GradeLevelId = _grade.Id",
+            "the add handler passes the grade context so the subject is wired to the grade");
     }
 
     [TestMethod]
@@ -572,7 +583,7 @@ public class GradeLevelDetailPageTests : BunitContext
 
         // Each card uses the SectionCard component with add button parameters.
         source.Should().Contain("<SectionCard", "SectionCard component is used for all three cards");
-        source.Should().Contain("OnAddClick=\"OpenTopicsDialogAsync\"", "Subjects card has add callback");
+        source.Should().Contain("OnAddClick=\"OpenTopicCreateAsync\"", "Subjects card has add callback");
         source.Should().Contain("OnAddClick=\"OpenTeachersDialogAsync\"", "Teachers card has add callback");
         source.Should().Contain("OnAddClick=\"OpenAddStudentsAsync\"", "Students card has add callback");
         source.Should().Contain("AddTitle=\"Add student\"", "Students card has add title");

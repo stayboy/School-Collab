@@ -9,6 +9,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Teachers> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="TeacherDto"
@@ -120,6 +121,7 @@
         try
         {
             await Api.DeleteTeacherAsync(id);
+            Toast.ShowSuccess($"Teacher '{name}' deleted.");
         }
         catch (Exception ex)
         {

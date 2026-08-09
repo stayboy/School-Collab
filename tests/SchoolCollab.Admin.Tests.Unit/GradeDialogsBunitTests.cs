@@ -1,5 +1,7 @@
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
+using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -35,6 +37,23 @@ public class GradeDialogsBunitTests : BunitContext
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+    }
+
+    /// <summary>
+    /// Hosts a <see cref="FluentDialogProvider"/> alongside a child component so
+    /// destructive row actions (which show a confirmation prompt via
+    /// <c>IDialogService</c>) can render their dialog in the provider.
+    /// </summary>
+    private sealed class DialogHost : ComponentBase
+    {
+        [Parameter] public RenderFragment? ChildContent { get; set; }
+
+        protected override void BuildRenderTree(RenderTreeBuilder builder)
+        {
+            builder.OpenComponent<FluentDialogProvider>(0);
+            builder.CloseComponent();
+            builder.AddContent(1, ChildContent);
+        }
     }
 
     private sealed class RecordingHandler : HttpMessageHandler
@@ -96,21 +115,31 @@ public class GradeDialogsBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void TopicsDialog_Remove_FiresRemoveCallback()
+    public void TopicsDialog_Remove_OpensModalConfirmation()
     {
         var topicId = Guid.NewGuid();
         var removed = new System.Collections.Generic.List<Guid>();
-        var cut = Render<GradeTopicsDialog>(p =>
-        {
-            p.Add(x => x.Topics, new[] { Topic(topicId, "Mathematics", "MATH", 2, 3) });
-            p.Add(x => x.Remove, new System.Func<Guid, Task>(id => { removed.Add(id); return Task.CompletedTask; }));
-        });
+        // The destructive Remove action is gated by a confirmation prompt that
+        // renders in a FluentDialogProvider, so host the dialog under one.
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<GradeTopicsDialog>(child => child
+                .Add(x => x.Topics, new[] { Topic(topicId, "Mathematics", "MATH", 2, 3) })
+                .Add(x => x.Remove, new System.Func<Guid, Task>(id => { removed.Add(id); return Task.CompletedTask; }))));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics"));
         cut.Find("fluent-button[title='Topic actions']").Click();
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
         removeItem.Click();
-        removed.Should().Contain(topicId);
+
+        // The destructive Remove action opens a MODAL confirmation dialog
+        // (dark overlay) with a warning message and Primary/Secondary buttons.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("modal=\"true\""));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove subject 'Mathematics' from this grade"));
+        cut.WaitForAssertion(() =>
+            cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+        cut.WaitForAssertion(() =>
+            cut.FindAll(".confirm-dialog fluent-button[appearance='outline']").Should().NotBeEmpty(
+                "the Cancel (secondary) button must render"));
     }
 
     [TestMethod]
@@ -251,24 +280,36 @@ public class GradeDialogsBunitTests : BunitContext
     }
 
     [TestMethod]
-    public void TeachersDialog_Remove_FiresRemoveCallback()
+    public void TeachersDialog_Remove_OpensModalConfirmation()
     {
         RegisterCodedValuesApi();
         var teacherId = Guid.NewGuid();
         var removed = new System.Collections.Generic.List<Guid>();
-        var cut = Render<GradeTeachersDialog>(p => p
-            .Add(x => x.Teachers, new[] { Teacher(teacherId, "Jane", "Doe") })
-            .Add(x => x.SalutationNames, new Dictionary<Guid, string>())
-            .Add(x => x.GenderNames, new Dictionary<Guid, string>())
-            .Add(x => x.LevelNames, new Dictionary<Guid, string>())
-            .Add(x => x.QualificationNames, new Dictionary<Guid, string>())
-            .Add(x => x.Remove, new System.Func<TeacherWithRoleDto, Task>(t => { removed.Add(t.Id); return Task.CompletedTask; })));
+        // The destructive Remove action is gated by a confirmation prompt that
+        // renders in a FluentDialogProvider, so host the dialog under one.
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<GradeTeachersDialog>(child => child
+                .Add(x => x.Teachers, new[] { Teacher(teacherId, "Jane", "Doe") })
+                .Add(x => x.SalutationNames, new Dictionary<Guid, string>())
+                .Add(x => x.GenderNames, new Dictionary<Guid, string>())
+                .Add(x => x.LevelNames, new Dictionary<Guid, string>())
+                .Add(x => x.QualificationNames, new Dictionary<Guid, string>())
+                .Add(x => x.Remove, new System.Func<TeacherWithRoleDto, Task>(t => { removed.Add(t.Id); return Task.CompletedTask; }))));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Jane Doe"));
         cut.Find("fluent-button[title='Teacher actions']").Click();
         var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
         removeItem.Click();
-        removed.Should().Contain(teacherId);
+
+        // The destructive Remove action opens a MODAL confirmation dialog
+        // (dark overlay) with a warning message and Primary/Secondary buttons.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("modal=\"true\""));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove teacher 'Jane Doe' from this grade"));
+        cut.WaitForAssertion(() =>
+            cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+        cut.WaitForAssertion(() =>
+            cut.FindAll(".confirm-dialog fluent-button[appearance='outline']").Should().NotBeEmpty(
+                "the Cancel (secondary) button must render"));
     }
 
     [TestMethod]

@@ -12,6 +12,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="StudentDto"
@@ -432,6 +433,7 @@
         {
             await Api.DeleteStudentAsync(id);
             if (_disposed) return;
+            Toast.ShowSuccess($"Student '{studentNumber}' deleted.");
 
             if (_showDeleted)
             {

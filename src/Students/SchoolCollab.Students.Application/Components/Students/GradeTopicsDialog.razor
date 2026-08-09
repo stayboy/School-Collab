@@ -86,7 +86,12 @@
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
             RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People),
             RowAction.Separator(),
-            RowAction.Callback("Remove", () => RemoveAsync(topic), FluentIcons.Delete),
+            RowAction.Callback(
+                "Remove",
+                () => RemoveAsync(topic),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed."),
         };
 
     private async Task RemoveAsync(GradeTopicCurriculumDto topic)

@@ -4,6 +4,7 @@
 @using SchoolCollab.Admin.Shared.Components.Landing
 @inject AssignmentsApiClient Api
 @inject ILogger<Index> Logger
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="AssignmentSummaryDto"
@@ -230,6 +231,7 @@
         {
             await Api.DeleteAsync(id);
             if (_disposed) return;
+            Toast.ShowSuccess($"Assignment '{title}' deleted.");
             if (_items is not null)
             {
                 _items = _items.Where(x => x.Id != id).ToArray();
@@ -254,7 +256,12 @@
                 actions.Add(RowAction.Navigate("Edit", $"/assignments/{a.Id}/edit", FluentIcons.Edit));
                 actions.Add(RowAction.Callback("Publish", () => OnPublishAsync(a.Id), FluentIcons.ArrowExportUp));
                 actions.Add(RowAction.Separator());
-                actions.Add(RowAction.Callback("Delete", () => OnDeleteAsync(a.Id, a.Title), FluentIcons.Delete));
+                actions.Add(RowAction.Callback(
+                    "Delete",
+                    () => OnDeleteAsync(a.Id, a.Title),
+                    FluentIcons.Delete,
+                    destructive: true,
+                    confirmMessage: $"Delete assignment '{a.Title}'? This cannot be undone."));
                 break;
             case AssignmentStatusDto.Published:
                 actions.Add(RowAction.Callback("Unpublish", () => OnUnpublishAsync(a.Id), FluentIcons.ArrowClockwise));

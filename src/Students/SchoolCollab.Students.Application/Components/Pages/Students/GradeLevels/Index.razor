@@ -12,6 +12,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="GradeLevelLandingDto"
@@ -320,6 +321,7 @@
             await Api.DeleteGradeLevelAsync(id);
             if (_disposed) return;
             Logger.LogInformation("Deleted grade level {Id}", id);
+            Toast.ShowSuccess($"Grade level '{name}' deleted.");
         }
         catch (Exception ex)
         {

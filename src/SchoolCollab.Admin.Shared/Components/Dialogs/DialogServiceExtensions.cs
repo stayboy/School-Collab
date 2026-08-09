@@ -125,4 +125,45 @@ public static class DialogServiceExtensions
         }
         return await dialogService.ShowDialogAsync<TComponent, DialogParameters>(dialogParams, dialogParams);
     }
+
+    /// <summary>
+    /// Shows the reusable <see cref="ConfirmDialog"/> as a <b>modal</b>
+    /// confirmation prompt and returns whether the user confirmed.
+    ///
+    /// <para>Unlike FluentUI's <c>ShowConfirmationAsync</c>/<c>ShowMessageBoxAsync</c>
+    /// (which hide the dark overlay whenever a secondary action is defined), this
+    /// always renders the modal overlay (<c>Modal = true</c>) while still offering
+    /// a Cancel button. <c>PreventDismissOnOverlayClick = false</c> (the default)
+    /// lets the user dismiss by clicking the overlay or pressing ESC.</para>
+    /// </summary>
+    /// <param name="message">The confirmation message to display.</param>
+    /// <param name="primaryText">Label for the confirm (primary) button.</param>
+    /// <param name="secondaryText">Label for the cancel (secondary) button. Default: "Cancel".</param>
+    /// <param name="title">Optional dialog title. Defaults to <paramref name="primaryText"/>.</param>
+    /// <returns><c>true</c> when the user clicked the primary button; <c>false</c>
+    /// when they cancelled, dismissed via the overlay, or pressed ESC.</returns>
+    public static async Task<bool> ShowConfirmDialogAsync(
+        this IDialogService dialogService,
+        string message,
+        string primaryText,
+        string secondaryText = "Cancel",
+        string? title = null)
+    {
+        var dialog = await dialogService.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
+            new ConfirmDialogContent(message, primaryText, secondaryText, title),
+            new DialogParameters
+            {
+                Title = title ?? primaryText,
+                // Null the default footer actions so FluentUI does NOT render its
+                // own OK/Cancel buttons — the ConfirmDialog renders its own
+                // Primary (Remove) / Secondary (Cancel) buttons.
+                PrimaryAction = null,
+                SecondaryAction = null,
+                Modal = true,
+                PreventDismissOnOverlayClick = false,
+                Width = "420px",
+            });
+        var result = await dialog.Result;
+        return !result.Cancelled;
+    }
 }

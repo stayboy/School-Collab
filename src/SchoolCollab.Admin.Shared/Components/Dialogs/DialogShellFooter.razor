@@ -17,7 +17,11 @@
                    the button row.
      SubmitText  — the submit button label (default "Save").
      OnCancel    — invoked when the Cancel button is clicked (typically
-                   bound to DialogShellBase.HandleCancelAsync). *@
+                   bound to DialogShellBase.HandleCancelAsync).
+     ShowSubmit  — when false, hides the Submit button (used by dialogs that
+                   toggle between a read-only display and an edit section, e.g.
+                   the topic create/edit dialogs, where the Submit action only
+                   applies in edit mode). Default true. *@
 
 @if (!string.IsNullOrWhiteSpace(Error))
 {
@@ -30,11 +34,29 @@
                   Disabled="@Saving">
         Cancel
     </FluentButton>
-    <FluentButton Type="ButtonType.Submit"
-                  Appearance="Appearance.Accent"
-                  Disabled="@Saving">
-        @(Saving ? SavingText : SubmitText)
-    </FluentButton>
+    @if (ShowSubmit)
+    {
+        @if (SubmitIsServerSubmit)
+        {
+            <FluentButton Type="ButtonType.Submit"
+                          Appearance="Appearance.Accent"
+                          Disabled="@(Saving || SubmitDisabled)">
+                @(Saving ? SavingText : SubmitText)
+            </FluentButton>
+        }
+        else
+        {
+            @* Local (non-server) submit — e.g. the topic edit dialog's
+               "Update Fields" button, which reflects changes back to the
+               read-only display section instead of submitting to the server. *@
+            <FluentButton Type="ButtonType.Button"
+                          Appearance="Appearance.Accent"
+                          Disabled="@(Saving || SubmitDisabled)"
+                          OnClick="OnSubmit">
+                @SubmitText
+            </FluentButton>
+        }
+    }
 </div>
 
 
@@ -53,4 +75,23 @@
 
     /// <summary>Invoked when the Cancel button is clicked.</summary>
     [Parameter] public EventCallback OnCancel { get; set; }
+
+    /// <summary>When true, disables the Submit button (in addition to <see cref="Saving"/>).</summary>
+    [Parameter] public bool SubmitDisabled { get; set; }
+
+    /// <summary>
+    /// When true (default), the Submit button is <c>Type=Submit</c> and submits the
+    /// enclosing EditForm (firing <c>HandleSubmitAsync</c> → the dialog's
+    /// <c>SubmitAsync</c>). When false, it renders as a plain button invoking
+    /// <see cref="OnSubmit"/> — used by dialogs whose edit-mode action reflects
+    /// changes locally (e.g. the topic edit dialog's "Update Fields") instead of
+    /// submitting to the server.
+    /// </summary>
+    [Parameter] public bool SubmitIsServerSubmit { get; set; } = true;
+
+    /// <summary>Invoked when the Submit button is clicked in local (non-server) mode.</summary>
+    [Parameter] public EventCallback OnSubmit { get; set; }
+
+    /// <summary>When false, hides the Submit button (display-only mode).</summary>
+    [Parameter] public bool ShowSubmit { get; set; } = true;
 }

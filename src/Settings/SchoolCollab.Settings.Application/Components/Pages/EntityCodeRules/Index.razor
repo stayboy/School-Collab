@@ -6,6 +6,7 @@
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<Index> Logger
+@inject IToastService Toast
 @implements IDisposable
 
 <LandingPage TItem="EntityCodeRuleDto"
@@ -176,6 +177,7 @@
         {
             await Api.DeleteAsync(rule.Id);
             if (_disposed) return;
+            Toast.ShowSuccess($"Rule '{rule.Code}' deleted.");
             if (_items is not null)
             {
                 _items = _items.Where(x => x.Id != rule.Id).ToArray();

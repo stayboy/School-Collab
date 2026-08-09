@@ -118,14 +118,78 @@ public class TopicEditDialogTests : BunitContext
             () => cut.Markup.Should().Contain("MATH", "the dialog loads the current topic code"),
             TimeSpan.FromSeconds(5));
         cut.Markup.Should().Contain("Mathematics", "the dialog loads the current topic name");
-        cut.Markup.Should().Contain("Display order");
+        cut.Markup.Should().NotContain("Display order", "the Display order field is not exposed in the topic dialogs");
         cut.Markup.Should().Contain("Description");
-        cut.Markup.Should().Contain("Save");
 
+        // The dialog starts in read-only display mode. The footer (Cancel / Save)
+        // is always rendered so the user can commit the selected coded value and
+        // any changes. Clicking the edit button switches to the editable inputs.
+        cut.Markup.Should().Contain("Save", "display mode shows the server Save action");
+        var editButton = cut.Find("fluent-button[aria-label='Edit topic fields']");
+        editButton.Click();
+        // Edit mode renders the editable Name input (id=topic-form-name) and the
+        // submit becomes the LOCAL "Update Fields" action (not a server submit).
+        cut.FindAll("fluent-text-field").Should().NotBeEmpty("edit mode renders editable inputs");
+        cut.Markup.Should().Contain("Update Fields", "edit mode shows the local Update Fields action");
+        cut.Markup.Should().NotContain("Save", "edit mode replaces the server Save with Update Fields");
+
+        // Cancel in edit mode reverts to display mode WITHOUT committing the
+        // changes (the editable inputs disappear).
         var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
+        cancelButton.Click();
+        cut.FindAll("fluent-text-field").Should().BeEmpty("cancelling edit mode reverts to display mode");
+
+        // Cancel in display mode closes the dialog.
+        cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
         cancelButton.Click();
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
         result.Should().BeNull("cancelling closes the dialog with no result");
+    }
+
+    [TestMethod]
+    public async Task EditDialog_EditMode_ShowsUpdateFieldsText_IsLocalAction()
+    {
+        var topicId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map("GET", $"/students/topics/{topicId}", HttpStatusCode.OK, TopicJson(topicId, "Mathematics"));
+        handler.Map("GET", $"/students/topics/{topicId}/strands", HttpStatusCode.OK, "[]");
+        Register(handler);
+
+        var cut = Render<FluentDialogProvider>();
+        var task = DialogService.ShowShellDialogAsync<TopicEditDialog, TopicEditDialog.TopicEditModel, TopicDto>(
+            new TopicEditDialog.TopicEditModel { Id = topicId, Name = "Mathematics" },
+            "Edit topic", DialogSize.Small);
+
+        cut.WaitForAssertion(
+            () => cut.Markup.Should().Contain("MATH", "the dialog loads the current topic code"),
+            TimeSpan.FromSeconds(5));
+
+        // Display mode: the submit action is the server "Save".
+        cut.Markup.Should().Contain("Save", "display mode shows the server Save action");
+        cut.Markup.Should().NotContain("Update Fields", "display mode does not show Update Fields");
+
+        // Switch to edit mode.
+        cut.Find("fluent-button[aria-label='Edit topic fields']").Click();
+
+        // Edit mode: the submit action becomes the LOCAL "Update Fields" (a
+        // plain button, not a form submit) — the server "Save" is gone.
+        cut.Markup.Should().Contain("Update Fields", "edit mode shows the local Update Fields action");
+        cut.Markup.Should().NotContain("Save", "edit mode replaces the server Save with Update Fields");
+
+        // Clicking "Update Fields" is a local action: it must NOT submit to the
+        // server (no PUT to /students/topics/{id}) and should return to display
+        // mode, which reflects the (unchanged here) values.
+        var updateButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Update Fields"));
+        updateButton.Click();
+        handler.Calls.Should().NotContain(
+            c => c.Method == "PUT" && c.Url == $"/students/topics/{topicId}",
+            "Update Fields reflects changes locally and does not submit to the server");
+        cut.Markup.Should().Contain("Save", "after Update Fields the dialog returns to display mode");
+
+        // Cleanup: close the dialog from display mode.
+        cut.Find("fluent-button[aria-label='Close']").Click();
+        var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
+        result.Should().BeNull("closing the dialog yields no result");
     }
 
     [TestMethod]
@@ -152,10 +216,12 @@ public class TopicEditDialogTests : BunitContext
             TimeSpan.FromSeconds(5));
         cut.Markup.Should().Contain("Algebra", "the dialog shows the resolved CodedValue name");
 
-        var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
-        cancelButton.Click();
+        // The dialog starts in display mode, where the footer (Cancel/Save) is
+        // hidden — close via the dialog header Close (X) button.
+        var closeButton = cut.Find("fluent-button[aria-label='Close']");
+        closeButton.Click();
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
-        result.Should().BeNull("cancelling closes the dialog with no result");
+        result.Should().BeNull("closing the dialog yields no result");
     }
 
     [TestMethod]
@@ -180,9 +246,11 @@ public class TopicEditDialogTests : BunitContext
         cut.Markup.Should().Contain("Strands (", "the topic edit dialog embeds the strands editor");
         cut.Markup.Should().Contain("New Strand", "the strands editor offers an add affordance");
 
-        var cancelButton = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Cancel"));
-        cancelButton.Click();
+        // The dialog starts in display mode, where the footer (Cancel/Save) is
+        // hidden — close via the dialog header Close (X) button.
+        var closeButton = cut.Find("fluent-button[aria-label='Close']");
+        closeButton.Click();
         var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
-        result.Should().BeNull("cancelling closes the dialog with no result");
+        result.Should().BeNull("closing the dialog yields no result");
     }
 }
