@@ -167,6 +167,19 @@
     [Parameter]
     public bool Disabled { get; set; }
 
+    /// <summary>
+    /// When true, prepends an empty option (<c>Id = Guid.Empty</c>) so the user
+    /// can clear the selection. Selecting it fires <see cref="SelectedIdChanged"/>
+    /// with <c>null</c>. Used by the topic-create dialog to re-enable the custom
+    /// topic fields after picking an existing subject.
+    /// </summary>
+    [Parameter]
+    public bool ShowEmptyOption { get; set; }
+
+    /// <summary>Display text for the empty option when <see cref="ShowEmptyOption"/> is true.</summary>
+    [Parameter]
+    public string EmptyOptionText { get; set; } = "None";
+
     private CodedValueDto[]? _items;
     private CodedValueDto? _selectedOption;
     private string? _error;
@@ -266,9 +279,12 @@
             // don't fight the user's mid-pick state.
             if (!SelectedId.HasValue)
             {
-                if (_selectedOption is not null)
+                // When no value is selected, show the empty option (if enabled)
+                // so the user can see the "clear" affordance; otherwise clear.
+                var empty = ShowEmptyOption ? _items.FirstOrDefault(x => x.Id == Guid.Empty) : null;
+                if (!Equals(empty, _selectedOption))
                 {
-                    _selectedOption = null;
+                    _selectedOption = empty;
                 }
             }
             else
@@ -345,6 +361,17 @@
                 : await Api.GetChildrenByParentCodeAsync(parentCode, ct) ?? [];
             if (_disposed || ct.IsCancellationRequested) return;
 
+            // Prepend an empty option (Id = Guid.Empty) when requested so the
+            // user can clear the selection and re-enable custom entry.
+            if (ShowEmptyOption)
+            {
+                var empty = new CodedValueDto(
+                    Guid.Empty, string.Empty, EmptyOptionText, null, null, null, false, 0,
+                    DateTimeOffset.MinValue, DateTimeOffset.MinValue,
+                    Array.Empty<CodedValueAttributeDto>(), Array.Empty<CodedValueAttributeDefinitionDto>());
+                items = new[] { empty }.Concat(items).ToArray();
+            }
+
             // Render the items BEFORE applying the selection. FluentSelect does
             // not select SelectedOption when Items and SelectedOption change in
             // the same render cycle — the <fluent-select> web component has not
@@ -362,7 +389,9 @@
             await Task.Delay(1);
 
             if (_disposed || ct.IsCancellationRequested) return;
-            _selectedOption = _items.FirstOrDefault(x => x.Id == SelectedId);
+            _selectedOption = SelectedId.HasValue
+                ? _items.FirstOrDefault(x => x.Id == SelectedId)
+                : (ShowEmptyOption ? _items.FirstOrDefault(x => x.Id == Guid.Empty) : null);
         }
         catch (OperationCanceledException)
         {
@@ -380,6 +409,9 @@
     private Task OnSelectedOptionChanged(CodedValueDto? value)
     {
         _selectedOption = value;
+        // The empty option (Id = Guid.Empty) clears the selection — fire null so
+        // the consumer's bound field re-enables (e.g. custom topic fields).
+        var id = value is not null && value.Id == Guid.Empty ? (Guid?)null : value?.Id;
         // Notifies the binder (drives the @bind-SelectedId target). When the
         // consumer also supplies a @bind-SelectedId:after handler, Blazor's
         // binder wires that handler into its internal callback chain and
@@ -392,7 +424,7 @@
         // keeps this event handler synchronous and avoids the Blazor renderer
         // having to schedule an async continuation before FluentSelect can
         // close the dropdown and refresh the UI.
-        return SelectedIdChanged.InvokeAsync(value?.Id);
+        return SelectedIdChanged.InvokeAsync(id);
     }
 
     public void Dispose()

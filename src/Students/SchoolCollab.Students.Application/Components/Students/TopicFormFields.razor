@@ -1,0 +1,102 @@
+@*
+    TopicFormFields — shared topic form field set (Name / Code / Description)
+    used by BOTH TopicCreateDialog and TopicEditDialog so the add and edit flows
+    render identical fields. The subject is display-only; the underlying entity
+    is a Topic.
+
+    The component toggles between two sections (never side-by-side):
+      • Display mode (default) — read-only values via <FieldDisplay>. The
+        optional <CodeActions> (e.g. the create dialog's "regenerate template
+        code" button) renders next to the Code display.
+      • Edit mode — editable inputs for making tenant overrides. The Code input
+        is disabled when <CodeDisabled> is true (a coded value is selected).
+
+    The owning dialog supplies the <EditForm>, the <DataAnnotationsValidator />,
+    and the <DialogShellFooter />, and controls which mode is shown.
+*@
+@using Microsoft.FluentUI.AspNetCore.Components
+
+@if (Mode == TopicFormMode.Display)
+{
+    <div class="topic-form-fields__display">
+        <FieldDisplay Label="Name" Orientation="FieldDisplayOrientation.Horizontal">@Model.Name</FieldDisplay>
+        <div class="topic-form-code-display-row">
+            <FieldDisplay Label="Code" Orientation="FieldDisplayOrientation.Horizontal">@(string.IsNullOrWhiteSpace(Model.Code) ? "—" : Model.Code)</FieldDisplay>
+            @if (CodeActions is not null)
+            {
+                @CodeActions
+            }
+        </div>
+        <FieldDisplay Label="Description" Orientation="FieldDisplayOrientation.Horizontal">@(string.IsNullOrWhiteSpace(Model.Description) ? "—" : Model.Description)</FieldDisplay>
+    </div>
+}
+else
+{
+    <div class="topic-form-fields__edit">
+        <FormRow Label="Name" For="topic-form-name">
+            <FluentTextField Id="topic-form-name"
+                             @bind-Value="Model.Name"
+                             Placeholder="Topic / subject name"
+                             Required="true"
+                             Style="width: 100%" />
+        </FormRow>
+
+        <FormRow Label="Code" For="topic-form-code">
+            <FluentTextField Id="topic-form-code"
+                             @bind-Value="Model.Code"
+                             Placeholder="@CodePlaceholder"
+                             Disabled="@CodeDisabled"
+                             Style="width: 100%" />
+        </FormRow>
+
+        <FormRow Label="Description" For="topic-form-description">
+            <FluentTextArea Id="topic-form-description"
+                            @bind-Value="Model.Description"
+                            Style="width: 100%" />
+        </FormRow>
+    </div>
+}
+
+
+@code {
+    /// <summary>Which section of the topic form to render.</summary>
+    public enum TopicFormMode
+    {
+        /// Read-only display of the current values (via <c>FieldDisplay</c>).
+        Display,
+        /// Editable inputs for making tenant overrides.
+        Edit,
+    }
+
+    /// <summary>
+    /// The topic fields shared by the create and edit dialogs. Both
+    /// <c>TopicCreateModel</c> and <c>TopicEditModel</c> implement this so the
+    /// shared form-fields component can bind to either without a common base.
+    /// </summary>
+    public interface ITopicFormModel
+    {
+        string Name { get; set; }
+        string? Code { get; set; }
+        string? Description { get; set; }
+    }
+
+    [Parameter, EditorRequired] public ITopicFormModel Model { get; set; } = default!;
+
+    /// <summary>Which section to render. Default: <see cref="TopicFormMode.Display"/>.</summary>
+    [Parameter] public TopicFormMode Mode { get; set; } = TopicFormMode.Display;
+
+    /// <summary>Placeholder for the Code field. Create passes a hint that the code is generated from the name when blank.</summary>
+    [Parameter] public string CodePlaceholder { get; set; } = "e.g. CS01";
+
+    /// <summary>
+    /// When true, the Code input is disabled. The create dialog sets this when a
+    /// SUBJECT coded value is selected (the code derives from the coded value).
+    /// </summary>
+    [Parameter] public bool CodeDisabled { get; set; }
+
+    /// <summary>
+    /// Optional extra content rendered next to the Code display (e.g. the create
+    /// dialog's "regenerate template code" button). Only shown in Display mode.
+    /// </summary>
+    [Parameter] public RenderFragment? CodeActions { get; set; }
+}

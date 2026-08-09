@@ -5,20 +5,34 @@
     inline (via the shared StrandsEditor).
 
     Topic edits go through the CodedValue + tenancy-override mechanism (tcv/4):
-      • the dialog loads the CodedValue backing the topic (Topic.CodedValueId);
-      • presents Name + Code + Description;
-      • on save it routes via TopicEditRouter to the tenant override
-        (UpsertOverrideAsync), an in-place main-CodedValue edit (UpdateAsync),
-        or a new tenant-scoped provisional CodedValue (CreateProvisionalCodedValueAsync)
-        when both code AND description change;
+      • the dialog loads the CodedValue backing the topic (Topic.CodedValueId)
+        and shows it in an ENABLED CodedValueDropdown — the user can pick a
+        different subject's coded value to repoint the topic;
+      • the form toggles between a read-only DISPLAY section and an EDITABLE
+        section. A dedicated "Edit fields" button (in the body, NOT the dialog
+        footer) switches display → edit. The dialog footer is always rendered:
+        in display mode the Submit is a server action ("Save" → SubmitAsync,
+        closing the dialog so the caller reloads the curriculum), while in edit
+        mode it becomes a LOCAL "Update Fields" action that reflects the edits
+        back into the read-only display section WITHOUT submitting; Cancel in
+        edit mode reverts the user's edits and returns to display mode;
+      • on save it routes via TopicCodedValueSaver (TopicEditRouter) to the
+        tenant override (UpsertOverrideAsync), an in-place main-CodedValue edit
+        (UpdateAsync), or a new tenant-scoped provisional CodedValue
+        (CreateProvisionalCodedValueAsync) when both code AND description change;
       • the topic's denormalized name/code (and CodedValueId on repoint) are synced
         via UpdateTopicAsync so the curriculum reloads show the resolved values.
 
     The caller (Detail.razor) reloads the curriculum on a non-null result.
+
+    Shares its form fields (Name / Code / Description / Display order) with
+    TopicCreateDialog via <TopicFormFields>, so the add and edit flows render
+    identical fields.
 *@
 @inherits DialogShellBase<TopicEditDialog.TopicEditModel, TopicDto>
 @using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Students.Application.Services
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
@@ -30,33 +44,36 @@
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
         <DataAnnotationsValidator />
 
-        <FormRow Label="Name" For="topic-edit-name">
-            <FluentTextField Id="topic-edit-name"
-                             @bind-Value="Model.Name"
-                             Placeholder="Topic / subject name"
-                             Required="true"
-                             Style="width: 100%" />
+        <FormRow Label="Subject" For="topic-edit-coded-value">
+            <div class="topic-edit-pick-row">
+                <CodedValueDropdown @ref="_codedValueDropdown"
+                                    Parent="CodedValueParent.Subjects"
+                                    @bind-SelectedId="Model.CodedValueId"
+                                    @bind-SelectedId:after="OnCodedValuePicked"
+                                    Placeholder="Pick the subject's coded value" />
+                @* The "Edit fields" switch button lives in the body (not the
+                   footer) and is only shown in display mode. The dialog footer
+                   (Cancel / Save) is always rendered so the user can commit the
+                   selected coded value and any changes. *@
+                @if (!_editing)
+                {
+                    <FluentButton Appearance="Appearance.Accent"
+                                  IconStart="@FluentIcons.Edit"
+                                  Title="Edit the topic fields"
+                                  aria-label="Edit topic fields"
+                                  OnClick="StartEditing" />
+                }
+            </div>
+            <p class="hint">Pick the subject's coded value, or switch to edit mode to change its fields (saved as tenant overrides).</p>
         </FormRow>
 
-        <FormRow Label="Code" For="topic-edit-code">
-            <FluentTextField Id="topic-edit-code"
-                             @bind-Value="Model.Code"
-                             Placeholder="e.g. CS01"
-                             Style="width: 100%" />
-        </FormRow>
-
-        <FormRow Label="Description" For="topic-edit-description">
-            <FluentTextArea Id="topic-edit-description"
-                            @bind-Value="Model.Description"
-                            Style="width: 100%" />
-        </FormRow>
-
-        <FormRow Label="Display order" For="topic-edit-order">
-            <FluentNumberField Id="topic-edit-order"
-                               @bind-Value="Model.DisplayOrder"
-                               Min="0"
-                               Style="width: 100%" />
-        </FormRow>
+        @* Horizontal separator (CSS border-top, per dialog-ui §2) between the
+           CodedValueDropdown section and the topic fields below. *@
+        <div class="topic-fields-section">
+            <TopicFormFields Model="Model"
+                             Mode="@(_editing ? TopicFormFields.TopicFormMode.Edit : TopicFormFields.TopicFormMode.Display)"
+                             CodeDisabled="@(Model.CodedValueId.HasValue)" />
+        </div>
 
         @* Strands for this topic — inline CRUD via the shared StrandsEditor.
            Its FluentButtons default to ButtonType.Button, so they never submit
@@ -65,20 +82,41 @@
             <StrandsEditor TopicId="Model.Id" TopicName="Model.Name" />
         </section>
 
+        @* The dialog footer is always rendered. In display mode the Submit is a
+           server action ("Save" → SubmitAsync). In edit mode it becomes a LOCAL
+           action ("Update Fields") that reflects the edits back into the
+           read-only display section WITHOUT submitting to the server; Cancel
+           reverts the user's edits before switching back to display mode. *@
         <DialogShellFooter Saving="@Saving"
                            Error="@Error"
-                           SubmitText="Save"
+                           SubmitText="@(_editing ? "Update Fields" : SubmitText)"
                            SavingText="Saving..."
-                           OnCancel="HandleCancelAsync" />
+                           SubmitIsServerSubmit="@(!_editing)"
+                           OnSubmit="UpdateFields"
+                           OnCancel="HandleCancel" />
     </EditForm>
 </div>
 
 
 @code {
+    private CodedValueDropdown? _codedValueDropdown;
+    private bool _editing;
+
+    // Snapshot of the pre-edit values so Cancel can revert the user's edits.
+    private string _origName = string.Empty;
+    private string? _origCode;
+    private string? _origDescription;
+    private Guid? _origCodedValueId;
+    private CodedValueDto? _origCodedValue;
+
     /// <summary>Editable form model for the topic edit dialog.</summary>
-    public sealed class TopicEditModel
+    public sealed class TopicEditModel : TopicFormFields.ITopicFormModel
     {
         public Guid Id { get; set; }
+
+        /// <summary>The topic's coded value id (selectable in the dropdown).</summary>
+        public Guid? CodedValueId { get; set; }
+
         public string Name { get; set; } = string.Empty;
         public string? Code { get; set; }
         public string? Description { get; set; }
@@ -92,6 +130,67 @@
     }
 
     protected override string SubmitText => "Save";
+
+    /// <summary>Switches from display mode to edit mode, snapshotting the
+    /// current values so Cancel can revert.</summary>
+    private void StartEditing()
+    {
+        _origName = Model.Name;
+        _origCode = Model.Code;
+        _origDescription = Model.Description;
+        _origCodedValueId = Model.CodedValueId;
+        _origCodedValue = Model.CodedValue;
+        _editing = true;
+    }
+
+    /// <summary>
+    /// Edit-mode "Update Fields" action: reflects the edited values back into
+    /// the read-only display section WITHOUT submitting to the server. The
+    /// actual persistence happens later via the display-mode "Save".
+    /// </summary>
+    private void UpdateFields()
+    {
+        _editing = false;
+    }
+
+    /// <summary>
+    /// Pre-fills Name / Code / Description from the picked
+    /// SUBJECT coded value (resolved from the dropdown's already-loaded items,
+    /// no extra API round-trip). The display section then shows these values.
+    /// </summary>
+    private void OnCodedValuePicked()
+    {
+        if (Model.CodedValueId is not { } id) return;
+        if (_codedValueDropdown is not null
+            && _codedValueDropdown.TryFindItem(id, out var cv)
+            && cv is not null)
+        {
+            Model.CodedValue = cv;
+            Model.Name = cv.Name;
+            Model.Code = cv.Code;
+            Model.Description = cv.Description;
+        }
+    }
+
+    /// <summary>
+    /// Cancel button: while editing, reverts the user's edits (restoring the
+    /// pre-edit snapshot) and switches back to display mode; otherwise closes
+    /// the dialog.
+    /// </summary>
+    private Task HandleCancel()
+    {
+        if (_editing)
+        {
+            Model.Name = _origName;
+            Model.Code = _origCode;
+            Model.Description = _origDescription;
+            Model.CodedValueId = _origCodedValueId;
+            Model.CodedValue = _origCodedValue;
+            _editing = false;
+            return Task.CompletedTask;
+        }
+        return HandleCancelAsync();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -125,6 +224,7 @@
                     if (cv is not null)
                     {
                         Model.CodedValue = cv;
+                        Model.CodedValueId = cv.Id;
                         Model.Code = cv.Code;
                         Model.Description = cv.Description;
                         Model.Name = cv.Name;
@@ -140,55 +240,19 @@
 
     protected override async Task<TopicDto?> SubmitAsync(TopicEditModel model)
     {
-        var plan = TopicEditRouter.Decide(
-            model.CodedValue, model.Name, model.Code, model.Description, model.DisplayOrder);
+        // Save the field edits as tenant overrides / new coded-value rows (the
+        // exception is template-code generation, which the edit dialog does not
+        // offer — the code is derived from the locked coded value).
+        var (resolvedCvId, effectiveCode) = await TopicCodedValueSaver.SaveAsync(
+            CodedValues, model.CodedValue, model.Name, model.Code, model.Description, model.DisplayOrder);
 
-        Guid? repointedCodedValueId = null;
-        string? effectiveCode = null;
-
-        switch (plan.Action)
-        {
-            case TopicEditRouter.Action.DirectNameOnly:
-                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder));
-                effectiveCode = model.Code;
-                break;
-
-            case TopicEditRouter.Action.Override:
-                await CodedValues.UpsertOverrideAsync(
-                    plan.CodedValueId!.Value,
-                    plan.Name,
-                    plan.Description,
-                    plan.Code);
-                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder, Code: plan.Code));
-                effectiveCode = plan.Code ?? model.Original?.Code;
-                break;
-
-            case TopicEditRouter.Action.EditInPlace:
-                await CodedValues.UpdateAsync(
-                    plan.CodedValueId!.Value,
-                    new UpdateCodedValueRequest(plan.Name, plan.Description, plan.DisplayOrder));
-                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder));
-                effectiveCode = model.Code;
-                break;
-
-            case TopicEditRouter.Action.CreateProvisional:
-                var newId = await CodedValues.CreateProvisionalCodedValueAsync(
-                    new CreateProvisionalCodedValueRequest(
-                        plan.Code ?? string.Empty,
-                        plan.Name,
-                        plan.Description,
-                        plan.ParentId,
-                        plan.DisplayOrder));
-                repointedCodedValueId = newId;
-                effectiveCode = plan.Code;
-                await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(model.Name, model.DisplayOrder, newId, plan.Code));
-                break;
-        }
+        await Api.UpdateTopicAsync(model.Id, new UpdateTopicRequest(
+            model.Name, model.DisplayOrder, resolvedCvId, effectiveCode));
 
         var original = model.Original;
         return new TopicDto(
             model.Id,
-            repointedCodedValueId ?? original?.CodedValueId,
+            resolvedCvId ?? original?.CodedValueId,
             effectiveCode,
             model.Name,
             model.Description,

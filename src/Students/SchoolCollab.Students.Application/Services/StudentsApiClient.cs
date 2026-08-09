@@ -320,6 +320,19 @@ public record UpdateTopicRequest(
     Guid? CodedValueId = null,
     string? Code = null);
 
+/// <summary>
+/// Creates (or reuses) a shared Topic and links it to the given grade level for
+/// the current period. Mirrors the server-side <c>CreateTopicForGrade</c> command
+/// (<c>POST /students/topics/for-grade</c>). <paramref name="Code" /> is optional;
+/// when omitted the server generates it from <paramref name="Name" />.
+/// </summary>
+public record CreateTopicForGradeRequest(
+    Guid GradeLevelId,
+    Guid? CodedValueId,
+    string? Code,
+    string Name,
+    int DisplayOrder);
+
 public record CreateTopicLessonRequest(
     Guid TopicId,
     string Name,
@@ -787,6 +800,20 @@ public sealed class StudentsApiClient : IContactsClient
     {
         var response = await _http.PutAsJsonAsync($"/students/topics/{id}", req, ct);
         response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>
+    /// Creates (or reuses) a shared Topic and wires it to the given grade level
+    /// in one atomic call. <c>POST /students/topics/for-grade</c>. Returns the
+    /// resolved <see cref="TopicDto"/>. Used by the grade-detail Subjects card's
+    /// Add affordance so a new subject (topic) can be created and assigned to the
+    /// grade without leaving the page.
+    /// </summary>
+    public async Task<TopicDto> CreateTopicForGradeAsync(CreateTopicForGradeRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/topics/for-grade", req, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<TopicDto>(ct))!;
     }
 
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>

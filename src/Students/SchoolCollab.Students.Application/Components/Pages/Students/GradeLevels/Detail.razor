@@ -77,8 +77,8 @@
                             <SectionCard TItem="GradeTopicCurriculumDto" Title="Subjects"
                                          Icon="@FluentIcons.Book"
                                          Count="@(_curriculum?.Length ?? 0)"
-                                         OnAddClick="OpenTopicsDialogAsync"
-                                         ViewAllNavigationUrl="/students/subjects"
+                                         OnAddClick="OpenTopicCreateAsync"
+                                         OnViewAllClick="OpenTopicsDialogAsync"
                                          ViewAllText="View all subjects"
                                          Items="@(_curriculum ?? [])"
                                          EmptyMessage="No subjects assigned to this curriculum yet."
@@ -512,6 +512,54 @@
     }
 
     // ── Topics: assign / remove ─────────────────────────────────────────────
+    /// <summary>
+    /// Subjects card "Add" affordance — opens the shared TopicCreateDialog in
+    /// Create mode with this grade's context so a new topic (displayed as a
+    /// subject) is created and wired to the grade in one atomic call
+    /// (CreateTopicForGradeAsync). This mirrors the TopicEditDialog pattern
+    /// (DialogShellBase + ShowShellDialogAsync) used for editing a subject on
+    /// this card, and creates a brand-new topic rather than renaming an existing
+    /// one. Reloads the curriculum on a non-null result so the card reflects the
+    /// new subject.
+    /// </summary>
+    private async Task OpenTopicCreateAsync()
+    {
+        if (_disposed || _grade is null) return;
+        try
+        {
+            var model = new TopicCreateDialog.TopicCreateModel
+            {
+                GradeLevelId = _grade.Id,
+                // Prevent adding a subject whose coded value is already used by
+                // another subject linked to this grade (duplicate coded values).
+                ExistingTopicCodedValueIds = _assignedTopics
+                    .Select(a => a.TopicId)
+                    .Where(_catalog.ContainsKey)
+                    .Select(id => _catalog[id].CodedValueId)
+                    .Where(id => id.HasValue)
+                    .Select(id => id!.Value)
+                    .ToHashSet(),
+            };
+            var created = await DialogService.ShowShellDialogAsync<
+                TopicCreateDialog,
+                TopicCreateDialog.TopicCreateModel,
+                TopicDto>(
+                model,
+                $"Add subject · {_grade.Name}",
+                DialogSize.Large);
+            if (created is not null && !_disposed)
+            {
+                await ReloadAssignedTopicsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create topic for grade {Id}", Id);
+            _error = ex.Message;
+        }
+    }
+
     private async Task AssignTopicAsync(Guid topicId)
     {
         if (_disposed) return;

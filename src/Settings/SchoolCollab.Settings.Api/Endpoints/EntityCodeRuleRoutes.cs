@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.CQRS.EntityCodes.Commands.ActivateEntityCodeRule;
 using SchoolCollab.Settings.Core.CQRS.EntityCodes.Commands.CreateEntityCodeRule;
@@ -178,9 +179,31 @@ public static class EntityCodeRuleRoutes
             }
         });
 
+        // Generate a code from a rule + name hint (used by the topic-create
+        // dialog's "regenerate template code" button). Advances the rule's
+        // sequence state, so the caller should use the returned code directly
+        // (not regenerate again on create).
+        group.MapPost("/generate", async (
+            [FromBody] GenerateCodeRequest req,
+            [FromServices] IEntityCodeGenerator generator,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var code = await generator.GenerateWithNameAsync(req.RuleCode, req.NameHint, ct);
+                return Results.Ok(new { code });
+            }
+            catch (EntityCodeRuleNotFoundException)
+            {
+                return Results.NotFound(new { Message = $"No active entity-code rule '{req.RuleCode}'." });
+            }
+        });
+
         return group;
     }
 }
+
+internal record GenerateCodeRequest(string RuleCode, string? NameHint);
 
 internal record UpdateEntityCodeRuleRequest(
     string Name,

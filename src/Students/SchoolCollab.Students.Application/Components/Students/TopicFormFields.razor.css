@@ -1,0 +1,28 @@
+/* Display mode — read-only values via FieldDisplay, stacked vertically. */
+.topic-form-fields__display {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+/* Code display + optional inline action (e.g. the create dialog's "regenerate
+   template code" button) sit side-by-side in a flex row. The FieldDisplay
+   flexes to fill the row; the action button stays fixed at the right. */
+.topic-form-code-display-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+.topic-form-code-display-row .field-display {
+    flex: 1;
+    min-width: 0;
+}
+
+/* Edit mode — editable inputs via FormRow. */
+.topic-form-fields__edit {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}

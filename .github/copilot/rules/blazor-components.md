@@ -573,3 +573,46 @@ Use FluentUI's own layout components for edit/create forms:
     </FluentStack>
 </FluentEditForm>
 ```
+
+## Share form fields between create & edit forms
+
+When a create form and an edit form render the **same field set** (e.g. a
+`TopicCreateDialog` / `TopicEditDialog` pair, or routable `Create.razor` /
+`Edit.razor` pages), extract the fields into ONE shared `XxxFormFields.razor`
+component and have both forms use it — do NOT copy-paste the rows. This is a
+general Blazor pattern, not just a dialog concern.
+
+### The pattern
+
+1. **Shared component renders only the field rows** — no `<EditForm>`, no
+   `<DataAnnotationsValidator>`, no submit/cancel buttons. The owning form
+   supplies those (it already owns the submit plumbing).
+2. **Define a small interface** (e.g. `ITopicFormModel`) with the shared
+   properties (`Name`, `Code`, `Description`, `DisplayOrder`). Both the create
+   and edit models implement it, so the shared component can `@bind-Value` to
+   either without a common base class.
+3. **The shared component takes `[Parameter] IXxxFormModel Model`** and binds
+   the rows to it. Add optional display parameters (e.g. `CodePlaceholder`) for
+   create-vs-edit wording differences.
+4. **Both forms** replace their inline rows with
+   `<XxxFormFields Model="Model" />` inside their `<EditForm>`.
+5. **Form-specific extras stay in the owning form**, below the shared fields
+   (e.g. an edit-only strands editor, or a create-only grade picker).
+
+### Example (this repo)
+
+- `src/Students/SchoolCollab.Students.Application/Components/Students/TopicFormFields.razor`
+  — shared rows + `ITopicFormModel`.
+- `TopicCreateDialog.razor` / `TopicEditDialog.razor` — both models implement
+  `TopicFormFields.ITopicFormModel` and render `<TopicFormFields Model="Model" />`.
+- `GradeLevelFormFields.razor` — same idea for the routable
+  `GradeLevels/Create.razor` / `GradeLevels/Edit.razor` pages (owns the
+  `<EditForm>` + validator + action row).
+
+### Checklist
+
+- [ ] Shared fields live in ONE `XxxFormFields.razor`; no duplicated rows.
+- [ ] Create & edit models implement a shared `IXxxFormModel` interface.
+- [ ] The shared component binds to the interface, not a concrete model.
+- [ ] Form-specific extras stay in the owning form, below the shared fields.
+- [ ] Build passes; both forms render the same fields.

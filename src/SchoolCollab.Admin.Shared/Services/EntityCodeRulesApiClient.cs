@@ -100,6 +100,12 @@ public sealed record EntityCodeSegmentInputDto(
 /// </summary>
 public sealed record CreateEntityCodeRuleResponse(Guid Id);
 
+/// <summary>
+/// Wire-format response for <c>POST /api/entity-code-rules/generate</c> — the
+/// generated code (server returns <c>{ code }</c>).
+/// </summary>
+public sealed record GenerateCodeResponse(string Code);
+
 // ── Typed client ────────────────────────────────────────────────────────────
 
 /// <summary>
@@ -124,6 +130,24 @@ public sealed class EntityCodeRulesApiClient(HttpClient http)
             return null;
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<EntityCodeRuleDto>(ct);
+    }
+
+    /// <summary>
+    /// Generates a code from a rule + name hint via
+    /// <c>POST /api/entity-code-rules/generate</c>. Used by the topic-create
+    /// dialog's "regenerate template code" button. Advances the rule's sequence
+    /// state, so the caller should use the returned code directly (not
+    /// regenerate again on create).
+    /// </summary>
+    public async Task<string> GenerateAsync(string ruleCode, string? nameHint, CancellationToken ct = default)
+    {
+        var response = await http.PostAsJsonAsync(
+            "/api/entity-code-rules/generate",
+            new { ruleCode, nameHint },
+            ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<GenerateCodeResponse>(ct);
+        return result?.Code ?? string.Empty;
     }
 
     /// <summary>
