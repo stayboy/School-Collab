@@ -114,3 +114,18 @@ under test (e.g. `ChatClientFactoryTests.cs` for `ChatClientFactory.cs`).
    throwing `HttpRequestException`. Never use `GetFromJsonAsync<T>()` for endpoints that
    can return 404 — it throws on non-success status codes. Use `GetAsync()` + status
    check + `ReadFromJsonAsync<T>()` instead.
+
+---
+
+## SectionCard testing
+
+The shared `SectionCard` component's rendering contract is covered **once** in
+`tests/SchoolCollab.Admin.Tests.Unit/SectionCardTests.cs` (title/count, empty, loading,
+error, top-N, selectors, href/click, tooltip, kebab, add, view-all, ItemTemplate).
+
+- **New SectionCard capabilities must be covered in `SectionCardTests.cs`** — the shared
+  component test — not re-implemented per card.
+- **Page tests** (`GradeLevelDetailPageTests.cs`) stay focused on **wiring**: which
+  handler/selector each card binds, per-card selectors, and the mutation-handler
+  local-state assertions (rule 4 above). Do not re-test SectionCard rendering mechanics
+  in the page tests — that is 4× duplicated logic that belongs in `SectionCardTests.cs`.
