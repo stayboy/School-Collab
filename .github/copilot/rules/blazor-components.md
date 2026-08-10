@@ -670,27 +670,11 @@ general Blazor pattern, not just a dialog concern.
 - [ ] Form-specific extras stay in the owning form, below the shared fields.
 - [ ] Build passes; both forms render the same fields.
 
-## SectionCard usage (grade-detail section cards)
+## SectionCard (grade-detail section cards)
 
-The shared `SectionCard` component (`src/Students/SchoolCollab.Students.Application/Components/Students/SectionCard.razor`)
-renders the Subjects / Teachers / Students / Streams preview cards on the grade-detail page. Every card
-must follow these rules:
-
-- **Destructive kebab actions** must be `RowAction.Callback("Remove", ..., destructive: true)` with a
-  `confirmMessage` — never a hand-rolled page-level confirm (that would double-prompt). The confirm is
-  enforced at the component level by `RowActionsMenu` via `ShowConfirmDialogAsync`.
-- **Every card must wire `ErrorMessage`** so a load failure renders an error, not a misleading empty
-  state. A card that catches a load error and silently sets `Items = []` is a bug — the failure looks
-  like "no items".
-- **Set `ItemNameTitle`** when the primary affordance is an edit or a named view (e.g. `ItemNameTitle="Edit topic"`,
-  `ItemNameTitle="View student"`), so the item anchor advertises its action.
-- **Child-component-triggered reloads must call `StateHasChanged()`** after refetching `Items`. The kebab
-  menu and dialogs re-render THEMSELVES, not the page — without `StateHasChanged()` the card never
-  receives the refreshed `Items` after a mutation.
-- **Card-level create + per-row edit must use shared-form-fields dialogs** (`XxxFormFields` bound to
-  `IXxxFormModel`, wrapped in `DialogShellBase` via `ShowShellDialogAsync`) — mirroring
-  `TopicCreateDialog`/`TopicEditDialog` — not landing-page forms. The card Add button opens the create
-  dialog; the row kebab Edit opens the edit dialog.
-
-Reference implementation: the Subjects card on `GradeLevels/Detail.razor` (topic create/edit dialogs,
-`ErrorMessage`, `ItemNameTitle`, `StateHasChanged()` after reload).
+The rules for the shared `SectionCard` component (kebab actions, page message
+alerts for error state, reload-after-mutation `StateHasChanged()`, shared-form-fields
+dialogs, no-nested-dialogs / in-page section toggle, topic+role assignment dates)
+live in **`.github/copilot/rules/section-card.md`** — see that file. (Split out to
+keep this file from overflowing; follow the same split-file pattern for other
+component-specific rule sets.)
