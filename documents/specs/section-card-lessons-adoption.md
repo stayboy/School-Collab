@@ -82,10 +82,11 @@ so Edit needs an explicit home. Edit opens a **shared-form-fields edit dialog** 
 
 ### L5 — Per-card error isolation
 Each card should surface its own load/mutation failure so a failure in one card does not fail
-the page. **Only the Students card actually wires `ErrorMessage`** on SectionCard. The Subjects
-card renders `_topicsError` via a page-level `<FluentMessageBar>` above the card (works, but not
-via the param). The **Teachers** card sets `_teachersError` but **never renders it** (silent — G1).
-The **Streams** card silently empties to `[]` (G3). Target: every card wires `ErrorMessage`.
+the page. The Subjects card renders `_topicsError` via a **page-level `<FluentMessageBar>` above
+the card** — this is the canonical pattern (NOT the SectionCard `ErrorMessage` param). The **Teachers**
+card sets `_teachersError` but **never renders it** (silent — G1). The **Streams** card silently
+empties to `[]` (G3). Target: every card renders a **page message alert** (the Subjects pattern),
+NOT the SectionCard `ErrorMessage` param.
 
 ## 4. Gaps / misses on the other cards
 
@@ -172,16 +173,25 @@ already source-inspection today.
 
 ## 6. Repo-rule enforcement
 
-### 6.1 `.github/copilot/rules/blazor-components.md`
-Add a SectionCard rule block:
+### 6.1 `.github/copilot/rules/section-card.md` (split out of `blazor-components.md`)
+The SectionCard rules live in their own `section-card.md` file (split out of
+`blazor-components.md` to keep that file from overflowing — follow the same
+split-file pattern for other component-specific rule sets). The rules:
 - Destructive actions in a card's `ItemActions` kebab must be `RowAction.Callback(..., destructive: true)`
   with a `confirmMessage` — never a hand-rolled page-level confirm (double-prompt).
-- Every card must wire `ErrorMessage` so a load failure renders an error, not a misleading empty state.
+- **Error state = page message alerts** (a `<FluentMessageBar>` ABOVE the card, like
+  the Subjects card's `_topicsError`), **NOT the SectionCard `ErrorMessage` param**.
+  (The `ErrorMessage` param was a misunderstanding of the Subjects pattern.)
 - Every card should set `ItemNameTitle` when the primary affordance is an edit or a named view.
 - Child-component-triggered reloads must call `StateHasChanged()` after refetching `Items`.
 - Card-level create + per-row edit must use **shared-form-fields dialogs** (`XxxFormFields` bound
-  to `IXxxFormModel`, wrapped in `DialogShellBase` via `ShowShellDialogAsync`) — mirroring
+  to a model, wrapped in a `DialogShellBase`/`IDialogContentComponent` dialog) — mirroring
   `TopicCreateDialog`/`TopicEditDialog` — not landing-page forms.
+- **Never open a dialog from another dialog instance.** A sub-editor inside a dialog uses an
+  **in-page section (`<div>`) toggle** (e.g. `GradeTeachersDialog`'s subject+role editor), not a
+  nested dialog. The shared `TeacherSubjectRoleFormFields` is reused in both a standalone dialog
+  (kebab) and an in-page toggle (`GradeTeachersDialog`).
+- A teacher↔topic assignment carries `StartDate` + open-ended `EndDate` (nullable).
 
 ### 6.2 `.github/copilot/rules/testing.md`
 - New SectionCard capabilities must be covered in `SectionCardTests.cs` (the shared component test).
@@ -193,7 +203,7 @@ Add a SectionCard rule block:
 |-------|--------|-------|------|
 | **1** | `stack/1-sectioncard-shared-tests` | Add `SectionCardTests.cs`; strip the 4× duplicated rendering assertions out of `GradeLevelDetailPageTests.cs` (keep wiring). | Pure test refactor — no prod change. |
 | **2a** | `stack/2-streams-card` | Streams card: surface load errors via `ErrorMessage` (fix G3) **and** add `ItemActions` kebab with **Edit** + destructive **Remove** (confirm). Test. | Prod behavior change. |
-| **2b** | `stack/3-teachers-card` | Teachers card: add `ItemActions` kebab with **Role** (grade-level), **Subjects** (focused per-teacher subject+role dialog), **View profile**, **Edit**, destructive **Remove** (confirm=unlink) + `ItemNameTitle` (fix G1). **Edit/Create reuse the existing `TeacherEditDialog`** (create/edit in one dialog) — no new `TeacherFormFields`/`TeacherFormModel` authored. **Subjects** opens a thin self-contained `TeacherSubjectsDialog`; the `GradeTeachersDialog` shared-form-fields refactor is **deferred**. **Wire `ErrorMessage`** (fix silent `_teachersError`). Test. | Prod behavior change + 2 new dialogs. |
+| **2b** | `stack/3-teachers-card` | Teachers card: add `ItemActions` kebab with **Role** (grade-level), **Subjects** (kebab: `TeacherSubjectsDialog`; GradeTeachersDialog: `FluentDataGrid` + in-page toggle of the shared `TeacherSubjectRoleFormFields`), **View profile**, **Edit**, destructive **Remove** (confirm=unlink) + `ItemNameTitle` (fix G1). **Edit/Create reuse the existing `TeacherEditDialog`** (create/edit in one dialog) — no new `TeacherFormFields`/`TeacherFormModel` authored. Subject+role assignments carry **dates** (start + open-ended end). **Page message alert** for `_teachersError` (NOT the SectionCard `ErrorMessage` param). Test. | Prod behavior change + shared subject-role form + dates + grid. |
 | **2c** | `stack/4-students-card` | Students card: add `ItemActions` kebab with **Transfer**, **Withdraw** (end-date + reason), destructive **Remove** (soft-delete the whole student, not an enrollment-withdraw), **Edit**, **View profile**; card Add → **Create** dialog. Wrap existing `StudentFormFields`/`StudentFormModel` in Edit/Create dialogs mirroring `TopicEditDialog`/`TopicCreateDialog`. **Resolve the enrollment id** for Transfer/Withdraw (§11.2). Add the **Withdraw-reason backend** (§11.1) if not already landed. **Preserve the name as the default link to the view page.** Test. | Prod behavior change + dialog wrappers + withdraw-reason backend. |
 | **3** | `stack/5-rule-enforcement` | Update `blazor-components.md` + `testing.md` rules. | Doc only. |
 
@@ -216,14 +226,17 @@ enrollment-id resolution is wiring (§11.2). See §9 + §11/§12.
   - Teachers card renders a kebab offering Role / Subjects / View profile / Edit / Remove; Remove
     triggers `ShowConfirmDialogAsync`; confirm **unlinks from this grade** (teacher stays in catalog,
     active in other grades). Role = grade-level role change; Subjects = focused per-teacher subject+role
-    dialog. Edit/Create reuse the existing `TeacherEditDialog`. **Teachers card renders `ErrorMessage`**
-    on load/mutation failure (fixes silent `_teachersError`).
+    dialog (kebab) / in-page toggle (GradeTeachersDialog), both via the shared `TeacherSubjectRoleFormFields`
+    (with assignment dates). Edit/Create reuse the existing `TeacherEditDialog`. **Teachers card renders a
+    page message alert** on load/mutation failure (fixes silent `_teachersError`) — NOT the SectionCard
+    `ErrorMessage` param.
   - Students card renders a kebab offering Transfer / Withdraw / Remove / Edit / View profile; card
     Add → Create. Each maps to the right action or navigation. The name remains the default link to
     the view page; Remove soft-deletes the whole student; Withdraw end-dates with a reason;
     Transfer/Withdraw resolve the enrollment id (§11.2).
   - Streams card renders a kebab offering Edit / Remove; Remove triggers `ShowConfirmDialogAsync`
-    (disable); and the card renders `ErrorMessage` text on load failure instead of "No streams defined".
+    (disable); and the card renders a **page message alert** on load failure (not the SectionCard
+    `ErrorMessage` param).
 - Full suite green at each stack tip (Admin, Students, Assignments, Settings) per the repo's
   stack convention.
 
@@ -268,10 +281,13 @@ enrollment-id resolution is wiring (§11.2). See §9 + §11/§12.
    `GradeTeachersDialog`'s `CodedValueDropdown Parent="CodedValueParent.TeacherRoles"` binding.
 6. **`SectionCardTests.cs` placement:** `Admin.Tests.Unit` (references `Students.Application` +
    bUnit). No dedicated component-test project.
-7. **Teachers "Subjects" kebab action:** opens a **focused per-teacher subject+role dialog**
-   (`TeacherSubjectsDialog`, kebab-scale), distinct from the full `GradeTeachersDialog` (View all).
-   The dialog is **self-contained** (thin); the `GradeTeachersDialog` shared-form-fields refactor is
-   **deferred** — the two surfaces are not yet unified behind a shared `TeacherSubjectRoleFormFields`.
+7. **Teachers "Subjects" kebab action + GradeTeachersDialog subject+role editor:** the kebab
+   opens a focused per-teacher subject+role dialog (`TeacherSubjectsDialog`, hosting the shared
+   `TeacherSubjectRoleFormFields`). `GradeTeachersDialog` (View all) renders its teacher list in a
+   **`FluentDataGrid`** (compact rows) and exposes the **same shared `TeacherSubjectRoleFormFields`
+   via an in-page section (`<div>`) toggle** (NOT a nested dialog — never open a dialog from another
+   dialog instance). Both surfaces are unified behind the shared component, with topic+role
+   **assignment dates** (start + open-ended end).
 
 ### Resolved open questions (from prior review)
 - **§9 (old) Q2 — Student action mapping:** Transfer / Edit / View exist; Remove = soft delete;
@@ -358,16 +374,17 @@ Pick per Phase 2c; both reuse existing queries. **No net-new backend.**
 | **Edit** | non-destructive | Open the teacher edit **dialog** | ✅ backend `UpdateTeacherAsync` exists; **reuses the existing `TeacherEditDialog`** (no new form-fields authored) | `TeacherEditDialog` (edit mode) |
 | **Create** | non-destructive (card Add) | Open the teacher create **dialog** | ✅ backend `CreateTeacherAsync` exists; **reuses the existing `TeacherEditDialog`** | `TeacherEditDialog` (create mode) |
 | **Role add/change** | mutating | Change the teacher's **grade-level** role | ✅ exists (`SetTeacherGradeLevelRoleAsync`, `PATCH /teachers/{id}/grade-levels/{gid}/role`) | small role dialog reusing `CodedValueDropdown Parent="CodedValueParent.TeacherRoles"` |
-| **Subjects** | mutating | Manage **subject+role** links (assign/unlink topics taught on this grade, each with a per-topic role) | ✅ exists (`LinkTeacherTopicAsync(teacherId, topicId, roleCodedValueId)`, `UnlinkTeacherTopicAsync(teacherId, topicId)`) | **focused per-teacher subject+role dialog** (`TeacherSubjectsDialog`, self-contained; `GradeTeachersDialog` refactor deferred) |
+| **Subjects** | mutating | Manage **subject+role** links (assign/unlink topics taught on this grade, each with a per-topic role + dates) | ✅ exists (`LinkTeacherTopicAsync(teacherId, topicId, roleCodedValueId, startDate, endDate)`, `UnlinkTeacherTopicAsync(teacherId, topicId)`) | **kebab:** `TeacherSubjectsDialog` (shared `TeacherSubjectRoleFormFields`); **View all:** `GradeTeachersDialog` `FluentDataGrid` + in-page toggle of the same shared form (NOT a nested dialog) |
 | **Remove** | destructive | **Unlink from this grade** (`UnlinkTeacherGradeLevelAsync`); removes only the grade assignment — **teacher stays in the catalog, active in other grades** | ✅ exists (`UnlinkTeacherGradeLevelAsync`) | confirm via `ShowConfirmDialogAsync` |
 
 - **Teachers reuse the existing `TeacherEditDialog`:** there is no `TeacherFormFields` /
   `TeacherFormModel` today, but the existing `TeacherEditDialog` already handles create/edit
   (profile + subjects/roles + grade levels), so Edit/Create reuse it rather than authoring new
   shared form-fields.
-- **Subjects dialog is self-contained (deferred refactor):** the focused `TeacherSubjectsDialog`
-  is thin and self-contained. The `GradeTeachersDialog` shared-form-fields refactor
-  (`TeacherSubjectRoleFormFields`) is **deferred** — the two surfaces are not yet unified.
+- **Subjects surfaces unified behind `TeacherSubjectRoleFormFields` (done):** the kebab opens
+  `TeacherSubjectsDialog`; `GradeTeachersDialog` (View all) renders its teachers in a `FluentDataGrid`
+  and toggles the **same** shared form **in-page** (a `<div>` toggle, never a nested dialog).
+  Topic+role assignments carry **start + open-ended end dates**.
 - **Teacher-grade assignment model (locked):** a teacher's link to a grade is **role-only**
   (grade-level role via `SetTeacherGradeLevelRoleAsync`) **or subject+role** (per-topic links via
   `LinkTeacherTopicAsync(teacherId, topicId, roleCodedValueId)`). The kebab **Role** action does
