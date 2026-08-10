@@ -193,7 +193,7 @@ Add a SectionCard rule block:
 |-------|--------|-------|------|
 | **1** | `stack/1-sectioncard-shared-tests` | Add `SectionCardTests.cs`; strip the 4× duplicated rendering assertions out of `GradeLevelDetailPageTests.cs` (keep wiring). | Pure test refactor — no prod change. |
 | **2a** | `stack/2-streams-card` | Streams card: surface load errors via `ErrorMessage` (fix G3) **and** add `ItemActions` kebab with **Edit** + destructive **Remove** (confirm). Test. | Prod behavior change. |
-| **2b** | `stack/3-teachers-card` | Teachers card: add `ItemActions` kebab with **Role** (grade-level), **Subjects** (focused per-teacher subject+role dialog), **View profile**, **Edit**, destructive **Remove** (confirm=unlink) + `ItemNameTitle` (fix G1). **Author `TeacherFormFields` + `TeacherFormModel`** (none exist) and wrap them in Edit/Create dialogs mirroring `TopicEditDialog`/`TopicCreateDialog`. **Author `TeacherSubjectRoleFormFields`** (shared) and use it in **both** the focused Subjects dialog **and** `GradeTeachersDialog`. **Wire `ErrorMessage`** (fix silent `_teachersError`). Test. | Prod behavior change + new shared form-fields (teacher + subject-role). |
+| **2b** | `stack/3-teachers-card` | Teachers card: add `ItemActions` kebab with **Role** (grade-level), **Subjects** (focused per-teacher subject+role dialog), **View profile**, **Edit**, destructive **Remove** (confirm=unlink) + `ItemNameTitle` (fix G1). **Edit/Create reuse the existing `TeacherEditDialog`** (create/edit in one dialog) — no new `TeacherFormFields`/`TeacherFormModel` authored. **Subjects** opens a thin self-contained `TeacherSubjectsDialog`; the `GradeTeachersDialog` shared-form-fields refactor is **deferred**. **Wire `ErrorMessage`** (fix silent `_teachersError`). Test. | Prod behavior change + 2 new dialogs. |
 | **2c** | `stack/4-students-card` | Students card: add `ItemActions` kebab with **Transfer**, **Withdraw** (end-date + reason), destructive **Remove** (soft-delete the whole student, not an enrollment-withdraw), **Edit**, **View profile**; card Add → **Create** dialog. Wrap existing `StudentFormFields`/`StudentFormModel` in Edit/Create dialogs mirroring `TopicEditDialog`/`TopicCreateDialog`. **Resolve the enrollment id** for Transfer/Withdraw (§11.2). Add the **Withdraw-reason backend** (§11.1) if not already landed. **Preserve the name as the default link to the view page.** Test. | Prod behavior change + dialog wrappers + withdraw-reason backend. |
 | **3** | `stack/5-rule-enforcement` | Update `blazor-components.md` + `testing.md` rules. | Doc only. |
 
@@ -201,11 +201,10 @@ Ordering rationale: Phase 1 first (pure win, no risk); then the three prod fixes
 (2a streams, 2b teachers, 2c students — the largest kebab). All depend on the destructive-confirm
 machinery already present in `RowActionsMenu`/`ShowConfirmDialogAsync` — no new component needed.
 Existing dialogs are reused where they exist (`StudentTransferDialog`, `WithdrawEnrollmentDialog`,
-`CodedValueDialog`); **net-new dialog UI** is the Edit/Create wrappers around `StudentFormFields`
-(students), the new `TeacherFormFields` + model + dialogs (teachers), and the shared
-`TeacherSubjectRoleFormFields` used by both the focused Subjects dialog and `GradeTeachersDialog`
-— all mirror `TopicEditDialog`/`TopicCreateDialog` shared-form-fields pattern. Net-new backend is
-the withdraw reason only (§11.1); enrollment-id resolution is wiring (§11.2). See §9 + §11/§12.
+`CodedValueDialog`, `TeacherEditDialog`); **net-new dialog UI** is the Edit/Create wrappers around
+`StudentFormFields` (students), the thin `TeacherSubjectsDialog` (teachers), and the small
+`TeacherRoleDialog` (teachers). Net-new backend is the withdraw reason only (§11.1);
+enrollment-id resolution is wiring (§11.2). See §9 + §11/§12.
 
 ## 8. Test plan
 
@@ -217,9 +216,8 @@ the withdraw reason only (§11.1); enrollment-id resolution is wiring (§11.2). 
   - Teachers card renders a kebab offering Role / Subjects / View profile / Edit / Remove; Remove
     triggers `ShowConfirmDialogAsync`; confirm **unlinks from this grade** (teacher stays in catalog,
     active in other grades). Role = grade-level role change; Subjects = focused per-teacher subject+role
-    dialog sharing `TeacherSubjectRoleFormFields` with `GradeTeachersDialog`. Edit/Create open the new
-    `TeacherFormFields` dialogs. **Teachers card renders `ErrorMessage`** on load/mutation failure
-    (fixes silent `_teachersError`).
+    dialog. Edit/Create reuse the existing `TeacherEditDialog`. **Teachers card renders `ErrorMessage`**
+    on load/mutation failure (fixes silent `_teachersError`).
   - Students card renders a kebab offering Transfer / Withdraw / Remove / Edit / View profile; card
     Add → Create. Each maps to the right action or navigation. The name remains the default link to
     the view page; Remove soft-deletes the whole student; Withdraw end-dates with a reason;
@@ -233,10 +231,10 @@ the withdraw reason only (§11.1); enrollment-id resolution is wiring (§11.2). 
 
 ### Locked decisions (from review)
 1. **Teachers kebab scope (G1):** inline **Role add/change**, **Subjects**, **View profile**,
-   **Edit**, and destructive **Remove** (confirm). **Edit** opens a shared-form-fields edit dialog
-   (mirroring `TopicEditDialog`) — **net-new UI**: no `TeacherFormFields` / `TeacherFormModel` exists
-   yet, so those must be created. **Create** is the card Add affordance via a shared-form-fields
-   create dialog (mirroring `TopicCreateDialog`). **Backend audit:** Role (`SetTeacherGradeLevelRoleAsync`),
+   **Edit**, and destructive **Remove** (confirm). **Edit** opens the existing `TeacherEditDialog`
+   (create/edit in one dialog) — no new `TeacherFormFields` / `TeacherFormModel` authored. **Create**
+   is the card Add affordance via the same `TeacherEditDialog` in create mode. **Backend audit:** Role
+   (`SetTeacherGradeLevelRoleAsync`),
    subject+role (`LinkTeacherTopicAsync`/`UnlinkTeacherTopicAsync`), and Remove
    (`UnlinkTeacherGradeLevelAsync`) all already exist; `CreateTeacherAsync` / `UpdateTeacherAsync`
    exist. **Teachers Remove = unlink from this grade** (locked): removes only the grade assignment;
@@ -250,9 +248,8 @@ the withdraw reason only (§11.1); enrollment-id resolution is wiring (§11.2). 
    **Edit**, **Create**, and **View profile**. **Edit** opens a shared-form-fields edit dialog
    (mirroring `TopicEditDialog`) — `StudentFormFields` + `StudentFormModel` already exist, so only
    the **dialog wrapper is net-new**. **Create** is the card Add affordance via a shared-form-fields
-   create dialog (mirroring `TopicCreateDialog`) — coexists with the existing enroll-existing flow
-   (`StudentPickerDialog`); the exact Add-button UX (enroll vs create vs chooser) is a Phase 2c
-   detail. **Transfer, View profile already have backend/action surface.** **Remove is a soft delete
+   create dialog (mirroring `TopicCreateDialog`) — **replaces** the enroll-existing flow on the card
+   Add (the `StudentPickerDialog` enroll-existing flow moves to the students landing page). **Transfer, View profile already have backend/action surface.** **Remove is a soft delete
    of the whole student record** (`Student.Delete()` → `DELETE /students/{id}`) — it is **NOT** an
    enrollment-withdraw, so it does **not** require a reason. **Withdraw is a separate, distinct
    action**: an end-date operation on the enrollment with a required **reason** — the end-date
@@ -272,10 +269,9 @@ the withdraw reason only (§11.1); enrollment-id resolution is wiring (§11.2). 
 6. **`SectionCardTests.cs` placement:** `Admin.Tests.Unit` (references `Students.Application` +
    bUnit). No dedicated component-test project.
 7. **Teachers "Subjects" kebab action:** opens a **focused per-teacher subject+role dialog**
-   (kebab-scale), distinct from the full `GradeTeachersDialog` (View all). Both surfaces share a
-   **single `TeacherSubjectRoleFormFields` component** bound to a model (the subject+role
-   add/edit form) so the focused dialog and `GradeTeachersDialog`'s subject+role flow stay in sync
-   — same shared-form-fields pattern as `StudentFormFields`/`TopicCreateDialog`.
+   (`TeacherSubjectsDialog`, kebab-scale), distinct from the full `GradeTeachersDialog` (View all).
+   The dialog is **self-contained** (thin); the `GradeTeachersDialog` shared-form-fields refactor is
+   **deferred** — the two surfaces are not yet unified behind a shared `TeacherSubjectRoleFormFields`.
 
 ### Resolved open questions (from prior review)
 - **§9 (old) Q2 — Student action mapping:** Transfer / Edit / View exist; Remove = soft delete;
@@ -291,8 +287,9 @@ _(none — all resolved; see locked decisions §9.)_
 - No changes to strands/lessons/topics CRUD semantics.
 - No notification / delivery changes.
 - A full enrollment-lifecycle redesign is out of scope. Only the kebab-required backend is in
-  scope (withdraw reason, §11.1); Transfer / View are reused as-is, and Edit / Create gain new
-  shared-form-fields dialog wrappers (§11/§12).
+  scope (withdraw reason, §11.1); Transfer / View are reused as-is. Edit / Create gain new
+  dialog wrappers around `StudentFormFields` (students) and reuse the existing `TeacherEditDialog`
+  (teachers) (§11/§12).
 
 ## 11. Resolved student-kebab action mapping
 
@@ -300,7 +297,7 @@ _(none — all resolved; see locked decisions §9.)_
 |---|---|---|---|---|
 | **View profile** | non-destructive | Navigate to the student detail page | ✅ exists | `ItemHrefSelector` → `/students/{id}` |
 | **Edit** | non-destructive | Open the student edit **dialog** | ⚠️ backend + `StudentFormFields`/`StudentFormModel` exist; **dialog wrapper is net-new** (mirror `TopicEditDialog`) | `StudentFormModel`-based shell dialog |
-| **Create** | non-destructive (card Add) | Open the student create **dialog** | ⚠️ backend + `StudentFormModel` exist; **dialog wrapper is net-new** (mirror `TopicCreateDialog`); coexists with enroll-existing `StudentPickerDialog` | `StudentFormModel`-based shell dialog |
+| **Create** | non-destructive (card Add) | Open the student create **dialog** | ⚠️ backend + `StudentFormModel` exist; **dialog wrapper is net-new** (mirror `TopicCreateDialog`); **replaces** the enroll-existing `StudentPickerDialog` on the card Add | `StudentFormModel`-based shell dialog |
 | **Transfer** | mutating | Change the student's grade | ✅ backend (`TransferStudent` cmd + `Reason`, `POST /enrollments/{id}/transfer`); ⚠️ **needs enrollment id** (see §11.2) | `StudentTransferDialog` + `StudentTransferModel` |
 | **Withdraw** | mutating (L3) | **End-date** the enrollment with a required **reason** | ⚠️ end-date exists (`WithdrawStudent` + `POST /enrollments/{id}/withdraw`); **reason is net-new** (§11.1); ⚠️ **needs enrollment id** (see §11.2) | `WithdrawEnrollmentDialog` + reason field |
 | **Remove** | destructive (soft delete) | Soft-delete the **whole student record** (`Student.Delete()` sets `isDeleted` + `DeletedAt`, `DELETE /students/{id}`). **Not** an enrollment-withdraw (no reason required). | ✅ exists (`Student.Delete()` + `DELETE /students/{id}` + `DeleteStudentAsync`) | confirm via `ShowConfirmDialogAsync` |
@@ -332,7 +329,7 @@ Mirror the existing transfer-reason pattern:
 3. Add a reason field to the withdraw dialog model/content.
 
 This keeps the withdraw change purely additive and consistent with how transfer records its
-reason. Excluded from Phase 1 (test refactor) and Phase 2c (kebab wiring) until this lands.
+reason. Landed in Phase 2c (§11.1).
 
 ### 11.2 Net-new wiring — Enrollment id for Transfer / Withdraw
 
@@ -358,19 +355,19 @@ Pick per Phase 2c; both reuse existing queries. **No net-new backend.**
 | Kebab action | Type | Behaviour | Backend art | Dialog/nav |
 |---|---|---|---|---|
 | **View profile** | non-destructive | Navigate to the teacher detail page | ✅ exists | `ItemHrefSelector` → `/students/teachers/{id}` |
-| **Edit** | non-destructive | Open the teacher edit **dialog** | ⚠️ backend `UpdateTeacherAsync` exists; **`TeacherFormFields` + `TeacherFormModel` + dialog are all net-new** (mirror `TopicEditDialog`) | new `TeacherFormFields`-based shell dialog |
-| **Create** | non-destructive (card Add) | Open the teacher create **dialog** | ⚠️ backend `CreateTeacherAsync` exists; **form-fields + model + dialog net-new** (mirror `TopicCreateDialog`) | new `TeacherFormFields`-based shell dialog |
+| **Edit** | non-destructive | Open the teacher edit **dialog** | ✅ backend `UpdateTeacherAsync` exists; **reuses the existing `TeacherEditDialog`** (no new form-fields authored) | `TeacherEditDialog` (edit mode) |
+| **Create** | non-destructive (card Add) | Open the teacher create **dialog** | ✅ backend `CreateTeacherAsync` exists; **reuses the existing `TeacherEditDialog`** | `TeacherEditDialog` (create mode) |
 | **Role add/change** | mutating | Change the teacher's **grade-level** role | ✅ exists (`SetTeacherGradeLevelRoleAsync`, `PATCH /teachers/{id}/grade-levels/{gid}/role`) | small role dialog reusing `CodedValueDropdown Parent="CodedValueParent.TeacherRoles"` |
-| **Subjects** | mutating | Manage **subject+role** links (assign/unlink topics taught on this grade, each with a per-topic role) | ✅ exists (`LinkTeacherTopicAsync(teacherId, topicId, roleCodedValueId)`, `UnlinkTeacherTopicAsync(teacherId, topicId)`) | **focused per-teacher subject+role dialog** (§9 dec 7) sharing `TeacherSubjectRoleFormFields` with `GradeTeachersDialog` |
+| **Subjects** | mutating | Manage **subject+role** links (assign/unlink topics taught on this grade, each with a per-topic role) | ✅ exists (`LinkTeacherTopicAsync(teacherId, topicId, roleCodedValueId)`, `UnlinkTeacherTopicAsync(teacherId, topicId)`) | **focused per-teacher subject+role dialog** (`TeacherSubjectsDialog`, self-contained; `GradeTeachersDialog` refactor deferred) |
 | **Remove** | destructive | **Unlink from this grade** (`UnlinkTeacherGradeLevelAsync`); removes only the grade assignment — **teacher stays in the catalog, active in other grades** | ✅ exists (`UnlinkTeacherGradeLevelAsync`) | confirm via `ShowConfirmDialogAsync` |
 
-- **Teachers have more net-new UI than students:** there is no `TeacherFormFields` / `TeacherFormModel`
-  today (teachers use a setup-wizard page), so Edit/Create require authoring the shared form-fields
-  component + model + dialog — not just a dialog wrapper.
-- **Net-new shared form-fields for subject+role:** a `TeacherSubjectRoleFormFields` component +
-  model (topic selector + `CodedValueDropdown Parent="CodedValueParent.TeacherRoles"`) is authored
-  **once** and used in **both** the focused per-teacher Subjects kebab dialog **and** the existing
-  `GradeTeachersDialog`'s add-subject flow — keeping the two surfaces in sync (§9 dec 7).
+- **Teachers reuse the existing `TeacherEditDialog`:** there is no `TeacherFormFields` /
+  `TeacherFormModel` today, but the existing `TeacherEditDialog` already handles create/edit
+  (profile + subjects/roles + grade levels), so Edit/Create reuse it rather than authoring new
+  shared form-fields.
+- **Subjects dialog is self-contained (deferred refactor):** the focused `TeacherSubjectsDialog`
+  is thin and self-contained. The `GradeTeachersDialog` shared-form-fields refactor
+  (`TeacherSubjectRoleFormFields`) is **deferred** — the two surfaces are not yet unified.
 - **Teacher-grade assignment model (locked):** a teacher's link to a grade is **role-only**
   (grade-level role via `SetTeacherGradeLevelRoleAsync`) **or subject+role** (per-topic links via
   `LinkTeacherTopicAsync(teacherId, topicId, roleCodedValueId)`). The kebab **Role** action does
