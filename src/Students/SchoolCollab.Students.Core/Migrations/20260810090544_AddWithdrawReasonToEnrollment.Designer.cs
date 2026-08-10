@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SchoolCollab.Students.Core.Data;
@@ -11,9 +12,11 @@ using SchoolCollab.Students.Core.Data;
 namespace SchoolCollab.Students.Core.Migrations
 {
     [DbContext(typeof(StudentsDbContext))]
-    partial class StudentsDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260810090544_AddWithdrawReasonToEnrollment")]
+    partial class AddWithdrawReasonToEnrollment
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1234,10 +1237,6 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date")
-                        .HasColumnName("end_date");
-
                     b.Property<Guid?>("RoleCodedValueId")
                         .HasColumnType("uuid")
                         .HasColumnName("role_coded_value_id");
@@ -1247,10 +1246,6 @@ namespace SchoolCollab.Students.Core.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
-
-                    b.Property<DateOnly>("StartDate")
-                        .HasColumnType("date")
-                        .HasColumnName("start_date");
 
                     b.Property<Guid>("TeacherId")
                         .HasColumnType("uuid")

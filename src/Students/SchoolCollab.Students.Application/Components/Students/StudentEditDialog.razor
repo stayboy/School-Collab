@@ -1,0 +1,82 @@
+@* StudentEditDialog — edit a student's core profile in a modal dialog
+   (section-card-lessons-adoption.md §9 dec 2). Wraps the shared
+   <StudentFormFields> (same field set + validation as /students/{id}/edit)
+   and saves via UpdateStudentAsync. Opens from the Students card kebab Edit
+   action via ShowReadonlyDialogAsync. *@
+@implements IDialogContentComponent<DialogParameters>
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject ILogger<StudentEditDialog> Logger
+
+<StudentFormFields Model="_model"
+                   ShowGuardians="false"
+                   StudentId="StudentId"
+                   ReadOnlyStudentNumber="true"
+                   ErrorMessage="@_error"
+                   OnValidSubmit="OnSaveAsync"
+                   SubmitLabel="Save Changes"
+                   SubmittingLabel="Saving…"
+                   Submitting="@_saving"
+                   OnCancel="CancelAsync" />
+
+@code {
+    /// <summary>The student being edited.</summary>
+    [Parameter, EditorRequired] public Guid StudentId { get; set; }
+
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    public DialogParameters Content { get; set; } = default!;
+
+    private readonly StudentFormModel _model = new();
+    private bool _saving;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var student = await Api.GetStudentByIdAsync(StudentId);
+            if (student is not null)
+            {
+                _model.StudentNumber = student.StudentNumber;
+                _model.FirstName = student.FirstName;
+                _model.LastName = student.LastName;
+                _model.DateOfBirth = student.DateOfBirth;
+                _model.GenderCodedValueId = student.GenderCodedValueId;
+                _model.TitleCodedValueId = student.TitleCodedValueId;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load student {StudentId} for edit", StudentId);
+            _error = $"Could not load: {ex.Message}";
+        }
+    }
+
+    private async Task OnSaveAsync()
+    {
+        if (_saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var request = new UpdateStudentRequest(
+                _model.FirstName!, _model.LastName!,
+                _model.DateOfBirth, _model.GenderCodedValueId, _model.TitleCodedValueId);
+            await Api.UpdateStudentAsync(StudentId, request);
+            if (Dialog is not null) await Dialog.CloseAsync(StudentId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update student {StudentId}", StudentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+}

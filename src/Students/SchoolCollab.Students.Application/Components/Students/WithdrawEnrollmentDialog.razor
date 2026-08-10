@@ -21,6 +21,7 @@
     <EditForm Model="_form" OnValidSubmit="HandleSubmitAsync">
         <FluentStack Orientation="Orientation.Vertical" Spacing="3">
             <FluentDatePicker Value="@ExitDateAsDateTime" ValueChanged="@OnExitDateChanged" Label="Exit date" Required="true" />
+            <FluentTextArea @bind-Value="_form.Reason" Label="Reason" Placeholder="Optional — why is this student being withdrawn?" />
         </FluentStack>
 
         <DialogShellFooter Saving="@Saving"
@@ -35,6 +36,7 @@
     private sealed class FormState
     {
         public DateTime? ExitDate { get; set; }
+        public string? Reason { get; set; }
     }
 
     private readonly FormState _form = new();
@@ -77,7 +79,7 @@
             var exitDate = DateOnly.FromDateTime(_form.ExitDate.Value);
             await Api.WithdrawStudentAsync(
                 model.EnrollmentId,
-                new WithdrawStudentRequest(exitDate));
+                new WithdrawStudentRequest(exitDate, _form.Reason));
             return new WithdrawEnrollmentResult(true);
         }
         catch (Exception ex)

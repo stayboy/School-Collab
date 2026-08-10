@@ -1,0 +1,67 @@
+@* StudentCreateDialog — create a new student in a modal dialog
+   (section-card-lessons-adoption.md §9 dec 2). Wraps the shared
+   <StudentFormFields> (same field set + validation as /students/create) and
+   creates the student via CreateStudentAsync, linking any guardians drafted
+   on the form. Opens from the Students card Add button via
+   ShowReadonlyDialogAsync. *@
+@implements IDialogContentComponent<DialogParameters>
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject ILogger<StudentCreateDialog> Logger
+
+<StudentFormFields Model="_model"
+                   ShowGuardians="true"
+                   ErrorMessage="@_error"
+                   OnValidSubmit="OnSaveAsync"
+                   SubmitLabel="Create Student"
+                   SubmittingLabel="Creating…"
+                   Submitting="@_saving"
+                   OnCancel="CancelAsync" />
+
+@code {
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    public DialogParameters Content { get; set; } = default!;
+
+    private readonly StudentFormModel _model = new();
+    private bool _saving;
+    private string? _error;
+
+    private async Task OnSaveAsync()
+    {
+        if (_saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            var request = new CreateStudentRequest(
+                _model.StudentNumber!, _model.FirstName!, _model.LastName!,
+                _model.DateOfBirth, _model.GenderCodedValueId, _model.TitleCodedValueId);
+            var studentId = await Api.CreateStudentAsync(request);
+
+            // Link any guardians drafted on the form (existing or newly created).
+            foreach (var draft in _model.GuardianLinks)
+            {
+                var guardianId = draft.ExistingGuardianId
+                    ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
+                        draft.TitleCodedValueId, draft.FirstName, draft.LastName, null, null, null));
+                await Api.LinkGuardianAsync(new LinkGuardianRequest(
+                    studentId, guardianId, draft.RelationshipCodedValueId, draft.Role, false, null));
+            }
+
+            if (Dialog is not null) await Dialog.CloseAsync(studentId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to create student");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+}

@@ -445,6 +445,100 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_StudentsCard_Row_HasKebab_WithActions()
+    {
+        var gradeId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId), studentsJson: JsonSerializer.Serialize(new[]
+        {
+            StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10)),
+        }));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada Lovelace"));
+
+        // The student name is the primary affordance (navigates to the student
+        // view page); the kebab hosts the secondary actions + destructive Remove.
+        cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]").Click();
+        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToArray();
+        items.Should().Contain("Transfer", "students kebab offers transfer");
+        items.Should().Contain("Withdraw", "students kebab offers withdraw");
+        items.Should().Contain("View profile", "students kebab offers view profile");
+        items.Should().Contain("Edit", "students kebab offers edit");
+        items.Should().Contain("Remove", "students kebab offers remove");
+    }
+
+    [TestMethod]
+    public void Detail_StudentsCard_Remove_Confirms_AndSoftDeletes()
+    {
+        var gradeId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId), studentsJson: JsonSerializer.Serialize(new[]
+        {
+            StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10)),
+        }));
+        handler.Map("DELETE", $"/students/{studentId}", HttpStatusCode.OK, "");
+
+        // Host the page under a FluentDialogProvider so the destructive Remove
+        // confirmation prompt can render.
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada Lovelace"));
+
+        // Open the student kebab and click Remove.
+        cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]").Click();
+        var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
+        removeItem.Click();
+
+        // The destructive Remove opens a MODAL confirmation dialog.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove student 'Ada Lovelace'?"));
+        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+
+        // Confirm → the whole student record is soft-deleted (not an enrollment-withdraw).
+        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.WaitForAssertion(() => handler.Calls.Should().Contain(c =>
+            c.Method == "DELETE" && c.Url == $"/students/{studentId}"));
+    }
+
+    [TestMethod]
+    public void Detail_StudentsCard_Withdraw_ResolvesEnrollment_AndOpensDialog()
+    {
+        var gradeId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
+        var enrollmentId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId), studentsJson: JsonSerializer.Serialize(new[]
+        {
+            StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10)),
+        }));
+        handler.Map("GET", $"/students/enrollments/by-student/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[]
+            {
+                new Dictionary<string, object?>
+                {
+                    ["id"] = enrollmentId, ["studentId"] = studentId, ["periodId"] = Guid.NewGuid(),
+                    ["gradeLevelId"] = gradeId, ["streamCodedValueId"] = (Guid?)null,
+                    ["enrolledOn"] = "2025-01-01", ["exitDate"] = (string?)null,
+                    ["status"] = "Active",
+                    ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+                },
+            }));
+
+        // Host the page under a FluentDialogProvider so the WithdrawEnrollmentDialog
+        // (opened via ShowShellDialogAsync) can render.
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada Lovelace"));
+
+        // Open the student kebab and click Withdraw.
+        cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]").Click();
+        var withdrawItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Withdraw"));
+        withdrawItem.Click();
+
+        // The WithdrawEnrollmentDialog opens with the resolved active enrollment.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("This will set the exit date on the current enrollment."));
+    }
+
+    [TestMethod]
     public void Detail_StreamsCard_ShowsEmptyState_WhenNone()
     {
         var gradeId = Guid.NewGuid();
@@ -659,7 +753,7 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("<SectionCard", "SectionCard component is used for all three cards");
         source.Should().Contain("OnAddClick=\"OpenTopicCreateAsync\"", "Subjects card has add callback");
         source.Should().Contain("OnAddClick=\"OpenTeacherCreateAsync\"", "Teachers card has add callback");
-        source.Should().Contain("OnAddClick=\"OpenAddStudentsAsync\"", "Students card has add callback");
+        source.Should().Contain("OnAddClick=\"OpenStudentCreateAsync\"", "Students card has add callback");
         source.Should().Contain("AddTitle=\"Add student\"", "Students card has add title");
         source.Should().Contain("AddAriaLabel=\"Add student\"", "Students card has add aria-label");
     }
@@ -697,22 +791,18 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_StudentAdd_Wires_StudentPickerDialog_AndEnroll()
+    public void Detail_StudentAdd_OpensStudentCreateDialog()
     {
         var source = ReadDetailSource();
 
-        source.Should().Contain("OpenAddStudentsAsync",
-            "the Students card add button calls OpenAddStudentsAsync");
-        source.Should().Contain("ListPeriodsAsync",
-            "OpenAddStudentsAsync resolves the active period first");
-        source.Should().Contain("StudentPickerDialog",
-            "OpenAddStudentsAsync opens StudentPickerDialog to select students");
-        source.Should().Contain("EnrollStudentAsync",
-            "OpenAddStudentsAsync enrolls each selected student via EnrollStudentAsync");
-        source.Should().Contain("EnrollStudentRequest",
-            "enrollment uses EnrollStudentRequest with PeriodId, GradeLevelId, StudentId");
-        source.Should().Contain("ReloadStudentsAsync",
-            "after enrollment, the students list is reloaded");
+        // The Students card Add button must open the shared StudentCreateDialog
+        // (new student), not the enroll-existing StudentPickerDialog.
+        source.Should().Contain("OnAddClick=\"OpenStudentCreateAsync\"",
+            "the Students card Add button opens the create dialog");
+        source.Should().Contain("ShowReadonlyDialogAsync<StudentCreateDialog>",
+            "the create handler opens StudentCreateDialog");
+        source.Should().NotContain("OpenAddStudentsAsync",
+            "the enroll-existing handler is removed from the card Add");
     }
 
     [TestMethod]
