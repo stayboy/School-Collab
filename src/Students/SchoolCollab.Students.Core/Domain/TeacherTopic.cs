@@ -21,27 +21,48 @@ public sealed class TeacherTopic : ITenantEntity, IEntity, IAuditableEntity, IHa
     /// </summary>
     public Guid? RoleCodedValueId { get; private set; }
 
+    /// <summary>
+    /// When the teacher starts teaching this topic (required; defaults to today).
+    /// </summary>
+    public DateOnly StartDate { get; private set; }
+
+    /// <summary>
+    /// When the teacher stops teaching this topic (nullable = open-ended).
+    /// </summary>
+    public DateOnly? EndDate { get; private set; }
+
     Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
     public Guid TenantId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    public static TeacherTopic Create(Guid teacherId, Guid topicId, Guid? roleCodedValueId = null) =>
+    public static TeacherTopic Create(Guid teacherId, Guid topicId, Guid? roleCodedValueId = null, DateOnly? startDate = null, DateOnly? endDate = null) =>
         new TeacherTopic
         {
             Id = Guid.NewGuid(),
             TeacherId = teacherId,
             TopicId = topicId,
             RoleCodedValueId = roleCodedValueId,
+            StartDate = startDate ?? DateOnly.FromDateTime(DateTime.UtcNow),
+            EndDate = endDate,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow
         };
 
-    public void SetRole(Guid? roleCodedValueId)
+    /// <summary>
+    /// Updates the role and/or the assignment dates. The start date defaults to
+    /// today when first set; a null end date means open-ended. Idempotent when
+    /// nothing changes.
+    /// </summary>
+    public void SetRole(Guid? roleCodedValueId, DateOnly? startDate = null, DateOnly? endDate = null)
     {
-        if (RoleCodedValueId == roleCodedValueId) return;
+        if (RoleCodedValueId == roleCodedValueId
+            && (startDate is null || StartDate == startDate)
+            && EndDate == endDate) return;
         RoleCodedValueId = roleCodedValueId;
+        if (startDate.HasValue) StartDate = startDate.Value;
+        EndDate = endDate;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 }

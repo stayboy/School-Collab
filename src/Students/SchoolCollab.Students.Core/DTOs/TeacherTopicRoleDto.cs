@@ -7,4 +7,6 @@ namespace SchoolCollab.Students.Core.DTOs;
 /// </summary>
 public sealed record TeacherTopicRoleDto(
     Guid TopicId,
-    Guid? RoleCodedValueId);
+    Guid? RoleCodedValueId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null);

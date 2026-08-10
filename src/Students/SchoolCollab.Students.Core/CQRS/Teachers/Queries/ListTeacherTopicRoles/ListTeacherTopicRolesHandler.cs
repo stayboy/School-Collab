@@ -35,7 +35,9 @@ public sealed class ListTeacherTopicRolesHandler(
                                    where ts.TenantId == tenantId && ts.TeacherId == query.TeacherId
                                    select new TeacherTopicRoleDto(
                                        ts.TopicId,
-                                       ts.RoleCodedValueId))
+                                       ts.RoleCodedValueId,
+                                       ts.StartDate,
+                                       ts.EndDate))
                     .ToArrayAsync(ct);
                 return roles;
             },

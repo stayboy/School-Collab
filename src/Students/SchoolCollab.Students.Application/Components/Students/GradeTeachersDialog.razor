@@ -1,12 +1,19 @@
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
 @using TeacherWithRoleDto = SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto
 @using TeacherDto = SchoolCollab.Students.Application.Services.TeacherDto
 @implements IDialogContentComponent<DialogParameters>
+@inject IDialogService DialogService
 
 @* Full list of teachers linked to a grade, shown from the Teachers section card's
    "View all" anchor (grade-detail-modern-ui-plan.md §0.4). The page owns the
    API/enrichment and passes the data + action callbacks so this dialog stays
-   thin. *@
+   thin. Renders the teachers in a FluentDataGrid so each row stays compact; the
+   per-teacher subject+role management (topics + roles + dates) is opened via the
+   shared TeacherSubjectsDialog (which hosts TeacherSubjectRoleFormFields), so the
+   grid rows don't grow a full topic list. *@
 <div class="teacher-dialog">
     <div class="picker-row">
         <FluentSelect TOption="TeacherDto"
@@ -25,59 +32,63 @@
     }
     else
     {
-        <div class="teacher-dialog__list">
-            @foreach (var teacher in Teachers)
-            {
-                <div class="teacher-dialog__row">
-                    <div class="teacher-dialog__main">
-                        <FluentAnchor Appearance="Appearance.Hypertext"
-                                      Href="@($"/students/teachers/{teacher.Id}")"
-                                      class="teacher-dialog__name">
-                            @(teacher.TitleCodedValueId is { } tid && SalutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@teacher.FirstName @teacher.LastName
-                        </FluentAnchor>
-                        <div class="teacher-dialog__meta">
-                            <span>@(teacher.GenderCodedValueId is { } gid && GenderNames.TryGetValue(gid, out var g) ? g : "—")</span>
-                            <span>·</span>
-                            <span>@(teacher.LevelOfEducationCodedValueId is { } lid && LevelNames.TryGetValue(lid, out var l) ? l : "—")</span>
-                        </div>
-                        @if ((teacher.QualificationCodedValueIds ?? []).Length > 0)
-                        {
-                            <div class="teacher-dialog__quals">
-                                @foreach (var qid in teacher.QualificationCodedValueIds ?? [])
-                                {
-                                    <span class="chip">@(QualificationNames is { } qn && qn.TryGetValue(qid, out var qv) ? qv : "•")</span>
-                                }
-                            </div>
-                        }
-                    </div>
-
-                    <div class="teacher-dialog__topics">
-                        @foreach (var tp in teacher.AssignedTopics)
-                        {
-                            <span class="chip" title="Click to unlink" @onclick="() => UnlinkTopicAsync(teacher, tp.Id)">
-                                @tp.Name <span class="chip-x">×</span>
-                            </span>
-                        }
-                        @if (teacher.AssignedTopics.Length == 0)
-                        {
-                            <span class="muted">No topics</span>
-                        }
-                    </div>
-
-                    <div class="teacher-dialog__role">
-                        <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
-                                            SelectedId="@teacher.TeacherRoleCodedValueId"
-                                            SelectedIdChanged="@((Guid? v) => RoleChangedAsync(teacher, v))"
-                                            Placeholder="No role"
-                                            Class="role-dropdown" />
-                    </div>
-
-                    <RowActionsMenu Actions="@BuildRowActions(teacher)"
-                                    AriaLabel="Teacher actions"
-                                    UseMenuService="false" />
+        <FluentDataGrid Items="@(Teachers.AsQueryable())"
+                        TGridItem="TeacherWithRoleDto"
+                        MultiLine="true"
+                        Class="teacher-grid">
+            <TemplateColumn Title="Teacher">
+                <FluentAnchor Appearance="Appearance.Hypertext"
+                              Href="@($"/students/teachers/{context.Id}")"
+                              class="teacher-dialog__name">
+                    @(context.TitleCodedValueId is { } tid && SalutationNames.TryGetValue(tid, out var sal) ? $"{sal} " : "")@context.FirstName @context.LastName
+                </FluentAnchor>
+                <div class="teacher-dialog__meta">
+                    <span>@(context.GenderCodedValueId is { } gid && GenderNames.TryGetValue(gid, out var g) ? g : "—")</span>
+                    <span>·</span>
+                    <span>@(context.LevelOfEducationCodedValueId is { } lid && LevelNames.TryGetValue(lid, out var l) ? l : "—")</span>
                 </div>
-            }
-        </div>
+                @if ((context.QualificationCodedValueIds ?? []).Length > 0)
+                {
+                    <div class="teacher-dialog__quals">
+                        @foreach (var qid in context.QualificationCodedValueIds ?? [])
+                        {
+                            <span class="chip">@(QualificationNames is { } qn && qn.TryGetValue(qid, out var qv) ? qv : "•")</span>
+                        }
+                    </div>
+                }
+            </TemplateColumn>
+            <TemplateColumn Title="Grade role">
+                <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
+                                    SelectedId="@context.TeacherRoleCodedValueId"
+                                    SelectedIdChanged="@((Guid? v) => RoleChangedAsync(context, v))"
+                                    Placeholder="No role" />
+            </TemplateColumn>
+            <TemplateColumn Title="Subjects">
+                <div class="teacher-dialog__topics">
+                    @foreach (var tp in context.AssignedTopics)
+                    {
+                        <span class="chip" title="Click to unlink" @onclick="() => UnlinkTopicAsync(context, tp.Id)">
+                            @tp.Name <span class="chip-x">×</span>
+                        </span>
+                    }
+                    @if (context.AssignedTopics.Length == 0)
+                    {
+                        <span class="muted">No subjects</span>
+                    }
+                </div>
+                <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                              IconStart="@FluentIcons.Book"
+                              Title="Edit subjects"
+                              OnClick="() => OpenSubjectsAsync(context)">
+                    Edit
+                </FluentButton>
+            </TemplateColumn>
+            <TemplateColumn Title="">
+                <RowActionsMenu Actions="@BuildRowActions(context)"
+                                AriaLabel="Teacher actions"
+                                UseMenuService="false" />
+            </TemplateColumn>
+        </FluentDataGrid>
     }
     <div class="dialog-footer">
         <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
@@ -115,6 +126,33 @@
         try
         {
             await UnlinkTopic(teacher, topicId);
+            if (OnChanged is not null) await OnChanged();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    /// <summary>
+    /// Opens the shared TeacherSubjectsDialog (hosting TeacherSubjectRoleFormFields)
+    /// for the row's teacher, so the grid row stays compact while the full
+    /// subject+role management (topics + roles + dates) is edited in a focused
+    /// dialog. Reloads the teacher list on close so the chips refresh.
+    /// </summary>
+    private async Task OpenSubjectsAsync(TeacherWithRoleDto teacher)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await DialogService.ShowReadonlyDialogAsync<TeacherSubjectsDialog>(
+                $"Subjects · {teacher.FirstName} {teacher.LastName}",
+                new Dictionary<string, object?>
+                {
+                    { nameof(TeacherSubjectsDialog.TeacherId), teacher.Id },
+                },
+                DialogSize.Medium);
             if (OnChanged is not null) await OnChanged();
         }
         finally
