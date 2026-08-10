@@ -102,6 +102,10 @@
 
                             @* Teachers card *@
                             <FluentGridItem xs="12" sm="6" lg="3">
+                            @if (!string.IsNullOrEmpty(_teachersError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_teachersError</FluentMessageBar>
+                            }
                             <SectionCard TItem="TeacherWithRoleDto" Title="Teachers"
                                          Icon="@FluentIcons.People"
                                          Count="@(_teachers?.Length ?? 0)"
@@ -110,7 +114,6 @@
                                          ViewAllText="View all teachers"
                                          Items="@(_teachers ?? [])"
                                          EmptyMessage="No teachers linked to this grade yet."
-                                         ErrorMessage="@_teachersError"
                                          Loading="@(_teachers is null)"
                                          ItemTextSelector="t => GetTeacherDisplayName(t)"
                                          ItemMetaSelector="@(t => [ GetTeacherRole(t) ])"
@@ -125,6 +128,10 @@
 
                             @* Students card *@
                             <FluentGridItem xs="12" sm="6" lg="3">
+                            @if (!string.IsNullOrEmpty(_studentsError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_studentsError</FluentMessageBar>
+                            }
                             <SectionCard TItem="StudentDto" Title="Students"
                                          Icon="@FluentIcons.Person"
                                          Count="@(_students?.Length ?? 0)"
@@ -135,7 +142,6 @@
                                          ViewAllText="View all students"
                                          Items="@(_students ?? [])"
                                          EmptyMessage="No active students in this grade for the current period."
-                                         ErrorMessage="@_studentsError"
                                          Loading="@(_students is null)"
                                          ItemTextSelector="@(st => $"{st.FirstName} {st.LastName}")"
                                          ItemMetaSelector="@(st => [ GetStudentDemographics(st) ])"
@@ -146,6 +152,10 @@
 
                             @* Streams card *@
                             <FluentGridItem xs="12" sm="6" lg="3">
+                            @if (!string.IsNullOrEmpty(_streamsError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mb-2">@_streamsError</FluentMessageBar>
+                            }
                             <SectionCard TItem="CodedValueDto" Title="Streams"
                                          Icon="@FluentIcons.TextBulletList"
                                          Count="@(_streams?.Length ?? 0)"
@@ -156,7 +166,6 @@
                                          ViewAllText="Manage streams"
                                          Items="@(_streams ?? [])"
                                          EmptyMessage="No streams defined for this grade yet."
-                                         ErrorMessage="@_streamsError"
                                          Loading="@(_streams is null)"
                                          ItemTextSelector="s => s.Name"
                                          ItemOnClick="s => OpenStreamEditAsync(s)"

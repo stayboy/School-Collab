@@ -1,19 +1,24 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Admin.Shared.Components
-@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Services
 @using TeacherWithRoleDto = SchoolCollab.Students.Core.DTOs.TeacherWithRoleDto
 @using TeacherDto = SchoolCollab.Students.Application.Services.TeacherDto
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @implements IDialogContentComponent<DialogParameters>
-@inject IDialogService DialogService
+@inject StudentsApiClient Api
+@inject ILogger<GradeTeachersDialog> Logger
 
 @* Full list of teachers linked to a grade, shown from the Teachers section card's
    "View all" anchor (grade-detail-modern-ui-plan.md §0.4). The page owns the
-   API/enrichment and passes the data + action callbacks so this dialog stays
-   thin. Renders the teachers in a FluentDataGrid so each row stays compact; the
-   per-teacher subject+role management (topics + roles + dates) is opened via the
-   shared TeacherSubjectsDialog (which hosts TeacherSubjectRoleFormFields), so the
-   grid rows don't grow a full topic list. *@
+   link/unlink/role/remove callbacks; this dialog owns the per-teacher subject+role
+   management (topics + roles + dates) via the shared TeacherSubjectRoleFormFields.
+
+   UI rules: (1) the teachers render in a FluentDataGrid so rows stay compact;
+   (2) the subject+role editor is an IN-PAGE section toggle (expandable div below
+   the grid), NOT a nested dialog — never open a dialog from another dialog instance.
+   Toggling "Edit subjects" on a row selects that teacher and expands the section. *@
 <div class="teacher-dialog">
     <div class="picker-row">
         <FluentSelect TOption="TeacherDto"
@@ -78,9 +83,9 @@
                 </div>
                 <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
                               IconStart="@FluentIcons.Book"
-                              Title="Edit subjects"
-                              OnClick="() => OpenSubjectsAsync(context)">
-                    Edit
+                              Title="Edit subjects (in-page)"
+                              OnClick="() => ToggleSubjectsAsync(context)">
+                    @(_subjectsTeacherId == context.Id ? "Hide" : "Edit")
                 </FluentButton>
             </TemplateColumn>
             <TemplateColumn Title="">
@@ -89,6 +94,41 @@
                                 UseMenuService="false" />
             </TemplateColumn>
         </FluentDataGrid>
+
+        @* In-page subject+role editor (toggle, NOT a nested dialog). Shown below
+           the grid for the selected teacher; hosts the shared
+           TeacherSubjectRoleFormFields with the teacher's topic+role assignments
+           and dates (open-ended allowed). *@
+        @if (_subjectsTeacherId is { } editId && _subjectsForTeacher is not null)
+        {
+            var editTeacher = Teachers.FirstOrDefault(t => t.Id == editId);
+            <div class="teacher-subjects-section">
+                <div class="teacher-subjects-section__title">
+                    <FluentIcon Value="@FluentIcons.Book" />
+                    <span>Subjects · @(editTeacher is not null ? $"{editTeacher.FirstName} {editTeacher.LastName}" : "teacher")</span>
+                    <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
+                                  IconStart="@FluentIcons.Dismiss"
+                                  Title="Hide"
+                                  OnClick="HideSubjects" />
+                </div>
+                @if (_subjectsError is not null)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error">@_subjectsError</FluentMessageBar>
+                }
+                <TeacherSubjectRoleFormFields Topics="@_allTopics"
+                                              Assignments="_subjectsForTeacher"
+                                              OnToggle="OnSubjectsToggleAsync"
+                                              OnRoleChanged="OnSubjectsRoleAsync"
+                                              OnStartDateChanged="OnSubjectsStartAsync"
+                                              OnEndDateChanged="OnSubjectsEndAsync" />
+                <div class="teacher-subjects-section__actions">
+                    <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small"
+                                  Disabled="@_subjectsSaving" OnClick="SaveSubjectsAsync">
+                        @(_subjectsSaving ? "Saving…" : "Save")
+                    </FluentButton>
+                </div>
+            </div>
+        }
     }
     <div class="dialog-footer">
         <FluentButton Appearance="Appearance.Accent" OnClick="CloseAsync">Close</FluentButton>
@@ -114,6 +154,14 @@
     private TeacherDto? _teacherToAdd;
     private bool _busy;
 
+    // ── In-page subject+role editor (toggle) ──────────────────────────────
+    private Guid? _subjectsTeacherId;
+    private Dictionary<Guid, TeacherTopicAssignment> _subjectsForTeacher = new();
+    private Dictionary<Guid, TeacherTopicAssignment> _subjectsOriginal = new();
+    private TopicDto[]? _allTopics;
+    private bool _subjectsSaving;
+    private string? _subjectsError;
+
     private async Task RoleChangedAsync(TeacherWithRoleDto teacher, Guid? roleId)
     {
         if (RoleChanged is not null) await RoleChanged(teacher, roleId);
@@ -135,29 +183,117 @@
     }
 
     /// <summary>
-    /// Opens the shared TeacherSubjectsDialog (hosting TeacherSubjectRoleFormFields)
-    /// for the row's teacher, so the grid row stays compact while the full
-    /// subject+role management (topics + roles + dates) is edited in a focused
-    /// dialog. Reloads the teacher list on close so the chips refresh.
+    /// Toggles the in-page subject+role editor for a teacher. First open loads
+    /// the topic catalog + the teacher's current topic+role assignments (with
+    /// dates); toggling the same teacher again hides it.
     /// </summary>
-    private async Task OpenSubjectsAsync(TeacherWithRoleDto teacher)
+    private async Task ToggleSubjectsAsync(TeacherWithRoleDto teacher)
     {
-        if (_busy) return;
-        _busy = true;
+        if (_subjectsTeacherId == teacher.Id)
+        {
+            HideSubjects();
+            return;
+        }
+        _subjectsError = null;
         try
         {
-            await DialogService.ShowReadonlyDialogAsync<TeacherSubjectsDialog>(
-                $"Subjects · {teacher.FirstName} {teacher.LastName}",
-                new Dictionary<string, object?>
-                {
-                    { nameof(TeacherSubjectsDialog.TeacherId), teacher.Id },
-                },
-                DialogSize.Medium);
+            _allTopics ??= await Api.ListTopicsAsync() ?? [];
+            var roles = await Api.ListTeacherTopicRolesAsync(teacher.Id) ?? [];
+            _subjectsForTeacher = roles.ToDictionary(
+                r => r.TopicId,
+                r => new TeacherTopicAssignment(r.TopicId, r.RoleCodedValueId, r.StartDate, r.EndDate));
+            _subjectsOriginal = new Dictionary<Guid, TeacherTopicAssignment>(_subjectsForTeacher);
+            _subjectsTeacherId = teacher.Id;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load subjects for teacher {TeacherId}", teacher.Id);
+            _subjectsError = $"Could not load: {ex.Message}";
+            _subjectsTeacherId = teacher.Id;
+        }
+    }
+
+    private void HideSubjects()
+    {
+        _subjectsTeacherId = null;
+        _subjectsForTeacher = new();
+        _subjectsOriginal = new();
+        _subjectsError = null;
+    }
+
+    private Task OnSubjectsToggleAsync(Guid topicId, bool selected)
+    {
+        if (selected)
+        {
+            if (!_subjectsForTeacher.ContainsKey(topicId))
+                _subjectsForTeacher[topicId] = new TeacherTopicAssignment(topicId);
+        }
+        else
+        {
+            _subjectsForTeacher.Remove(topicId);
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task OnSubjectsRoleAsync(Guid topicId, Guid? role)
+    {
+        if (_subjectsForTeacher.TryGetValue(topicId, out var a))
+            _subjectsForTeacher[topicId] = a with { RoleCodedValueId = role };
+        return Task.CompletedTask;
+    }
+
+    private Task OnSubjectsStartAsync(Guid topicId, DateOnly? date)
+    {
+        if (_subjectsForTeacher.TryGetValue(topicId, out var a))
+            _subjectsForTeacher[topicId] = a with { StartDate = date };
+        return Task.CompletedTask;
+    }
+
+    private Task OnSubjectsEndAsync(Guid topicId, DateOnly? date)
+    {
+        if (_subjectsForTeacher.TryGetValue(topicId, out var a))
+            _subjectsForTeacher[topicId] = a with { EndDate = date };
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Persists the in-page subject+role edits for the selected teacher:
+    /// reconciles topic links + roles + dates (start, open-ended end) against
+    /// the original snapshot. Reloads the page's teacher list on success so the
+    /// Subjects chips refresh.
+    /// </summary>
+    private async Task SaveSubjectsAsync()
+    {
+        if (_subjectsSaving || _subjectsTeacherId is not { } teacherId) return;
+        _subjectsSaving = true;
+        _subjectsError = null;
+        try
+        {
+            foreach (var id in _subjectsForTeacher.Keys.Except(_subjectsOriginal.Keys))
+            {
+                var a = _subjectsForTeacher[id];
+                await Api.LinkTeacherTopicAsync(teacherId, id, a.RoleCodedValueId, a.StartDate, a.EndDate);
+            }
+            foreach (var id in _subjectsOriginal.Keys.Except(_subjectsForTeacher.Keys))
+                await Api.UnlinkTeacherTopicAsync(teacherId, id);
+            foreach (var id in _subjectsForTeacher.Keys.Intersect(_subjectsOriginal.Keys))
+            {
+                var a = _subjectsForTeacher[id];
+                var orig = _subjectsOriginal[id];
+                if (a.RoleCodedValueId != orig.RoleCodedValueId || a.StartDate != orig.StartDate || a.EndDate != orig.EndDate)
+                    await Api.SetTeacherTopicRoleAsync(teacherId, id, a.RoleCodedValueId, a.StartDate, a.EndDate);
+            }
             if (OnChanged is not null) await OnChanged();
+            HideSubjects();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save subjects for teacher {TeacherId}", teacherId);
+            _subjectsError = $"Could not save: {ex.Message}";
         }
         finally
         {
-            _busy = false;
+            _subjectsSaving = false;
         }
     }
 

@@ -404,13 +404,18 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_TeachersCard_Wires_ErrorMessage()
+    public void Detail_TeachersCard_Wires_PageErrorAlert()
     {
-        // The Teachers card must surface _teachersError (set by the mutation
-        // handlers / ReloadTeachersAsync) instead of failing silently.
+        // The Teachers card surfaces _teachersError (set by the mutation handlers /
+        // ReloadTeachersAsync) via a PAGE-LEVEL message alert above the card —
+        // the same pattern the Subjects card uses for _topicsError. Not the
+        // SectionCard ErrorMessage param.
         var source = ReadDetailSource();
-        source.Should().Contain("ErrorMessage=\"@_teachersError\"",
-            "the Teachers card wires ErrorMessage to _teachersError");
+        source.Should().Contain("_teachersError",
+            "the Teachers card surfaces _teachersError");
+        source.Should().Contain("FluentMessageBar", "the error renders as a page message bar");
+        source.Should().NotContain("ErrorMessage=\"@_teachersError\"",
+            "the Teachers card does NOT use the SectionCard ErrorMessage param — page alert instead");
     }
 
     [TestMethod]
@@ -505,14 +510,15 @@ public class GradeLevelDetailPageTests : BunitContext
     public void Detail_StreamsCard_RendersErrorMessage_OnLoadFailure()
     {
         var gradeId = Guid.NewGuid();
-        // Invalid JSON makes the streams fetch throw, so the card must surface an
-        // error instead of the misleading "No streams defined" empty state.
+        // Invalid JSON makes the streams fetch throw, so the card must surface a
+        // page-level error alert (the Subjects/Topic card pattern) instead of
+        // failing silently. The card's empty state may still render below the
+        // alert — the alert itself is the contract.
         Register(gradeId, GradeJson(gradeId), streamsJson: "not-json");
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Could not load streams"));
-        cut.Markup.Should().NotContain("No streams defined for this grade yet.",
-            "a load failure must render an error, not the misleading empty state");
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Could not load streams",
+            "a load failure renders a page-level error alert, not a silent empty state"));
     }
 
     [TestMethod]
