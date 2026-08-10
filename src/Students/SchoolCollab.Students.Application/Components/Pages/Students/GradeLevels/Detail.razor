@@ -105,15 +105,21 @@
                             <SectionCard TItem="TeacherWithRoleDto" Title="Teachers"
                                          Icon="@FluentIcons.People"
                                          Count="@(_teachers?.Length ?? 0)"
-                                         OnAddClick="OpenTeachersDialogAsync"
+                                         OnAddClick="OpenTeacherCreateAsync"
                                          OnViewAllClick="OpenTeachersDialogAsync"
                                          ViewAllText="View all teachers"
                                          Items="@(_teachers ?? [])"
                                          EmptyMessage="No teachers linked to this grade yet."
+                                         ErrorMessage="@_teachersError"
                                          Loading="@(_teachers is null)"
                                          ItemTextSelector="t => GetTeacherDisplayName(t)"
                                          ItemMetaSelector="@(t => [ GetTeacherRole(t) ])"
                                          ItemHrefSelector="@(t => $"/students/teachers/{t.Id}")">
+                                <ItemActions Context="t">
+                                    <RowActionsMenu AriaLabel="@($"Actions for {t.FirstName} {t.LastName}")"
+                                                    UseMenuService="false"
+                                                    Actions="@BuildTeacherRowActions(t)" />
+                                </ItemActions>
                             </SectionCard>
                             </FluentGridItem>
 
@@ -805,6 +811,101 @@
         await ReloadTeachersAsync();
     }
 
+    /// <summary>
+    /// Teachers card "Add" affordance — opens the shared TeacherEditDialog in
+    /// Create mode (new teacher). Reloads the card on a non-cancelled result.
+    /// </summary>
+    private async Task OpenTeacherCreateAsync()
+    {
+        if (_disposed) return;
+        await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+            "New Teacher",
+            new Dictionary<string, object?>
+            {
+                { nameof(TeacherEditDialog.TeacherId), (Guid?)null },
+            },
+            DialogSize.Large);
+        if (_disposed) return;
+        await ReloadTeachersAsync();
+    }
+
+    /// <summary>
+    /// Teachers card kebab "Edit" — opens the shared TeacherEditDialog in Edit
+    /// mode for the row's teacher. Reloads the card on a non-cancelled result.
+    /// </summary>
+    private async Task OpenTeacherEditAsync(TeacherWithRoleDto teacher)
+    {
+        if (_disposed) return;
+        await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+            $"Edit Teacher · {teacher.FirstName} {teacher.LastName}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TeacherEditDialog.TeacherId), teacher.Id },
+            },
+            DialogSize.Large);
+        if (_disposed) return;
+        await ReloadTeachersAsync();
+    }
+
+    /// <summary>
+    /// Teachers card kebab "Role" — opens a small role-selection dialog that
+    /// saves the grade-level role via the page-owned OnRoleChangedAsync.
+    /// </summary>
+    private async Task OpenTeacherRoleAsync(TeacherWithRoleDto teacher)
+    {
+        if (_disposed) return;
+        await DialogService.ShowReadonlyDialogAsync<TeacherRoleDialog>(
+            $"Role · {teacher.FirstName} {teacher.LastName}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TeacherRoleDialog.CurrentRoleId), teacher.TeacherRoleCodedValueId },
+                { nameof(TeacherRoleDialog.Save), new Func<Guid?, Task>(roleId => OnRoleChangedAsync(teacher, roleId)) },
+            },
+            DialogSize.Small);
+        if (_disposed) return;
+        await ReloadTeachersAsync();
+    }
+
+    /// <summary>
+    /// Teachers card kebab "Subjects" — opens a focused per-teacher subject+role
+    /// dialog. Reloads the card on close so the Assigned Topics chips refresh.
+    /// </summary>
+    private async Task OpenTeacherSubjectsAsync(TeacherWithRoleDto teacher)
+    {
+        if (_disposed) return;
+        await DialogService.ShowReadonlyDialogAsync<TeacherSubjectsDialog>(
+            $"Subjects · {teacher.FirstName} {teacher.LastName}",
+            new Dictionary<string, object?>
+            {
+                { nameof(TeacherSubjectsDialog.TeacherId), teacher.Id },
+            },
+            DialogSize.Medium);
+        if (_disposed) return;
+        await ReloadTeachersAsync();
+    }
+
+    /// <summary>
+    /// Row kebab for a Teachers-card preview item. The teacher name is the
+    /// primary affordance (navigates to the teacher detail page); the kebab
+    /// holds the secondary actions (Role, Subjects, View profile, Edit) and the
+    /// destructive Remove (unlink from this grade).
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildTeacherRowActions(TeacherWithRoleDto teacher) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Role", () => OpenTeacherRoleAsync(teacher), FluentIcons.Person),
+            RowAction.Callback("Subjects", () => OpenTeacherSubjectsAsync(teacher), FluentIcons.Book),
+            RowAction.Navigate("View profile", $"/students/teachers/{teacher.Id}", FluentIcons.Open),
+            RowAction.Callback("Edit", () => OpenTeacherEditAsync(teacher), FluentIcons.Edit),
+            RowAction.Separator(),
+            RowAction.Callback(
+                "Remove",
+                () => RemoveTeacherAsync(teacher),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: $"Remove teacher '{teacher.FirstName} {teacher.LastName}' from this grade? Only the grade assignment is removed — the teacher stays in the catalog."),
+        };
+
     private async Task RemoveTeacherAsync(TeacherWithRoleDto teacher)
     {
         if (_disposed) return;
@@ -858,12 +959,17 @@
         try
         {
             _teachers = await Api.ListTeachersForGradeLevelAsync(Id) ?? [];
+            _teachersError = null;
         }
         catch (Exception ex)
         {
             if (_disposed) return;
             _teachersError = $"Could not reload teachers: {ex.Message}";
         }
+        // Invoked from child components (the kebab menu, the grade teachers
+        // dialog) whose events re-render THEMSELVES, not this page. Without this,
+        // the SectionCard never receives the refreshed Items after a mutation.
+        if (!_disposed) StateHasChanged();
     }
 
     // ── Students: add (enroll) ───────────────────────────────────────────────

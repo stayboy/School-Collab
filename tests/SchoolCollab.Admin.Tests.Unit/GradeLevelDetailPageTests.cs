@@ -348,6 +348,87 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_TeachersCard_Row_HasKebab_WithActions()
+    {
+        var gradeId = Guid.NewGuid();
+        var teacherId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId), teachersJson: JsonSerializer.Serialize(new[]
+        {
+            TeacherJson(teacherId, "Jane", "Doe", "jane@example.com"),
+        }));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Jane Doe"));
+
+        // The teacher name is the primary affordance (navigates to the teacher
+        // detail page); the kebab hosts the secondary actions + destructive Remove.
+        cut.Find("fluent-button[title=\"Actions for Jane Doe\"]").Click();
+        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToArray();
+        items.Should().Contain("Role", "teachers kebab offers role");
+        items.Should().Contain("Subjects", "teachers kebab offers subjects");
+        items.Should().Contain("View profile", "teachers kebab offers view profile");
+        items.Should().Contain("Edit", "teachers kebab offers edit");
+        items.Should().Contain("Remove", "teachers kebab offers remove");
+    }
+
+    [TestMethod]
+    public void Detail_TeachersCard_Remove_Confirms_AndUnlinks()
+    {
+        var gradeId = Guid.NewGuid();
+        var teacherId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId), teachersJson: JsonSerializer.Serialize(new[]
+        {
+            TeacherJson(teacherId, "Jane", "Doe", "jane@example.com"),
+        }));
+        handler.Map("DELETE", $"/teachers/{teacherId}/grade-levels/{gradeId}", HttpStatusCode.OK, "");
+
+        // Host the page under a FluentDialogProvider so the destructive Remove
+        // confirmation prompt can render.
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Jane Doe"));
+
+        // Open the teacher kebab and click Remove.
+        cut.Find("fluent-button[title=\"Actions for Jane Doe\"]").Click();
+        var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
+        removeItem.Click();
+
+        // The destructive Remove opens a MODAL confirmation dialog.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove teacher 'Jane Doe' from this grade"));
+        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+
+        // Confirm → the teacher is unlinked from this grade (stays in the catalog).
+        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.WaitForAssertion(() => handler.Calls.Should().Contain(c =>
+            c.Method == "DELETE" && c.Url == $"/teachers/{teacherId}/grade-levels/{gradeId}"));
+    }
+
+    [TestMethod]
+    public void Detail_TeachersCard_Wires_ErrorMessage()
+    {
+        // The Teachers card must surface _teachersError (set by the mutation
+        // handlers / ReloadTeachersAsync) instead of failing silently.
+        var source = ReadDetailSource();
+        source.Should().Contain("ErrorMessage=\"@_teachersError\"",
+            "the Teachers card wires ErrorMessage to _teachersError");
+    }
+
+    [TestMethod]
+    public void Detail_TeachersCard_Add_OpensTeacherCreateDialog()
+    {
+        var source = ReadDetailSource();
+
+        // The Teachers card Add button must open the shared TeacherEditDialog in
+        // Create mode (new teacher), not just the link-existing GradeTeachersDialog.
+        source.Should().Contain("OnAddClick=\"OpenTeacherCreateAsync\"",
+            "the Teachers card Add button opens the create dialog");
+        source.Should().Contain("ShowReadonlyDialogAsync<TeacherEditDialog>",
+            "the create handler opens TeacherEditDialog");
+        source.Should().Contain("nameof(TeacherEditDialog.TeacherId), (Guid?)null",
+            "the create handler passes a null TeacherId for create mode");
+    }
+
+    [TestMethod]
     public void Detail_StudentsCard_ShowsEmptyState_WhenNoStudents()
     {
         var gradeId = Guid.NewGuid();
@@ -571,7 +652,7 @@ public class GradeLevelDetailPageTests : BunitContext
         // Each card uses the SectionCard component with add button parameters.
         source.Should().Contain("<SectionCard", "SectionCard component is used for all three cards");
         source.Should().Contain("OnAddClick=\"OpenTopicCreateAsync\"", "Subjects card has add callback");
-        source.Should().Contain("OnAddClick=\"OpenTeachersDialogAsync\"", "Teachers card has add callback");
+        source.Should().Contain("OnAddClick=\"OpenTeacherCreateAsync\"", "Teachers card has add callback");
         source.Should().Contain("OnAddClick=\"OpenAddStudentsAsync\"", "Students card has add callback");
         source.Should().Contain("AddTitle=\"Add student\"", "Students card has add title");
         source.Should().Contain("AddAriaLabel=\"Add student\"", "Students card has add aria-label");

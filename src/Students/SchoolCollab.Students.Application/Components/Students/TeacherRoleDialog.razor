@@ -1,0 +1,48 @@
+@* TeacherRoleDialog — small role-selection dialog for the Teachers card kebab
+   "Role" action (section-card-lessons-adoption.md §9 dec 5). Shows a single
+   grade-level role dropdown (reusing GradeTeachersDialog's CodedValueDropdown
+   binding) and saves via a page-owned callback so the page keeps ownership of
+   the SetTeacherGradeLevelRoleAsync call. *@
+@implements IDialogContentComponent<DialogParameters>
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Admin.Shared.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="teacher-role-dialog">
+    <FormRow Label="Role">
+        <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
+                            @bind-SelectedId="_roleId"
+                            Placeholder="No role" />
+    </FormRow>
+    <div class="dialog-footer">
+        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+        <FluentButton Appearance="Appearance.Accent" OnClick="SaveAsync" class="ms-2">Save</FluentButton>
+    </div>
+</div>
+
+@code {
+    /// <summary>The teacher's current grade-level role (to prefill the dropdown).</summary>
+    [Parameter] public Guid? CurrentRoleId { get; set; }
+
+    /// <summary>Page-owned save callback (invoked with the chosen role id).</summary>
+    [Parameter] public Func<Guid?, Task>? Save { get; set; }
+
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    public DialogParameters Content { get; set; } = default!;
+
+    private Guid? _roleId;
+
+    protected override void OnInitialized()
+    {
+        _roleId = CurrentRoleId;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Save is not null) await Save(_roleId);
+        if (Dialog is not null) await Dialog.CloseAsync();
+    }
+
+    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+}
