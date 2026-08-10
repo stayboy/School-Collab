@@ -21,7 +21,7 @@
     <EditForm Model="_form" OnValidSubmit="HandleSubmitAsync">
         <FluentStack Orientation="Orientation.Vertical" Spacing="3">
             <FluentDatePicker Value="@ExitDateAsDateTime" ValueChanged="@OnExitDateChanged" Label="Exit date" Required="true" />
-            <FluentTextArea @bind-Value="_form.Reason" Label="Reason" Placeholder="Optional — why is this student being withdrawn?" />
+            <FluentTextArea @bind-Value="_form.Reason" Label="Reason" Required="true" Placeholder="Why is this student being withdrawn?" />
         </FluentStack>
 
         <DialogShellFooter Saving="@Saving"
@@ -71,6 +71,11 @@
         if (_form.ExitDate is null)
         {
             Error = "Pick an exit date before withdrawing.";
+            return null;
+        }
+        if (string.IsNullOrWhiteSpace(_form.Reason))
+        {
+            Error = "Enter a reason for the withdrawal.";
             return null;
         }
 
