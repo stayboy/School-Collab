@@ -584,6 +584,15 @@ appends to the hub; the drawer's display chat reads from the hub via its
 `ExternalMessages` parameter and re-renders when the hub's `Changed` event
 fires.
 
+### Never open a dialog from another dialog instance
+
+Do **not** open a dialog (`ShowReadonlyDialogAsync` / `ShowShellDialogAsync` /
+`ShowDialogAsync`) from inside another dialog component (`IDialogContentComponent`).
+When a dialog needs to expose a sub-editor (e.g. a per-row manager inside a list
+dialog), use an **in-page section (`<div>`) toggle** that expands/collapses the
+sub-editor inline within the same dialog — not a nested dialog. This keeps the
+interaction in one dialog surface and avoids stacked overlays.
+
 ### Edit form layout with FluentUI
 
 Use FluentUI's own layout components for edit/create forms:
