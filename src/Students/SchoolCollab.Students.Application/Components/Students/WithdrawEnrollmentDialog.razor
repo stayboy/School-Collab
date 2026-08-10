@@ -57,6 +57,7 @@
         _form.ExitDate = Model.DefaultExitDate.HasValue
             ? Model.DefaultExitDate.Value.ToDateTime(TimeOnly.MinValue)
             : DateTime.UtcNow;
+        _form.Reason = Model.Reason;
     }
 
     protected override async Task<WithdrawEnrollmentResult?> SubmitAsync(WithdrawEnrollmentModel model)

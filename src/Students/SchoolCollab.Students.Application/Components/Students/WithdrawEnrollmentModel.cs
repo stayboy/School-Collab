@@ -9,7 +9,8 @@ public sealed record WithdrawEnrollmentModel(
     Guid EnrollmentId,
     string? StudentName = null,
     string? GradeName = null,
-    DateOnly? DefaultExitDate = null);
+    DateOnly? DefaultExitDate = null,
+    string? Reason = null);
 
 /// <summary>Result of the withdraw-enrollment dialog.</summary>
 public sealed record WithdrawEnrollmentResult(bool Success);
