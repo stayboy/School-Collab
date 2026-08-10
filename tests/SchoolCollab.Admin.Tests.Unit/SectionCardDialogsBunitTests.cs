@@ -122,13 +122,21 @@ public class SectionCardDialogsBunitTests : BunitContext
         var handler = new ScriptedHandler();
         handler.Map("/students/topics", HttpStatusCode.OK, JsonArray(TopicJson(topicId, "Mathematics", "MATH")));
         handler.Map($"/teachers/{teacherId}/topics/roles", HttpStatusCode.OK, JsonArray(
-            new Dictionary<string, object?> { ["topicId"] = topicId, ["roleCodedValueId"] = roleId }));
+            new Dictionary<string, object?>
+            {
+                ["topicId"] = topicId, ["roleCodedValueId"] = roleId,
+                ["startDate"] = "2026-01-01", ["endDate"] = (string?)null,
+            }));
         Register(handler);
 
         var cut = Render<TeacherSubjectsDialog>(p => p.Add(x => x.TeacherId, teacherId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics",
             "the dialog loads the topic catalog and renders each topic"));
+        cut.Markup.Should().Contain("Start",
+            "the assignment start date picker renders");
+        cut.Markup.Should().Contain("End (open-ended)",
+            "the assignment end date picker renders (open-ended allowed)");
         cut.Markup.Should().Contain("Save", "the dialog renders its Save action");
     }
 
