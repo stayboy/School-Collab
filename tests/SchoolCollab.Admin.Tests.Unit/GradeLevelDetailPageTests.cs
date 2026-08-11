@@ -259,34 +259,6 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_TopicsCard_ListsPreview_AndCount()
-    {
-        var gradeId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
-        Register(
-            gradeId,
-            GradeJson(gradeId),
-            topicsCatalogJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-            {
-                ["id"] = topicId, ["codedValueId"] = (Guid?)null, ["code"] = "MATH",
-                ["name"] = "Mathematics", ["description"] = (string?)null,
-                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-            } }),
-            assignmentsJson: JsonSerializer.Serialize(new[] { AssignmentJson(Guid.NewGuid(), topicId, gradeId) }),
-            curriculumJson: JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-            {
-                ["topicId"] = topicId, ["name"] = "Mathematics", ["code"] = "MATH",
-                ["strandCount"] = 2, ["lessonCount"] = 3,
-            } }));
-
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all subjects (1)"));
-        cut.Markup.Should().Contain("Mathematics", "top-15 preview lists the topic name");
-        cut.Markup.Should().Contain("2 strands", "topic strand count renders");
-        cut.Markup.Should().Contain("3 lessons", "topic lesson count renders");
-    }
-
-    [TestMethod]
     public void Detail_TopicsCard_Row_HasKebab_WithSecondaryActions()
     {
         var gradeId = Guid.NewGuid();
@@ -335,25 +307,6 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_TeachersCard_ListsPreview_AndCount()
-    {
-        var gradeId = Guid.NewGuid();
-        var teacherId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
-        Register(
-            gradeId,
-            GradeJson(gradeId),
-            teachersJson: JsonSerializer.Serialize(new[]
-            {
-                TeacherJson(teacherId, "Jane", "Doe", "jane@example.com", roleId: null, (topicId, "Mathematics")),
-            }));
-
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all teachers (1)"));
-        cut.Markup.Should().Contain("Jane Doe", "top-15 preview lists the teacher name");
-    }
-
-    [TestMethod]
     public void Detail_TeachersCard_ShowsEmptyState_WhenNone()
     {
         var gradeId = Guid.NewGuid();
@@ -365,36 +318,6 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
-    public void Detail_StudentsCard_ListsStudents_WithDemographics()
-    {
-        var gradeId = Guid.NewGuid();
-        var studentId = Guid.NewGuid();
-        var genderId = Guid.NewGuid();
-        var (handler, _) = Register(
-            gradeId,
-            GradeJson(gradeId),
-            studentsJson: JsonSerializer.Serialize(new[]
-            {
-                StudentJson(studentId, "STU001", "Ada", "Lovelace", genderId, new DateOnly(2015, 3, 10)),
-            }));
-        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[] { new Dictionary<string, object?>
-            {
-                ["id"] = genderId, ["code"] = "GENDERS_FEMALE", ["name"] = "Female",
-                ["parentId"] = (Guid?)null, ["parentCode"] = (string?)null,
-                ["description"] = (string?)null, ["isDisabled"] = false,
-                ["displayOrder"] = 0, ["createdAt"] = DateTimeOffset.UnixEpoch,
-                ["updatedAt"] = DateTimeOffset.UnixEpoch, ["attributes"] = Array.Empty<object>(),
-                ["childCount"] = 0,
-            } }));
-
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all students (1)"));
-        cut.Markup.Should().Contain("Ada Lovelace", "top-15 preview lists the student name");
-        cut.Markup.Should().Contain("Female", "demographics suffix carries the enriched gender");
-    }
-
-    [TestMethod]
     public void Detail_StudentsCard_ShowsEmptyState_WhenNoStudents()
     {
         var gradeId = Guid.NewGuid();
@@ -403,38 +326,6 @@ public class GradeLevelDetailPageTests : BunitContext
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all students (0)"));
         cut.Markup.Should().Contain("No active students in this grade for the current period.");
-    }
-
-    [TestMethod]
-    public void Detail_StreamsCard_ListsStreams()
-    {
-        var gradeId = Guid.NewGuid();
-        var (handler, _) = Register(gradeId, GradeJson(gradeId));
-        handler.Map("/api/coded-values/by-parent?parentCode=GRSTREAMS", HttpStatusCode.OK,
-            JsonSerializer.Serialize(new[]
-            {
-                new Dictionary<string, object?>
-                {
-                    ["id"] = Guid.NewGuid(), ["code"] = "GR5A", ["name"] = "Grade 5A",
-                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTREAMS",
-                    ["isDisabled"] = false, ["displayOrder"] = 0,
-                    ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-                    ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
-                },
-                new Dictionary<string, object?>
-                {
-                    ["id"] = Guid.NewGuid(), ["code"] = "GR5B", ["name"] = "Grade 5B",
-                    ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTREAMS",
-                    ["isDisabled"] = false, ["displayOrder"] = 1,
-                    ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
-                    ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
-                },
-            }));
-
-        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 5A"));
-        cut.Markup.Should().Contain("Grade 5B", "stream card lists both grade streams");
-        cut.Markup.Should().Contain("Manage streams", "stream card offers a manage affordance");
     }
 
     [TestMethod]
@@ -588,6 +479,38 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("OnAddClick=\"OpenAddStudentsAsync\"", "Students card has add callback");
         source.Should().Contain("AddTitle=\"Add student\"", "Students card has add title");
         source.Should().Contain("AddAriaLabel=\"Add student\"", "Students card has add aria-label");
+    }
+
+    [TestMethod]
+    public void Detail_SectionCards_Wire_ItemSelectors_And_PrimaryAffordances()
+    {
+        // The SectionCard rendering mechanics (text/meta/href/click/tooltip) are
+        // covered once in SectionCardTests.cs. These source-inspection assertions
+        // verify the per-card WIRING — which selector / primary affordance each
+        // card binds — so a card can't silently regress to a different selector.
+        var source = ReadDetailSource();
+
+        // Subjects card: topic name + strand/lesson counts; name opens the edit dialog.
+        source.Should().Contain("ItemTextSelector=\"t => t.Name\"", "Subjects card binds the topic name");
+        source.Should().Contain("ItemMetaSelector=\"@(t => [ $", "Subjects card binds strand/lesson counts");
+        source.Should().Contain("ItemOnClick=\"t => OpenTopicEditAsync(t)\"", "Subjects card name opens the topic edit dialog");
+        source.Should().Contain("ItemNameTitle=\"Edit topic\"", "Subjects card advertises the edit affordance");
+
+        // Teachers card: display name + role; name navigates to the teacher detail page.
+        source.Should().Contain("ItemTextSelector=\"t => GetTeacherDisplayName(t)\"", "Teachers card binds the teacher display name");
+        source.Should().Contain("ItemMetaSelector=\"@(t => [ GetTeacherRole(t) ])\"", "Teachers card binds the role meta");
+        source.Should().Contain("ItemHrefSelector=\"@(t => $\"/students/teachers/{t.Id}\")\"", "Teachers card name navigates to the teacher detail page");
+
+        // Students card: full name + demographics; name navigates to the student view page.
+        source.Should().Contain("ItemTextSelector=\"@(st => $", "Students card binds the student full name");
+        source.Should().Contain("ItemMetaSelector=\"@(st => [ GetStudentDemographics(st) ])\"", "Students card binds demographics meta");
+        source.Should().Contain("ItemHrefSelector=\"@(st => $\"/students/{st.Id}\")\"", "Students card name navigates to the student view page");
+        source.Should().Contain("ItemNameTitle=\"View student\"", "Students card advertises the view affordance");
+
+        // Streams card: stream name; name opens the stream edit dialog.
+        source.Should().Contain("ItemTextSelector=\"s => s.Name\"", "Streams card binds the stream name");
+        source.Should().Contain("ItemOnClick=\"s => OpenStreamEditAsync(s)\"", "Streams card name opens the stream edit dialog");
+        source.Should().Contain("ItemNameTitle=\"Edit stream\"", "Streams card advertises the edit affordance");
     }
 
     [TestMethod]
