@@ -836,19 +836,18 @@
     private async Task OpenTeacherCreateAsync()
     {
         if (_disposed || _grade is null) return;
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
-            "New Teacher",
-            new Dictionary<string, object?>
+        var saved = await DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
+            new TeacherEditDialog.TeacherFormModel
             {
-                { nameof(TeacherEditDialog.TeacherId), (Guid?)null },
+                TeacherId = null,
                 // Link the new teacher to the current grade so an "Add teacher"
                 // on the grade page actually shows up on the card after save.
-                { nameof(TeacherEditDialog.InitialGradeLevelIds), new[] { Id } },
+                ContextGradeLevelId = Id,
+                ContextGradeLevelName = _grade.Name,
             },
+            "New Teacher",
             DialogSize.Large);
-        if (_disposed) return;
-        var result = await dialog.Result;
-        if (_disposed || result.Cancelled) return;
+        if (_disposed || saved is null) return;
         await ReloadTeachersAsync();
     }
 
@@ -859,16 +858,16 @@
     private async Task OpenTeacherEditAsync(TeacherWithRoleDto teacher)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
-            $"Edit Teacher · {teacher.FirstName} {teacher.LastName}",
-            new Dictionary<string, object?>
+        var saved = await DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
+            new TeacherEditDialog.TeacherFormModel
             {
-                { nameof(TeacherEditDialog.TeacherId), teacher.Id },
+                TeacherId = teacher.Id,
+                ContextGradeLevelId = Id,
+                ContextGradeLevelName = _grade?.Name,
             },
+            $"Edit Teacher · {teacher.FirstName} {teacher.LastName}",
             DialogSize.Large);
-        if (_disposed) return;
-        var result = await dialog.Result;
-        if (_disposed || result.Cancelled) return;
+        if (_disposed || saved is null) return;
         await ReloadTeachersAsync();
     }
 

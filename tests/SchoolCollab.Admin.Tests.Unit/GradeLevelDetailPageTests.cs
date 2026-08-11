@@ -427,10 +427,12 @@ public class GradeLevelDetailPageTests : BunitContext
         // Create mode (new teacher), not just the link-existing GradeTeachersDialog.
         source.Should().Contain("OnAddClick=\"OpenTeacherCreateAsync\"",
             "the Teachers card Add button opens the create dialog");
-        source.Should().Contain("ShowReadonlyDialogAsync<TeacherEditDialog>",
-            "the create handler opens TeacherEditDialog");
-        source.Should().Contain("nameof(TeacherEditDialog.TeacherId), (Guid?)null",
-            "the create handler passes a null TeacherId for create mode");
+        source.Should().Contain("ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>",
+            "the create handler opens TeacherEditDialog via the dialog shell");
+        source.Should().Contain("ContextGradeLevelId = Id",
+            "the create handler passes the current grade as the context grade");
+        source.Should().Contain("ContextGradeLevelName = _grade.Name",
+            "the create handler passes the context grade name");
     }
 
     [TestMethod]

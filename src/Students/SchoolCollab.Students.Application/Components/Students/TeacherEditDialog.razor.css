@@ -1,6 +1,11 @@
 .teacher-dialog-section {
     margin-bottom: 1rem;
 }
+/* Vertical rhythm between stacked FormRow inputs (FormRow itself adds no
+   inter-row margin — the dialog owns the spacing). */
+.teacher-dialog ::deep .form-row + .form-row {
+    margin-top: 0.75rem;
+}
 .teacher-dialog-section-title {
     display: flex;
     align-items: center;
@@ -8,20 +13,51 @@
     font-weight: 600;
     margin-bottom: 0.5rem;
 }
-.topic-role-list,
-.check-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-    max-height: 180px;
-    overflow-y: auto;
+/* Subjects / Grade-levels section body is indented to the same x as the
+   FormRow input column (180px label + 12px gap) so the comboboxes and
+   selected rows align with the profile input fields above. */
+.section-body {
+    margin-left: 192px;
 }
-.topic-role-row,
-.check-row {
+/* Comboboxes fill their column so they align with the full-width text fields. */
+.teacher-dialog ::deep fluent-combobox {
+    width: 100%;
+}
+/* Inline First/Last name pair under one "Name" label. */
+.name-fields {
+    display: flex;
+    gap: 0.5rem;
+    width: 100%;
+}
+.name-fields ::deep fluent-text-field {
+    flex: 1;
+    min-width: 0;
+}
+/* Selected multi-value items (qualifications / grade levels) as chips.
+   Chips render BELOW the add-picker combobox, so separate them from it. */
+.chip-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.5rem;
+}
+/* One row per assigned subject: name + role dropdown + remove button. */
+.subject-row {
     display: flex;
     align-items: center;
     gap: 0.6rem;
+    margin-bottom: 0.4rem;
 }
-.check-name {
+.subject-name {
     flex: 1;
+    min-width: 0;
+}
+/* Icon-only remove button needs a square footprint. */
+.subject-row ::deep fluent-button {
+    min-width: 2rem;
+    min-height: 2rem;
+    padding: 0;
+}
+.grade-context-note {
+    margin: 0.25rem 0 0.75rem;
 }
