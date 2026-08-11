@@ -5,14 +5,17 @@
 <FluentCard class="section-card-wrapper" AreaRestricted="false">
     <div class="section-card @Class">
         <div class="section-card__header">
-        <FluentIcon Value="@Icon" />
+        @if (Icon is { } icon)
+        {
+            <FluentIcon Value="@icon" />
+        }
         <span class="section-card__title">@Title</span>
         <span class="section-card__count">@Count</span>
         @if (ShowAddButton)
         {
             <FluentButton Appearance="Appearance.Stealth" Size="ButtonSize.Small"
                         IconStart="@AddIcon" Title="@AddTitle"
-                        AriaLabel="@AddAriaLabel" OnClick="OnAddClick" />
+                        AriaLabel="@AddAriaLabel" OnClick="HandleAddClickAsync" />
         }
     </div>
     <div class="section-card__body">
@@ -115,7 +118,7 @@
     /// <summary>
     /// Icon to display in the header.
     /// </summary>
-    [Parameter] public Icon Icon { get; set; }
+    [Parameter] public Icon? Icon { get; set; }
 
     /// <summary>
     /// Item count to display in the header badge.
@@ -229,5 +232,13 @@
     /// Callback for "Add" button click.
     /// </summary>
     [Parameter, EditorRequired] public Func<Task>? OnAddClick { get; set; }
+
+    /// <summary>
+    /// Invokes <see cref="OnAddClick"/> when the header Add button is clicked.
+    /// The callback is optional (a card may show the button without wiring an
+    /// action), so a missing callback resolves to a no-op task instead of a
+    /// null reference at the event-binder level.
+    /// </summary>
+    private Task HandleAddClickAsync() => OnAddClick?.Invoke() ?? Task.CompletedTask;
 }
 
