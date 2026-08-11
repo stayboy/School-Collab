@@ -1,6 +1,7 @@
 @page "/students/teachers/{Id:guid}"
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Application.Components.Students
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Services
@@ -170,17 +171,12 @@
     private async Task OpenEditAsync()
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+        var saved = await DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
+            new TeacherEditDialog.TeacherFormModel { TeacherId = Id },
             "Edit Teacher",
-            new Dictionary<string, object?>
-            {
-                { nameof(TeacherEditDialog.TeacherId), Id },
-            },
             DialogSize.Large);
-        var result = await dialog.Result;
-        if (_disposed || result.Cancelled) return;
-        if (result.Data is Guid)
-            Nav.NavigateTo($"/students/teachers/{Id}");
+        if (_disposed || saved is null) return;
+        Nav.NavigateTo($"/students/teachers/{Id}");
     }
 
     public void Dispose()
