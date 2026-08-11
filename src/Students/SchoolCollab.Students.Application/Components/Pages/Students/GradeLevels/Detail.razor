@@ -719,16 +719,18 @@
         // The unified Strands editor shows root strands AND their lessons (lessons
         // are parented strands — strand-lesson-unification-plan.md), so this dialog
         // is the single place to manage a topic's curriculum.
-        await DialogService.ShowReadonlyDialogAsync<TopicStrandsDialog>(
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TopicStrandsDialog>(
             $"Strands · {topic.Name}",
             new Dictionary<string, object?>
             {
                 { nameof(TopicStrandsDialog.TopicId), topic.TopicId },
                 { nameof(TopicStrandsDialog.TopicName), topic.Name },
+                // The editor mutates strands/lessons; refresh the card once it closes.
+                { nameof(TopicStrandsDialog.OnChanged), new Func<Task>(ReloadAssignedTopicsAsync) },
             },
             DialogSize.Medium);
         if (_disposed) return;
-        await ReloadAssignedTopicsAsync();
+        await dialog.Result;
     }
 
     // Open the topic edit dialog (rename / display order). Reload the
@@ -772,17 +774,19 @@
     // Teachers tab (Assigned Topics chips) once the dialog closes.
     private async Task OpenTopicTeachersAsync(GradeTopicCurriculumDto topic)
     {
-        await DialogService.ShowReadonlyDialogAsync<TopicTeachersDialog>(
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TopicTeachersDialog>(
             $"Teachers · {topic.Name}",
             new Dictionary<string, object?>
             {
                 { nameof(TopicTeachersDialog.TopicId), topic.TopicId },
                 { nameof(TopicTeachersDialog.TopicName), topic.Name },
                 { nameof(TopicTeachersDialog.AvailableTeachers), _teachers ?? [] },
+                // The dialog mutates teacher-topic links; refresh the card as it does.
+                { nameof(TopicTeachersDialog.OnChanged), new Func<Task>(ReloadTeachersAsync) },
             },
             DialogSize.Medium);
         if (_disposed) return;
-        await ReloadTeachersAsync();
+        await dialog.Result;
     }
 
     // ── Teachers: link / remove / role / topics ────────────────────────────
@@ -831,15 +835,20 @@
     /// </summary>
     private async Task OpenTeacherCreateAsync()
     {
-        if (_disposed) return;
-        await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+        if (_disposed || _grade is null) return;
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
             "New Teacher",
             new Dictionary<string, object?>
             {
                 { nameof(TeacherEditDialog.TeacherId), (Guid?)null },
+                // Link the new teacher to the current grade so an "Add teacher"
+                // on the grade page actually shows up on the card after save.
+                { nameof(TeacherEditDialog.InitialGradeLevelIds), new[] { Id } },
             },
             DialogSize.Large);
         if (_disposed) return;
+        var result = await dialog.Result;
+        if (_disposed || result.Cancelled) return;
         await ReloadTeachersAsync();
     }
 
@@ -850,7 +859,7 @@
     private async Task OpenTeacherEditAsync(TeacherWithRoleDto teacher)
     {
         if (_disposed) return;
-        await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
             $"Edit Teacher · {teacher.FirstName} {teacher.LastName}",
             new Dictionary<string, object?>
             {
@@ -858,6 +867,8 @@
             },
             DialogSize.Large);
         if (_disposed) return;
+        var result = await dialog.Result;
+        if (_disposed || result.Cancelled) return;
         await ReloadTeachersAsync();
     }
 
@@ -868,7 +879,7 @@
     private async Task OpenTeacherRoleAsync(TeacherWithRoleDto teacher)
     {
         if (_disposed) return;
-        await DialogService.ShowReadonlyDialogAsync<TeacherRoleDialog>(
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherRoleDialog>(
             $"Role · {teacher.FirstName} {teacher.LastName}",
             new Dictionary<string, object?>
             {
@@ -877,7 +888,9 @@
             },
             DialogSize.Small);
         if (_disposed) return;
-        await ReloadTeachersAsync();
+        // The Save callback (OnRoleChangedAsync) already reloads the card; nothing
+        // to do here once the dialog closes.
+        await dialog.Result;
     }
 
     /// <summary>
@@ -887,15 +900,17 @@
     private async Task OpenTeacherSubjectsAsync(TeacherWithRoleDto teacher)
     {
         if (_disposed) return;
-        await DialogService.ShowReadonlyDialogAsync<TeacherSubjectsDialog>(
+        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherSubjectsDialog>(
             $"Subjects · {teacher.FirstName} {teacher.LastName}",
             new Dictionary<string, object?>
             {
                 { nameof(TeacherSubjectsDialog.TeacherId), teacher.Id },
+                // The dialog mutates subject+role links; refresh the card once it saves.
+                { nameof(TeacherSubjectsDialog.OnChanged), new Func<Task>(ReloadTeachersAsync) },
             },
             DialogSize.Medium);
         if (_disposed) return;
-        await ReloadTeachersAsync();
+        await dialog.Result;
     }
 
     /// <summary>
@@ -1007,12 +1022,43 @@
     private async Task OpenStudentCreateAsync()
     {
         if (_disposed) return;
-        await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
+        var dialog = await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
             "New Student",
             new Dictionary<string, object?>(),
             DialogSize.Large);
         if (_disposed) return;
-        await ReloadStudentsAsync();
+        var result = await dialog.Result;
+        if (_disposed || result.Cancelled || result.Data is not Guid studentId) return;
+        try
+        {
+            // The card lists students enrolled in THIS grade, so enrol the new
+            // student in its active period (mirrors how "Add teacher" links the
+            // new teacher to the grade). Otherwise the new student would never
+            // appear on the card.
+            var periods = await Api.ListPeriodsAsync() ?? [];
+            var active = periods
+                .Where(p => string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(p => p.StartDate)
+                .FirstOrDefault();
+            if (active is null)
+            {
+                _studentsError = "No active period is open to enrol the new student in.";
+                return;
+            }
+            await Api.EnrollStudentAsync(new EnrollStudentRequest(
+                StudentId: studentId,
+                PeriodId: active.Id,
+                GradeLevelId: Id,
+                StreamCodedValueId: null,
+                EnrolledOn: DateOnly.FromDateTime(DateTime.UtcNow)));
+            if (_disposed) return;
+            await ReloadStudentsAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _studentsError = $"Could not enrol the new student: {ex.Message}";
+        }
     }
 
     /// <summary>
@@ -1022,7 +1068,7 @@
     private async Task OpenStudentEditAsync(StudentDto student)
     {
         if (_disposed) return;
-        await DialogService.ShowReadonlyDialogAsync<StudentEditDialog>(
+        var dialog = await DialogService.ShowReadonlyDialogAsync<StudentEditDialog>(
             $"Edit Student · {student.FirstName} {student.LastName}",
             new Dictionary<string, object?>
             {
@@ -1030,6 +1076,8 @@
             },
             DialogSize.Large);
         if (_disposed) return;
+        var result = await dialog.Result;
+        if (_disposed || result.Cancelled) return;
         await ReloadStudentsAsync();
     }
 

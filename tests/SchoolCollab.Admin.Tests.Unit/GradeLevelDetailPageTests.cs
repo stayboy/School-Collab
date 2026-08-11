@@ -434,6 +434,62 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_TeachersCard_Add_Click_OpensTeacherCreateDialog()
+    {
+        // BEHAVIORAL check (vs the source-only test above): clicking the Teachers
+        // card Add button must actually open the shared TeacherEditDialog in Create
+        // mode. This is the flow the source-inspection test never executes.
+        var gradeId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId));
+
+        // Endpoints the TeacherEditDialog hits on init (create mode).
+        handler.Map("GET", "/students/grade-levels", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/api/coded-values/by-parent?parentCode=QUALIF", HttpStatusCode.OK, "[]");
+
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Teachers"));
+
+        // The Subjects card (1st) and Teachers card (2nd) both use the SectionCard
+        // default AddTitle="Add"; Students/Streams use distinct titles. So the
+        // Teachers card's Add button is the 2nd "Add" button inside a section card.
+        cut.FindAll("fluent-card.section-card-wrapper fluent-button[title=\"Add\"]")[1].Click();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain(
+            "Create Teacher",
+            "clicking Add on the Teachers card opens the shared TeacherEditDialog in create mode"));
+    }
+
+    [TestMethod]
+    public void Detail_StudentsCard_Edit_Click_OpensStudentEditDialog()
+    {
+        // BEHAVIORAL check: clicking the Students card kebab Edit must open the
+        // shared StudentEditDialog pre-loaded with the row's student.
+        var gradeId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId), studentsJson: JsonSerializer.Serialize(new[]
+        {
+            StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10)),
+        }));
+        handler.Map("GET", $"/students/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10))));
+
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada Lovelace"));
+
+        cut.Find("fluent-button[title=\"Actions for Ada Lovelace\"]").Click();
+        var editItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Edit"));
+        editItem.Click();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain(
+            "Save Changes",
+            "clicking Edit on the Students card opens the shared StudentEditDialog"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain(
+            "Ada", "the edit dialog is pre-loaded with the selected student"));
+    }
+
+    [TestMethod]
     public void Detail_StudentsCard_ShowsEmptyState_WhenNoStudents()
     {
         var gradeId = Guid.NewGuid();

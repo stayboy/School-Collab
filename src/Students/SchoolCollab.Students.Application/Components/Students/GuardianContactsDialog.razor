@@ -139,7 +139,7 @@
     /// contract for the two-type-arg <c>IDialogService.ShowDialogAsync</c>
     /// overload used by <c>ShowReadonlyDialogAsync</c>. The dialog ignores
     /// the assigned reference and reads everything via <c>[Parameter]</c>.</summary>
-    public DialogParameters Content { get; set; } = default!;
+    [Parameter] public DialogParameters Content { get; set; } = default!;
 
     private List<ContactDto> _contacts = new();
     private bool _loading;

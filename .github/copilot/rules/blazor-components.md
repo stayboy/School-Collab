@@ -584,6 +584,15 @@ appends to the hub; the drawer's display chat reads from the hub via its
 `ExternalMessages` parameter and re-renders when the hub's `Changed` event
 fires.
 
+### Never open a dialog from another dialog instance
+
+Do **not** open a dialog (`ShowReadonlyDialogAsync` / `ShowShellDialogAsync` /
+`ShowDialogAsync`) from inside another dialog component (`IDialogContentComponent`).
+When a dialog needs to expose a sub-editor (e.g. a per-row manager inside a list
+dialog), use an **in-page section (`<div>`) toggle** that expands/collapses the
+sub-editor inline within the same dialog — not a nested dialog. This keeps the
+interaction in one dialog surface and avoids stacked overlays.
+
 ### Edit form layout with FluentUI
 
 Use FluentUI's own layout components for edit/create forms:
@@ -669,3 +678,12 @@ general Blazor pattern, not just a dialog concern.
 - [ ] The shared component binds to the interface, not a concrete model.
 - [ ] Form-specific extras stay in the owning form, below the shared fields.
 - [ ] Build passes; both forms render the same fields.
+
+## SectionCard (grade-detail section cards)
+
+The rules for the shared `SectionCard` component (kebab actions, page message
+alerts for error state, reload-after-mutation `StateHasChanged()`, shared-form-fields
+dialogs, no-nested-dialogs / in-page section toggle, topic+role assignment dates)
+live in **`.github/copilot/rules/section-card.md`** — see that file. (Split out to
+keep this file from overflowing; follow the same split-file pattern for other
+component-specific rule sets.)
