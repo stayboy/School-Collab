@@ -28,14 +28,14 @@ public sealed class LinkTeacherGradeLevelHandler(
         if (await gradeLevelRepository.GetAsync(command.GradeLevelId, cancellationToken) is null)
             throw new GradeLevelNotFoundException(command.GradeLevelId);
 
-        if (await repository.GetGradeLevelLinkAsync(command.TeacherId, command.GradeLevelId, cancellationToken) is not null)
+        if (await repository.GetGradeLevelLinkAsync(command.TeacherId, command.GradeLevelId, command.TopicId, cancellationToken) is not null)
             throw new TeacherLinkAlreadyExistsException(command.TeacherId, command.GradeLevelId);
 
-        var link = TeacherGradeLevel.Create(command.TeacherId, command.GradeLevelId, command.TeacherRoleCodedValueId)
+        var link = TeacherGradeLevel.Create(command.TeacherId, command.GradeLevelId, command.TopicId, command.TeacherRoleCodedValueId)
             .WithTenant(tenantProvider);
         await repository.AddGradeLevelAsync(link, cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);
 
-        logger.LogInformation("Grade level {GradeLevelId} linked to teacher {TeacherId}", command.GradeLevelId, command.TeacherId);
+        logger.LogInformation("Grade level {GradeLevelId} (subject {TopicId}) linked to teacher {TeacherId}", command.GradeLevelId, command.TopicId, command.TeacherId);
     }
 }

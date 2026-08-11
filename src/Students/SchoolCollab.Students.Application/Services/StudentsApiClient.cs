@@ -427,6 +427,10 @@ public record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = nul
 
 public record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 
+public record LinkTeacherGradeAssignmentRequest(Guid GradeLevelId, Guid? SubjectId = null, Guid? RoleCodedValueId = null);
+
+public record LinkTeacherActivityAssignmentRequest(Guid ActivityGroupId, Guid? RoleCodedValueId = null, Guid[]? GradeLevelIds = null);
+
 public record SetTeacherGradeLevelRoleRequest(Guid? TeacherRoleCodedValueId);
 
 public record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId, DateOnly? StartDate = null, DateOnly? EndDate = null);
@@ -453,6 +457,31 @@ public sealed record TeacherTopicRoleDto(
     Guid? RoleCodedValueId = null,
     DateOnly? StartDate = null,
     DateOnly? EndDate = null);
+
+/// <summary>
+/// A grade-scoped teaching assignment (v4 spec §3.5): grade + optional subject + role.
+/// Returned by <c>ListTeacherGradeAssignmentsAsync</c> (GET /teachers/{id}/grade-assignments).
+/// </summary>
+public sealed record TeacherGradeAssignmentDto(
+    Guid RowId,
+    Guid GradeLevelId,
+    string GradeName,
+    int GradeLevel,
+    Guid? SubjectId,
+    string? SubjectName,
+    string? SubjectCode,
+    Guid? RoleCodedValueId);
+
+/// <summary>
+/// A teacher↔activity assignment (v4 spec §3.5): activity + role + optional grades.
+/// Returned by <c>ListTeacherActivityAssignmentsAsync</c> (GET /teachers/{id}/activity-assignments).
+/// </summary>
+public sealed record TeacherActivityAssignmentDto(
+    Guid RowId,
+    Guid ActivityGroupId,
+    string ActivityName,
+    Guid? RoleCodedValueId,
+    Guid[] GradeLevelIds);
 
 // ── Client ──────────────────────────────────────────────────────────────────
 
@@ -1365,6 +1394,26 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task<GradeLevelDto[]?> ListGradeLevelsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<GradeLevelDto[]>($"/teachers/{teacherId}/grade-levels", ct);
+
+    // ── v4 assignments (grade + optional subject + role; activity + role + grades) ──
+
+    public async Task<TeacherGradeAssignmentDto[]?> ListTeacherGradeAssignmentsAsync(Guid teacherId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TeacherGradeAssignmentDto[]>($"/teachers/{teacherId}/grade-assignments", ct);
+
+    public async Task LinkTeacherGradeAssignmentAsync(Guid teacherId, Guid gradeLevelId, Guid? subjectId = null, Guid? roleCodedValueId = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/grade-assignments", new LinkTeacherGradeAssignmentRequest(gradeLevelId, subjectId, roleCodedValueId), ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteTeacherGradeAssignmentAsync(Guid teacherId, Guid rowId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/teachers/{teacherId}/grade-assignments/{rowId}", ct)).EnsureSuccessStatusCode();
+
+    public async Task<TeacherActivityAssignmentDto[]?> ListTeacherActivityAssignmentsAsync(Guid teacherId, CancellationToken ct = default) =>
+        await _http.GetFromJsonAsync<TeacherActivityAssignmentDto[]>($"/teachers/{teacherId}/activity-assignments", ct);
+
+    public async Task LinkTeacherActivityAssignmentAsync(Guid teacherId, Guid activityGroupId, Guid? roleCodedValueId = null, Guid[]? gradeLevelIds = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/activity-assignments", new LinkTeacherActivityAssignmentRequest(activityGroupId, roleCodedValueId, gradeLevelIds), ct)).EnsureSuccessStatusCode();
+
+    public async Task DeleteTeacherActivityAssignmentAsync(Guid teacherId, Guid rowId, CancellationToken ct = default) =>
+        (await _http.DeleteAsync($"/teachers/{teacherId}/activity-assignments/{rowId}", ct)).EnsureSuccessStatusCode();
 
     // ── Contacts ──────────────────────────────────────────────────────────────
     // The contacts API is registered as a sibling top-level group in
