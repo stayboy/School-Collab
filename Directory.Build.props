@@ -1,6 +1,13 @@
 <Project>
   <PropertyGroup>
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <!-- NOTE: EnforceCodeStyleInBuild is intentionally OFF for now. The repo's
+         .editorconfig sets primary-constructors / file-scoped-namespace as the
+         documented target, but the existing codebase predates them — enabling
+         style enforcement currently surfaces ~300 pre-existing warnings. Turn it
+         on (with TreatWarningsAsErrors) once that debt is cleared. The checkable
+         "Never" anti-patterns are enforced in CI by
+         SchoolCollab.ArchitectureTests.Unit regardless. -->
   </PropertyGroup>
   <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
     <TestingPlatformCommandLineArguments>$(TestingPlatformCommandLineArguments) --ignore-exit-code 8</TestingPlatformCommandLineArguments>

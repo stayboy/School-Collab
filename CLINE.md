@@ -47,3 +47,8 @@ recall and record structured facts about this codebase across sessions.
 - Repo-local skills in `.github/skills/` (`bounded-context`, `dotnet-best-practices`,
   `coded-values`, `dialog-ui`, `fluentui-component-props`, `fluentui-icons`) encode the
   authoritative conventions; the memory graph is a quick-recall index, not a replacement.
+- **Before any C#/`.razor` code-behind change, read
+  `.github/copilot/rules/dotnet-best-practices.md` (load-bearing rules) and its backing
+  skill `.github/skills/dotnet-best-practices/SKILL.md`.** New C# must follow the repo's
+  CQRS/primary-constructor/factory patterns and be warning-free; the checkable anti-patterns
+  are enforced in CI by `tests/SchoolCollab.ArchitectureTests.Unit`.
