@@ -280,7 +280,8 @@ public record TransferStudentRequest(
     string Reason);
 
 public record WithdrawStudentRequest(
-    DateOnly? ExitDate);
+    DateOnly? ExitDate,
+    string? Reason = null);
 
 public record AssignGradeTopicRequest(
     Guid GradeLevelId,

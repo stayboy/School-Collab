@@ -23,7 +23,7 @@ public sealed class WithdrawStudentHandler(
         var enrollment = await repository.GetAsync(command.EnrollmentId, cancellationToken)
             ?? throw new InvalidOperationException($"Enrollment with ID '{command.EnrollmentId}' not found.");
 
-        enrollment.Withdraw(command.ExitDate);
+        enrollment.Withdraw(command.ExitDate, command.Reason);
 
         try
         {

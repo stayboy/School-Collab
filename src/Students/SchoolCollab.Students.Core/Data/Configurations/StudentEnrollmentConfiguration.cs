@@ -37,6 +37,10 @@ internal sealed class StudentEnrollmentConfiguration : TenantEntityTypeConfigura
             .HasColumnName("transfer_reason")
             .IsRequired(false);
 
+        builder.Property(x => x.WithdrawReason)
+            .HasColumnName("withdraw_reason")
+            .IsRequired(false);
+
         builder.HasIndex(x => new { x.TenantId, x.StudentId, x.PeriodId })
             .IsUnique()
             .HasDatabaseName("ix_student_enrollments_tenant_student_period");

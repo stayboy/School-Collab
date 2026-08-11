@@ -24,6 +24,7 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
     public DateOnly? ExitDate { get; private set; }
     public EnrollmentStatus Status { get; private set; }
     public string? TransferReason { get; private set; }
+    public string? WithdrawReason { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -69,13 +70,14 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
         _domainEvents.Add(new StudentTransferredEvent(Id, StudentId, PeriodId, newGradeLevelId, newStreamCodedValueId));
     }
 
-    public void Withdraw(DateOnly? exitDate = null)
+    public void Withdraw(DateOnly? exitDate = null, string? reason = null)
     {
         if (Status != EnrollmentStatus.Active)
             throw new InvalidOperationException("Only active enrollments can be withdrawn.");
 
         Status = EnrollmentStatus.Withdrawn;
         ExitDate = exitDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
+        WithdrawReason = reason;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new StudentWithdrawnEvent(Id, StudentId, PeriodId));
     }

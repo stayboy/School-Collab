@@ -107,7 +107,7 @@ public static class EnrollmentRoutes
         {
             try
             {
-                await handler.HandleAsync(new WithdrawStudent(id, req.ExitDate), ct);
+                await handler.HandleAsync(new WithdrawStudent(id, req.ExitDate, req.Reason), ct);
                 return Results.NoContent();
             }
             catch (InvalidOperationException ex)
@@ -126,4 +126,4 @@ public static class EnrollmentRoutes
 
 internal record EnrollStudentRequest(Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? StreamCodedValueId, DateOnly? EnrolledOn);
 internal record TransferStudentRequest(Guid NewGradeLevelId, Guid? NewStreamCodedValueId, DateOnly? TransferDate, string Reason);
-internal record WithdrawStudentRequest(DateOnly? ExitDate);
+internal record WithdrawStudentRequest(DateOnly? ExitDate, string? Reason = null);

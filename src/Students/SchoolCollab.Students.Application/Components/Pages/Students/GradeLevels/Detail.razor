@@ -137,7 +137,7 @@
                                          Count="@(_students?.Length ?? 0)"
                                          AddTitle="Add student"
                                          AddAriaLabel="Add student"
-                                         OnAddClick="OpenAddStudentsAsync"
+                                         OnAddClick="OpenStudentCreateAsync"
                                          ViewAllNavigationUrl="@($"/students?gradeLevelId={Id}")"
                                          ViewAllText="View all students"
                                          Items="@(_students ?? [])"
@@ -147,6 +147,11 @@
                                          ItemMetaSelector="@(st => [ GetStudentDemographics(st) ])"
                                          ItemHrefSelector="@(st => $"/students/{st.Id}")"
                                          ItemNameTitle="View student">
+                                <ItemActions Context="st">
+                                    <RowActionsMenu AriaLabel="@($"Actions for {st.FirstName} {st.LastName}")"
+                                                    UseMenuService="false"
+                                                    Actions="@BuildStudentRowActions(st)" />
+                                </ItemActions>
                             </SectionCard>
                             </FluentGridItem>
 
@@ -981,42 +986,7 @@
         if (!_disposed) StateHasChanged();
     }
 
-    // ── Students: add (enroll) ───────────────────────────────────────────────
-    private async Task OpenAddStudentsAsync()
-    {
-        if (_disposed || _grade is null) return;
-        _studentsError = null;
-        try
-        {
-            var periods = await Api.ListPeriodsAsync() ?? [];
-            var active = periods.FirstOrDefault(p => p.Status == "Active");
-            if (active is null)
-            {
-                _studentsError = "No active period to enroll students into.";
-                return;
-            }
-            var model = new StudentPickerModel(
-                ExcludedStudentIds: _students?.Select(s => s.Id) ?? [],
-                PeriodId: active.Id);
-            var selected = await DialogService.ShowShellDialogAsync<StudentPickerDialog, StudentPickerModel, StudentDto[]>(
-                model, $"Enroll students · {_grade.Name}", DialogSize.Large);
-            if (selected is null || selected.Length == 0) return;
-            foreach (var s in selected)
-            {
-                await Api.EnrollStudentAsync(new EnrollStudentRequest(
-                    s.Id, active.Id, Id, StreamCodedValueId: null, DateOnly.FromDateTime(DateTime.UtcNow)));
-            }
-            if (_disposed) return;
-            await ReloadStudentsAsync();
-        }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to enroll students in grade {Id}", Id);
-            _studentsError = $"Could not enroll students: {ex.Message}";
-        }
-    }
-
+    // ── Students: add (create) / kebab actions ──────────────────────────────
     private async Task ReloadStudentsAsync()
     {
         try
@@ -1029,6 +999,142 @@
             _studentsError = $"Could not reload students: {ex.Message}";
         }
     }
+
+    /// <summary>
+    /// Students card "Add" affordance — opens the shared StudentCreateDialog
+    /// (new student). Reloads the card on a non-cancelled result.
+    /// </summary>
+    private async Task OpenStudentCreateAsync()
+    {
+        if (_disposed) return;
+        await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
+            "New Student",
+            new Dictionary<string, object?>(),
+            DialogSize.Large);
+        if (_disposed) return;
+        await ReloadStudentsAsync();
+    }
+
+    /// <summary>
+    /// Students card kebab "Edit" — opens the shared StudentEditDialog for the
+    /// row's student. Reloads the card on a non-cancelled result.
+    /// </summary>
+    private async Task OpenStudentEditAsync(StudentDto student)
+    {
+        if (_disposed) return;
+        await DialogService.ShowReadonlyDialogAsync<StudentEditDialog>(
+            $"Edit Student · {student.FirstName} {student.LastName}",
+            new Dictionary<string, object?>
+            {
+                { nameof(StudentEditDialog.StudentId), student.Id },
+            },
+            DialogSize.Large);
+        if (_disposed) return;
+        await ReloadStudentsAsync();
+    }
+
+    /// <summary>
+    /// Students card kebab "Transfer" — opens the shared StudentTransferDialog
+    /// (which resolves the student's active enrollment internally). Reloads the
+    /// card on a successful transfer.
+    /// </summary>
+    private async Task OpenStudentTransferAsync(StudentDto student)
+    {
+        if (_disposed) return;
+        var result = await DialogService.ShowShellDialogAsync<StudentTransferDialog, StudentTransferModel, StudentTransferResult>(
+            new StudentTransferModel(student.Id),
+            "Transfer student",
+            DialogSize.Medium);
+        if (result is { Success: true } && !_disposed)
+        {
+            await ReloadStudentsAsync();
+        }
+    }
+
+    /// <summary>
+    /// Students card kebab "Withdraw" — resolves the student's active
+    /// enrollment id (§11.2) and opens the shared WithdrawEnrollmentDialog
+    /// (end-date + reason). Reloads the card on a successful withdraw.
+    /// </summary>
+    private async Task OpenStudentWithdrawAsync(StudentDto student)
+    {
+        if (_disposed) return;
+        try
+        {
+            var enrollments = await Api.ListEnrollmentsByStudentAsync(student.Id) ?? [];
+            var active = enrollments
+                .Where(e => e.ExitDate is null && string.Equals(e.Status, "Active", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(e => e.EnrolledOn)
+                .FirstOrDefault();
+            if (active is null)
+            {
+                _studentsError = "This student has no active enrollment to withdraw.";
+                return;
+            }
+
+            var result = await DialogService.ShowShellDialogAsync<WithdrawEnrollmentDialog, WithdrawEnrollmentModel, WithdrawEnrollmentResult>(
+                new WithdrawEnrollmentModel(
+                    EnrollmentId: active.Id,
+                    StudentName: $"{student.FirstName} {student.LastName}".Trim(),
+                    DefaultExitDate: DateOnly.FromDateTime(DateTime.UtcNow)),
+                "Withdraw student",
+                DialogSize.Medium);
+            if (result is { Success: true } && !_disposed)
+            {
+                await ReloadStudentsAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _studentsError = $"Could not withdraw student: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Students card kebab "Remove" — soft-deletes the whole student record
+    /// (Student.Delete() → DELETE /students/{id}), NOT an enrollment-withdraw.
+    /// Gated by the kebab's destructive confirmation prompt.
+    /// </summary>
+    private async Task RemoveStudentAsync(StudentDto student)
+    {
+        if (_disposed) return;
+        try
+        {
+            await Api.DeleteStudentAsync(student.Id);
+            if (_disposed) return;
+            await ReloadStudentsAsync();
+            Toast.ShowSuccess($"Student '{student.FirstName} {student.LastName}' removed.");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _studentsError = $"Could not remove student: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Row kebab for a Students-card preview item. The student name is the
+    /// primary affordance (navigates to the student view page); the kebab holds
+    /// the secondary actions (Transfer, Withdraw, View profile, Edit) and the
+    /// destructive Remove (soft-delete the whole student).
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildStudentRowActions(StudentDto student) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Transfer", () => OpenStudentTransferAsync(student), FluentIcons.ArrowExportUp),
+            RowAction.Callback("Withdraw", () => OpenStudentWithdrawAsync(student), FluentIcons.ArrowClockwise),
+            RowAction.Navigate("View profile", $"/students/{student.Id}", FluentIcons.Open),
+            RowAction.Callback("Edit", () => OpenStudentEditAsync(student), FluentIcons.Edit),
+            RowAction.Separator(),
+            RowAction.Callback(
+                "Remove",
+                () => RemoveStudentAsync(student),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: $"Remove student '{student.FirstName} {student.LastName}'? This soft-deletes the whole student record."),
+        };
 
     public void Dispose()
     {
