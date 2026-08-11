@@ -45,6 +45,33 @@ rule sets.
   shared `TeacherSubjectRoleFormFields` is reused both in a standalone dialog (`TeacherSubjectsDialog`,
   from the kebab) and inline-toggled within `GradeTeachersDialog`.
 
+## Read-only dialog plumbing (`IDialogContentComponent<DialogParameters>`)
+
+- **Every dialog opened via `ShowReadonlyDialogAsync<TComponent>` must mark its `Content`
+  property with `[Parameter]`** (it implements `IDialogContentComponent<DialogParameters>`).
+  FluentUI's dialog host sets `Content` as a regular parameter on open — if the attribute is
+  missing, Blazor throws `ThrowForUnknownIncomingParameterName` and the dialog **never renders**
+  (silently "does nothing" from the user's POV). This is exactly what broke the section-card
+  create/edit dialogs. Do NOT use `[CascadingParameter]` here — FluentUI passes it as a direct
+  parameter, so `[CascadingParameter]` fails with "cannot be set explicitly".
+
+## Await the dialog result before reloading the card
+
+- **Create/Edit handlers must `await` the dialog's result and reload the card only on a
+  non-cancelled / successful save.** `ShowReadonlyDialogAsync` returns the `IDialogReference`
+  as soon as the dialog is shown; reloading immediately after it returns pulls **stale** data
+  (before the user saved). The correct pattern:
+  ```
+  var dialog = await DialogService.ShowReadonlyDialogAsync<XxxDialog>(...);
+  if (_disposed) return;
+  var result = await dialog.Result;
+  if (_disposed || result.Cancelled) return;
+  await ReloadXxxAsync();
+  ```
+- **When a dialog mutates data internally (no OK/Cancel result), raise an `OnChanged`
+  `Func<Task>` callback** so the page reloads the card at the moment the change is persisted,
+  and have the handler pass `OnChanged = ReloadXxxAsync` instead of reloading after open.
+
 ## Topic+role assignment dates (open-ended)
 
 - A teacher↔topic assignment (`TeacherTopic`) carries `StartDate` (required) and `EndDate` (nullable =

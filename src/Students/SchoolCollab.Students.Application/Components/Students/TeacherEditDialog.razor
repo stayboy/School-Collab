@@ -170,8 +170,16 @@
     /// <summary>Set to a teacher's id to edit; <c>null</c> to create a new teacher.</summary>
     [Parameter, EditorRequired] public Guid? TeacherId { get; set; }
 
+    /// <summary>
+    /// Grade levels to pre-select when creating a teacher (create mode only).
+    /// Lets an "Add teacher" action on the grade-level page link the new teacher
+    /// to that grade immediately, so it appears on the card right after save.
+    /// Ignored in edit mode (the existing links are loaded from the API).
+    /// </summary>
+    [Parameter] public IEnumerable<Guid>? InitialGradeLevelIds { get; set; }
+
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    public DialogParameters Content { get; set; } = default!;
+    [Parameter] public DialogParameters Content { get; set; } = default!;
 
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
@@ -238,6 +246,12 @@
                 var gradeLevels = await Api.ListGradeLevelsForTeacherAsync(TeacherId.Value) ?? [];
                 _originalGradeLevelIds = gradeLevels.Select(g => g.Id).ToHashSet();
                 _selectedGradeLevelIds = new HashSet<Guid>(_originalGradeLevelIds);
+            }
+            else
+            {
+                // Create mode: pre-select any grade levels the caller asked for
+                // (e.g. the current grade when adding from the grade page).
+                _selectedGradeLevelIds = new HashSet<Guid>(InitialGradeLevelIds ?? []);
             }
         }
         catch (Exception ex)

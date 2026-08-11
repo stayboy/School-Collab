@@ -39,8 +39,11 @@
     /// <summary>The teacher whose subject+role links are being managed.</summary>
     [Parameter, EditorRequired] public Guid TeacherId { get; set; }
 
+    /// <summary>Raised after a successful save so the page can refresh its card.</summary>
+    [Parameter] public Func<Task>? OnChanged { get; set; }
+
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    public DialogParameters Content { get; set; } = default!;
+    [Parameter] public DialogParameters Content { get; set; } = default!;
 
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private ILogger<TeacherSubjectsDialog> Logger { get; set; } = default!;
@@ -136,6 +139,7 @@
                     await Api.SetTeacherTopicRoleAsync(TeacherId, id, a.RoleCodedValueId, a.StartDate, a.EndDate);
             }
             if (Dialog is not null) await Dialog.CloseAsync();
+            if (OnChanged is not null) await OnChanged.Invoke();
         }
         catch (Exception ex)
         {

@@ -65,7 +65,7 @@
     [Parameter] public Func<Task>? OnChanged { get; set; }
 
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    public DialogParameters Content { get; set; } = default!;
+    [Parameter] public DialogParameters Content { get; set; } = default!;
 
     private TopicDto? _topicToAdd;
     private bool _adding;

@@ -79,8 +79,11 @@
     /// can be assigned to one of the grade's topics).</summary>
     [Parameter] public TeacherWithRoleDto[] AvailableTeachers { get; set; } = [];
 
+    /// <summary>Raised after a mutation so the page can refresh its card.</summary>
+    [Parameter] public Func<Task>? OnChanged { get; set; }
+
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    public DialogParameters Content { get; set; } = default!;
+    [Parameter] public DialogParameters Content { get; set; } = default!;
 
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private ILogger<TopicTeachersDialog> Logger { get; set; } = default!;
@@ -134,6 +137,7 @@
             _teacherToAdd = null;
             _newRole = null;
             await ReloadAsync();
+            if (OnChanged is not null) await OnChanged.Invoke();
         }
         catch (Exception ex)
         {
@@ -152,6 +156,7 @@
         {
             await Api.UnlinkTeacherTopicAsync(teacherId, TopicId);
             await ReloadAsync();
+            if (OnChanged is not null) await OnChanged.Invoke();
         }
         catch (Exception ex)
         {
@@ -165,6 +170,7 @@
         try
         {
             await Api.SetTeacherTopicRoleAsync(teacher.TeacherId, TopicId, role);
+            if (OnChanged is not null) await OnChanged.Invoke();
         }
         catch (Exception ex)
         {

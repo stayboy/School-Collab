@@ -22,7 +22,7 @@
 
 @code {
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    public DialogParameters Content { get; set; } = default!;
+    [Parameter] public DialogParameters Content { get; set; } = default!;
 
     private readonly StudentFormModel _model = new();
     private bool _saving;

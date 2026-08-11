@@ -21,8 +21,15 @@
     [Parameter, EditorRequired] public Guid TopicId { get; set; }
     [Parameter] public string? TopicName { get; set; }
 
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    public DialogParameters Content { get; set; } = default!;
+    /// <summary>Raised when the dialog closes so the page can refresh its card.</summary>
+    [Parameter] public Func<Task>? OnChanged { get; set; }
 
-    private Task CloseAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    [Parameter] public DialogParameters Content { get; set; } = default!;
+
+    private async Task CloseAsync()
+    {
+        if (OnChanged is not null) await OnChanged.Invoke();
+        if (Dialog is not null) await Dialog.CloseAsync();
+    }
 }
