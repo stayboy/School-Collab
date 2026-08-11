@@ -176,6 +176,16 @@ public class TeacherEditDialogBunitTests : BunitContext
                     ["createdAt"] = "2026-01-01T00:00:00Z", ["updatedAt"] = "2026-01-01T00:00:00Z",
                 }).ToArray()));
         }
+        else
+        {
+            // v4: load topic assignments for ALL grades (not just context grade) so each
+            // grade row's subject picker is filtered correctly. Map empty assignments for
+            // all registered grades when not in context mode.
+            foreach (var g in grades ?? [])
+            {
+                handler.Map($"/students/topic-assignments/by-grade/{g.Id}", HttpStatusCode.OK, "[]");
+            }
+        }
 
         if (teacherId is { } tid)
         {

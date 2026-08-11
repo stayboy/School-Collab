@@ -232,7 +232,8 @@
     private ActivityGroupDto[]? _allActivities;
     private CodedValueDto[]? _allQualifications;
     private CodedValueDto[]? _allTeacherRoles;
-    private HashSet<Guid>? _gradeEnrolledTopicIds;
+    /// <summary>Maps grade level id → set of enrolled topic ids (for filtering subject pickers).</summary>
+    private Dictionary<Guid, HashSet<Guid>>? _gradeEnrolledTopicIdsByGrade;
 
     private CodedValueDto? _qualToAdd;
     private int _qualKey;
@@ -263,10 +264,13 @@
             _allQualifications = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.Qualification.ToCode()) ?? [];
             _allTeacherRoles = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.TeacherRoles.ToCode()) ?? [];
 
-            if (Model.ContextGradeLevelId is { } ctxGradeId)
+            // Load topic assignments for ALL grades so each grade row's subject picker
+            // is filtered to that grade's enrolled subjects (v4 spec §3.2).
+            _gradeEnrolledTopicIdsByGrade = new();
+            foreach (var g in _allGradeLevels ?? [])
             {
-                var assignments = await Api.ListGradeTopicsByGradeAsync(ctxGradeId) ?? [];
-                _gradeEnrolledTopicIds = assignments.Select(a => a.TopicId).ToHashSet();
+                var assignments = await Api.ListGradeTopicsByGradeAsync(g.Id) ?? [];
+                _gradeEnrolledTopicIdsByGrade[g.Id] = assignments.Select(a => a.TopicId).ToHashSet();
             }
 
             if (Model.TeacherId is { } teacherId)
@@ -345,15 +349,14 @@
     private CodedValueDto[] UnselectedQualifications
         => _allQualifications?.Where(q => !Model.QualificationCodedValueIds.Contains(q.Id)).ToArray() ?? [];
 
-    /// <summary>Subjects a grade row may choose: the grade's enrolled subjects (or full catalog if none/unknown).</summary>
+    /// <summary>Subjects a grade row may choose: the grade's enrolled subjects (empty if grade has no assigned subjects).</summary>
     private TopicDto[] SubjectsForGrade(Guid? gradeLevelId)
     {
         if (_allTopics is null) return [];
         if (gradeLevelId is null) return [];
-        var eligible = _gradeEnrolledTopicIds is not null
-            ? _allTopics.Where(t => _gradeEnrolledTopicIds.Contains(t.Id))
-            : _allTopics;
-        return eligible.ToArray();
+        if (_gradeEnrolledTopicIdsByGrade is not { } map) return [];
+        if (!map.TryGetValue(gradeLevelId.Value, out var enrolled)) return [];
+        return _allTopics.Where(t => enrolled.Contains(t.Id)).ToArray();
     }
 
     private IEnumerable<GradeLevelDto> SelectedGradeObjects(AssignmentRow row)
