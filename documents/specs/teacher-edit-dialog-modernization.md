@@ -9,7 +9,7 @@
 >    - **Activity assignment** = `activity + role + optional grades` (a teacher may be assigned to an activity with a role, optionally across multiple grades).
 > 3. **Grid UI with inline row edit.** Rows render read-only by default; clicking **Edit** converts the row into editable controls (dropdowns); **Save** commits, **Cancel** reverts. Add / Remove rows.
 > 4. **Default grade from context.** Opened from a grade detail page, the context grade is pre-set — new grade-assignment rows default to it (§3.5).
-> 5. **Backend change (overturns the v3 “zero backend changes” decision for this feature).** Grade-scoped subjects and teacher-activity assignments need new entities + endpoints (§4). Profile fields + qualifications chips are unchanged.
+> 5. **Backend change (overturns the v3 “zero backend changes” decision for this feature).** Grade rows **reuse `TeacherGradeLevel`** (add nullable `topic_id`, relax the unique index so a teacher can hold multiple subjects per grade); the standalone `TeacherTopic` is **removed**; teacher-activity assignments get a new entity + endpoints. Profile fields + qualifications chips are unchanged.
 >
 > **v3.1 — implementation-introduced changes (noted here per request):**
 > 1. **Chips render BELOW the add-picker combobox** (was above) for the qualifications and grade-level multi-value fields. The add-affordance (combobox) sits at the top of the row/section; the selected chips fall beneath it. §3.3 / §3.5.
@@ -42,7 +42,7 @@
 6. **Assignments data source (v4).** The grid loads the teacher's grade assignments (grade + subject + role) and activity assignments; the subjects add-picker is scoped to a chosen grade's enrolled subjects (§3.6).
 7. **Shell migration** to `DialogShellBase<TeacherFormModel, Guid>` + `DialogShellFooter` + `EditForm` validation (repo convention; this dialog is the only hand-rolled form dialog left — 13 siblings already use the shell).
 8. **Size** stays `DialogSize.Large` (720px) — no downsize.
-9. **Backend change for v4.** New entities + endpoints for grade-scoped subjects and teacher-activity assignments (§4). This overturns the v3 “zero backend changes” decision; it is required to support `grade+subject+role` and `activity+role+grades` rows.
+9. **Backend change for v4.** Reuse `TeacherGradeLevel` for grade + optional subject + role rows (add nullable `topic_id`, relax the unique index so a teacher can teach multiple subjects per grade); **remove** the standalone `TeacherTopic`; add a new `TeacherActivityAssignment` (+ grades join) entity + endpoints. Overturns the v3 “zero backend changes” decision (§4).
 
 ## 1. Goal
 
@@ -177,15 +177,16 @@ public enum AssignmentType { Grade, Activity }
 - **Activity row:** `ActivityId` required; `RoleCodedValueId`; `GradeLevelIds` optional multi (0..n).
 - The old grade **chips / checklist picker is removed** — grades are captured inside the grid (the grade column of grade rows, and the multi-select on activity rows).
 
-**Entity mapping (confirmed from repo):** a grid row maps to an existing or new backend link per row type:
+**Entity mapping (confirmed from repo + owner rule):** a grid row maps to a backend link per row type:
 
 | Row | Backing entity | Status |
 |---|---|---|
-| Grade row, no subject (`grade + role`) | `TeacherGradeLevel` (TeacherId, GradeLevelId, TeacherRoleCodedValueId) | **exists** — reuse |
-| Grade row, with subject (`grade + subject + role`) | `TeacherGradeTopic` (TeacherId, GradeLevelId, TopicId, RoleCodedValueId, StartDate, EndDate) | **new** — grade-scoped subject; the current `TeacherTopic` is standalone (no `GradeLevelId`), so it cannot express grade-scoped subjects |
+| Grade row (`grade + optional subject + role`) | `TeacherGradeLevel` (TeacherId, GradeLevelId, **TopicId?**, TeacherRoleCodedValueId) | **reuse** — add nullable `topic_id`; a teacher may have **multiple rows per grade** (one per subject, plus an optional grade-only row with `topic_id` null) |
 | Activity row (`activity + role + grades`) | `TeacherActivityAssignment` (TeacherId, ActivityGroupId, RoleCodedValueId) + `TeacherActivityAssignmentGrade` join (TeacherActivityAssignmentId, GradeLevelId) | **new** — no teacher→activity link exists |
 
-**Backend implication (confirmed, option A):** grade+role rows are UI-only on the existing `TeacherGradeLevel`; grade+subject and activity rows need the two new entities + endpoints + a migration.
+**Standalone `TeacherTopic` is no longer required.** Because a teacher can teach multiple subjects in a grade and every subject is grade-scoped via `TeacherGradeLevel.topic_id`, the standalone subject link (`TeacherTopic` + its `LinkTeacherTopic`/`UnlinkTeacherTopic`/`SetTeacherTopicRole` endpoints and `TeacherSubjectsDialog`/`GradeTeachersDialog`/`TeacherSubjectRoleFormFields` UI) is **deprecated and removed**.
+
+**Backend implication (confirmed):** grade rows reuse the existing `teacher_grade_levels` table — add a nullable `topic_id` column and **relax the unique index** from `(tenant, teacher, grade)` so a teacher can hold multiple rows per grade (one per subject; keep a partial unique on grade-only rows via `WHERE topic_id IS NULL`). Activity rows add the new `TeacherActivityAssignment` (+ grades join) entity, endpoints, and a migration.
 
 **Context default grade:**
 
@@ -201,7 +202,7 @@ public enum AssignmentType { Grade, Activity }
 
 ### 3.6 Assignments data source (v4)
 
-- **Grade assignments:** `ListTeacherGradeAssignmentsAsync(teacherId)` (new) returns the combined grade rows — grade-only rows from `TeacherGradeLevel` (grade + role) and grade+subject rows from `TeacherGradeTopic` (grade + subject + role). Each row carries its resolved grade/subject/role names plus the entity ids.
+- **Grade assignments:** `ListTeacherGradeAssignmentsAsync(teacherId)` (new) returns the grade rows — all from `TeacherGradeLevel` (grade-only with `topic_id` null, and grade+subject rows with `topic_id` set). Each row carries its resolved grade/subject/role names plus the entity id.
 - **Activity assignments:** `ListTeacherActivityAssignmentsAsync(teacherId)` (new) returns activity rows (activity + role + grades), grades resolved from the `TeacherActivityAssignmentGrade` join.
 - **Subject dropdown scope:** a grade row's subject dropdown is filtered to `ListGradeTopicsByGradeAsync(gradeLevelId)` (the grade's enrolled subjects), names resolved from the loaded `_allTopics`. Rows without a chosen grade offer no subject until a grade is chosen.
 - **Catalog loads:** `_allTopics`, `_allGradeLevels`, `_allActivities` (`ListActivityGroupsAsync`), qualifications — all loaded up front.
@@ -214,8 +215,7 @@ public enum AssignmentType { Grade, Activity }
 - Footer → `<DialogShellFooter Saving Error OnCancel SubmitText …/>` (*"Create Teacher"* / *"Save Changes"* by mode). No `<FluentDivider>`.
 - Opened via `ShowShellDialogAsync<TeacherEditDialog, TeacherFormModel, Guid>(…)`; returns `Guid?` (`null` = cancelled).
 - **Save reconciliation (v4):** diff `Assignments` against the loaded originals per row type —
-  - **Grade row, no subject:** upsert/delete `TeacherGradeLevel` (grade+role) via existing `LinkTeacherGradeLevelAsync` / `SetTeacherGradeLevelRoleAsync` / `UnlinkTeacherGradeLevelAsync`.
-  - **Grade row, with subject:** upsert/delete `TeacherGradeTopic` (grade + subject + role) via new grade-scoped-subject endpoints.
+  - **Grade row (with or without subject):** upsert/delete a `TeacherGradeLevel` row — `topic_id` set for a grade+subject row, null for a grade-only row. Extend the existing link endpoints to accept an optional `subjectId`, or add a dedicated grade-assignments upsert/delete.
   - **Activity row:** upsert/delete `TeacherActivityAssignment` (+ grades) via new activity-assignment endpoints.
   - Context grade is force-included on create (§3.5).
   - In grade context, a grade-only row with the context grade (no subject) is the implicit link; if no grade-only context row exists, one is created on save.
@@ -236,24 +236,26 @@ public enum AssignmentType { Grade, Activity }
 | `…/TeacherEditDialog.razor.css` | **Merge, never overwrite** (dialog-ui skill §3): remove `.topic-role-list` / `.check-list` scroll rules; add `.name-fields`, `.chip-list`, `.assignment-grid` / `.assignment-row` / `.assignment-row--editing` styles. (No `.grade-context` — grades now live in the grid, v4.) |
 | `Components/Pages/Teachers/Teachers.razor`, `TeacherDetail.razor`, `GradeLevels/Detail.razor` | §3.8 (context params → default grade) |
 | `Components/Pages/Teachers/TeacherSetupWizard.razor` + `/students/teachers/create` route | **Deleted** (v3) — wizard retired; landing already uses the dialog |
-| `src/Students/SchoolCollab.Students.Core/Domain/TeacherGradeTopic.cs` (**new**) | grade-scoped subject link — `Id, TeacherId, GradeLevelId, TopicId, RoleCodedValueId?, StartDate, EndDate?` + tenant/audit/rowversion. So a subject is **tied to a specific grade** (the current `TeacherTopic` has no `GradeLevelId`). |
+| `src/Students/SchoolCollab.Students.Core/Domain/TeacherGradeLevel.cs` | **reuse** — add nullable `TopicId` so a row = grade + optional subject + role; a teacher can hold multiple rows per grade (one per subject) |
+| `src/Students/SchoolCollab.Students.Core/Domain/TeacherTopic.cs` | **deleted** — standalone subject link superseded by grade-scoped `TeacherGradeLevel.topic_id` |
 | `src/Students/SchoolCollab.Students.Core/Domain/TeacherActivityAssignment.cs` (**new**) | teacher-activity link — `Id, TeacherId, ActivityGroupId, RoleCodedValueId?` + tenant/audit/rowversion. Grades via a join table. |
 | `src/Students/SchoolCollab.Students.Core/Domain/TeacherActivityAssignmentGrade.cs` (**new**) | join — `TeacherActivityAssignmentId, GradeLevelId` (0..n grades per activity row). |
-| `…/Data/Configurations/TeacherGradeTopicConfiguration.cs`, `TeacherActivityAssignmentConfiguration.cs` (**new**) | EF configs for the new entities + join table. |
-| `…/Students.Core/Migrations/<new>` (**new**) | add `TeacherGradeTopic`, `TeacherActivityAssignment`, `TeacherActivityAssignmentGrade` tables. |
-| `…/Students.Api/Endpoints/TeacherRoutes.cs` + CQRS (**new**) | grade-scoped subjects + activity assignments (see contract below) |
-| `…/Students.Application/Services/StudentsApiClient.cs` | add client methods for the new endpoints |
+| `…/Data/Configurations/TeacherGradeLevelConfiguration.cs` | add `TopicId` column; **relax the unique index** to allow multiple rows per grade (one per subject; partial unique on grade-only rows `WHERE topic_id IS NULL`); add `TeacherActivityAssignmentConfiguration` + grades join config |
+| `…/Students.Core/Migrations/<new>` (**new**) | add `topic_id` to `teacher_grade_levels`, drop the `TeacherTopics` table + migrate existing standalone links (to the teacher's default/context grade or as a data-reconcile step), and add `TeacherActivityAssignment` + `TeacherActivityAssignmentGrade` tables |
+| `…/Students.Api/Endpoints/TeacherRoutes.cs` + CQRS | grade-assignments reuse `TeacherGradeLevel` (extend link/role endpoints for subject); remove the `TeacherTopic` endpoints; add activity-assignment endpoints (see contract below) |
+| `…/Students.Application/Services/StudentsApiClient.cs` | add client methods for the new endpoints; drop the teacher-topic methods |
+| `…/TeacherSubjectsDialog.razor`, `GradeTeachersDialog.razor`, `TeacherSubjectRoleFormFields.razor` | **removed** (standalone-subject surfaces superseded by the grid) |
 | `tests/SchoolCollab.Admin.Tests.Unit/TeacherEditDialogBunitTests.cs` | Rewritten (§5) |
 | `tests/SchoolCollab.Admin.Tests.Unit/GradeLevelDetailPageTests.cs:426-460` | Wiring assertions updated (context params, shell open, `Large`) |
 
-**Backend scope (v4):** new entities + endpoints above; a migration adds the `TeacherGradeTopic`, `TeacherActivityAssignment`, and `TeacherActivityAssignmentGrade` tables. This overturns the v3 “no backend files” note and is required for `grade+subject+role` and `activity+role+grades` rows.
+**Backend scope (v4):** grade rows **reuse `TeacherGradeLevel`** (add nullable `topic_id`, relax the unique index to allow multiple rows per grade); the standalone `TeacherTopic` table + endpoints are **removed**; new `TeacherActivityAssignment` + `TeacherActivityAssignmentGrade` tables/endpoints are added. A migration adds `topic_id`, drops `TeacherTopics`, and adds the activity tables. This overturns the v3 “no backend files” note and is required for `grade+subject+role` and `activity+role+grades` rows.
 
-**Endpoint contract (new):**
+**Endpoint contract:**
 
 ```
-GET    /teachers/{id}/grade-assignments          → combined grade rows (grade-only from TeacherGradeLevel, grade+subject from TeacherGradeTopic)
+GET    /teachers/{id}/grade-assignments          → combined grade rows (all from TeacherGradeLevel: grade-only and grade+subject)
 POST   /teachers/{id}/grade-assignments          → upsert one grade row { gradeLevelId, subjectId?, roleCodedValueId?, startDate?, endDate? }
-DELETE /teachers/{id}/grade-assignments/{rowId}  → delete the row (TeacherGradeLevel or TeacherGradeTopic)
+DELETE /teachers/{id}/grade-assignments/{rowId}  → delete the row (a TeacherGradeLevel row)
 
 GET    /teachers/{id}/activity-assignments        → activity rows (activity + role + gradeIds)
 POST   /teachers/{id}/activity-assignments        → upsert one activity row { activityGroupId, roleCodedValueId?, gradeLevelIds[] }
