@@ -1,6 +1,8 @@
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -115,6 +117,33 @@ public class GradeLevelDetailPageTests : BunitContext
         public override Task<AuthenticationState> GetAuthenticationStateAsync() => Task.FromResult(new AuthenticationState(_user));
     }
 
+    /// <summary>
+    /// Hosts a <see cref="FluentDialogProvider"/> alongside a child component so
+    /// destructive row actions (which show a confirmation prompt via
+    /// <c>IDialogService</c>) can render their dialog in the provider.
+    /// </summary>
+    private sealed class DialogHost : ComponentBase
+    {
+        [Parameter] public RenderFragment? ChildContent { get; set; }
+
+        protected override void BuildRenderTree(RenderTreeBuilder builder)
+        {
+            builder.OpenComponent<FluentDialogProvider>(0);
+            builder.CloseComponent();
+            builder.AddContent(1, ChildContent);
+        }
+    }
+
+    private static Dictionary<string, object?> StreamJson(Guid id, string name, string code) =>
+        new()
+        {
+            ["id"] = id, ["code"] = code, ["name"] = name,
+            ["description"] = (string?)null, ["parentId"] = (Guid?)null, ["parentCode"] = "GRSTREAMS",
+            ["isDisabled"] = false, ["displayOrder"] = 0,
+            ["createdAt"] = DateTimeOffset.UnixEpoch, ["updatedAt"] = DateTimeOffset.UnixEpoch,
+            ["attributes"] = Array.Empty<object>(), ["attributeDefinitions"] = Array.Empty<object>(),
+        };
+
     private (ScriptedHandler Handler, Guid GradeId) Register(
         Guid gradeId,
         string gradeJson,
@@ -122,7 +151,8 @@ public class GradeLevelDetailPageTests : BunitContext
         string teachersJson = "[]",
         string assignmentsJson = "[]",
         string studentsJson = "[]",
-        string curriculumJson = "[]")
+        string curriculumJson = "[]",
+        string streamsJson = "[]")
     {
         var auth = new MutableAuthenticationStateProvider { User = CreateUser(realTenant: true) };
         var handler = new ScriptedHandler();
@@ -136,7 +166,7 @@ public class GradeLevelDetailPageTests : BunitContext
         // Role dropdown (TCHROLES) parent lookup.
         handler.Map("GET", RoleParentUrl, HttpStatusCode.OK, "[]");
         // Grade streams (GRSTREAMS) for the Streams card.
-        handler.Map("/api/coded-values/by-parent?parentCode=GRSTREAMS", HttpStatusCode.OK, "[]");
+        handler.Map("/api/coded-values/by-parent?parentCode=GRSTREAMS", HttpStatusCode.OK, streamsJson);
         // Notification &amp; Delivery editor: no tenant default / no grade override.
         handler.Map("GET", "/api/settings/notification-policy", HttpStatusCode.NoContent, "");
         handler.Map("GET", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.NoContent, "");
@@ -336,6 +366,72 @@ public class GradeLevelDetailPageTests : BunitContext
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("No streams defined for this grade yet."));
+    }
+
+    [TestMethod]
+    public void Detail_StreamsCard_Row_HasKebab_WithEditAndRemove()
+    {
+        var gradeId = Guid.NewGuid();
+        var streamId = Guid.NewGuid();
+        Register(gradeId, GradeJson(gradeId), streamsJson: JsonSerializer.Serialize(new[]
+        {
+            StreamJson(streamId, "Grade 5A", "GR5A"),
+        }));
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 5A"));
+
+        // The stream name is the primary affordance (opens the edit dialog); the
+        // kebab hosts the secondary actions (Edit + destructive Remove).
+        cut.Find("fluent-button[title=\"Actions for Grade 5A\"]").Click();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Edit", "streams kebab offers edit"));
+        cut.Markup.Should().Contain("Remove", "streams kebab offers remove");
+    }
+
+    [TestMethod]
+    public void Detail_StreamsCard_Remove_Confirms_AndDisables()
+    {
+        var gradeId = Guid.NewGuid();
+        var streamId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId), streamsJson: JsonSerializer.Serialize(new[]
+        {
+            StreamJson(streamId, "Grade 5A", "GR5A"),
+        }));
+        handler.Map("POST", $"/api/coded-values/{streamId}/disable", HttpStatusCode.OK, "");
+
+        // Host the page under a FluentDialogProvider so the destructive Remove
+        // confirmation prompt can render.
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grade 5A"));
+
+        // Open the stream kebab and click Remove.
+        cut.Find("fluent-button[title=\"Actions for Grade 5A\"]").Click();
+        var removeItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Remove"));
+        removeItem.Click();
+
+        // The destructive Remove opens a MODAL confirmation dialog.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Remove stream 'Grade 5A'?"));
+        cut.WaitForAssertion(() => cut.FindAll(".confirm-dialog fluent-button[appearance='accent']").Any());
+
+        // Confirm → the stream is disabled (coded-value lifecycle, not a hard delete).
+        cut.Find(".confirm-dialog fluent-button[appearance='accent']").Click();
+        cut.WaitForAssertion(() => handler.Calls.Should().Contain(c =>
+            c.Method == "POST" && c.Url == $"/api/coded-values/{streamId}/disable"));
+    }
+
+    [TestMethod]
+    public void Detail_StreamsCard_RendersErrorMessage_OnLoadFailure()
+    {
+        var gradeId = Guid.NewGuid();
+        // Invalid JSON makes the streams fetch throw, so the card must surface an
+        // error instead of the misleading "No streams defined" empty state.
+        Register(gradeId, GradeJson(gradeId), streamsJson: "not-json");
+
+        var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Could not load streams"));
+        cut.Markup.Should().NotContain("No streams defined for this grade yet.",
+            "a load failure must render an error, not the misleading empty state");
     }
 
     [TestMethod]

@@ -150,10 +150,16 @@
                                          ViewAllText="Manage streams"
                                          Items="@(_streams ?? [])"
                                          EmptyMessage="No streams defined for this grade yet."
+                                         ErrorMessage="@_streamsError"
                                          Loading="@(_streams is null)"
                                          ItemTextSelector="s => s.Name"
                                          ItemOnClick="s => OpenStreamEditAsync(s)"
                                          ItemNameTitle="Edit stream">
+                                <ItemActions Context="s">
+                                    <RowActionsMenu AriaLabel="@($"Actions for {s.Name}")"
+                                                    UseMenuService="false"
+                                                    Actions="@BuildStreamRowActions(s)" />
+                                </ItemActions>
                             </SectionCard>
                             </FluentGridItem>
                         </FluentGrid>
@@ -213,6 +219,7 @@
     private TeacherWithRoleDto[]? _teachers;
     private StudentDto[]? _students;
     private CodedValueDto[]? _streams;
+    private string? _streamsError;
     private TeacherDto[]? _allTeachers;
     private readonly Dictionary<Guid, string> _salutationNames = new();
     private readonly Dictionary<Guid, string> _genderNames = new();
@@ -447,11 +454,13 @@
         {
             _streams = await CodedValuesApi.GetChildrenByParentCodeFilteredByAttributeAsync(
                 CodedValueParent.Streams.ToCode(), "gradeLevel", _grade!.CodedValueId.ToString(), ct) ?? [];
+            _streamsError = null;
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, "Failed to load grade streams for grade {Id}", Id);
             _streams = [];
+            _streamsError = $"Could not load streams: {ex.Message}";
         }
     }
 
@@ -472,6 +481,49 @@
         if (updated is not null && !_disposed)
         {
             await ReloadStreamsAsync();
+        }
+    }
+
+    /// <summary>
+    /// Row kebab for a Streams-card preview item. The stream name is the primary
+    /// affordance (opens the edit dialog); the kebab holds the secondary actions
+    /// (Edit for discoverability + destructive Remove). Remove means disable —
+    /// the coded value is marked <c>isDisabled</c> (kept in the catalog, not hard
+    /// deleted), matching the coded-value lifecycle.
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildStreamRowActions(CodedValueDto stream) =>
+        new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => OpenStreamEditAsync(stream), FluentIcons.Edit),
+            RowAction.Separator(),
+            RowAction.Callback(
+                "Remove",
+                () => RemoveStreamAsync(stream),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: $"Remove stream '{stream.Name}'? The stream is disabled and hidden from this grade."),
+        };
+
+    /// <summary>
+    /// Streams card Remove — disables the stream (coded-value lifecycle, not a
+    /// hard delete) and reloads the card. Gated by the kebab's destructive
+    /// confirmation prompt.
+    /// </summary>
+    private async Task RemoveStreamAsync(CodedValueDto stream)
+    {
+        if (_disposed) return;
+        try
+        {
+            await CodedValuesApi.DisableAsync(stream.Id);
+            if (_disposed) return;
+            await ReloadStreamsAsync();
+            Toast.ShowSuccess($"Stream '{stream.Name}' removed.");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _streamsError = $"Could not remove stream: {ex.Message}";
+            StateHasChanged();
         }
     }
 
