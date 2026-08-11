@@ -12,7 +12,6 @@ namespace SchoolCollab.Students.Core.Domain;
 /// </summary>
 public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAuditableEntity, ISoftDeletableEntity, IHasRowVersion
 {
-    private readonly List<TeacherTopic> _topics = [];
     private readonly List<TeacherGradeLevel> _gradeLevels = [];
     private readonly List<TeacherQualification> _qualifications = [];
     private readonly List<TeacherActivityAssignment> _activityAssignments = [];
@@ -35,7 +34,6 @@ public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAudita
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
 
-    public IReadOnlyList<TeacherTopic> Topics => _topics.AsReadOnly();
     public IReadOnlyList<TeacherGradeLevel> GradeLevels => _gradeLevels.AsReadOnly();
     public IReadOnlyList<TeacherQualification> Qualifications => _qualifications.AsReadOnly();
     public IReadOnlyList<TeacherActivityAssignment> ActivityAssignments => _activityAssignments.AsReadOnly();
@@ -81,8 +79,6 @@ public sealed class Teacher : PersonDemographic, ITenantEntity, IEntity, IAudita
     public void UnlinkQualification(Guid codedValueId)
         => _qualifications.RemoveAll(q => q.CodedValueId == codedValueId);
 
-    public void LinkTopic(Guid topicId) => _topics.Add(TeacherTopic.Create(Id, topicId));
-    public void UnlinkTopic(Guid topicId) => _topics.RemoveAll(s => s.TopicId == topicId);
     public void LinkGradeLevel(Guid gradeLevelId, Guid? topicId = null, Guid? teacherRoleCodedValueId = null)
     {
         if (_gradeLevels.Any(g => g.GradeLevelId == gradeLevelId && g.TopicId == topicId)) return;

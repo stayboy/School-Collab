@@ -111,35 +111,6 @@ public class SectionCardDialogsBunitTests : BunitContext
         saved.Should().Be(roleId, "Save invokes the callback with the current role");
     }
 
-    // ── TeacherSubjectsDialog ───────────────────────────────────────────────
-
-    [TestMethod]
-    public void TeacherSubjectsDialog_LoadsTopics_AndRendersAssigned()
-    {
-        var teacherId = Guid.NewGuid();
-        var topicId = Guid.NewGuid();
-        var roleId = Guid.NewGuid();
-        var handler = new ScriptedHandler();
-        handler.Map("/students/topics", HttpStatusCode.OK, JsonArray(TopicJson(topicId, "Mathematics", "MATH")));
-        handler.Map($"/teachers/{teacherId}/topics/roles", HttpStatusCode.OK, JsonArray(
-            new Dictionary<string, object?>
-            {
-                ["topicId"] = topicId, ["roleCodedValueId"] = roleId,
-                ["startDate"] = "2026-01-01", ["endDate"] = (string?)null,
-            }));
-        Register(handler);
-
-        var cut = Render<TeacherSubjectsDialog>(p => p.Add(x => x.TeacherId, teacherId));
-
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics",
-            "the dialog loads the topic catalog and renders each topic"));
-        cut.Markup.Should().Contain("Start",
-            "the assignment start date picker renders");
-        cut.Markup.Should().Contain("End (open-ended)",
-            "the assignment end date picker renders (open-ended allowed)");
-        cut.Markup.Should().Contain("Save", "the dialog renders its Save action");
-    }
-
     // ── StudentCreateDialog ─────────────────────────────────────────────────
 
     [TestMethod]

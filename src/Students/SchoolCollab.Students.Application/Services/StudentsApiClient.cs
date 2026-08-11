@@ -423,8 +423,6 @@ public record UpdateTeacherRequest(
     Guid? LevelOfEducationCodedValueId = null,
     Guid[]? QualificationCodedValueIds = null);
 
-public record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null, DateOnly? StartDate = null, DateOnly? EndDate = null);
-
 public record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 
 public record LinkTeacherGradeAssignmentRequest(Guid GradeLevelId, Guid? SubjectId = null, Guid? RoleCodedValueId = null);
@@ -432,31 +430,6 @@ public record LinkTeacherGradeAssignmentRequest(Guid GradeLevelId, Guid? Subject
 public record LinkTeacherActivityAssignmentRequest(Guid ActivityGroupId, Guid? RoleCodedValueId = null, Guid[]? GradeLevelIds = null);
 
 public record SetTeacherGradeLevelRoleRequest(Guid? TeacherRoleCodedValueId);
-
-public record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId, DateOnly? StartDate = null, DateOnly? EndDate = null);
-
-/// <summary>
-/// A teacher linked to a topic, with their per-topic role
-/// (grade-detail-rich-grids-plan.md §5). Returned by <c>ListTopicTeachersAsync</c>.
-/// </summary>
-public sealed record TopicTeacherDto(
-    Guid TeacherId,
-    Guid? TitleCodedValueId,
-    string FirstName,
-    string LastName,
-    string? DisplayName,
-    Guid? RoleCodedValueId = null);
-
-/// <summary>
-/// The role a teacher holds on a topic (cg/6). Returned by <c>ListTeacherTopicRolesAsync</c>
-/// (GET /teachers/{id}/topics/roles) and used by the teacher create/edit dialog to prefill
-/// per-topic roles when editing.
-/// </summary>
-public sealed record TeacherTopicRoleDto(
-    Guid TopicId,
-    Guid? RoleCodedValueId = null,
-    DateOnly? StartDate = null,
-    DateOnly? EndDate = null);
 
 /// <summary>
 /// A grade-scoped teaching assignment (v4 spec §3.5): grade + optional subject + role.
@@ -1353,12 +1326,6 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task DeleteTeacherAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{id}", ct)).EnsureSuccessStatusCode();
 
-    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId = null, DateOnly? startDate = null, DateOnly? endDate = null, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId, roleCodedValueId, startDate, endDate), ct)).EnsureSuccessStatusCode();
-
-    public async Task UnlinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/teachers/{teacherId}/topics/{topicId}", ct)).EnsureSuccessStatusCode();
-
     public async Task LinkTeacherGradeLevelAsync(Guid teacherId, Guid gradeLevelId, Guid? roleCodedValueId = null, CancellationToken ct = default) =>
         (await _http.PostAsJsonAsync($"/teachers/{teacherId}/grade-levels", new LinkTeacherGradeLevelRequest(gradeLevelId, roleCodedValueId), ct)).EnsureSuccessStatusCode();
 
@@ -1370,25 +1337,7 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task SetTeacherGradeLevelRoleAsync(Guid teacherId, Guid gradeLevelId, Guid? roleCodedValueId, CancellationToken ct = default) =>
         (await _http.PatchAsJsonAsync($"/teachers/{teacherId}/grade-levels/{gradeLevelId}/role", new SetTeacherGradeLevelRoleRequest(roleCodedValueId), ct)).EnsureSuccessStatusCode();
 
-    public async Task<TopicDto[]?> ListTopicsForTeacherAsync(Guid teacherId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<TopicDto[]>($"/teachers/{teacherId}/topics", ct);
-
-    // Per-topic roles for a teacher (cg/6). GET /teachers/{id}/topics/roles.
-    public async Task<TeacherTopicRoleDto[]?> ListTeacherTopicRolesAsync(Guid teacherId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<TeacherTopicRoleDto[]>($"/teachers/{teacherId}/topics/roles", ct);
-
-    // Set/clear the coded-value role a teacher holds on a topic
-    // (grade-detail-rich-grids-plan.md §5). PATCH /teachers/{id}/topics/{topicId}/role.
-    public async Task SetTeacherTopicRoleAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId, DateOnly? startDate = null, DateOnly? endDate = null, CancellationToken ct = default) =>
-        (await _http.PatchAsJsonAsync($"/teachers/{teacherId}/topics/{topicId}/role", new SetTeacherTopicRoleRequest(roleCodedValueId, startDate, endDate), ct)).EnsureSuccessStatusCode();
-
-    // Teachers linked to a topic with their per-topic role
-    // (grade-detail-rich-grids-plan.md §5). GET /topics/{id}/teachers.
-    public async Task<TopicTeacherDto[]?> ListTopicTeachersAsync(Guid topicId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<TopicTeacherDto[]>($"/students/topics/{topicId}/teachers", ct);
-
-    // Teachers linked to a grade level with their role + assigned topics
-    // (grade-level-detail-view-plan.md §3.2). GET /grade-levels/{id}/teachers.
+    // Teachers linked to a grade level with their role (grade-level-detail-view-plan.md §3.2).
     public async Task<TeacherWithRoleDto[]?> ListTeachersForGradeLevelAsync(Guid gradeLevelId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<TeacherWithRoleDto[]>($"/students/grade-levels/{gradeLevelId}/teachers", ct);
 

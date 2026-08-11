@@ -5,23 +5,17 @@ using SchoolCollab.Students.Core.DTOs;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.CreateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherGradeLevel;
-using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherActivityAssignment;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacherGradeAssignment;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacherActivityAssignment;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeacherGradeAssignments;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeacherActivityAssignments;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherGradeLevelRole;
-using SchoolCollab.Students.Core.CQRS.Teachers.Commands.SetTeacherTopicRole;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherGradeLevel;
-using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UnlinkTeacherTopic;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.UpdateTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.GetTeacherById;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListGradeLevelsForTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel;
-using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicsForTeacher;
-using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeacherTopicRoles;
-using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTopicTeachers;
 using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachers;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
@@ -90,64 +84,6 @@ public static class TeacherRoutes
                 return Results.NotFound();
             }
         });
-
-        // Topic links (spec §4.12). Subject->Topic rename (FR-13).
-        group.MapGet("/{id:guid}/topics", async (
-            Guid id,
-            [FromServices] IQueryHandler<ListTopicsForTeacher, TopicDto[]> handler,
-            CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListTopicsForTeacher(id), ct)));
-
-        group.MapPost("/{id:guid}/topics", async (
-            Guid id,
-            [FromBody] LinkTeacherTopicRequest req,
-            [FromServices] ICommandHandler<LinkTeacherTopic> handler,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId, req.RoleCodedValueId, req.StartDate, req.EndDate), ct);
-                return Results.NoContent();
-            }
-            catch (TeacherNotFoundException) { return Results.NotFound(); }
-            catch (TopicNotFoundException) { return Results.NotFound(); }
-            catch (TeacherLinkAlreadyExistsException ex) { return Results.Conflict(new { ex.Message }); }
-        });
-
-        group.MapDelete("/{id:guid}/topics/{topicId:guid}", async (
-            Guid id,
-            Guid topicId,
-            [FromServices] ICommandHandler<UnlinkTeacherTopic> handler,
-            CancellationToken ct) =>
-        {
-            await handler.HandleAsync(new UnlinkTeacherTopic(id, topicId), ct);
-            return Results.NoContent();
-        });
-
-        // Set/clear the coded-value role a teacher holds on a topic
-        // (grade-detail-rich-grids-plan.md §5). Idempotent at the domain layer.
-        group.MapPatch("/{id:guid}/topics/{topicId:guid}/role", async (
-            Guid id,
-            Guid topicId,
-            [FromBody] SetTeacherTopicRoleRequest req,
-            [FromServices] ICommandHandler<SetTeacherTopicRole> handler,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                await handler.HandleAsync(new SetTeacherTopicRole(id, topicId, req.RoleCodedValueId, req.StartDate, req.EndDate), ct);
-                return Results.NoContent();
-            }
-            catch (TeacherLinkNotFoundException) { return Results.NotFound(); }
-        });
-
-        // Per-topic roles for a teacher (cg/6) — inverse of ListTopicTeachers,
-        // used by the teacher create/edit dialog to prefill topic roles when editing.
-        group.MapGet("/{id:guid}/topics/roles", async (
-            Guid id,
-            [FromServices] IQueryHandler<ListTeacherTopicRoles, TeacherTopicRoleDto[]> handler,
-            CancellationToken ct) =>
-            Results.Ok(await handler.HandleAsync(new ListTeacherTopicRoles(id), ct)));
 
         // Grade-level links (spec §4.12).
         group.MapGet("/{id:guid}/grade-levels", async (
@@ -284,10 +220,6 @@ internal record UpdateTeacherRequest(
     DateOnly? DateOfBirth = null,
     Guid? LevelOfEducationCodedValueId = null,
     Guid[]? QualificationCodedValueIds = null);
-
-internal record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null, DateOnly? StartDate = null, DateOnly? EndDate = null);
-
-internal record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId, DateOnly? StartDate = null, DateOnly? EndDate = null);
 
 internal record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 

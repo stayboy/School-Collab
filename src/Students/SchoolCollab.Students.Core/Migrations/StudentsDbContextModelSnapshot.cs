@@ -1316,60 +1316,6 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("teacher_qualifications", (string)null);
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherTopic", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .HasColumnType("uuid")
-                        .HasColumnName("id");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("created_at");
-
-                    b.Property<DateOnly?>("EndDate")
-                        .HasColumnType("date")
-                        .HasColumnName("end_date");
-
-                    b.Property<Guid?>("RoleCodedValueId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("role_coded_value_id");
-
-                    b.Property<uint>("RowVersion")
-                        .IsConcurrencyToken()
-                        .ValueGeneratedOnAddOrUpdate()
-                        .HasColumnType("xid")
-                        .HasColumnName("xmin");
-
-                    b.Property<DateOnly>("StartDate")
-                        .HasColumnType("date")
-                        .HasColumnName("start_date");
-
-                    b.Property<Guid>("TeacherId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("teacher_id");
-
-                    b.Property<Guid>("TenantId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("tenant_id");
-
-                    b.Property<Guid>("TopicId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("topic_id");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("pk_teacher_topics");
-
-                    b.HasIndex("TenantId", "TeacherId", "TopicId")
-                        .IsUnique()
-                        .HasDatabaseName("ix_teacher_topics_tenant_teacher_topic");
-
-                    b.ToTable("teacher_topics", (string)null);
-                });
-
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Topic", b =>
                 {
                     b.Property<Guid>("Id")

@@ -11,6 +11,9 @@ namespace SchoolCollab.Students.Core.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            migrationBuilder.DropTable(
+                name: "teacher_topics");
+
             migrationBuilder.DropIndex(
                 name: "ix_teacher_grade_levels_tenant_teacher_grade_level",
                 table: "teacher_grade_levels");
@@ -131,10 +134,36 @@ namespace SchoolCollab.Students.Core.Migrations
                 name: "topic_id",
                 table: "teacher_grade_levels");
 
+            migrationBuilder.CreateTable(
+                name: "teacher_topics",
+                columns: table => new
+                {
+                    id = table.Column<Guid>(type: "uuid", nullable: false),
+                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
+                    end_date = table.Column<DateOnly>(type: "date", nullable: true),
+                    role_coded_value_id = table.Column<Guid>(type: "uuid", nullable: true),
+                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
+                    start_date = table.Column<DateOnly>(type: "date", nullable: false),
+                    teacher_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    tenant_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    topic_id = table.Column<Guid>(type: "uuid", nullable: false),
+                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
+                },
+                constraints: table =>
+                {
+                    table.PrimaryKey("pk_teacher_topics", x => x.id);
+                });
+
             migrationBuilder.CreateIndex(
                 name: "ix_teacher_grade_levels_tenant_teacher_grade_level",
                 table: "teacher_grade_levels",
                 columns: new[] { "tenant_id", "teacher_id", "grade_level_id" },
+                unique: true);
+
+            migrationBuilder.CreateIndex(
+                name: "ix_teacher_topics_tenant_teacher_topic",
+                table: "teacher_topics",
+                columns: new[] { "tenant_id", "teacher_id", "topic_id" },
                 unique: true);
         }
     }

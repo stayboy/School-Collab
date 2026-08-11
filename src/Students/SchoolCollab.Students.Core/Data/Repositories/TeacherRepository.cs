@@ -7,32 +7,6 @@ namespace SchoolCollab.Students.Core.Data.Repositories;
 internal sealed class TeacherRepository(StudentsDbContext db)
     : SoftDeletableRepositoryBase<Teacher, StudentsDbContext>(db), ITeacherRepository
 {
-    public Task AddTopicAsync(TeacherTopic link, CancellationToken cancellationToken = default)
-    {
-        Db.TeacherTopics.Add(link);
-        return Db.SaveChangesAsync(cancellationToken);
-    }
-
-    public Task<TeacherTopic?> GetTopicLinkAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default)
-        => Db.TeacherTopics.FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == topicId, cancellationToken);
-
-    public async Task RemoveTopicAsync(Guid teacherId, Guid topicId, CancellationToken cancellationToken = default)
-    {
-        var link = await Db.TeacherTopics
-            .FirstOrDefaultAsync(l => l.TeacherId == teacherId && l.TopicId == topicId, cancellationToken);
-        if (link is not null)
-        {
-            Db.TeacherTopics.Remove(link);
-            await Db.SaveChangesAsync(cancellationToken);
-        }
-    }
-
-    public Task UpdateTopicAsync(TeacherTopic link, CancellationToken cancellationToken = default)
-    {
-        Db.TeacherTopics.Update(link);
-        return Db.SaveChangesAsync(cancellationToken);
-    }
-
     public Task AddQualificationAsync(TeacherQualification link, CancellationToken cancellationToken = default)
     {
         Db.TeacherQualifications.Add(link);

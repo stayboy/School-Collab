@@ -365,7 +365,6 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Find("fluent-button[title=\"Actions for Jane Doe\"]").Click();
         var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToArray();
         items.Should().Contain("Role", "teachers kebab offers role");
-        items.Should().Contain("Subjects", "teachers kebab offers subjects");
         items.Should().Contain("View profile", "teachers kebab offers view profile");
         items.Should().Contain("Edit", "teachers kebab offers edit");
         items.Should().Contain("Remove", "teachers kebab offers remove");
@@ -722,20 +721,12 @@ public class GradeLevelDetailPageTests : BunitContext
 
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
             "the Subjects card's View-all opens GradeTopicsDialog via the read-only helper");
-        source.Should().Contain("ShowReadonlyDialogAsync<GradeTeachersDialog>(",
-            "the Teachers card's View-all button opens GradeTeachersDialog via the read-only helper");
 
         // GradeTopicsDialog gets the assigned topics + assignable catalog + action callbacks.
         source.Should().Contain("nameof(GradeTopicsDialog.Topics)");
         source.Should().Contain("nameof(GradeTopicsDialog.UnassignedTopics)");
         source.Should().Contain("nameof(GradeTopicsDialog.Remove)");
         source.Should().Contain("nameof(GradeTopicsDialog.Assign)");
-
-        // GradeTeachersDialog gets the linked teachers + catalog + name maps + callbacks.
-        source.Should().Contain("nameof(GradeTeachersDialog.Teachers)");
-        source.Should().Contain("nameof(GradeTeachersDialog.UnlinkedTeachers)");
-        source.Should().Contain("nameof(GradeTeachersDialog.RoleChanged)");
-        source.Should().Contain("nameof(GradeTeachersDialog.UnlinkTopic)");
 
         // Students card's View-all navigates to the grade-filtered students landing.
         source.Should().Contain("View all students");
