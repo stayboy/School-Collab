@@ -422,13 +422,13 @@ public record UpdateTeacherRequest(
     Guid? LevelOfEducationCodedValueId = null,
     Guid[]? QualificationCodedValueIds = null);
 
-public record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null);
+public record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null, DateOnly? StartDate = null, DateOnly? EndDate = null);
 
 public record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 
 public record SetTeacherGradeLevelRoleRequest(Guid? TeacherRoleCodedValueId);
 
-public record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId);
+public record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId, DateOnly? StartDate = null, DateOnly? EndDate = null);
 
 /// <summary>
 /// A teacher linked to a topic, with their per-topic role
@@ -449,7 +449,9 @@ public sealed record TopicTeacherDto(
 /// </summary>
 public sealed record TeacherTopicRoleDto(
     Guid TopicId,
-    Guid? RoleCodedValueId = null);
+    Guid? RoleCodedValueId = null,
+    DateOnly? StartDate = null,
+    DateOnly? EndDate = null);
 
 // ── Client ──────────────────────────────────────────────────────────────────
 
@@ -1321,8 +1323,8 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task DeleteTeacherAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{id}", ct)).EnsureSuccessStatusCode();
 
-    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId = null, CancellationToken ct = default) =>
-        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId, roleCodedValueId), ct)).EnsureSuccessStatusCode();
+    public async Task LinkTeacherTopicAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId = null, DateOnly? startDate = null, DateOnly? endDate = null, CancellationToken ct = default) =>
+        (await _http.PostAsJsonAsync($"/teachers/{teacherId}/topics", new LinkTeacherTopicRequest(topicId, roleCodedValueId, startDate, endDate), ct)).EnsureSuccessStatusCode();
 
     public async Task UnlinkTeacherTopicAsync(Guid teacherId, Guid topicId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/teachers/{teacherId}/topics/{topicId}", ct)).EnsureSuccessStatusCode();
@@ -1347,8 +1349,8 @@ public sealed class StudentsApiClient : IContactsClient
 
     // Set/clear the coded-value role a teacher holds on a topic
     // (grade-detail-rich-grids-plan.md §5). PATCH /teachers/{id}/topics/{topicId}/role.
-    public async Task SetTeacherTopicRoleAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId, CancellationToken ct = default) =>
-        (await _http.PatchAsJsonAsync($"/teachers/{teacherId}/topics/{topicId}/role", new SetTeacherTopicRoleRequest(roleCodedValueId), ct)).EnsureSuccessStatusCode();
+    public async Task SetTeacherTopicRoleAsync(Guid teacherId, Guid topicId, Guid? roleCodedValueId, DateOnly? startDate = null, DateOnly? endDate = null, CancellationToken ct = default) =>
+        (await _http.PatchAsJsonAsync($"/teachers/{teacherId}/topics/{topicId}/role", new SetTeacherTopicRoleRequest(roleCodedValueId, startDate, endDate), ct)).EnsureSuccessStatusCode();
 
     // Teachers linked to a topic with their per-topic role
     // (grade-detail-rich-grids-plan.md §5). GET /topics/{id}/teachers.

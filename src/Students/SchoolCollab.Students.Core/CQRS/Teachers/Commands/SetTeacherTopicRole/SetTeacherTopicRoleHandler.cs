@@ -22,7 +22,7 @@ public sealed class SetTeacherTopicRoleHandler(
             ?? throw new TeacherLinkNotFoundException(command.TeacherId, command.TopicId);
 
         // Idempotent at the domain layer — SetRole no-ops when unchanged.
-        link.SetRole(command.RoleCodedValueId);
+        link.SetRole(command.RoleCodedValueId, command.StartDate, command.EndDate);
         await repository.UpdateTopicAsync(link, cancellationToken);
         await cache.RemoveByTagAsync("teachers", cancellationToken);
 

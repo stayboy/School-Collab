@@ -1,0 +1,152 @@
+@* TeacherSubjectsDialog — focused per-teacher subject+role dialog for the
+   Teachers card kebab "Subjects" action (section-card-lessons-adoption.md
+   §9 dec 7). Shows the teacher's assigned topics with per-topic roles and
+   assignment dates (open-ended allowed) via the shared
+   <TeacherSubjectRoleFormFields>, and lets the user add/remove topics, change
+   each role, and set dates. Reconciles the topic+role links + dates on save
+   through the StudentsApiClient. *@
+@implements IDialogContentComponent<DialogParameters>
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Components
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="teacher-subjects-dialog">
+    @if (_loading)
+    {
+        <div class="spinner-container"><FluentProgressRing /></div>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+        }
+        <TeacherSubjectRoleFormFields Topics="@(_allTopics)"
+                                      Assignments="_assignments"
+                                      OnToggle="OnToggleAsync"
+                                      OnRoleChanged="OnRoleChangedAsync"
+                                      OnStartDateChanged="OnStartDateChangedAsync"
+                                      OnEndDateChanged="OnEndDateChangedAsync" />
+    }
+    <div class="dialog-footer">
+        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+        <FluentButton Appearance="Appearance.Accent" OnClick="SaveAsync" class="ms-2">Save</FluentButton>
+    </div>
+</div>
+
+@code {
+    /// <summary>The teacher whose subject+role links are being managed.</summary>
+    [Parameter, EditorRequired] public Guid TeacherId { get; set; }
+
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+    public DialogParameters Content { get; set; } = default!;
+
+    [Inject] private StudentsApiClient Api { get; set; } = default!;
+    [Inject] private ILogger<TeacherSubjectsDialog> Logger { get; set; } = default!;
+
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private TopicDto[]? _allTopics;
+    private readonly Dictionary<Guid, TeacherTopicAssignment> _assignments = new();
+    private Dictionary<Guid, TeacherTopicAssignment> _originalAssignments = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        try
+        {
+            _allTopics = await Api.ListTopicsAsync() ?? [];
+            var roles = await Api.ListTeacherTopicRolesAsync(TeacherId) ?? [];
+            _assignments.Clear();
+            foreach (var r in roles)
+                _assignments[r.TopicId] = new TeacherTopicAssignment(r.TopicId, r.RoleCodedValueId, r.StartDate, r.EndDate);
+            _originalAssignments = new Dictionary<Guid, TeacherTopicAssignment>(_assignments);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load subjects for teacher {TeacherId}", TeacherId);
+            _error = $"Could not load: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private Task OnToggleAsync(Guid topicId, bool selected)
+    {
+        if (selected)
+        {
+            if (!_assignments.ContainsKey(topicId))
+                _assignments[topicId] = new TeacherTopicAssignment(topicId);
+        }
+        else
+        {
+            _assignments.Remove(topicId);
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task OnRoleChangedAsync(Guid topicId, Guid? role)
+    {
+        if (_assignments.TryGetValue(topicId, out var a))
+            _assignments[topicId] = a with { RoleCodedValueId = role };
+        return Task.CompletedTask;
+    }
+
+    private Task OnStartDateChangedAsync(Guid topicId, DateOnly? date)
+    {
+        if (_assignments.TryGetValue(topicId, out var a))
+            _assignments[topicId] = a with { StartDate = date };
+        return Task.CompletedTask;
+    }
+
+    private Task OnEndDateChangedAsync(Guid topicId, DateOnly? date)
+    {
+        if (_assignments.TryGetValue(topicId, out var a))
+            _assignments[topicId] = a with { EndDate = date };
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_saving) return;
+        _saving = true;
+        _error = null;
+        try
+        {
+            foreach (var id in _assignments.Keys.Except(_originalAssignments.Keys))
+            {
+                var a = _assignments[id];
+                await Api.LinkTeacherTopicAsync(TeacherId, id, a.RoleCodedValueId, a.StartDate, a.EndDate);
+            }
+            foreach (var id in _originalAssignments.Keys.Except(_assignments.Keys))
+                await Api.UnlinkTeacherTopicAsync(TeacherId, id);
+            foreach (var id in _assignments.Keys.Intersect(_originalAssignments.Keys))
+            {
+                var a = _assignments[id];
+                var orig = _originalAssignments[id];
+                if (a.RoleCodedValueId != orig.RoleCodedValueId || a.StartDate != orig.StartDate || a.EndDate != orig.EndDate)
+                    await Api.SetTeacherTopicRoleAsync(TeacherId, id, a.RoleCodedValueId, a.StartDate, a.EndDate);
+            }
+            if (Dialog is not null) await Dialog.CloseAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save subjects for teacher {TeacherId}", TeacherId);
+            _error = $"Could not save: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+}

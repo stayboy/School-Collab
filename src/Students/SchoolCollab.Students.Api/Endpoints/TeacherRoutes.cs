@@ -101,7 +101,7 @@ public static class TeacherRoutes
         {
             try
             {
-                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId, req.RoleCodedValueId), ct);
+                await handler.HandleAsync(new LinkTeacherTopic(id, req.TopicId, req.RoleCodedValueId, req.StartDate, req.EndDate), ct);
                 return Results.NoContent();
             }
             catch (TeacherNotFoundException) { return Results.NotFound(); }
@@ -130,7 +130,7 @@ public static class TeacherRoutes
         {
             try
             {
-                await handler.HandleAsync(new SetTeacherTopicRole(id, topicId, req.RoleCodedValueId), ct);
+                await handler.HandleAsync(new SetTeacherTopicRole(id, topicId, req.RoleCodedValueId, req.StartDate, req.EndDate), ct);
                 return Results.NoContent();
             }
             catch (TeacherLinkNotFoundException) { return Results.NotFound(); }
@@ -207,9 +207,9 @@ internal record UpdateTeacherRequest(
     Guid? LevelOfEducationCodedValueId = null,
     Guid[]? QualificationCodedValueIds = null);
 
-internal record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null);
+internal record LinkTeacherTopicRequest(Guid TopicId, Guid? RoleCodedValueId = null, DateOnly? StartDate = null, DateOnly? EndDate = null);
 
-internal record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId);
+internal record SetTeacherTopicRoleRequest(Guid? RoleCodedValueId, DateOnly? StartDate = null, DateOnly? EndDate = null);
 
 internal record LinkTeacherGradeLevelRequest(Guid GradeLevelId, Guid? TeacherRoleCodedValueId = null);
 

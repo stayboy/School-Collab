@@ -3,11 +3,13 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Rendering;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Students;
+using SchoolCollab.Students.Application.Services;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -74,7 +76,12 @@ public class GradeDialogsBunitTests : BunitContext
     {
         var handler = new RecordingHandler();
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
-        Services.AddSingleton(new CodedValuesApiClient(http));
+        var cv = new CodedValuesApiClient(http);
+        Services.AddSingleton(cv);
+        // GradeTeachersDialog now injects StudentsApiClient (owns the in-page
+        // subject+role editor) + a logger.
+        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, cv));
+        Services.AddSingleton<ILogger<GradeTeachersDialog>>(NullLogger<GradeTeachersDialog>.Instance);
     }
 
     private static GradeTopicCurriculumDto Topic(Guid id, string name, string code, int strands, int lessons) =>

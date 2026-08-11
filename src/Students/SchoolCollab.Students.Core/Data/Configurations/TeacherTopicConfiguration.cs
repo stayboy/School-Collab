@@ -24,6 +24,13 @@ internal sealed class TeacherTopicConfiguration : TenantEntityTypeConfigurationB
         builder.Property(x => x.TopicId).IsRequired();
         builder.Property(x => x.RoleCodedValueId);
 
+        builder.Property(x => x.StartDate)
+            .HasColumnName("start_date")
+            .IsRequired();
+        builder.Property(x => x.EndDate)
+            .HasColumnName("end_date")
+            .IsRequired(false);
+
         builder.HasIndex(x => new { x.TenantId, x.TeacherId, x.TopicId })
             .IsUnique()
             .HasDatabaseName("ix_teacher_topics_tenant_teacher_topic");
