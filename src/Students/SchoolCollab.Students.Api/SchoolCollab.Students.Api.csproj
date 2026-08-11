@@ -9,6 +9,7 @@
     <ProjectReference Include="..\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
     <ProjectReference Include="..\..\Settings\SchoolCollab.Settings.Core\SchoolCollab.Settings.Core.csproj" />
     <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
+    <ProjectReference Include="..\..\SchoolCollab.Admin.Shared\SchoolCollab.Admin.Shared.csproj" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" />

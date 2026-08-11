@@ -25,7 +25,16 @@ else
 }
 
 // Cross-module: HTTP client for the Settings Coded Values API (strand validation).
-builder.Services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(client =>
+// Minimal client used by handlers (GetByIdAsync only).
+builder.Services.AddHttpClient<ICodedValuesApiClient, SchoolCollab.Students.Core.Services.CodedValuesApiClient>(client =>
+{
+    client.BaseAddress = new Uri("http://settings-api");
+});
+
+// Full-featured CodedValuesApiClient for Admin.Shared UI components (e.g., TeacherEditDialog).
+// Registers as SchoolCollab.Admin.Shared.Services.CodedValuesApiClient so @inject CodedValuesApiClient
+// in Blazor components resolves to the full-featured version with GetChildrenByParentCodeAsync, etc.
+builder.Services.AddHttpClient<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>(client =>
 {
     client.BaseAddress = new Uri("http://settings-api");
 });
