@@ -1,0 +1,41 @@
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{cs,razor}]
+# Qualification / members
+dotnet_style_qualification_for_field = false:silent
+dotnet_style_qualification_for_property = false:silent
+dotnet_style_qualification_for_method = false:silent
+dotnet_style_qualification_for_event = false:silent
+dotnet_style_require_accessibility_modifiers = for_non_interface_members:silent
+
+# Language idioms the repo targets (see dotnet-best-practices). Kept as the
+# documented target / IDE preference, NOT build-warning debt: the existing
+# codebase predates these idioms, and EnforceCodeStyleInBuild is off until that
+# debt is cleared (see Directory.Build.props comment).
+csharp_style_namespace_declarations = file_scoped:silent
+csharp_style_prefer_primary_constructors = true:silent
+csharp_prefer_simple_using_statement = true:suggestion
+csharp_style_prefer_collection_expression = true:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_using_directive_placement = outside_namespace:silent
+dotnet_sort_system_directives_first = true
+dotnet_style_prefer_auto_properties = true:suggestion
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+
+# Unused usings (IDE0005) surface as build warnings when style enforcement is enabled
+dotnet_diagnostic.IDE0005.severity = warning
+
+# The repo hardcodes English UI/user-facing strings; do NOT require localization
+dotnet_diagnostic.CA1303.severity = none
+
+# Generated code should not be linted
+[*.{g.cs,Designer.cs,AssemblyInfo.cs}]
+dotnet_diagnostic.IDE0005.severity = none

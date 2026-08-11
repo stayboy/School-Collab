@@ -14,6 +14,7 @@ guidance into these files.
 | Logging and Aspire observability | `logging-aspire.md` |
 | Testing | `testing.md` |
 | Configuration documentation | `configuration-documentation.md` |
+| .NET/C# best practices | `dotnet-best-practices.md` |
 
 ## How to use
 
@@ -31,3 +32,4 @@ Skills live under `.github/skills/` and include trigger metadata for agent selec
 | Bounded context creation | `../skills/bounded-context/SKILL.md` |
 | Coded values domain | `../skills/coded-values/SKILL.md` |
 | Azure AI OpenAI .NET | `../skills/azure-ai-openai-dotnet/SKILL.md` |
+| .NET/C# best practices | `../skills/dotnet-best-practices/SKILL.md` |

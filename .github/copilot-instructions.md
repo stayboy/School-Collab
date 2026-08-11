@@ -77,6 +77,13 @@ guidance instead of duplicating it.
 | Bounded context creation | `.github/skills/bounded-context/SKILL.md` |
 | Coded values domain | `.github/skills/coded-values/SKILL.md` |
 | Azure AI OpenAI .NET | `.github/skills/azure-ai-openai-dotnet/SKILL.md` |
+| **.NET/C# best practices (all C# changes)** | `.github/copilot/rules/dotnet-best-practices.md` + `.github/skills/dotnet-best-practices/SKILL.md` |
+
+**Default rule for C#:** For **any** change that touches a `.cs` or `.razor` code-behind, read
+`.github/copilot/rules/dotnet-best-practices.md` (and its backing skill
+`.github/skills/dotnet-best-practices/SKILL.md`) **before** writing code. This is not
+optional-on-demand — it applies to every C# edit in this repo, and the rule's "Never" list is
+enforced in CI by `SchoolCollab.ArchitectureTests.Unit`.
 
 ## Tenancy & Operational Standards
 
