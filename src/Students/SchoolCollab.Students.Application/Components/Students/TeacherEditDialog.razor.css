@@ -41,23 +41,43 @@
     gap: 0.4rem;
     margin-top: 0.5rem;
 }
-/* One row per assigned subject: name + role dropdown + remove button. */
-.subject-row {
+
+/* v4 teaching-assignments grid (grade + optional subject + role, or activity + role + grades). */
+.assignments-toolbar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.assignment-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.assignment-row {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
-    margin-bottom: 0.4rem;
+    gap: 0.5rem;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--neutral-stroke-rest);
+    border-radius: 6px;
 }
-.subject-name {
+.assignment-row--editing {
+    border-color: var(--accent-fill-rest);
+}
+.assignment-row ::deep fluent-select,
+.assignment-row ::deep fluent-combobox {
+    min-width: 150px;
+}
+.row-type {
+    flex-shrink: 0;
+    width: 64px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--neutral-foreground-hint);
+}
+.row-display {
     flex: 1;
     min-width: 0;
-}
-/* Icon-only remove button needs a square footprint. */
-.subject-row ::deep fluent-button {
-    min-width: 2rem;
-    min-height: 2rem;
-    padding: 0;
-}
-.grade-context-note {
-    margin: 0.25rem 0 0.75rem;
 }
