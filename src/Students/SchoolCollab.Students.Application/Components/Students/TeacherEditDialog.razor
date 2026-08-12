@@ -489,18 +489,31 @@
         }
         else
         {
-            teacherId = await Api.CreateTeacherAsync(new CreateTeacherRequest(
+            // Atomic create: teacher + qualifications + grade/activity assignments
+            // in one transaction (Unit of Work). Any failure rolls back the whole
+            // batch — no orphaned teacher, no partial assignments.
+            var gradeAssignments = model.Assignments
+                .Where(a => !a.IsActivity)
+                .Select(a => new GradeAssignmentRequest(a.GradeLevelId!.Value, a.SubjectId, a.RoleCodedValueId))
+                .ToList();
+
+            // Context grade is force-included on create if the user removed the pre-created row.
+            if (model.ContextGradeLevelId is { } ctx
+                && !gradeAssignments.Any(g => g.GradeLevelId == ctx))
+                gradeAssignments.Add(new GradeAssignmentRequest(ctx, null, null));
+
+            var activityAssignments = model.Assignments
+                .Where(a => a.IsActivity)
+                .Select(a => new ActivityAssignmentRequest(a.ActivityGroupId!.Value, a.RoleCodedValueId, a.GradeLevelIds.ToArray()))
+                .ToArray();
+
+            teacherId = await Api.CreateTeacherWithAssignmentsAsync(new CreateTeacherWithAssignmentsRequest(
                 model.TitleCodedValueId,
                 model.FirstName.Trim(), model.LastName.Trim(),
                 string.IsNullOrWhiteSpace(model.DisplayName) ? null : model.DisplayName.Trim(),
                 model.GenderCodedValueId, model.DateOfBirth, model.LevelOfEducationCodedValueId,
-                QualificationIds()));
-            await ReconcileAssignmentsAsync(teacherId, model);
-
-            // Context grade is force-included on create if the user removed the pre-created row.
-            if (model.ContextGradeLevelId is { } ctx
-                && !model.Assignments.Any(a => !a.IsActivity && a.GradeLevelId == ctx))
-                await Api.LinkTeacherGradeAssignmentAsync(teacherId, ctx, null, null);
+                QualificationIds(),
+                gradeAssignments.ToArray(), activityAssignments));
         }
 
         return await Api.GetTeacherByIdAsync(teacherId);

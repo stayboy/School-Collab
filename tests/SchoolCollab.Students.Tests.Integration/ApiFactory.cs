@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Students.Core.Data;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
@@ -71,6 +72,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
                 opts.UseNpgsql(_postgres.GetConnectionString()).UseSnakeCaseNamingConvention());
             services.AddDbContextFactory<StudentsDbContext>(opts =>
                 opts.UseNpgsql(_postgres.GetConnectionString()).UseSnakeCaseNamingConvention());
+
+            // The real IEntityCodeGenerator (Settings module) needs a Settings DB
+            // that this Students-only factory does not start. Stub it so teacher /
+            // student creation handlers resolve a deterministic code instead of
+            // failing to connect to a missing settings-db.
+            services.RemoveAll<IEntityCodeGenerator>();
+            services.AddSingleton<IEntityCodeGenerator>(new StubEntityCodeGenerator());
         });
 
         builder.UseEnvironment("Testing");
@@ -82,4 +90,19 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
         // in tests, so any valid exchange name works.
         builder.UseSetting("Outbox:ExchangeName", "students");
     }
+}
+
+/// <summary>
+/// Deterministic <see cref="IEntityCodeGenerator"/> for the Students-only test
+/// factory. Returns a fixed code so creation handlers don't need a Settings DB.
+/// </summary>
+internal sealed class StubEntityCodeGenerator : IEntityCodeGenerator
+{
+    private int _seq;
+
+    public Task<string> GenerateAsync(string ruleCode, CancellationToken cancellationToken = default)
+        => Task.FromResult($"{ruleCode}{Interlocked.Increment(ref _seq):D4}");
+
+    public Task<string> GenerateWithNameAsync(string ruleCode, string? nameHint, CancellationToken cancellationToken = default)
+        => Task.FromResult($"{ruleCode}{Interlocked.Increment(ref _seq):D4}");
 }

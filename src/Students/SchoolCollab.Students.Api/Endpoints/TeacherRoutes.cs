@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.DTOs;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.CreateTeacher;
+using SchoolCollab.Students.Core.CQRS.Teachers.Commands.CreateTeacherWithAssignments;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.DeleteTeacher;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherGradeLevel;
 using SchoolCollab.Students.Core.CQRS.Teachers.Commands.LinkTeacherActivityAssignment;
@@ -33,6 +34,23 @@ public static class TeacherRoutes
         {
             var id = await handler.HandleAsync(command, ct);
             return Results.Created($"/teachers/{id}", new { id });
+        });
+
+        // Atomic create: teacher + qualifications + grade/activity assignments in
+        // one transaction (Unit of Work). Any failure rolls back the whole batch.
+        group.MapPost("/with-assignments", async (
+            [FromBody] CreateTeacherWithAssignments command,
+            [FromServices] ICommandHandler<CreateTeacherWithAssignments, Guid> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var id = await handler.HandleAsync(command, ct);
+                return Results.Created($"/teachers/{id}", new { id });
+            }
+            catch (GradeLevelNotFoundException) { return Results.NotFound(); }
+            catch (ActivityGroupNotFoundException) { return Results.NotFound(); }
+            catch (TeacherLinkAlreadyExistsException ex) { return Results.Conflict(new { ex.Message }); }
         });
 
         group.MapGet("/", async (

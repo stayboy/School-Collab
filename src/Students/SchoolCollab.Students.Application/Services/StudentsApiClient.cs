@@ -414,6 +414,25 @@ public record CreateTeacherRequest(
     Guid? LevelOfEducationCodedValueId = null,
     Guid[]? QualificationCodedValueIds = null);
 
+/// <summary>Atomic create-teacher-with-assignments request (Unit of Work).</summary>
+public record CreateTeacherWithAssignmentsRequest(
+    Guid? TitleCodedValueId,
+    string FirstName,
+    string LastName,
+    string? DisplayName,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null,
+    Guid? LevelOfEducationCodedValueId = null,
+    Guid[]? QualificationCodedValueIds = null,
+    GradeAssignmentRequest[]? GradeAssignments = null,
+    ActivityAssignmentRequest[]? ActivityAssignments = null);
+
+/// <summary>A grade assignment row: grade + optional subject + optional role.</summary>
+public record GradeAssignmentRequest(Guid GradeLevelId, Guid? SubjectId = null, Guid? RoleCodedValueId = null);
+
+/// <summary>An activity assignment row: activity + optional role + optional grades.</summary>
+public record ActivityAssignmentRequest(Guid ActivityGroupId, Guid? RoleCodedValueId = null, Guid[]? GradeLevelIds = null);
+
 public record UpdateTeacherRequest(
     string FirstName,
     string LastName,
@@ -1315,6 +1334,18 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<Guid> CreateTeacherAsync(CreateTeacherRequest req, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/teachers", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    /// <summary>
+    /// Atomically creates a teacher with its grade and activity assignments in a
+    /// single transaction. If any assignment fails, the whole create is rolled back.
+    /// </summary>
+    public async Task<Guid> CreateTeacherWithAssignmentsAsync(CreateTeacherWithAssignmentsRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/teachers/with-assignments", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;

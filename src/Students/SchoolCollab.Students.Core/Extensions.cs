@@ -9,6 +9,7 @@ using SchoolCollab.Students.Core.Domain.Specifications;
 using SchoolCollab.Students.Core.Tenancy;
 using SchoolCollab.Students.Core.Services;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Notifications;
 
@@ -30,6 +31,11 @@ public static class Extensions
         services.AddDbContextFactory<StudentsDbContext>(opts =>
             opts.UseNpgsql(connectionString)
                 .UseSnakeCaseNamingConvention());
+
+        // Request-scoped unit of work for atomic compound commands (e.g.
+        // create-teacher-with-assignments). Wraps a batch of writes in one
+        // EF Core transaction committed once at the end.
+        services.AddScoped<IUnitOfWork<StudentsDbContext>, UnitOfWork<StudentsDbContext>>();
 
         services.AddScoped<IStudentRepository, StudentRepository>();
         services.AddScoped<IGradeLevelRepository, GradeLevelRepository>();

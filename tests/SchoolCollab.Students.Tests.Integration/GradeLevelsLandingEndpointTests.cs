@@ -50,10 +50,11 @@ public class GradeLevelsLandingEndpointTests
     {
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<StudentsDbContext>();
-        // Tables (note legacy renames): Topic→subjects, TopicStrand→subject_strands,
-        // TopicLesson→subject_lessons; GradeTopicAssignment is TPH under topic_assignments.
+        // Tables (note legacy renames): Topic→subjects, TopicStrand→subject_strands;
+        // lessons are parented strands (no separate subject_lessons table).
+        // GradeTopicAssignment is TPH under topic_assignments.
         await db.Database.ExecuteSqlRawAsync(
-            "TRUNCATE TABLE subject_strands, subject_lessons, topic_assignments, student_topic_assignments, grade_levels, subjects, periods CASCADE;");
+            "TRUNCATE TABLE subject_strands, topic_assignments, student_topic_assignments, grade_levels, subjects, periods CASCADE;");
     }
 
     /// <summary>
@@ -82,20 +83,24 @@ public class GradeLevelsLandingEndpointTests
             db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(gradeLevelId, topicA.Id, today));
             db.GradeTopicAssignments.Add(GradeTopicAssignment.Create(gradeLevelId, topicB.Id, today));
 
-            // 3 strands on topic A, 1 on topic B → StrandCount 4.
-            db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Algebra", null, 1));
-            db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Geometry", null, 2));
-            db.TopicStrands.Add(TopicStrand.Create(topicA.Id, "Statistics", null, 3));
-            db.TopicStrands.Add(TopicStrand.Create(topicB.Id, "Biology", null, 1));
+            // 3 root strands on topic A, 1 on topic B → StrandCount 4.
+            var algebra = TopicStrand.Create(topicA.Id, "Algebra", null, 1);
+            var geometry = TopicStrand.Create(topicA.Id, "Geometry", null, 2);
+            var statistics = TopicStrand.Create(topicA.Id, "Statistics", null, 3);
+            var biology = TopicStrand.Create(topicB.Id, "Biology", null, 1);
+            db.TopicStrands.AddRange(algebra, geometry, statistics, biology);
 
-            // 5 lessons on topic A, 2 on topic B → LessonCount 7.
-            db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "L1", null, null, null, 1));
-            db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "L2", null, null, null, 2));
-            db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "L3", null, null, null, 3));
-            db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "L4", null, null, null, 4));
-            db.TopicLessons.Add(TopicLesson.Create(topicA.Id, "L5", null, null, null, 5));
-            db.TopicLessons.Add(TopicLesson.Create(topicB.Id, "A1", null, null, null, 1));
-            db.TopicLessons.Add(TopicLesson.Create(topicB.Id, "A2", null, null, null, 2));
+            // 5 lessons on topic A, 2 on topic B → LessonCount 7. A lesson is a
+            // parented strand (strand-lesson-unification-plan.md): ParentStrandId
+            // set, so the handler counts it as a lesson, not a root strand.
+            db.TopicStrands.AddRange(
+                TopicStrand.Create(topicA.Id, "L1", null, 1, parentStrandId: algebra.Id),
+                TopicStrand.Create(topicA.Id, "L2", null, 2, parentStrandId: algebra.Id),
+                TopicStrand.Create(topicA.Id, "L3", null, 3, parentStrandId: geometry.Id),
+                TopicStrand.Create(topicA.Id, "L4", null, 4, parentStrandId: geometry.Id),
+                TopicStrand.Create(topicA.Id, "L5", null, 5, parentStrandId: statistics.Id),
+                TopicStrand.Create(topicB.Id, "A1", null, 1, parentStrandId: biology.Id),
+                TopicStrand.Create(topicB.Id, "A2", null, 2, parentStrandId: biology.Id));
             await db.SaveChangesAsync();
             return true;
         });
@@ -130,8 +135,10 @@ public class GradeLevelsLandingEndpointTests
             db.Topics.Add(topic);
             db.GradeTopicAssignments.Add(
                 GradeTopicAssignment.Create(gradeLevelId, topic.Id, DateOnly.FromDateTime(DateTime.UtcNow)));
-            db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Algebra", null, 1));
-            db.TopicLessons.Add(TopicLesson.Create(topic.Id, "Lesson 1", null, null, null, 1));
+            var algebra = TopicStrand.Create(topic.Id, "Algebra", null, 1);
+            db.TopicStrands.Add(algebra);
+            // A lesson is a parented strand.
+            db.TopicStrands.Add(TopicStrand.Create(topic.Id, "Lesson 1", null, 1, parentStrandId: algebra.Id));
             await db.SaveChangesAsync();
             return true;
         });
