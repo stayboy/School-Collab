@@ -24,6 +24,12 @@
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
     [Parameter] public DialogParameters Content { get; set; } = default!;
 
+    // Optional enrollment target. When set (e.g. the grade-detail "Add" passes the
+    // grade id), the student is enrolled in the same atomic create — no separate
+    // EnrollStudentAsync round-trip, no "created but not on the grade card" state.
+    [Parameter] public Guid? EnrollmentGradeLevelId { get; set; }
+    [Parameter] public Guid? EnrollmentPeriodId { get; set; }
+
     private readonly StudentFormModel _model = new();
     private bool _saving;
     private string? _error;
@@ -35,21 +41,28 @@
         _error = null;
         try
         {
-            var request = new CreateStudentRequest(
-                _model.StudentNumber!, _model.FirstName!, _model.LastName!,
-                _model.DateOfBirth, _model.GenderCodedValueId, _model.TitleCodedValueId);
-            var studentId = await Api.CreateStudentAsync(request);
+            var guardians = _model.GuardianLinks
+                .Select(d => new GuardianDraftRequest(
+                    ExistingGuardianId: d.ExistingGuardianId,
+                    Role: d.Role,
+                    RelationshipCodedValueId: d.RelationshipCodedValueId,
+                    IsEmergencyContact: false,
+                    ActingGuardianId: null,
+                    TitleCodedValueId: d.TitleCodedValueId,
+                    FirstName: d.FirstName,
+                    LastName: d.LastName))
+                .ToArray();
 
-            // Link any guardians drafted on the form (existing or newly created).
-            foreach (var draft in _model.GuardianLinks)
-            {
-                var guardianId = draft.ExistingGuardianId
-                    ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
-                        draft.TitleCodedValueId, draft.FirstName, draft.LastName, null, null, null));
-                await Api.LinkGuardianAsync(new LinkGuardianRequest(
-                    studentId, guardianId, draft.RelationshipCodedValueId, draft.Role, false, null));
-            }
+            // Single atomic call: student + drafted guardians (+ optional enrollment)
+            // are created together, all-or-nothing (Unit of Work).
+            var request = new CreateStudentWithLinkedDataRequest(
+                _model.FirstName!, _model.LastName!, _model.DateOfBirth,
+                _model.GenderCodedValueId, _model.TitleCodedValueId,
+                Guardians: guardians,
+                EnrollmentGradeLevelId: EnrollmentGradeLevelId,
+                EnrollmentPeriodId: EnrollmentPeriodId);
 
+            var studentId = await Api.CreateStudentWithLinkedDataAsync(request);
             if (Dialog is not null) await Dialog.CloseAsync(studentId);
         }
         catch (Exception ex)
