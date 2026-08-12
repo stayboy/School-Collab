@@ -18,8 +18,10 @@
 @using GradeLevelDto = SchoolCollab.Students.Application.Services.GradeLevelDto
 @using ActivityGroupDto = SchoolCollab.Students.Application.Services.ActivityGroupDto
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Core.Features
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
+@inject IFeatureFlagService FeatureFlags
 @inject ILogger<TeacherEditDialog> Logger
 
 <div class="teacher-dialog">
@@ -110,7 +112,10 @@
 
                 <div class="assignments-toolbar">
                     <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="AddGradeAssignment">+ Grade</FluentButton>
-                    <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="AddActivityAssignment">+ Activity</FluentButton>
+                    @if (_activityGroupsEnabled)
+                    {
+                        <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="AddActivityAssignment">+ Activity</FluentButton>
+                    }
                 </div>
 
                 @if (Model.Assignments.Count == 0)
@@ -226,6 +231,7 @@
     private bool _isEdit => Model.TeacherId.HasValue;
     private bool InGradeContext => Model.ContextGradeLevelId.HasValue;
     private bool _loading = true;
+    private bool _activityGroupsEnabled;
 
     private TopicDto[]? _allTopics;
     private GradeLevelDto[]? _allGradeLevels;
@@ -258,9 +264,13 @@
     {
         try
         {
+            _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups);
+
             _allTopics = await Api.ListTopicsAsync() ?? [];
             _allGradeLevels = await Api.ListGradeLevelsAsync() ?? [];
-            _allActivities = await Api.ListActivityGroupsAsync() ?? [];
+            _allActivities = _activityGroupsEnabled
+                ? await Api.ListActivityGroupsAsync() ?? []
+                : [];
             _allQualifications = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.Qualification.ToCode()) ?? [];
             _allTeacherRoles = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.TeacherRoles.ToCode()) ?? [];
 
@@ -320,6 +330,16 @@
         {
             Logger.LogError(ex, "Failed to load data for teacher dialog (TeacherId={TeacherId})", Model.TeacherId);
             Error = $"Could not load: {ex.Message}";
+
+            // Don't leave dropdown sources null — that would trap the UI in
+            // an endless loading-spinner state even though the overall dialog
+            // has finished loading. Render empty lists so the user can see the
+            // error and continue.
+            _allTopics ??= [];
+            _allGradeLevels ??= [];
+            _allActivities ??= [];
+            _allQualifications ??= [];
+            _allTeacherRoles ??= [];
         }
         finally
         {

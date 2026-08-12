@@ -160,4 +160,45 @@ public class TeacherCqrsTests
         var act = async () => await NewLinkGrade(s).HandleAsync(new LinkTeacherGradeLevel(id, gradeId));
         await act.Should().ThrowAsync<TeacherLinkAlreadyExistsException>();
     }
+
+    [TestMethod]
+    public async Task LinkGradeLevel_ReturnsFullGradeDetails()
+    {
+        using var s = new StudentsTestScope("teacher-grade-details");
+        var id = await NewCreate(s).HandleAsync(new CreateTeacher(null, "Jane", "Doe", null));
+
+        // Create a grade level with specific enrollment constraints
+        var genderId = Guid.NewGuid();
+        var gl = GradeLevel.Create(
+            Guid.NewGuid(),
+            level: 3,
+            name: "Grade 3",
+            displayOrder: 3,
+            minAge: 8,
+            maxAge: 9,
+            allowedGenderCodedValueId: genderId,
+            isBlockedFromEnrollment: false)
+            .WithTenant(s.Tenants);
+        s.Db.GradeLevels.Add(gl);
+        await s.Db.SaveChangesAsync();
+
+        // Link the teacher to this grade level
+        await NewLinkGrade(s).HandleAsync(new LinkTeacherGradeLevel(id, gl.Id));
+
+        // Query the grade levels for this teacher
+        var gradeLinks = await NewListGrades(s).HandleAsync(new ListGradeLevelsForTeacher(id));
+
+        // Verify the grade level details are correctly returned
+        gradeLinks.Should().ContainSingle(x => x.Id == gl.Id);
+        var linkedGrade = gradeLinks.Single(x => x.Id == gl.Id);
+        linkedGrade.Level.Should().Be(3);
+        linkedGrade.Name.Should().Be("Grade 3");
+        linkedGrade.DisplayOrder.Should().Be(3);
+        linkedGrade.MinAge.Should().Be(8);
+        linkedGrade.MaxAge.Should().Be(9);
+        linkedGrade.AllowedGenderCodedValueId.Should().Be(genderId);
+        linkedGrade.IsBlockedFromEnrollment.Should().BeFalse();
+        linkedGrade.TopicCount.Should().Be(0);
+        linkedGrade.StudentCount.Should().Be(0);
+    }
 }

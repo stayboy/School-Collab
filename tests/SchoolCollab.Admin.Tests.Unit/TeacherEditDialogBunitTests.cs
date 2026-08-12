@@ -12,6 +12,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Services;
 
@@ -34,6 +35,28 @@ public class TeacherEditDialogBunitTests : BunitContext
     {
         JSInterop.Mode = JSRuntimeMode.Loose;
         Services.AddFluentUIComponents();
+    }
+
+    /// <summary>Feature-flag stub that returns true for all flags so existing
+    /// v4 teacher-dialog tests keep exercising the activity-group path.</summary>
+    private sealed class AllEnabledFeatureFlagService : IFeatureFlagService
+    {
+        public bool IsEnabled(string featureKey) => true;
+        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(true);
+        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
+        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId = null, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
+    }
+
+    /// <summary>Feature-flag stub that disables only the activity-group feature.</summary>
+    private sealed class ActivityGroupsOffFeatureFlagService : IFeatureFlagService
+    {
+        public bool IsEnabled(string featureKey) => featureKey != FeatureFlagKeys.EnableActivityGroups;
+        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default)
+            => Task.FromResult(featureKey != FeatureFlagKeys.EnableActivityGroups);
+        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
+        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId = null, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
     }
 
     private sealed class ScriptedHandler : HttpMessageHandler
@@ -196,6 +219,7 @@ public class TeacherEditDialogBunitTests : BunitContext
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         var codedValuesClient = new CodedValuesApiClient(http);
+        Services.AddSingleton<IFeatureFlagService>(new AllEnabledFeatureFlagService());
         Services.AddSingleton(codedValuesClient);
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
 
@@ -233,6 +257,25 @@ public class TeacherEditDialogBunitTests : BunitContext
         cut.Markup.Should().Contain("Teaching assignments (0)");
         cut.Markup.Should().Contain("+ Grade");
         cut.Markup.Should().Contain("+ Activity");
+
+        Cancel(cut);
+        (await task).Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task CreateMode_ActivityGroupsFlagOff_HidesActivityButtonAndLoads()
+    {
+        var gradeId = Guid.NewGuid();
+        RegisterFor(grades: new[] { (gradeId, "Grade 5", 5) });
+        Services.AddSingleton<IFeatureFlagService>(new ActivityGroupsOffFeatureFlagService());
+        var cut = RenderProvider();
+
+        var task = OpenAsync(cut, new TeacherEditDialog.TeacherFormModel { TeacherId = null });
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        cut.Markup.Should().Contain("+ Grade");
+        cut.Markup.Should().NotContain("+ Activity");
+        cut.Markup.Should().NotContain("Could not load");
 
         Cancel(cut);
         (await task).Should().BeNull();
