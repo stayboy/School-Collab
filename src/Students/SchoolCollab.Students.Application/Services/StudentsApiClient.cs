@@ -188,6 +188,45 @@ public record CreateStudentRequest(
     Guid? GenderCodedValueId,
     Guid? TitleCodedValueId = null);
 
+/// <summary>Atomic create-student-with-linked-data request (Unit of Work).
+/// Mirrors the server <c>CreateStudentWithLinkedData</c> command
+/// (<c>POST /students/with-linked-data</c>). Enrollment is optional and included
+/// in the same transaction when <see cref="EnrollmentGradeLevelId"/> is set.</summary>
+public record CreateStudentWithLinkedDataRequest(
+    string FirstName,
+    string LastName,
+    DateOnly? DateOfBirth,
+    Guid? GenderCodedValueId,
+    Guid? TitleCodedValueId = null,
+    GuardianDraftRequest[]? Guardians = null,
+    Guid? EnrollmentGradeLevelId = null,
+    Guid? EnrollmentPeriodId = null,
+    Guid? StreamCodedValueId = null,
+    DateOnly? EnrolledOn = null,
+    ContactDraftRequest[]? Contacts = null);
+
+/// <summary>A guardian row for <see cref="CreateStudentWithLinkedDataRequest"/> —
+/// either references an existing guardian or supplies new-guardian demographics.</summary>
+public record GuardianDraftRequest(
+    Guid? ExistingGuardianId,
+    GuardianRole Role,
+    Guid? RelationshipCodedValueId = null,
+    bool IsEmergencyContact = false,
+    Guid? ActingGuardianId = null,
+    Guid? TitleCodedValueId = null,
+    string? FirstName = null,
+    string? LastName = null,
+    Guid? GenderCodedValueId = null,
+    DateOnly? DateOfBirth = null);
+
+/// <summary>A contact row for <see cref="CreateStudentWithLinkedDataRequest"/> (reserved shape).</summary>
+public record ContactDraftRequest(
+    ContactChannel Channel,
+    string Value,
+    string? Label = null,
+    string? CountryCode = null,
+    int DisplayOrder = 0);
+
 public record UpdateStudentRequest(
     string FirstName,
     string LastName,
@@ -645,6 +684,28 @@ public sealed class StudentsApiClient : IContactsClient
     {
         var response = await _http.PostAsJsonAsync("/students", req, ct);
         response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    /// <summary>
+    /// Atomically creates a student with its guardians, optional contacts, and an
+    /// optional enrollment in one request. <c>POST /students/with-linked-data</c>.
+    /// On failure the response body (with the server's domain-exception detail, e.g.
+    /// "no active period is open") is surfaced so the dialog can render it.
+    /// </summary>
+    public async Task<Guid> CreateStudentWithLinkedDataAsync(
+        CreateStudentWithLinkedDataRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/with-linked-data", req, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"CreateStudentWithLinkedData failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }

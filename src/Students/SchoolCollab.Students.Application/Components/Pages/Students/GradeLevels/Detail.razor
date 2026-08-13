@@ -938,43 +938,33 @@
     private async Task OpenStudentCreateAsync()
     {
         if (_disposed) return;
+
+        // Resolve the active period up front. When one is open, pass the grade so the
+        // new student is enrolled atomically as part of the compound create (no separate
+        // EnrollStudentAsync round-trip, no "created but not on the grade card" state).
+        // When no period is open, the student is still created (with its guardians) but
+        // without an enrollment — preserving the previous "create even without a period"
+        // behavior.
+        var periods = await Api.ListPeriodsAsync() ?? [];
+        var active = periods
+            .Where(p => string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(p => p.StartDate)
+            .FirstOrDefault();
+
+        var parameters = new Dictionary<string, object?>();
+        if (active is not null)
+            parameters[nameof(StudentCreateDialog.EnrollmentGradeLevelId)] = Id;
+        else
+            _studentsError = "No active period is open — the new student will be created without enrolling them to this grade.";
+
         var dialog = await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
             "New Student",
-            new Dictionary<string, object?>(),
+            parameters,
             DialogSize.Large);
         if (_disposed) return;
         var result = await dialog.Result;
-        if (_disposed || result.Cancelled || result.Data is not Guid studentId) return;
-        try
-        {
-            // The card lists students enrolled in THIS grade, so enrol the new
-            // student in its active period (mirrors how "Add teacher" links the
-            // new teacher to the grade). Otherwise the new student would never
-            // appear on the card.
-            var periods = await Api.ListPeriodsAsync() ?? [];
-            var active = periods
-                .Where(p => string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase))
-                .OrderByDescending(p => p.StartDate)
-                .FirstOrDefault();
-            if (active is null)
-            {
-                _studentsError = "No active period is open to enrol the new student in.";
-                return;
-            }
-            await Api.EnrollStudentAsync(new EnrollStudentRequest(
-                StudentId: studentId,
-                PeriodId: active.Id,
-                GradeLevelId: Id,
-                StreamCodedValueId: null,
-                EnrolledOn: DateOnly.FromDateTime(DateTime.UtcNow)));
-            if (_disposed) return;
-            await ReloadStudentsAsync();
-        }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            _studentsError = $"Could not enrol the new student: {ex.Message}";
-        }
+        if (_disposed || result.Cancelled || result.Data is not Guid) return;
+        await ReloadStudentsAsync();
     }
 
     /// <summary>

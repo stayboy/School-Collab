@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.CreateStudent;
+using SchoolCollab.Students.Core.CQRS.Students.Commands.CreateStudentWithLinkedData;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.DeleteStudent;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.RecoverStudent;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.UpdateStudent;
@@ -69,6 +70,28 @@ public static class StudentRoutes
             {
                 return Results.Conflict(new { ex.Message });
             }
+        });
+
+        // Atomic create: student + guardians (+ optional contacts + enrollment) in one
+        // transaction (Unit of Work). Any failure rolls back the whole batch — no
+        // orphaned student, no partial guardian set, no halfway enrollment state.
+        group.MapPost("/with-linked-data", async (
+            [FromBody] CreateStudentWithLinkedData command,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<CreateStudentWithLinkedData, Guid> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var id = await handler.HandleAsync(command, ct);
+                return Results.Created($"/students/{id}", new { id });
+            }
+            catch (GradeLevelNotFoundException ex) { return Results.NotFound(new { ex.Message }); }
+            catch (GuardianNotFoundException ex) { return Results.NotFound(new { ex.Message }); }
+            catch (PeriodNotOpenException ex) { return Results.Conflict(new { ex.Message }); }
+            catch (StreamGradeMismatchException ex) { return Results.Conflict(new { ex.Message }); }
+            catch (GuardianLinkAlreadyExistsException) { return Results.Conflict(new { message = "A link already exists between this student and guardian." }); }
+            catch (DuplicateStudentNumberException ex) { return Results.Conflict(new { ex.Message }); }
+            catch (EnrollmentValidationException ex) { return Results.Conflict(new { ex.Message }); }
         });
 
         group.MapPut("/{id:guid}", async (
