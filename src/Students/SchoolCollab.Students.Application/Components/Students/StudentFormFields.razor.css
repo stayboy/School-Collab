@@ -15,6 +15,13 @@
     max-width: 600px;
 }
 
+/* Wide variant: removes the 600px cap so the form fills a wide dialog
+   (used by the create/edit dialogs, which host the guardians grid +
+   contacts editor and need the full dialog width). */
+.student-form-fields--wide {
+    max-width: none;
+}
+
 /* ── Per-input widths ── now driven by the repo-wide W1–W9 ladder.
    Each input uses a `w-N` class (FluentTextField / FluentDatePicker) or
    the `Width` enum (CodedValueDropdown — emits an inline style that beats
@@ -136,4 +143,14 @@
 }
 .guardian-add-actions {
     margin-top: 0.25rem;
+}
+
+/* ── Contacts section (opt-in via ShowContacts) ──
+   Wraps the shared <ContactsEditor>. The editor renders its own add-row
+   and list; this wrapper only provides vertical rhythm so the section
+   sits comfortably between the divider and the action row. */
+.student-contacts {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
 }

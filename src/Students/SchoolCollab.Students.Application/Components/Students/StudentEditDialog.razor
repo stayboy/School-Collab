@@ -11,7 +11,9 @@
 @inject ILogger<StudentEditDialog> Logger
 
 <StudentFormFields Model="_model"
-                   ShowGuardians="false"
+                   ShowGuardians="true"
+                   ShowContacts="true"
+                   Wide="true"
                    StudentId="StudentId"
                    ReadOnlyStudentNumber="true"
                    ErrorMessage="@_error"

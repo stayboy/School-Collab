@@ -43,7 +43,7 @@
 @using SchoolCollab.Students.Core.Domain
 @using StudentDto = SchoolCollab.Students.Application.Services.StudentDto
 
-<EditForm Model="@Model" OnValidSubmit="@OnValidSubmit" @ref="_editForm" class="student-form-fields">
+<EditForm Model="@Model" OnValidSubmit="@OnValidSubmit" @ref="_editForm" class="@FormClass">
     <DataAnnotationsValidator />
 
     @* The parent vertical stack controls the row rhythm. Spacing="3" gives
@@ -339,6 +339,44 @@
                 </div>
             </FormRow>
         }
+
+        @* Contacts section. Opt-in via ShowContacts. Mirrors the guardians
+           section: a divider + a FormRow titled "Contacts". The editor is the
+           shared <ContactsEditor>:
+
+             - Edit mode (StudentId set): Live mode against the existing
+               student's persisted contacts (OwnerType=Student, OwnerId=StudentId).
+               Mutations persist immediately — no extra save step.
+             - Create mode: Buffered mode collecting into Model.Contacts. The
+               parent flushes the list to the API as part of the atomic create
+               (CreateStudentWithLinkedDataRequest.Contacts).
+
+           ShowSubscription=false keeps the dialog focused on the contact
+           channels themselves (matches the student Edit page's contacts
+           editor); subscription toggles live on the student view page. *@
+        @if (ShowContacts)
+        {
+            <div class="">
+                <FluentDivider Orientation="Orientation.Horizontal" Style="width:100%" />
+            </div>
+            <FormRow Label="Contacts">
+                <div class="student-contacts">
+                    @if (IsEditMode)
+                    {
+                        <ContactsEditor OwnerType="ContactOwnerType.Student"
+                                        OwnerId="StudentId!.Value"
+                                        ShowSubscription="false" />
+                    }
+                    else
+                    {
+                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                        OwnerType="ContactOwnerType.Student"
+                                        Contacts="Model.Contacts"
+                                        ContactsChanged="OnDraftContactsChanged" />
+                    }
+                </div>
+            </FormRow>
+        }
     </FluentStack>
 
     @if (!string.IsNullOrEmpty(ErrorMessage))
@@ -403,6 +441,23 @@
     private string FormActionsClass => ActionsAlignment == StudentFormActionsAlignment.Right
         ? "form-actions form-actions--right"
         : "form-actions";
+
+    /// <summary>The class attribute on the rendered <c>EditForm</c>. The
+    /// base <c>student-form-fields</c> caps the form at 600px (compact
+    /// page forms). The <c>student-form-fields--wide</c> modifier removes
+    /// that cap so the form fills a wide dialog (used by the create/edit
+    /// dialogs, which host the guardians grid + contacts editor and need
+    /// the full dialog width).</summary>
+    private string FormClass => Wide
+        ? "student-form-fields student-form-fields--wide"
+        : "student-form-fields";
+
+    /// <summary>When true, removes the 600px max-width cap so the form
+    /// fills the full dialog width. Used by the create/edit dialogs, which
+    /// host the guardians grid + contacts editor and need the extra room.
+    /// Page forms (Create.razor / Edit.razor / the wizard inline form) keep
+    /// the default compact width.</summary>
+    [Parameter] public bool Wide { get; set; }
 
     /// <summary>The form model. Required — the EditForm binds to it.</summary>
     [Parameter, EditorRequired] public StudentFormModel Model { get; set; } = default!;
@@ -511,6 +566,14 @@
     /// (e.g. the GradeLevelWizard inline edit form). Enabled by /students/create
     /// and /students/{id}/edit.</summary>
     [Parameter] public bool ShowGuardians { get; set; }
+
+    /// <summary>When true, renders the contacts section (the shared
+    /// <see cref="ContactsEditor"/>). Opt-in so the shared form can be embedded
+    /// where contacts are managed elsewhere. In edit mode (StudentId set) the
+    /// editor runs Live against the existing student's contacts; in create mode
+    /// it runs Buffered, collecting into <see cref="StudentFormModel.Contacts"/>
+    /// for the parent to flush atomically. Enabled by the create/edit dialogs.</summary>
+    [Parameter] public bool ShowContacts { get; set; }
 
     /// <summary>Student id for edit mode. Null (default) ⇒ create mode.</summary>
     [Parameter] public Guid? StudentId { get; set; }
@@ -982,5 +1045,14 @@
         {
             // Non-fatal: the relationship name is only a display nicety.
         }
+    }
+
+    // ── Contacts (create-mode Buffered editor) ────────────────────────────────
+    // The Buffered ContactsEditor mutates Model.Contacts in place and raises
+    // ContactsChanged after every mutation. We re-render so the count / list
+    // stays in sync; the parent flushes the list on save.
+    private async Task OnDraftContactsChanged()
+    {
+        await InvokeAsync(StateHasChanged);
     }
 }

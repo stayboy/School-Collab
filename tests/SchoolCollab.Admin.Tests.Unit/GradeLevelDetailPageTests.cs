@@ -11,6 +11,7 @@ using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 using SchoolCollab.Students.Application.Services;
+using SchoolCollab.Students.Core.Contracts;
 using System.Net;
 using System.Net.Http;
 using System.Reflection;
@@ -177,7 +178,11 @@ public class GradeLevelDetailPageTests : BunitContext
         Services.AddSingleton<AuthenticationStateProvider>(auth);
         var codedValuesClient = new CodedValuesApiClient(http);
         Services.AddSingleton(codedValuesClient);
-        Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient));
+        var api = new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, codedValuesClient);
+        Services.AddSingleton(api);
+        // The ContactsEditor (rendered by the student create/edit dialogs)
+        // injects IContactsClient, which the app maps to StudentsApiClient.
+        Services.AddSingleton<IContactsClient>(api);
         Services.AddSingleton(new NotificationPolicyApiClient(http));
         Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
 
