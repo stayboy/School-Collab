@@ -23,9 +23,10 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<ContactSubscription> ContactSubscriptions => Set<ContactSubscription>();
     public DbSet<GradeNotificationPolicy> GradeNotificationPolicies => Set<GradeNotificationPolicy>();
     public DbSet<Teacher> Teachers => Set<Teacher>();
-    public DbSet<TeacherTopic> TeacherTopics => Set<TeacherTopic>();
     public DbSet<TeacherGradeLevel> TeacherGradeLevels => Set<TeacherGradeLevel>();
     public DbSet<TeacherQualification> TeacherQualifications => Set<TeacherQualification>();
+    public DbSet<TeacherActivityAssignment> TeacherActivityAssignments => Set<TeacherActivityAssignment>();
+    public DbSet<TeacherActivityAssignmentGrade> TeacherActivityAssignmentGrades => Set<TeacherActivityAssignmentGrade>();
     public DbSet<GradeTopicAssignment> GradeTopicAssignments => Set<GradeTopicAssignment>();
     public DbSet<ActivityGroupTopicAssignment> ActivityGroupTopicAssignments => Set<ActivityGroupTopicAssignment>();
     public DbSet<TopicAssignment> TopicAssignments => Set<TopicAssignment>();
@@ -55,9 +56,10 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new ContactSubscriptionConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new GradeNotificationPolicyConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherConfiguration(() => CurrentTenantId));
-        modelBuilder.ApplyConfiguration(new TeacherTopicConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherGradeLevelConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherQualificationConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TeacherActivityAssignmentConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TeacherActivityAssignmentGradeConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TopicAssignmentConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new GradeTopicAssignmentConfiguration());
         modelBuilder.ApplyConfiguration(new ActivityGroupTopicAssignmentConfiguration());

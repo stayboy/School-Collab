@@ -46,17 +46,17 @@ public sealed class EntityCodeGenerator(
             attempt++;
             await using var db = await dbFactory.CreateDbContextAsync(cancellationToken);
             // Find the active rule by Code. The hybrid tenant filter
-            // (TenantId == CurrentTenantId OR TenantId == null) would let a
-            // tenant see both their own rule and the shared blueprint for the
-            // same Code, which would make SingleOrDefaultAsync throw. This is
-            // safe because EntityCodeRuleConfiguration declares a GLOBALLY
-            // unique index on Code (ix_entity_code_rules_code_unique) — only
-            // one row per Code can exist across all tenants, so there is never
-            // ambiguity. If that index is ever relaxed, this query must change
-            // (e.g. prefer the tenant-owned row, fall back to the shared
-            // blueprint) to avoid an InvalidOperationException.
+            // (TenantId == CurrentTenantId OR TenantId == null) can return
+            // multiple rows when a tenant has their own override rule AND
+            // there's a shared blueprint for the same Code. To avoid
+            // SingleOrDefaultAsync throwing InvalidOperationException, we
+            // prefer the tenant-owned row (TenantId != null) and fall back
+            // to the shared blueprint (TenantId == null).
+            var currentTenantId = tenantProvider.GetTenantContext().TenantId;
             var rule = await db.EntityCodeRules
-                .SingleOrDefaultAsync(x => x.Code == normalised && x.IsActive, cancellationToken);
+                .Where(x => x.Code == normalised && x.IsActive)
+                .OrderByDescending(x => x.TenantId == currentTenantId) // tenant-owned first
+                .FirstOrDefaultAsync(cancellationToken);
 
             if (rule is null)
                 throw new EntityCodeRuleNotFoundException(normalised);
@@ -68,7 +68,6 @@ public sealed class EntityCodeGenerator(
             // skip it when the active rule is tenant-owned. The default
             // tenant (Guid.Empty) is treated like a real tenant here: it
             // owns overrides targeting the shared blueprint.
-            var currentTenantId = tenantProvider.GetTenantContext().TenantId;
             var overridesBySegment = rule.TenantId is null
                 ? await LoadOverridesAsync(db, rule.Id, currentTenantId, cancellationToken)
                 : new Dictionary<Guid, IReadOnlyDictionary<OverrideField, string>>();

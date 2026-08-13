@@ -1,6 +1,7 @@
 @page "/students/teachers"
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Application.Components.Students
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -140,17 +141,12 @@
     {
         if (_disposed) return;
         var title = teacherId.HasValue ? "Edit Teacher" : "New Teacher";
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
+        var saved = await DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
+            new TeacherEditDialog.TeacherFormModel { TeacherId = teacherId },
             title,
-            new Dictionary<string, object?>
-            {
-                { nameof(TeacherEditDialog.TeacherId), teacherId },
-            },
             DialogSize.Large);
-        var result = await dialog.Result;
-        if (_disposed || result.Cancelled) return;
-        if (result.Data is Guid teacherIdSaved)
-            Nav.NavigateTo($"/students/teachers/{teacherIdSaved}");
+        if (_disposed || saved is null) return;
+        Nav.NavigateTo($"/students/teachers/{saved.Id}");
     }
 
     private IReadOnlyList<RowAction> BuildTeacherActions(TeacherDto t)

@@ -110,7 +110,6 @@
                                          Icon="@FluentIcons.People"
                                          Count="@(_teachers?.Length ?? 0)"
                                          OnAddClick="OpenTeacherCreateAsync"
-                                         OnViewAllClick="OpenTeachersDialogAsync"
                                          ViewAllText="View all teachers"
                                          Items="@(_teachers ?? [])"
                                          EmptyMessage="No teachers linked to this grade yet."
@@ -663,7 +662,6 @@
                 { nameof(GradeTopicsDialog.Topics), _curriculum ?? [] },
                 { nameof(GradeTopicsDialog.UnassignedTopics), _unassignedTopics },
                 { nameof(GradeTopicsDialog.OpenStrands), new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
-                { nameof(GradeTopicsDialog.OpenTeachers), new Func<GradeTopicCurriculumDto, Task>(OpenTopicTeachersAsync) },
                 { nameof(GradeTopicsDialog.Remove), new Func<Guid, Task>(RemoveTopicAsync) },
                 { nameof(GradeTopicsDialog.Assign), new Func<Guid, Task>(AssignTopicAsync) },
                 { nameof(GradeTopicsDialog.OnChanged), new Func<Task>(ReloadAssignedTopicsAsync) },
@@ -759,7 +757,6 @@
         {
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
 
-            RowAction.Callback("Teachers", () => OpenTopicTeachersAsync(topic), FluentIcons.People),
             RowAction.Separator(),
             RowAction.Callback(
                 "Remove",
@@ -769,27 +766,7 @@
                 confirmMessage: $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed."),
         };
 
-    // Open the topic-teachers dialog (assign teachers + their per-topic roles,
-    // grade-detail-rich-grids-plan.md §5). Await the reference so we refresh the
-    // Teachers tab (Assigned Topics chips) once the dialog closes.
-    private async Task OpenTopicTeachersAsync(GradeTopicCurriculumDto topic)
-    {
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TopicTeachersDialog>(
-            $"Teachers · {topic.Name}",
-            new Dictionary<string, object?>
-            {
-                { nameof(TopicTeachersDialog.TopicId), topic.TopicId },
-                { nameof(TopicTeachersDialog.TopicName), topic.Name },
-                { nameof(TopicTeachersDialog.AvailableTeachers), _teachers ?? [] },
-                // The dialog mutates teacher-topic links; refresh the card as it does.
-                { nameof(TopicTeachersDialog.OnChanged), new Func<Task>(ReloadTeachersAsync) },
-            },
-            DialogSize.Medium);
-        if (_disposed) return;
-        await dialog.Result;
-    }
-
-    // ── Teachers: link / remove / role / topics ────────────────────────────
+    // ── Teachers: link / remove / role ────────────────────────────────
     private async Task LinkTeacherAsync(Guid teacherId)
     {
         if (_disposed) return;
@@ -806,29 +783,6 @@
         }
     }
 
-    private async Task OpenTeachersDialogAsync()
-    {
-        await DialogService.ShowReadonlyDialogAsync<GradeTeachersDialog>(
-            $"Teachers · {_grade!.Name}",
-            new Dictionary<string, object?>
-            {
-                { nameof(GradeTeachersDialog.Teachers), _teachers ?? [] },
-                { nameof(GradeTeachersDialog.UnlinkedTeachers), _unlinkedTeachers },
-                { nameof(GradeTeachersDialog.SalutationNames), _salutationNames },
-                { nameof(GradeTeachersDialog.GenderNames), _genderNames },
-                { nameof(GradeTeachersDialog.LevelNames), _levelNames },
-                { nameof(GradeTeachersDialog.QualificationNames), _qualificationNames },
-                { nameof(GradeTeachersDialog.Link), new Func<Guid, Task>(LinkTeacherAsync) },
-                { nameof(GradeTeachersDialog.RoleChanged), new Func<TeacherWithRoleDto, Guid?, Task>(OnRoleChangedAsync) },
-                { nameof(GradeTeachersDialog.UnlinkTopic), new Func<TeacherWithRoleDto, Guid, Task>(UnlinkTeacherTopicAsync) },
-                { nameof(GradeTeachersDialog.Remove), new Func<TeacherWithRoleDto, Task>(RemoveTeacherAsync) },
-                { nameof(GradeTeachersDialog.OnChanged), new Func<Task>(ReloadTeachersAsync) },
-            },
-            DialogSize.Medium);
-        if (_disposed) return;
-        await ReloadTeachersAsync();
-    }
-
     /// <summary>
     /// Teachers card "Add" affordance — opens the shared TeacherEditDialog in
     /// Create mode (new teacher). Reloads the card on a non-cancelled result.
@@ -836,19 +790,18 @@
     private async Task OpenTeacherCreateAsync()
     {
         if (_disposed || _grade is null) return;
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
-            "New Teacher",
-            new Dictionary<string, object?>
+        var saved = await DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
+            new TeacherEditDialog.TeacherFormModel
             {
-                { nameof(TeacherEditDialog.TeacherId), (Guid?)null },
+                TeacherId = null,
                 // Link the new teacher to the current grade so an "Add teacher"
                 // on the grade page actually shows up on the card after save.
-                { nameof(TeacherEditDialog.InitialGradeLevelIds), new[] { Id } },
+                ContextGradeLevelId = Id,
+                ContextGradeLevelName = _grade.Name,
             },
+            "New Teacher",
             DialogSize.Large);
-        if (_disposed) return;
-        var result = await dialog.Result;
-        if (_disposed || result.Cancelled) return;
+        if (_disposed || saved is null) return;
         await ReloadTeachersAsync();
     }
 
@@ -859,16 +812,16 @@
     private async Task OpenTeacherEditAsync(TeacherWithRoleDto teacher)
     {
         if (_disposed) return;
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherEditDialog>(
-            $"Edit Teacher · {teacher.FirstName} {teacher.LastName}",
-            new Dictionary<string, object?>
+        var saved = await DialogService.ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>(
+            new TeacherEditDialog.TeacherFormModel
             {
-                { nameof(TeacherEditDialog.TeacherId), teacher.Id },
+                TeacherId = teacher.Id,
+                ContextGradeLevelId = Id,
+                ContextGradeLevelName = _grade?.Name,
             },
+            $"Edit Teacher · {teacher.FirstName} {teacher.LastName}",
             DialogSize.Large);
-        if (_disposed) return;
-        var result = await dialog.Result;
-        if (_disposed || result.Cancelled) return;
+        if (_disposed || saved is null) return;
         await ReloadTeachersAsync();
     }
 
@@ -894,25 +847,6 @@
     }
 
     /// <summary>
-    /// Teachers card kebab "Subjects" — opens a focused per-teacher subject+role
-    /// dialog. Reloads the card on close so the Assigned Topics chips refresh.
-    /// </summary>
-    private async Task OpenTeacherSubjectsAsync(TeacherWithRoleDto teacher)
-    {
-        if (_disposed) return;
-        var dialog = await DialogService.ShowReadonlyDialogAsync<TeacherSubjectsDialog>(
-            $"Subjects · {teacher.FirstName} {teacher.LastName}",
-            new Dictionary<string, object?>
-            {
-                { nameof(TeacherSubjectsDialog.TeacherId), teacher.Id },
-                // The dialog mutates subject+role links; refresh the card once it saves.
-                { nameof(TeacherSubjectsDialog.OnChanged), new Func<Task>(ReloadTeachersAsync) },
-            },
-            DialogSize.Medium);
-        if (_disposed) return;
-        await dialog.Result;
-    }
-
     /// <summary>
     /// Row kebab for a Teachers-card preview item. The teacher name is the
     /// primary affordance (navigates to the teacher detail page); the kebab
@@ -923,7 +857,6 @@
         new List<RowAction>
         {
             RowAction.Callback("Role", () => OpenTeacherRoleAsync(teacher), FluentIcons.Person),
-            RowAction.Callback("Subjects", () => OpenTeacherSubjectsAsync(teacher), FluentIcons.Book),
             RowAction.Navigate("View profile", $"/students/teachers/{teacher.Id}", FluentIcons.Open),
             RowAction.Callback("Edit", () => OpenTeacherEditAsync(teacher), FluentIcons.Edit),
             RowAction.Separator(),
@@ -963,23 +896,6 @@
         {
             if (_disposed) return;
             _teachersError = $"Could not update role: {ex.Message}";
-        }
-    }
-
-    private async Task UnlinkTeacherTopicAsync(TeacherWithRoleDto teacher, Guid topicId)
-    {
-        if (_disposed) return;
-        try
-        {
-            await Api.UnlinkTeacherTopicAsync(teacher.Id, topicId);
-            if (_disposed) return;
-            await ReloadTeachersAsync();
-            Toast.ShowSuccess("Teacher unlinked from topic.");
-        }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            _teachersError = $"Could not unlink topic: {ex.Message}";
         }
     }
 

@@ -60,15 +60,9 @@ public sealed class ListTeachersForGradeLevelHandler(
                          select q.CodedValueId).ToArray(),
                         t.IsDeleted,
                         tg.TeacherRoleCodedValueId,
-                        // Assigned topics for this teacher, tenant-scoped.
-                        (from ts in db.TeacherTopics.IgnoreQueryFilters(new[] { "Tenant" })
-                         join s in db.Topics.IgnoreQueryFilters(new[] { "Tenant" }) on ts.TopicId equals s.Id
-                         where ts.TeacherId == t.Id && ts.TenantId == tenantId
-                         orderby s.DisplayOrder, s.Name
-                         select new TopicDto(
-                             s.Id, s.CodedValueId, s.Code, s.Name,
-                             s.Description, s.DisplayOrder,
-                             s.CreatedAt, s.UpdatedAt)).ToArray(),
+                        // v4: subjects are grade-scoped (TeacherGradeLevel.TopicId); the
+                        // standalone TeacherTopic link is removed.
+                        Array.Empty<TopicDto>(),
                         t.CreatedAt,
                         t.UpdatedAt))
                     .ToArrayAsync(ct);

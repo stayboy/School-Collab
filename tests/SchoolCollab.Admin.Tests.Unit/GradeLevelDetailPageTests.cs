@@ -365,7 +365,6 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Find("fluent-button[title=\"Actions for Jane Doe\"]").Click();
         var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToArray();
         items.Should().Contain("Role", "teachers kebab offers role");
-        items.Should().Contain("Subjects", "teachers kebab offers subjects");
         items.Should().Contain("View profile", "teachers kebab offers view profile");
         items.Should().Contain("Edit", "teachers kebab offers edit");
         items.Should().Contain("Remove", "teachers kebab offers remove");
@@ -427,10 +426,12 @@ public class GradeLevelDetailPageTests : BunitContext
         // Create mode (new teacher), not just the link-existing GradeTeachersDialog.
         source.Should().Contain("OnAddClick=\"OpenTeacherCreateAsync\"",
             "the Teachers card Add button opens the create dialog");
-        source.Should().Contain("ShowReadonlyDialogAsync<TeacherEditDialog>",
-            "the create handler opens TeacherEditDialog");
-        source.Should().Contain("nameof(TeacherEditDialog.TeacherId), (Guid?)null",
-            "the create handler passes a null TeacherId for create mode");
+        source.Should().Contain("ShowShellDialogAsync<TeacherEditDialog, TeacherEditDialog.TeacherFormModel, TeacherDto>",
+            "the create handler opens TeacherEditDialog via the dialog shell");
+        source.Should().Contain("ContextGradeLevelId = Id",
+            "the create handler passes the current grade as the context grade");
+        source.Should().Contain("ContextGradeLevelName = _grade.Name",
+            "the create handler passes the context grade name");
     }
 
     [TestMethod]
@@ -720,20 +721,12 @@ public class GradeLevelDetailPageTests : BunitContext
 
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
             "the Subjects card's View-all opens GradeTopicsDialog via the read-only helper");
-        source.Should().Contain("ShowReadonlyDialogAsync<GradeTeachersDialog>(",
-            "the Teachers card's View-all button opens GradeTeachersDialog via the read-only helper");
 
         // GradeTopicsDialog gets the assigned topics + assignable catalog + action callbacks.
         source.Should().Contain("nameof(GradeTopicsDialog.Topics)");
         source.Should().Contain("nameof(GradeTopicsDialog.UnassignedTopics)");
         source.Should().Contain("nameof(GradeTopicsDialog.Remove)");
         source.Should().Contain("nameof(GradeTopicsDialog.Assign)");
-
-        // GradeTeachersDialog gets the linked teachers + catalog + name maps + callbacks.
-        source.Should().Contain("nameof(GradeTeachersDialog.Teachers)");
-        source.Should().Contain("nameof(GradeTeachersDialog.UnlinkedTeachers)");
-        source.Should().Contain("nameof(GradeTeachersDialog.RoleChanged)");
-        source.Should().Contain("nameof(GradeTeachersDialog.UnlinkTopic)");
 
         // Students card's View-all navigates to the grade-filtered students landing.
         source.Should().Contain("View all students");

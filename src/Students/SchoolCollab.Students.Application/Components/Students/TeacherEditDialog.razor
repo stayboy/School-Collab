@@ -1,21 +1,28 @@
-@* TeacherEditDialog — create / edit a teacher in a modal dialog
-   (grade-detail-rich-grids-plan.md §5 / cg/6: "teacher create/edit dialog captures
-   the profile fields (gender, DOB, level of education, qualifications) AND the
-   subjects/topics the teacher teaches WITH their per-topic roles"). Also carries the
-   grade-level multi-select so the dialog is a complete editor. Opens from the
-   Teachers grid (+ New / Edit) and the teacher Detail Edit button via
-   ShowReadonlyDialogAsync. Self-contained: loads all topics / grade levels /
-   qualification options up front and reconciles topic+role and grade-level links on
-   save through the StudentsApiClient (mirrors the TeacherSetupWizard page, but adds
-   per-topic roles and stays in-place as a dialog). *@
-@implements IDialogContentComponent<DialogParameters>
+@* TeacherEditDialog — create / edit a teacher in a modal dialog (v4).
+   Profile + qualifications + a teaching-assignments grid. Each assignment row is
+   a grade + optional subject + role, OR an activity + role + optional grades.
+   Subjects are grade-scoped (no standalone subject links). Rows render read-only;
+   Edit converts a row to editable inline; Save/Cancel commit or revert.
+
+   v4 spec §3.4–§3.7: one dialog, two modes (TeacherId null = create); DialogShellBase;
+   context grade (ContextGradeLevelId) pre-sets a default grade row; save reconciles
+   grade + activity assignments through StudentsApiClient. *@
+@inherits DialogShellBase<TeacherEditDialog.TeacherFormModel, TeacherDto>
+@using System.ComponentModel.DataAnnotations
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Constants
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Components.Dialogs
 @using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using GradeLevelDto = SchoolCollab.Students.Application.Services.GradeLevelDto
+@using ActivityGroupDto = SchoolCollab.Students.Application.Services.ActivityGroupDto
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Core.Features
+@inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
+@inject IFeatureFlagService FeatureFlags
+@inject ILogger<TeacherEditDialog> Logger
 
 <div class="teacher-dialog">
     @if (_loading)
@@ -24,33 +31,30 @@
     }
     else
     {
-        @if (!string.IsNullOrEmpty(_error))
-        {
-            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
-        }
+        <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+            <DataAnnotationsValidator />
 
-        <div class="teacher-dialog-section">
-            <div class="teacher-dialog-section-title">
-                <FluentIcon Icon="@(Icons.Regular.Size24.Person)" Color="@Color.Accent" />
-                <span>Profile</span>
-            </div>
-            <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+            <div class="teacher-dialog-section">
+                <div class="teacher-dialog-section-title">
+                    <FluentIcon Icon="@(Icons.Regular.Size24.Person)" Color="@Color.Accent" />
+                    <span>Profile</span>
+                </div>
                 <FormRow Label="Title">
                     <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                        @bind-SelectedId="_titleCodedValueId" />
+                                        @bind-SelectedId="Model.TitleCodedValueId" />
                 </FormRow>
-                <FormRow Label="First name" Required>
-                    <FluentTextField @bind-Value="_firstName" Required Placeholder="First name" />
-                </FormRow>
-                <FormRow Label="Last name" Required>
-                    <FluentTextField @bind-Value="_lastName" Required Placeholder="Last name" />
+                <FormRow Label="Name" Required For="teacherFirstName">
+                    <div class="name-fields">
+                        <FluentTextField Id="teacherFirstName" @bind-Value="Model.FirstName" Placeholder="First name" />
+                        <FluentTextField Id="teacherLastName" @bind-Value="Model.LastName" Placeholder="Last name" />
+                    </div>
                 </FormRow>
                 <FormRow Label="Display name">
-                    <FluentTextField @bind-Value="_displayName" Placeholder="e.g. Mr. Smith (optional)" />
+                    <FluentTextField @bind-Value="Model.DisplayName" Placeholder="e.g. Mr. Smith (optional)" />
                 </FormRow>
                 <FormRow Label="Gender">
                     <CodedValueDropdown Parent="CodedValueParent.Genders"
-                                        @bind-SelectedId="_genderCodedValueId" />
+                                        @bind-SelectedId="Model.GenderCodedValueId" />
                 </FormRow>
                 <FormRow Label="Date of birth">
                     <FluentDatePicker Id="teacherDialogDob"
@@ -60,204 +64,282 @@
                 </FormRow>
                 <FormRow Label="Level of education">
                     <CodedValueDropdown Parent="CodedValueParent.EducLevel"
-                                        @bind-SelectedId="_levelOfEducationCodedValueId" />
+                                        @bind-SelectedId="Model.LevelOfEducationCodedValueId" />
                 </FormRow>
                 <FormRow Label="Qualifications" AlignTop>
-                    <div class="qual-list">
-                        @if (_allQualifications is null)
+                    @if (_allQualifications is null)
+                    {
+                        <FluentProgressRing />
+                    }
+                    else if (_allQualifications.Length == 0)
+                    {
+                        <span class="muted">No qualification options in this tenant yet.</span>
+                    }
+                    else
+                    {
+                        @if (UnselectedQualifications.Length > 0)
                         {
-                            <FluentProgressRing />
-                        }
-                        else if (_allQualifications.Length == 0)
-                        {
-                            <span class="muted">No qualification options in this tenant yet.</span>
+                            <FluentCombobox @key="_qualKey" TOption="CodedValueDto"
+                                            Items="@UnselectedQualifications"
+                                            OptionText="@(q => q.Name)"
+                                            SelectedOption="@_qualToAdd"
+                                            SelectedOptionChanged="@OnQualificationPicked"
+                                            Autocomplete="ComboboxAutocomplete.List"
+                                            Placeholder="Add qualification…" Height="240px" />
                         }
                         else
                         {
-                            @foreach (var q in _allQualifications)
-                            {
-                                <label class="qual-row">
-                                    <input type="checkbox"
-                                           checked="@_selectedQualificationIds.Contains(q.Id)"
-                                           @onchange="e => OnQualificationToggled(q.Id, e.Value is true)" />
-                                    <span>@q.Name</span>
-                                </label>
-                            }
+                            <span class="muted">All qualifications selected.</span>
+                        }
+                        @if (SelectedQualifications.Length > 0)
+                        {
+                            <div class="chip-list">
+                                @foreach (var q in SelectedQualifications)
+                                {
+                                    <Chip Label="@q.Name" OnDismiss="() => RemoveQualification(q.Id)" />
+                                }
+                            </div>
+                        }
+                    }
+                </FormRow>
+            </div>
+
+            <div class="teacher-dialog-section">
+                <div class="teacher-dialog-section-title">
+                    <FluentIcon Icon="@(Icons.Regular.Size24.Book)" Color="@Color.Accent" />
+                    <span>Teaching assignments (@Model.Assignments.Count)</span>
+                </div>
+
+                <div class="assignments-toolbar">
+                    <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="AddGradeAssignment">+ Grade</FluentButton>
+                    @if (_activityGroupsEnabled)
+                    {
+                        <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="AddActivityAssignment">+ Activity</FluentButton>
+                    }
+                </div>
+
+                @if (Model.Assignments.Count == 0)
+                {
+                    <p class="muted">No teaching assignments yet.</p>
+                }
+                else
+                {
+                    <div class="assignment-grid">
+                        @foreach (var row in Model.Assignments)
+                        {
+                            <div class="assignment-row @(row.Editing ? "assignment-row--editing" : null)">
+                                @if (row.Editing)
+                                {
+                                    @if (row.IsActivity)
+                                    {
+                                        <span class="row-type">Activity</span>
+                                        <FluentSelect TOption="ActivityGroupDto" Items="@_allActivities"
+                                                      OptionText="@(a => a.Name)" OptionValue="@(a => a.Id.ToString())"
+                                                      Value="@(row.ActivityGroupId?.ToString())"
+                                                      ValueChanged="@((string? v) => SetRowActivity(row, ParseGuid(v)))"
+                                                      Placeholder="Activity" />
+                                        <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
+                                                            SelectedId="@row.RoleCodedValueId"
+                                                            SelectedIdChanged="@((Guid? v) => SetRowRole(row, v))"
+                                                            Placeholder="No role" />
+                                        <FluentSelect TOption="GradeLevelDto" Multiple Items="@_allGradeLevels"
+                                                      OptionText="@(g => g.Name)" OptionValue="@(g => g.Id.ToString())"
+                                                      SelectedOptions="@(SelectedGradeObjects(row))"
+                                                      SelectedOptionsChanged="@((IEnumerable<GradeLevelDto>? v) => SetRowGrades(row, v))"
+                                                      Placeholder="Grades (optional)" />
+                                    }
+                                    else
+                                    {
+                                        <span class="row-type">Grade</span>
+                                        <FluentSelect TOption="GradeLevelDto" Items="@_allGradeLevels"
+                                                      OptionText="@(g => g.Name)" OptionValue="@(g => g.Id.ToString())"
+                                                      Value="@(row.GradeLevelId?.ToString())"
+                                                      ValueChanged="@((string? v) => SetRowGrade(row, ParseGuid(v)))"
+                                                      Placeholder="Grade" />
+                                        <FluentSelect TOption="TopicDto" Items="@SubjectsForGrade(row.GradeLevelId)"
+                                                      OptionText="@(t => t.Name)" OptionValue="@(t => t.Id.ToString())"
+                                                      Value="@(row.SubjectId?.ToString())"
+                                                      ValueChanged="@((string? v) => SetRowSubject(row, ParseGuid(v)))"
+                                                      Placeholder="Subject (optional)" />
+                                        <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
+                                                            SelectedId="@row.RoleCodedValueId"
+                                                            SelectedIdChanged="@((Guid? v) => SetRowRole(row, v))"
+                                                            Placeholder="No role" />
+                                    }
+                                    <FluentButton Appearance="Appearance.Accent" Size="Size.Small" OnClick="() => SaveRow(row)">Save</FluentButton>
+                                    <FluentButton Appearance="Appearance.Outline" Size="Size.Small" OnClick="() => CancelRow(row)">Cancel</FluentButton>
+                                }
+                                else
+                                {
+                                    <span class="row-type">@(row.IsActivity ? "Activity" : "Grade")</span>
+                                    <span class="row-display">@DisplayText(row)</span>
+                                    <FluentButton Appearance="Appearance.Stealth" Size="Size.Small" OnClick="() => row.Editing = true">Edit</FluentButton>
+                                    <FluentButton Appearance="Appearance.Stealth" Size="Size.Small"
+                                                  IconStart="@FluentIcons.Delete" Title="Remove assignment"
+                                                  OnClick="() => RemoveRow(row)">Remove</FluentButton>
+                                }
+                            </div>
                         }
                     </div>
-                </FormRow>
-            </FluentStack>
-        </div>
-
-        <div class="teacher-dialog-section">
-            <div class="teacher-dialog-section-title">
-                <FluentIcon Icon="@(Icons.Regular.Size24.Book)" Color="@Color.Accent" />
-                <span>Subjects (@_topicRoles.Count)</span>
+                }
             </div>
-            @if (_allTopics is null)
-            {
-                <div class="spinner-container"><FluentProgressRing /></div>
-            }
-            else if (_allTopics.Length == 0)
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">No subjects in this tenant yet.</FluentMessageBar>
-            }
-            else
-            {
-                <div class="topic-role-list">
-                    @foreach (var s in _allTopics)
-                    {
-                        <div class="topic-role-row">
-                            <FluentCheckbox Value="@_topicRoles.ContainsKey(s.Id)"
-                                            ValueChanged="@(v => OnTopicToggled(s.Id, v))" />
-                            <span class="check-name">@s.Name <span class="muted">@s.Code</span></span>
-                            @if (_topicRoles.ContainsKey(s.Id))
-                            {
-                                <CodedValueDropdown Parent="CodedValueParent.TeacherRoles"
-                                                    SelectedId="@_topicRoles[s.Id]"
-                                                    SelectedIdChanged="@((Guid? v) => OnTopicRoleChanged(s.Id, v))"
-                                                    Placeholder="No role" />
-                            }
-                        </div>
-                    }
-                </div>
-            }
-        </div>
 
-        <div class="teacher-dialog-section">
-            <div class="teacher-dialog-section-title">
-                <FluentIcon Icon="@(Icons.Regular.Size24.SlideText)" Color="@Color.Accent" />
-                <span>Grade levels (@_selectedGradeLevelIds.Count)</span>
-            </div>
-            @if (_allGradeLevels is null)
-            {
-                <div class="spinner-container"><FluentProgressRing /></div>
-            }
-            else if (_allGradeLevels.Length == 0)
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">No grade levels in this tenant yet.</FluentMessageBar>
-            }
-            else
-            {
-                <div class="check-list">
-                    @foreach (var gl in _allGradeLevels)
-                    {
-                        <div class="check-row">
-                            <FluentCheckbox Value="@_selectedGradeLevelIds.Contains(gl.Id)"
-                                            ValueChanged="@(v => OnGradeLevelToggled(gl.Id, v))" />
-                            <span class="check-name">@gl.Name <span class="muted">Level @gl.Level</span></span>
-                        </div>
-                    }
-                </div>
-            }
-        </div>
+            <DialogShellFooter Saving="@Saving"
+                               Error="@Error"
+                               SubmitText="@SubmitText"
+                               SavingText="@SavingText"
+                               OnCancel="HandleCancelAsync" />
+        </EditForm>
     }
-
-    <div class="dialog-footer">
-        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-        <FluentButton Appearance="Appearance.Accent"
-                      IconStart="@FluentIcons.Save"
-                      Disabled="@_saving"
-                      OnClick="SaveAsync"
-                      class="ms-2">
-            @(_saving ? "Saving…" : (_isEdit ? "Save Changes" : "Create Teacher"))
-        </FluentButton>
-    </div>
 </div>
 
 
 @code {
-    /// <summary>Set to a teacher's id to edit; <c>null</c> to create a new teacher.</summary>
-    [Parameter, EditorRequired] public Guid? TeacherId { get; set; }
+    /// <summary>Form-state model for the teacher create/edit dialog.</summary>
+    public sealed class TeacherFormModel
+    {
+        public Guid? TeacherId { get; set; }
+        public Guid? ContextGradeLevelId { get; set; }
+        public string? ContextGradeLevelName { get; set; }
 
-    /// <summary>
-    /// Grade levels to pre-select when creating a teacher (create mode only).
-    /// Lets an "Add teacher" action on the grade-level page link the new teacher
-    /// to that grade immediately, so it appears on the card right after save.
-    /// Ignored in edit mode (the existing links are loaded from the API).
-    /// </summary>
-    [Parameter] public IEnumerable<Guid>? InitialGradeLevelIds { get; set; }
+        [Required] public string FirstName { get; set; } = string.Empty;
+        [Required] public string LastName { get; set; } = string.Empty;
+        public string? DisplayName { get; set; }
+        public Guid? TitleCodedValueId { get; set; }
+        public Guid? GenderCodedValueId { get; set; }
+        public DateOnly? DateOfBirth { get; set; }
+        public Guid? LevelOfEducationCodedValueId { get; set; }
+        public HashSet<Guid> QualificationCodedValueIds { get; set; } = new();
 
-    [CascadingParameter] public FluentDialog? Dialog { get; set; }
-    [Parameter] public DialogParameters Content { get; set; } = default!;
+        public List<AssignmentRow> Assignments { get; set; } = new();
+    }
 
-    [Inject] private StudentsApiClient Api { get; set; } = default!;
-    [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
-    [Inject] private ILogger<TeacherEditDialog> Logger { get; set; } = default!;
+    /// <summary>One teaching-assignment grid row (grade + optional subject + role, or activity + role + grades).</summary>
+    public sealed class AssignmentRow
+    {
+        public Guid Key { get; set; } = Guid.NewGuid();
+        public Guid? RowId { get; set; }                 // existing assignment row id (null = new)
+        public bool IsActivity { get; set; }
+        public bool Editing { get; set; } = true;        // new rows open in edit mode
+        public Guid? GradeLevelId { get; set; }
+        public Guid? SubjectId { get; set; }
+        public Guid? ActivityGroupId { get; set; }
+        public Guid? RoleCodedValueId { get; set; }
+        public HashSet<Guid> GradeLevelIds { get; set; } = new();
+    }
 
-    private bool _isEdit => TeacherId.HasValue;
+    private bool _isEdit => Model.TeacherId.HasValue;
+    private bool InGradeContext => Model.ContextGradeLevelId.HasValue;
     private bool _loading = true;
-    private bool _saving;
-    private string? _error;
+    private bool _activityGroupsEnabled;
 
-    // Profile.
-    private Guid? _titleCodedValueId;
-    private string _firstName = string.Empty;
-    private string _lastName = string.Empty;
-    private string _displayName = string.Empty;
-    private Guid? _genderCodedValueId;
-    private DateOnly? _dateOfBirth;
-    private Guid? _levelOfEducationCodedValueId;
-    private CodedValueDto[]? _allQualifications;
-    private HashSet<Guid> _selectedQualificationIds = new();
-
-    // Topics (with per-topic roles) and grade levels.
     private TopicDto[]? _allTopics;
     private GradeLevelDto[]? _allGradeLevels;
-    private readonly Dictionary<Guid, Guid?> _topicRoles = new();
-    private Dictionary<Guid, Guid?> _originalTopicRoles = new();
-    private HashSet<Guid> _selectedGradeLevelIds = new();
-    private HashSet<Guid> _originalGradeLevelIds = new();
+    private ActivityGroupDto[]? _allActivities;
+    private CodedValueDto[]? _allQualifications;
+    private CodedValueDto[]? _allTeacherRoles;
+    /// <summary>Maps grade level id → set of enrolled topic ids (for filtering subject pickers).</summary>
+    private Dictionary<Guid, HashSet<Guid>>? _gradeEnrolledTopicIdsByGrade;
 
-    protected override async Task OnInitializedAsync()
+    private CodedValueDto? _qualToAdd;
+    private int _qualKey;
+
+    // Original assignment state for edit-mode reconciliation.
+    private readonly List<AssignmentRow> _originalRows = new();
+
+    protected override string SubmitText => _isEdit ? "Save Changes" : "Create Teacher";
+    protected override string SavingText => _isEdit ? "Saving…" : "Creating…";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        await LoadAsync();
+        if (firstRender)
+        {
+            await LoadAsync();
+            StateHasChanged();
+        }
+        await base.OnAfterRenderAsync(firstRender);
     }
 
     private async Task LoadAsync()
     {
         try
         {
+            _activityGroupsEnabled = await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.EnableActivityGroups);
+
             _allTopics = await Api.ListTopicsAsync() ?? [];
             _allGradeLevels = await Api.ListGradeLevelsAsync() ?? [];
+            _allActivities = _activityGroupsEnabled
+                ? await Api.ListActivityGroupsAsync() ?? []
+                : [];
             _allQualifications = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.Qualification.ToCode()) ?? [];
+            _allTeacherRoles = await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.TeacherRoles.ToCode()) ?? [];
 
-            if (_isEdit && TeacherId is not null)
+            // Load topic assignments for ALL grades so each grade row's subject picker
+            // is filtered to that grade's enrolled subjects (v4 spec §3.2).
+            _gradeEnrolledTopicIdsByGrade = new();
+            foreach (var g in _allGradeLevels ?? [])
             {
-                var t = await Api.GetTeacherByIdAsync(TeacherId.Value);
+                var assignments = await Api.ListGradeTopicsByGradeAsync(g.Id) ?? [];
+                _gradeEnrolledTopicIdsByGrade[g.Id] = assignments.Select(a => a.TopicId).ToHashSet();
+            }
+
+            if (Model.TeacherId is { } teacherId)
+            {
+                var t = await Api.GetTeacherByIdAsync(teacherId);
                 if (t is not null)
                 {
-                    _titleCodedValueId = t.TitleCodedValueId;
-                    _firstName = t.FirstName;
-                    _lastName = t.LastName;
-                    _displayName = t.DisplayName ?? string.Empty;
-                    _genderCodedValueId = t.GenderCodedValueId;
-                    _dateOfBirth = t.DateOfBirth;
-                    _levelOfEducationCodedValueId = t.LevelOfEducationCodedValueId;
-                    _selectedQualificationIds = (t.QualificationCodedValueIds ?? []).ToHashSet();
+                    Model.TitleCodedValueId = t.TitleCodedValueId;
+                    Model.FirstName = t.FirstName;
+                    Model.LastName = t.LastName;
+                    Model.DisplayName = t.DisplayName ?? string.Empty;
+                    Model.GenderCodedValueId = t.GenderCodedValueId;
+                    Model.DateOfBirth = t.DateOfBirth;
+                    Model.LevelOfEducationCodedValueId = t.LevelOfEducationCodedValueId;
+                    Model.QualificationCodedValueIds = (t.QualificationCodedValueIds ?? []).ToHashSet();
                 }
 
-                var roles = await Api.ListTeacherTopicRolesAsync(TeacherId.Value) ?? [];
-                _topicRoles.Clear();
-                foreach (var r in roles)
-                    _topicRoles[r.TopicId] = r.RoleCodedValueId;
-                _originalTopicRoles = new Dictionary<Guid, Guid?>(_topicRoles);
-
-                var gradeLevels = await Api.ListGradeLevelsForTeacherAsync(TeacherId.Value) ?? [];
-                _originalGradeLevelIds = gradeLevels.Select(g => g.Id).ToHashSet();
-                _selectedGradeLevelIds = new HashSet<Guid>(_originalGradeLevelIds);
+                Model.Assignments.Clear();
+                foreach (var g in await Api.ListTeacherGradeAssignmentsAsync(teacherId) ?? [])
+                {
+                    Model.Assignments.Add(new AssignmentRow
+                    {
+                        RowId = g.RowId, IsActivity = false, Editing = false,
+                        GradeLevelId = g.GradeLevelId, SubjectId = g.SubjectId, RoleCodedValueId = g.RoleCodedValueId
+                    });
+                }
+                foreach (var a in await Api.ListTeacherActivityAssignmentsAsync(teacherId) ?? [])
+                {
+                    Model.Assignments.Add(new AssignmentRow
+                    {
+                        RowId = a.RowId, IsActivity = true, Editing = false,
+                        ActivityGroupId = a.ActivityGroupId, RoleCodedValueId = a.RoleCodedValueId,
+                        GradeLevelIds = a.GradeLevelIds.ToHashSet()
+                    });
+                }
+                CopyOriginals();
             }
             else
             {
-                // Create mode: pre-select any grade levels the caller asked for
-                // (e.g. the current grade when adding from the grade page).
-                _selectedGradeLevelIds = new HashSet<Guid>(InitialGradeLevelIds ?? []);
+                Model.Assignments.Clear();
+                if (InGradeContext && Model.ContextGradeLevelId is { } ctx)
+                    Model.Assignments.Add(new AssignmentRow { GradeLevelId = ctx, SubjectId = null });
+                CopyOriginals();
             }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to load data for teacher dialog (TeacherId={TeacherId})", TeacherId);
-            _error = $"Could not load: {ex.Message}";
+            Logger.LogError(ex, "Failed to load data for teacher dialog (TeacherId={TeacherId})", Model.TeacherId);
+            Error = $"Could not load: {ex.Message}";
+
+            // Don't leave dropdown sources null — that would trap the UI in
+            // an endless loading-spinner state even though the overall dialog
+            // has finished loading. Render empty lists so the user can see the
+            // error and continue.
+            _allTopics ??= [];
+            _allGradeLevels ??= [];
+            _allActivities ??= [];
+            _allQualifications ??= [];
+            _allTeacherRoles ??= [];
         }
         finally
         {
@@ -265,109 +347,211 @@
         }
     }
 
-    private void OnTopicToggled(Guid topicId, bool selected)
+    private void CopyOriginals()
     {
-        if (selected)
-            _topicRoles.TryAdd(topicId, null);
-        else
-            _topicRoles.Remove(topicId);
+        _originalRows.Clear();
+        foreach (var r in Model.Assignments)
+            _originalRows.Add(CloneRow(r));
     }
 
-    private void OnTopicRoleChanged(Guid topicId, Guid? role)
-        => _topicRoles[topicId] = role;
-
-    private void OnGradeLevelToggled(Guid gradeLevelId, bool selected)
+    private static AssignmentRow CloneRow(AssignmentRow r) => new()
     {
-        if (selected)
-            _selectedGradeLevelIds.Add(gradeLevelId);
-        else
-            _selectedGradeLevelIds.Remove(gradeLevelId);
+        Key = r.Key, RowId = r.RowId, IsActivity = r.IsActivity, Editing = r.Editing,
+        GradeLevelId = r.GradeLevelId, SubjectId = r.SubjectId, ActivityGroupId = r.ActivityGroupId,
+        RoleCodedValueId = r.RoleCodedValueId, GradeLevelIds = new HashSet<Guid>(r.GradeLevelIds)
+    };
+
+    // ---- Computed lists ----
+
+    private CodedValueDto[] SelectedQualifications
+        => _allQualifications?.Where(q => Model.QualificationCodedValueIds.Contains(q.Id)).ToArray() ?? [];
+
+    private CodedValueDto[] UnselectedQualifications
+        => _allQualifications?.Where(q => !Model.QualificationCodedValueIds.Contains(q.Id)).ToArray() ?? [];
+
+    /// <summary>Subjects a grade row may choose: the grade's enrolled subjects (empty if grade has no assigned subjects).</summary>
+    private TopicDto[] SubjectsForGrade(Guid? gradeLevelId)
+    {
+        if (_allTopics is null) return [];
+        if (gradeLevelId is null) return [];
+        if (_gradeEnrolledTopicIdsByGrade is not { } map) return [];
+        if (!map.TryGetValue(gradeLevelId.Value, out var enrolled)) return [];
+        return _allTopics.Where(t => enrolled.Contains(t.Id)).ToArray();
     }
 
-    private void OnQualificationToggled(Guid codedValueId, bool selected)
+    private IEnumerable<GradeLevelDto> SelectedGradeObjects(AssignmentRow row)
+        => (_allGradeLevels ?? []).Where(g => row.GradeLevelIds.Contains(g.Id));
+
+    // ---- Grid mutation handlers (each updates the component's own list state) ----
+
+    private void AddGradeAssignment()
+        => Model.Assignments.Add(new AssignmentRow { GradeLevelId = InGradeContext ? Model.ContextGradeLevelId : null });
+
+    private void AddActivityAssignment()
+        => Model.Assignments.Add(new AssignmentRow { IsActivity = true });
+
+    private void RemoveRow(AssignmentRow row)
+        => Model.Assignments.Remove(row);
+
+    private void SaveRow(AssignmentRow row)
     {
-        if (selected)
-            _selectedQualificationIds.Add(codedValueId);
+        if (row.IsActivity)
+        {
+            if (row.ActivityGroupId is null) return; // require an activity
+        }
         else
-            _selectedQualificationIds.Remove(codedValueId);
+        {
+            if (row.GradeLevelId is null) return; // require a grade
+        }
+        row.Editing = false;
     }
 
-    // DOB bridge: _dateOfBirth is DateOnly? but FluentDatePicker.Value is DateTime?.
-    private DateTime? DateOfBirthAsDateTime => _dateOfBirth?.ToDateTime(TimeOnly.MinValue);
+    private void CancelRow(AssignmentRow row)
+    {
+        var original = _originalRows.FirstOrDefault(o => o.Key == row.Key);
+        if (original is not null)
+        {
+            var idx = Model.Assignments.IndexOf(row);
+            Model.Assignments[idx] = CloneRow(original);
+        }
+        else
+        {
+            Model.Assignments.Remove(row);
+        }
+    }
+
+    private void SetRowGrade(AssignmentRow row, Guid? gradeLevelId)
+    {
+        row.GradeLevelId = gradeLevelId;
+        row.SubjectId = null; // subject is scoped to the grade — reset when grade changes
+    }
+
+    private void SetRowSubject(AssignmentRow row, Guid? subjectId) => row.SubjectId = subjectId;
+    private void SetRowActivity(AssignmentRow row, Guid? activityGroupId) => row.ActivityGroupId = activityGroupId;
+    private void SetRowRole(AssignmentRow row, Guid? role) => row.RoleCodedValueId = role;
+
+    private void SetRowGrades(AssignmentRow row, IEnumerable<GradeLevelDto>? grades)
+    {
+        row.GradeLevelIds = new HashSet<Guid>(grades?.Select(g => g.Id) ?? []);
+    }
+
+    private string DisplayText(AssignmentRow row)
+    {
+        if (row.IsActivity)
+        {
+            var name = _allActivities?.FirstOrDefault(a => a.Id == row.ActivityGroupId)?.Name;
+            var grades = string.Join(", ", (_allGradeLevels ?? []).Where(g => row.GradeLevelIds.Contains(g.Id)).Select(g => g.Name));
+            var role = _allTeacherRoles?.FirstOrDefault(r => r.Id == row.RoleCodedValueId)?.Name;
+            return $"{name ?? "Activity"}{(string.IsNullOrEmpty(grades) ? "" : $" · {grades}")}{(string.IsNullOrEmpty(role) ? "" : $" · {role}")}";
+        }
+        else
+        {
+            var grade = _allGradeLevels?.FirstOrDefault(g => g.Id == row.GradeLevelId)?.Name;
+            var subject = _allTopics?.FirstOrDefault(t => t.Id == row.SubjectId)?.Name;
+            var role = _allTeacherRoles?.FirstOrDefault(r => r.Id == row.RoleCodedValueId)?.Name;
+            return $"{grade ?? "Grade"}{(string.IsNullOrEmpty(subject) ? "" : $" · {subject}")}{(string.IsNullOrEmpty(role) ? "" : $" · {role}")}";
+        }
+    }
+
+    private static Guid? ParseGuid(string? s) => Guid.TryParse(s, out var g) ? g : null;
+
+    private void OnQualificationPicked(CodedValueDto? q)
+    {
+        if (q is null) return;
+        if (!Model.QualificationCodedValueIds.Add(q.Id)) return;
+        _qualToAdd = null;
+        _qualKey++;
+    }
+
+    private void RemoveQualification(Guid codedValueId)
+        => Model.QualificationCodedValueIds.Remove(codedValueId);
+
+    private DateTime? DateOfBirthAsDateTime => Model.DateOfBirth?.ToDateTime(TimeOnly.MinValue);
 
     private void OnDateOfBirthChanged(DateTime? value)
-        => _dateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
+        => Model.DateOfBirth = value.HasValue ? DateOnly.FromDateTime(value.Value) : null;
 
     private Guid[]? QualificationIds()
-        => _selectedQualificationIds.Count == 0 ? null : _selectedQualificationIds.ToArray();
+        => Model.QualificationCodedValueIds.Count == 0 ? null : Model.QualificationCodedValueIds.ToArray();
 
-    public async Task SaveAsync()
+    protected override async Task<TeacherDto?> SubmitAsync(TeacherFormModel model)
     {
-        if (_saving) return;
-        if (string.IsNullOrWhiteSpace(_firstName) || string.IsNullOrWhiteSpace(_lastName))
+        Guid teacherId;
+        if (model.TeacherId is { } editId)
         {
-            _error = "First name and last name are required.";
-            return;
+            teacherId = editId;
+            await Api.UpdateTeacherAsync(teacherId, new UpdateTeacherRequest(
+                model.FirstName.Trim(), model.LastName.Trim(),
+                string.IsNullOrWhiteSpace(model.DisplayName) ? null : model.DisplayName.Trim(),
+                model.GenderCodedValueId, model.DateOfBirth, model.LevelOfEducationCodedValueId,
+                QualificationIds()));
+            await ReconcileAssignmentsAsync(teacherId, model);
+        }
+        else
+        {
+            // Atomic create: teacher + qualifications + grade/activity assignments
+            // in one transaction (Unit of Work). Any failure rolls back the whole
+            // batch — no orphaned teacher, no partial assignments.
+            var gradeAssignments = model.Assignments
+                .Where(a => !a.IsActivity)
+                .Select(a => new GradeAssignmentRequest(a.GradeLevelId!.Value, a.SubjectId, a.RoleCodedValueId))
+                .ToList();
+
+            // Context grade is force-included on create if the user removed the pre-created row.
+            if (model.ContextGradeLevelId is { } ctx
+                && !gradeAssignments.Any(g => g.GradeLevelId == ctx))
+                gradeAssignments.Add(new GradeAssignmentRequest(ctx, null, null));
+
+            var activityAssignments = model.Assignments
+                .Where(a => a.IsActivity)
+                .Select(a => new ActivityAssignmentRequest(a.ActivityGroupId!.Value, a.RoleCodedValueId, a.GradeLevelIds.ToArray()))
+                .ToArray();
+
+            teacherId = await Api.CreateTeacherWithAssignmentsAsync(new CreateTeacherWithAssignmentsRequest(
+                model.TitleCodedValueId,
+                model.FirstName.Trim(), model.LastName.Trim(),
+                string.IsNullOrWhiteSpace(model.DisplayName) ? null : model.DisplayName.Trim(),
+                model.GenderCodedValueId, model.DateOfBirth, model.LevelOfEducationCodedValueId,
+                QualificationIds(),
+                gradeAssignments.ToArray(), activityAssignments));
         }
 
-        _saving = true;
-        _error = null;
-        try
-        {
-            Guid teacherId;
-            if (_isEdit && TeacherId is not null)
-            {
-                teacherId = TeacherId.Value;
-                await Api.UpdateTeacherAsync(teacherId, new UpdateTeacherRequest(
-                    _firstName.Trim(), _lastName.Trim(),
-                    string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
-                    QualificationIds()));
-
-                // Reconcile topic links + per-topic roles.
-                foreach (var id in _topicRoles.Keys.Except(_originalTopicRoles.Keys))
-                    await Api.LinkTeacherTopicAsync(teacherId, id, _topicRoles[id]);
-                foreach (var id in _originalTopicRoles.Keys.Except(_topicRoles.Keys))
-                    await Api.UnlinkTeacherTopicAsync(teacherId, id);
-                foreach (var id in _topicRoles.Keys.Intersect(_originalTopicRoles.Keys))
-                {
-                    if (_topicRoles[id] != _originalTopicRoles[id])
-                        await Api.SetTeacherTopicRoleAsync(teacherId, id, _topicRoles[id]);
-                }
-
-                // Reconcile grade-level links.
-                foreach (var id in _selectedGradeLevelIds.Except(_originalGradeLevelIds))
-                    await Api.LinkTeacherGradeLevelAsync(teacherId, id, null);
-                foreach (var id in _originalGradeLevelIds.Except(_selectedGradeLevelIds))
-                    await Api.UnlinkTeacherGradeLevelAsync(teacherId, id);
-            }
-            else
-            {
-                teacherId = await Api.CreateTeacherAsync(new CreateTeacherRequest(
-                    _titleCodedValueId,
-                    _firstName.Trim(), _lastName.Trim(),
-                    string.IsNullOrWhiteSpace(_displayName) ? null : _displayName.Trim(),
-                    _genderCodedValueId, _dateOfBirth, _levelOfEducationCodedValueId,
-                    QualificationIds()));
-                foreach (var kvp in _topicRoles)
-                    await Api.LinkTeacherTopicAsync(teacherId, kvp.Key, kvp.Value);
-                foreach (var gradeLevelId in _selectedGradeLevelIds)
-                    await Api.LinkTeacherGradeLevelAsync(teacherId, gradeLevelId, null);
-            }
-
-            if (Dialog is not null)
-                await Dialog.CloseAsync(teacherId);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to save teacher (TeacherId={TeacherId})", TeacherId);
-            _error = $"Could not save: {ex.Message}";
-        }
-        finally
-        {
-            _saving = false;
-        }
+        return await Api.GetTeacherByIdAsync(teacherId);
     }
 
-    private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+    private async Task ReconcileAssignmentsAsync(Guid teacherId, TeacherFormModel model)
+    {
+        var currentGrade = model.Assignments.Where(a => !a.IsActivity).ToList();
+        var originalGrade = _originalRows.Where(a => !a.IsActivity).ToList();
+        foreach (var o in originalGrade.Where(o => currentGrade.All(c => c.Key != o.Key)))
+            await Api.DeleteTeacherGradeAssignmentAsync(teacherId, o.RowId!.Value);
+        foreach (var c in currentGrade.Where(c => c.RowId is null))
+            await Api.LinkTeacherGradeAssignmentAsync(teacherId, c.GradeLevelId!.Value, c.SubjectId, c.RoleCodedValueId);
+        foreach (var c in currentGrade.Where(c => c.RowId is not null))
+        {
+            var o = originalGrade.First(o => o.Key == c.Key);
+            if (o.GradeLevelId != c.GradeLevelId || o.SubjectId != c.SubjectId || o.RoleCodedValueId != c.RoleCodedValueId)
+            {
+                await Api.DeleteTeacherGradeAssignmentAsync(teacherId, c.RowId!.Value);
+                await Api.LinkTeacherGradeAssignmentAsync(teacherId, c.GradeLevelId!.Value, c.SubjectId, c.RoleCodedValueId);
+            }
+        }
+
+        var currentActivity = model.Assignments.Where(a => a.IsActivity).ToList();
+        var originalActivity = _originalRows.Where(a => a.IsActivity).ToList();
+        foreach (var o in originalActivity.Where(o => currentActivity.All(c => c.Key != o.Key)))
+            await Api.DeleteTeacherActivityAssignmentAsync(teacherId, o.RowId!.Value);
+        foreach (var c in currentActivity.Where(c => c.RowId is null))
+            await Api.LinkTeacherActivityAssignmentAsync(teacherId, c.ActivityGroupId!.Value, c.RoleCodedValueId, c.GradeLevelIds.ToArray());
+        foreach (var c in currentActivity.Where(c => c.RowId is not null))
+        {
+            var o = originalActivity.First(o => o.Key == c.Key);
+            if (o.ActivityGroupId != c.ActivityGroupId || o.RoleCodedValueId != c.RoleCodedValueId
+                || !o.GradeLevelIds.SetEquals(c.GradeLevelIds))
+            {
+                await Api.DeleteTeacherActivityAssignmentAsync(teacherId, c.RowId!.Value);
+                await Api.LinkTeacherActivityAssignmentAsync(teacherId, c.ActivityGroupId!.Value, c.RoleCodedValueId, c.GradeLevelIds.ToArray());
+            }
+        }
+    }
 }
