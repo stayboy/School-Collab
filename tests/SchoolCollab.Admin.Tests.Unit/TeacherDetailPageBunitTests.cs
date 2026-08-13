@@ -198,8 +198,8 @@ public class TeacherDetailPageBunitTests : BunitContext
         cut.Markup.Should().Contain("Ama Owusu", "header shows full name");
         cut.Markup.Should().Contain("Mr.", "title coded-value name renders from GetByIdAsync");
         cut.Markup.Should().Contain("12 Apr 1990", "date of birth renders as dd MMM yyyy");
-        cut.Markup.Should().Contain("Subjects (1)");
-        cut.Markup.Should().Contain("Mathematics");
+        cut.Markup.Should().Contain("Contacts");
+        cut.Markup.Should().Contain("No contacts yet.");
         cut.Markup.Should().Contain("Grade levels (1)");
         cut.Markup.Should().Contain("Grade 5");
 
@@ -231,7 +231,8 @@ public class TeacherDetailPageBunitTests : BunitContext
 
         var cut = Render<TeacherDetail>(p => p.Add(x => x.Id, teacherId));
 
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("No subjects linked."));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Contacts"));
+        cut.Markup.Should().Contain("No contacts yet.");
         cut.Markup.Should().Contain("No grade levels linked.");
     }
 }
