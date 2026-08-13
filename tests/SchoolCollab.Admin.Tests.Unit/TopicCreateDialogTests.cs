@@ -123,7 +123,12 @@ public class TopicCreateDialogTests : BunitContext
 
         // Edit mode: the submit becomes the LOCAL "Update Fields" (a plain
         // button, not a form submit) — the server "Create" is gone.
-        cut.Markup.Should().Contain("Update Fields", "edit mode shows the local Update Fields action");
+        // WaitForAssertion: the CodedValueDropdown loads coded values
+        // asynchronously, and the re-render from StartEditing races with that
+        // pending load. Asserting immediately was flaky in CI (the read-back
+        // markup could still be the display-mode "Create" snapshot).
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Update Fields",
+            "edit mode shows the local Update Fields action"));
         cut.Markup.Should().NotContain("Create", "edit mode replaces the server Create with Update Fields");
         var update = cut.FindAll("fluent-button").Single(b => b.TextContent.Contains("Update Fields"));
         update.GetAttribute("type").Should().NotBe("submit", "Update Fields is a local action, not a server submit");

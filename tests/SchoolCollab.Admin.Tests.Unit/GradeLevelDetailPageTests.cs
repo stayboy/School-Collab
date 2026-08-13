@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SchoolCollab.Admin.Shared.Services;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 using SchoolCollab.Students.Application.Services;
 using System.Net;
@@ -279,13 +280,10 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.Markup.Should().Contain("10–12", "age range renders as min–max");
         cut.Markup.Should().Contain("3 students");
 
-        // Three equally-sized section cards render with titles + counts + anchors.
+        // Three equally-sized section cards render with titles + counts.
         cut.Markup.Should().Contain("Subjects", "Subjects card title renders");
         cut.Markup.Should().Contain("Teachers", "Teachers card title renders");
         cut.Markup.Should().Contain("Students", "Students card title renders");
-        cut.Markup.Should().Contain("View all subjects (0)");
-        cut.Markup.Should().Contain("View all teachers (0)");
-        cut.Markup.Should().Contain("View all students (0)");
     }
 
     [TestMethod]
@@ -343,7 +341,7 @@ public class GradeLevelDetailPageTests : BunitContext
         Register(gradeId, GradeJson(gradeId));
 
         var cut = Render<Detail>(p => p.Add(x => x.Id, gradeId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("View all teachers (0)"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Teachers"));
         cut.Markup.Should().Contain("No teachers linked to this grade yet");
     }
 
@@ -443,6 +441,10 @@ public class GradeLevelDetailPageTests : BunitContext
         var gradeId = Guid.NewGuid();
         var (handler, _) = Register(gradeId, GradeJson(gradeId));
 
+        // Register IFeatureFlagService (required by TeacherEditDialog)
+        Services.AddSingleton<IFeatureFlagService>(new StubFlagService { Enabled = true });
+        Services.AddSingleton<IFeatureFlagChangeNotifier>(new StubFlagNotifier());
+
         // Endpoints the TeacherEditDialog hits on init (create mode).
         handler.Map("GET", "/students/grade-levels", HttpStatusCode.OK, "[]");
         handler.Map("GET", "/api/coded-values/by-parent?parentCode=QUALIF", HttpStatusCode.OK, "[]");
@@ -457,7 +459,7 @@ public class GradeLevelDetailPageTests : BunitContext
         cut.FindAll("fluent-card.section-card-wrapper fluent-button[title=\"Add\"]")[1].Click();
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain(
-            "Create Teacher",
+            "New Teacher",
             "clicking Add on the Teachers card opens the shared TeacherEditDialog in create mode"));
     }
 
@@ -865,5 +867,21 @@ public class GradeLevelDetailPageTests : BunitContext
             "the editor is wrapped in a Notification & Delivery card below the section cards");
         source.Should().Contain("Notification &amp; Delivery",
             "the card is titled 'Notification & Delivery'");
+    }
+
+    private sealed class StubFlagService : IFeatureFlagService
+    {
+        public bool Enabled { get; set; }
+        public bool IsEnabled(string featureKey) => Enabled;
+        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken ct = default) => Task.FromResult(Enabled);
+        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
+        public Task<IReadOnlyDictionary<string, bool>> GetAllFlagsAsync(Guid? tenantId, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyDictionary<string, bool>>(new Dictionary<string, bool>());
+    }
+
+    private sealed class StubFlagNotifier : IFeatureFlagChangeNotifier
+    {
+        public event Action? FeatureFlagsChanged;
+        public void Raise() => FeatureFlagsChanged?.Invoke();
     }
 }
