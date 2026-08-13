@@ -960,7 +960,7 @@
         var dialog = await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
             "New Student",
             parameters,
-            DialogSize.Large);
+            DialogSize.ExtraLarge);
         if (_disposed) return;
         var result = await dialog.Result;
         if (_disposed || result.Cancelled || result.Data is not Guid) return;
@@ -980,7 +980,7 @@
             {
                 { nameof(StudentEditDialog.StudentId), student.Id },
             },
-            DialogSize.Large);
+            DialogSize.ExtraLarge);
         if (_disposed) return;
         var result = await dialog.Result;
         if (_disposed || result.Cancelled) return;

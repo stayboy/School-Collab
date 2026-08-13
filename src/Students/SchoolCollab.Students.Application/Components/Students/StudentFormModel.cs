@@ -1,4 +1,5 @@
 using System.ComponentModel.DataAnnotations;
+using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 
 namespace SchoolCollab.Students.Application.Components.Students;
@@ -42,4 +43,13 @@ public sealed class StudentFormModel
     /// the existing student immediately via the API.
     /// </summary>
     public List<GuardianAssignment> GuardianLinks { get; set; } = new();
+
+    /// <summary>
+    /// Contacts drafted on the create form (create mode only). Populated by the
+    /// shared form's contacts section (<see cref="ContactsEditor"/> in Buffered
+    /// mode); the calling page flushes them to the API as part of the atomic
+    /// create. Ignored in edit mode, where the <see cref="ContactsEditor"/> runs
+    /// in Live mode against the existing student's persisted contacts.
+    /// </summary>
+    public List<ContactModel> Contacts { get; set; } = new();
 }
