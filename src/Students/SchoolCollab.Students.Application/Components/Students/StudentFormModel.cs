@@ -134,6 +134,26 @@ public sealed class StudentFormModel
             LoadedContactIds: LoadedContactIds);
     }
 
+    /// <summary>
+    /// Projects this model back to a <see cref="CreateStudentWithLinkedDataRequest"/> for the
+    /// atomic create save (profile + guardians + contacts + optional enrollment). Symmetric
+    /// with <see cref="ToUpdateRequest"/>; reuses the same <see cref="ToGuardianDraft"/>/
+    /// <see cref="ToContactDraft"/> converters so create and edit stay in lockstep (notably,
+    /// the guardian emergency flag round-trips — the previous inline flush hardcoded it to
+    /// false). Enrollment targets are dialog-level, so they're passed in as arguments.
+    /// </summary>
+    public CreateStudentWithLinkedDataRequest ToCreateRequest(
+        Guid? enrollmentGradeLevelId = null,
+        Guid? enrollmentPeriodId = null)
+    {
+        return new CreateStudentWithLinkedDataRequest(
+            FirstName!, LastName!, DateOfBirth, GenderCodedValueId, TitleCodedValueId,
+            Guardians: GuardianLinks.Select(ToGuardianDraft).ToArray(),
+            Contacts: Contacts.OrderBy(c => c.Order).Select(ToContactDraft).ToArray(),
+            EnrollmentGradeLevelId: enrollmentGradeLevelId,
+            EnrollmentPeriodId: enrollmentPeriodId);
+    }
+
     private static GuardianAssignment ToGuardianAssignment(StudentGuardianViewDto g) => new(
         g.GuardianId, g.FirstName, g.LastName, g.RelationshipCodedValueId,
         ContactChannel: null, ContactValue: null, TitleCodedValueId: g.TitleCodedValueId,
