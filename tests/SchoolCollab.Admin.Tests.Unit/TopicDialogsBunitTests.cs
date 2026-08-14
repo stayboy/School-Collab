@@ -103,11 +103,11 @@ public class TopicDialogsBunitTests : BunitContext
             StrandJson(StrandRow(rootId, topicId, "Numbers", null), StrandRow(lessonId, topicId, "Add", rootId)));
         Register(handler);
 
-        var cut = Render<TopicStrandsDialog>(p =>
+        var cut = Render<TopicStrandsDialog>(p => p.Add(x => x.Content, new DialogParameters
         {
-            p.Add(x => x.TopicId, topicId);
-            p.Add(x => x.TopicName, "Mathematics");
-        });
+            [TopicStrandsDialog.TopicIdKey] = topicId,
+            [TopicStrandsDialog.TopicNameKey] = "Mathematics",
+        }));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Numbers"));
         cut.Markup.Should().Contain("Strands (1)", "one root strand");

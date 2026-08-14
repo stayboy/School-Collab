@@ -206,7 +206,7 @@
     private string? _editingAttrKey;
     private string? _editAttrValue;
     private bool _savingAttr;
-    private readonly EditModel _model = new();
+    private readonly CodedValueEditModel _model = new();
     private CancellationTokenSource? _loadCts;
     private CancellationTokenSource? _mutationCts = new();
     private volatile bool _disposed;
@@ -323,9 +323,9 @@
             if (_disposed) return;
             if (_item is not null)
             {
-                _model.Name = _item.Name;
-                _model.Description = _item.Description;
-                _model.DisplayOrder = _item.DisplayOrder;
+                // Project the DTO into the shared form model via the tested
+                // on-model mapping (CodedValueEditModel.LoadFrom).
+                _model.LoadFrom(_item);
 
                 // Load parent for attribute definitions dropdown
                 if (_item.ParentId.HasValue && _item.ParentCode is not null)
@@ -510,13 +510,4 @@
         _mutationCts = null;
     }
 
-    private sealed class EditModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Name { get; set; }
-
-        public string? Description { get; set; }
-
-        public int DisplayOrder { get; set; }
-    }
 }

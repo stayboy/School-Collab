@@ -1,0 +1,10 @@
+/* StudentEditDialog — loading state.
+   The form is gated on the student profile load (see StudentEditDialog.razor)
+   so the FluentTextField bindings connect with the populated model instead of
+   an empty one. While loading, show a centered progress ring. */
+.student-edit-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem 0;
+}

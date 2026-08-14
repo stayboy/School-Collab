@@ -91,6 +91,8 @@
                                          ItemTextSelector="t => t.Name"
                                          ItemMetaSelector="@(t => [ $"{t.StrandCount} strands", $"{t.LessonCount} lessons" ])"
                                          ItemOnClick="t => OpenTopicEditAsync(t)"
+                                         ItemKeySelector="t => t.TopicId"
+                                         OnItemActionBlocked="OnTopicEditBlocked"
                                          ItemNameTitle="Edit topic">
                                 <ItemActions Context="t">
                                     <RowActionsMenu AriaLabel="@($"Actions for {t.Name}")"
@@ -144,8 +146,10 @@
                                          Loading="@(_students is null)"
                                          ItemTextSelector="@(st => $"{st.FirstName} {st.LastName}")"
                                          ItemMetaSelector="@(st => [ GetStudentDemographics(st) ])"
-                                         ItemHrefSelector="@(st => $"/students/{st.Id}")"
-                                         ItemNameTitle="View student">
+                                         ItemOnClick="st => OpenStudentEditAsync(st)"
+                                         ItemKeySelector="st => st.Id"
+                                         OnItemActionBlocked="OnStudentEditBlocked"
+                                         ItemNameTitle="Edit student">
                                 <ItemActions Context="st">
                                     <RowActionsMenu AriaLabel="@($"Actions for {st.FirstName} {st.LastName}")"
                                                     UseMenuService="false"
@@ -173,6 +177,8 @@
                                          Loading="@(_streams is null)"
                                          ItemTextSelector="s => s.Name"
                                          ItemOnClick="s => OpenStreamEditAsync(s)"
+                                         ItemKeySelector="s => s.Id"
+                                         OnItemActionBlocked="OnStreamEditBlocked"
                                          ItemNameTitle="Edit stream">
                                 <ItemActions Context="s">
                                     <RowActionsMenu AriaLabel="@($"Actions for {s.Name}")"
@@ -659,12 +665,12 @@
             $"Subjects · {_grade!.Name}",
             new Dictionary<string, object?>
             {
-                { nameof(GradeTopicsDialog.Topics), _curriculum ?? [] },
-                { nameof(GradeTopicsDialog.UnassignedTopics), _unassignedTopics },
-                { nameof(GradeTopicsDialog.OpenStrands), new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
-                { nameof(GradeTopicsDialog.Remove), new Func<Guid, Task>(RemoveTopicAsync) },
-                { nameof(GradeTopicsDialog.Assign), new Func<Guid, Task>(AssignTopicAsync) },
-                { nameof(GradeTopicsDialog.OnChanged), new Func<Task>(ReloadAssignedTopicsAsync) },
+                { GradeTopicsDialog.TopicsKey, _curriculum ?? [] },
+                { GradeTopicsDialog.UnassignedTopicsKey, _unassignedTopics },
+                { GradeTopicsDialog.OpenStrandsKey, new Func<GradeTopicCurriculumDto, Task>(OpenStrandsAsync) },
+                { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
+                { GradeTopicsDialog.AssignKey, new Func<Guid, Task>(AssignTopicAsync) },
+                { GradeTopicsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
             },
             DialogSize.Medium);
         if (_disposed) return;
@@ -721,10 +727,10 @@
             $"Strands · {topic.Name}",
             new Dictionary<string, object?>
             {
-                { nameof(TopicStrandsDialog.TopicId), topic.TopicId },
-                { nameof(TopicStrandsDialog.TopicName), topic.Name },
+                { TopicStrandsDialog.TopicIdKey, topic.TopicId },
+                { TopicStrandsDialog.TopicNameKey, topic.Name },
                 // The editor mutates strands/lessons; refresh the card once it closes.
-                { nameof(TopicStrandsDialog.OnChanged), new Func<Task>(ReloadAssignedTopicsAsync) },
+                { TopicStrandsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
             },
             DialogSize.Medium);
         if (_disposed) return;
@@ -836,8 +842,8 @@
             $"Role · {teacher.FirstName} {teacher.LastName}",
             new Dictionary<string, object?>
             {
-                { nameof(TeacherRoleDialog.CurrentRoleId), teacher.TeacherRoleCodedValueId },
-                { nameof(TeacherRoleDialog.Save), new Func<Guid?, Task>(roleId => OnRoleChangedAsync(teacher, roleId)) },
+                { TeacherRoleDialog.CurrentRoleIdKey, teacher.TeacherRoleCodedValueId },
+                { TeacherRoleDialog.SaveKey, new Func<Guid?, Task>(roleId => OnRoleChangedAsync(teacher, roleId)) },
             },
             DialogSize.Small);
         if (_disposed) return;
@@ -953,7 +959,7 @@
 
         var parameters = new Dictionary<string, object?>();
         if (active is not null)
-            parameters[nameof(StudentCreateDialog.EnrollmentGradeLevelId)] = Id;
+            parameters[StudentCreateDialog.EnrollmentGradeLevelIdKey] = Id;
         else
             _studentsError = "No active period is open — the new student will be created without enrolling them to this grade.";
 
@@ -968,17 +974,40 @@
     }
 
     /// <summary>
+    /// Section-card edit-action guard callbacks (wired to each edit card's
+    /// <c>OnItemActionBlocked</c>). SectionCard centralizes the guard (an edit
+    /// action requires a non-empty item key); these handlers surface the block
+    /// as a per-card error. The message is also reused by the kebab Edit actions
+    /// (which bypass SectionCard's subitem guard).
+    /// </summary>
+    private Task OnTopicEditBlocked(string name) { _topicsError = $"{name} is missing an Id and cannot be edited."; return Task.CompletedTask; }
+    private Task OnStudentEditBlocked(string name) { _studentsError = $"{name} is missing an Id and cannot be edited."; return Task.CompletedTask; }
+    private Task OnStreamEditBlocked(string name) { _streamsError = $"{name} is missing an Id and cannot be edited."; return Task.CompletedTask; }
+
+    /// <summary>
     /// Students card kebab "Edit" — opens the shared StudentEditDialog for the
     /// row's student. Reloads the card on a non-cancelled result.
     /// </summary>
     private async Task OpenStudentEditAsync(StudentDto student)
     {
         if (_disposed) return;
+
+        // Defense-in-depth for the kebab Edit action (which calls this handler
+        // directly and bypasses SectionCard's central ItemKeySelector guard):
+        // never open the edit dialog with an empty student Id — that would 404
+        // and leave a blank form. Surfaced via the same OnStudentEditBlocked
+        // path the section-card subitem uses.
+        if (student.Id == Guid.Empty)
+        {
+            await OnStudentEditBlocked($"{student.FirstName} {student.LastName}".Trim());
+            return;
+        }
+
         var dialog = await DialogService.ShowReadonlyDialogAsync<StudentEditDialog>(
             $"Edit Student · {student.FirstName} {student.LastName}",
             new Dictionary<string, object?>
             {
-                { nameof(StudentEditDialog.StudentId), student.Id },
+                { StudentEditDialog.StudentIdKey, student.Id },
             },
             DialogSize.ExtraLarge);
         if (_disposed) return;

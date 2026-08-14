@@ -46,12 +46,16 @@ public class GuardianContactsDialogTests
     {
         var razor = ReadSource(ComponentPath);
 
-        razor.Should().Contain("[Parameter, EditorRequired] public Guid GuardianId",
-            "GuardianId is the only required parameter (drives the contact load)");
-        razor.Should().Contain("[Parameter] public string? GuardianName",
-            "GuardianName is the optional parameter used for the dialog title");
-        razor.Should().Contain("[Parameter] public string? Subtitle",
-            "Subtitle is the optional secondary line (e.g. 'Father · Primary')");
+        // FluentUI 4.14.x does NOT spread DialogParameters indexer entries onto
+        // separate [Parameter]s, so the dialog reads its inputs from Content.
+        razor.Should().Contain("public const string GuardianIdKey",
+            "GuardianId is read from Content (the DialogParameters indexer)");
+        razor.Should().Contain("TryGet<Guid>(GuardianIdKey)",
+            "GuardianId is the required input that drives the contact load");
+        razor.Should().Contain("public const string GuardianNameKey",
+            "GuardianName is read from Content (used for the dialog title)");
+        razor.Should().Contain("public const string SubtitleKey",
+            "Subtitle is read from Content (the optional secondary line)");
     }
 
     [TestMethod]

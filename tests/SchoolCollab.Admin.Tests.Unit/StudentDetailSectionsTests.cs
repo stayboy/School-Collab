@@ -323,12 +323,13 @@ public class StudentDetailSectionsTests
         source.Should().Contain("ShowReadonlyDialogAsync<GuardianContactsDialog>(",
             "the handler opens GuardianContactsDialog via the DialogServiceExtensions.ShowReadonlyDialogAsync helper");
         // GuardianId / GuardianName / Subtitle are passed via nameof(...) keys.
-        source.Should().Contain("nameof(GuardianContactsDialog.GuardianId)",
-            "GuardianId is passed by parameter name so DialogParameters binds it to the [Parameter]");
-        source.Should().Contain("nameof(GuardianContactsDialog.GuardianName)",
-            "GuardianName is passed by parameter name");
-        source.Should().Contain("nameof(GuardianContactsDialog.Subtitle)",
-            "Subtitle is passed by parameter name");
+        // GuardianId / GuardianName / Subtitle are passed via the Content indexer keys.
+        source.Should().Contain("GuardianContactsDialog.GuardianIdKey",
+            "GuardianId is passed via the Content DialogParameters indexer key");
+        source.Should().Contain("GuardianContactsDialog.GuardianNameKey",
+            "GuardianName is passed via the Content indexer key");
+        source.Should().Contain("GuardianContactsDialog.SubtitleKey",
+            "Subtitle is passed via the Content indexer key");
     }
 
     [TestMethod]

@@ -498,6 +498,79 @@ public class GradeLevelDetailPageTests : BunitContext
     }
 
     [TestMethod]
+    public void Detail_StudentsCard_Subitem_Click_OpensStudentEditDialog_WithStudentId()
+    {
+        // Regression: clicking a student's name in the Students section card
+        // must open StudentEditDialog with that student's real Id (not an
+        // empty guid). If an empty guid were passed, the dialog's
+        // GET /students/{id} load would miss and show the error instead of
+        // the pre-loaded student.
+        var gradeId = Guid.NewGuid();
+        var studentId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId), studentsJson: JsonSerializer.Serialize(new[]
+        {
+            StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10)),
+        }));
+        handler.Map("GET", $"/students/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10))));
+
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada Lovelace"));
+
+        // Click the student's name (the section-card subitem anchor).
+        cut.Find(".item-name").Click();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain(
+            "Save Changes",
+            "clicking the student subitem opens the shared StudentEditDialog"));
+        // Definitive check: the FirstName input must be bound to the loaded
+        // student profile. A mere "Ada" match on the markup is a false positive
+        // (the dialog title is "Edit Student · Ada Lovelace"). If StudentId were
+        // an empty guid (never bound via ShowReadonlyDialogAsync), the dialog's
+        // GET /students/{id} would 404 and the field would render blank.
+        cut.WaitForAssertion(() => cut.Find("#studentFormFirstName").GetAttribute("value")
+            .Should().Be("Ada",
+                "the edit dialog's FirstName input binds the loaded student (StudentId must be a real guid)"));
+    }
+
+    [TestMethod]
+    public void Detail_StudentsCard_Subitem_Click_PassesCorrectStudent_WhenMultiple()
+    {
+        // Regression: with multiple students, clicking a specific subitem must
+        // pass THAT student's Id to the edit dialog — not the last student, not
+        // an empty guid (a classic @foreach closure-capture mistake).
+        var gradeId = Guid.NewGuid();
+        var adaId = Guid.NewGuid();
+        var graceId = Guid.NewGuid();
+        var (handler, _) = Register(gradeId, GradeJson(gradeId), studentsJson: JsonSerializer.Serialize(new[]
+        {
+            StudentJson(adaId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10)),
+            StudentJson(graceId, "STU002", "Grace", "Hopper", null, new DateOnly(2016, 4, 20)),
+        }));
+        handler.Map("GET", $"/students/{adaId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(StudentJson(adaId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10))));
+        handler.Map("GET", $"/students/{graceId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(StudentJson(graceId, "STU002", "Grace", "Hopper", null, new DateOnly(2016, 4, 20))));
+
+        var cut = Render<DialogHost>(p => p
+            .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada Lovelace"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Grace Hopper"));
+
+        // Click the SECOND student's name (Grace Hopper).
+        cut.FindAll(".item-name")[1].Click();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain(
+            "Save Changes",
+            "clicking a student subitem opens the shared StudentEditDialog"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain(
+            "Grace", "the edit dialog pre-loads the clicked student (not the last/empty one)"));
+        cut.Markup.Should().NotContain("Could not load",
+            "the dialog must receive a real Id, not an empty guid that 404s");
+    }
+
+    [TestMethod]
     public void Detail_StudentsCard_ShowsEmptyState_WhenNoStudents()
     {
         var gradeId = Guid.NewGuid();
@@ -729,11 +802,12 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("ShowReadonlyDialogAsync<GradeTopicsDialog>(",
             "the Subjects card's View-all opens GradeTopicsDialog via the read-only helper");
 
-        // GradeTopicsDialog gets the assigned topics + assignable catalog + action callbacks.
-        source.Should().Contain("nameof(GradeTopicsDialog.Topics)");
-        source.Should().Contain("nameof(GradeTopicsDialog.UnassignedTopics)");
-        source.Should().Contain("nameof(GradeTopicsDialog.Remove)");
-        source.Should().Contain("nameof(GradeTopicsDialog.Assign)");
+        // GradeTopicsDialog gets the assigned topics + assignable catalog + action callbacks
+        // (passed via the Content DialogParameters indexer keys).
+        source.Should().Contain("GradeTopicsDialog.TopicsKey");
+        source.Should().Contain("GradeTopicsDialog.UnassignedTopicsKey");
+        source.Should().Contain("GradeTopicsDialog.RemoveKey");
+        source.Should().Contain("GradeTopicsDialog.AssignKey");
 
         // Students card's View-all navigates to the grade-filtered students landing.
         source.Should().Contain("View all students");
@@ -827,6 +901,8 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("ItemTextSelector=\"t => t.Name\"", "Subjects card binds the topic name");
         source.Should().Contain("ItemMetaSelector=\"@(t => [ $", "Subjects card binds strand/lesson counts");
         source.Should().Contain("ItemOnClick=\"t => OpenTopicEditAsync(t)\"", "Subjects card name opens the topic edit dialog");
+        source.Should().Contain("ItemKeySelector=\"t => t.TopicId\"", "Subjects card opts into the central edit-key guard (TopicId)");
+        source.Should().Contain("OnItemActionBlocked=\"OnTopicEditBlocked\"", "Subjects card surfaces the guard block");
         source.Should().Contain("ItemNameTitle=\"Edit topic\"", "Subjects card advertises the edit affordance");
 
         // Teachers card: display name + role; name navigates to the teacher detail page.
@@ -834,15 +910,19 @@ public class GradeLevelDetailPageTests : BunitContext
         source.Should().Contain("ItemMetaSelector=\"@(t => [ GetTeacherRole(t) ])\"", "Teachers card binds the role meta");
         source.Should().Contain("ItemHrefSelector=\"@(t => $\"/students/teachers/{t.Id}\")\"", "Teachers card name navigates to the teacher detail page");
 
-        // Students card: full name + demographics; name navigates to the student view page.
+        // Students card: full name + demographics; name opens the edit dialog.
         source.Should().Contain("ItemTextSelector=\"@(st => $", "Students card binds the student full name");
         source.Should().Contain("ItemMetaSelector=\"@(st => [ GetStudentDemographics(st) ])\"", "Students card binds demographics meta");
-        source.Should().Contain("ItemHrefSelector=\"@(st => $\"/students/{st.Id}\")\"", "Students card name navigates to the student view page");
-        source.Should().Contain("ItemNameTitle=\"View student\"", "Students card advertises the view affordance");
+        source.Should().Contain("ItemOnClick=\"st => OpenStudentEditAsync(st)\"", "Students card name opens the student edit dialog");
+        source.Should().Contain("ItemKeySelector=\"st => st.Id\"", "Students card opts into the central edit-key guard (Id)");
+        source.Should().Contain("OnItemActionBlocked=\"OnStudentEditBlocked\"", "Students card surfaces the guard block");
+        source.Should().Contain("ItemNameTitle=\"Edit student\"", "Students card advertises the edit affordance");
 
         // Streams card: stream name; name opens the stream edit dialog.
         source.Should().Contain("ItemTextSelector=\"s => s.Name\"", "Streams card binds the stream name");
         source.Should().Contain("ItemOnClick=\"s => OpenStreamEditAsync(s)\"", "Streams card name opens the stream edit dialog");
+        source.Should().Contain("ItemKeySelector=\"s => s.Id\"", "Streams card opts into the central edit-key guard (Id)");
+        source.Should().Contain("OnItemActionBlocked=\"OnStreamEditBlocked\"", "Streams card surfaces the guard block");
         source.Should().Contain("ItemNameTitle=\"Edit stream\"", "Streams card advertises the edit affordance");
     }
 

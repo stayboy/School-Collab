@@ -83,6 +83,17 @@ public class SectionCardDialogsBunitTests : BunitContext
         Services.AddSingleton<IContactsClient>(api);
     }
 
+    /// <summary>
+    /// Renders StudentEditDialog as FluentUI would: its data comes via the
+    /// <c>Content</c> DialogParameters indexer (StudentId key), because FluentUI
+    /// does NOT spread indexer entries onto separate <c>[Parameter]</c>s.
+    /// </summary>
+    private IRenderedComponent<StudentEditDialog> RenderEditDialog(Guid studentId)
+    {
+        var content = new DialogParameters { [StudentEditDialog.StudentIdKey] = studentId };
+        return Render<StudentEditDialog>(p => p.Add(x => x.Content, content));
+    }
+
     private static string JsonArray(params object[] items) => JsonSerializer.Serialize(items);
 
     private static Dictionary<string, object?> TopicJson(Guid id, string name, string code) => new()
@@ -109,9 +120,13 @@ public class SectionCardDialogsBunitTests : BunitContext
         Register(new ScriptedHandler());
         var roleId = Guid.NewGuid();
         Guid? saved = null;
-        var cut = Render<TeacherRoleDialog>(p => p
-            .Add(x => x.CurrentRoleId, roleId)
-            .Add(x => x.Save, new Func<Guid?, Task>(r => { saved = r; return Task.CompletedTask; })));
+        // FluentUI passes dialog inputs via the Content DialogParameters indexer.
+        var content = new DialogParameters
+        {
+            [TeacherRoleDialog.CurrentRoleIdKey] = roleId,
+            [TeacherRoleDialog.SaveKey] = new Func<Guid?, Task>(r => { saved = r; return Task.CompletedTask; }),
+        };
+        var cut = Render<TeacherRoleDialog>(p => p.Add(x => x.Content, content));
 
         cut.Markup.Should().Contain("Role", "the role dropdown label renders");
         cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Save")).Click();
@@ -143,7 +158,7 @@ public class SectionCardDialogsBunitTests : BunitContext
         handler.Map($"/students/{studentId}/guardians", HttpStatusCode.OK, "[]");
         Register(handler);
 
-        var cut = Render<StudentEditDialog>(p => p.Add(x => x.StudentId, studentId));
+        var cut = RenderEditDialog(studentId);
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Save Changes",
             "the edit dialog loads the student and renders the shared StudentFormFields in edit mode"));
@@ -167,6 +182,34 @@ public class SectionCardDialogsBunitTests : BunitContext
     }
 
     // ── StudentEditDialog: binds to existing guardians + contacts ───────────
+
+    [TestMethod]
+    public void StudentEditDialog_BindsStudentProfile_ToInputFields()
+    {
+        // Regression: the edit dialog must bind the existing student's profile
+        // into the form input values (not leave them blank). The form is gated
+        // on the profile load so the FluentTextField bindings connect with the
+        // populated model — without that, fluent-text-field's Web Component does
+        // not re-sync its internal value after an async model update and the
+        // inputs render empty.
+        var studentId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map($"/students/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(StudentJson(studentId, "STU001", "Ada", "Lovelace")));
+        handler.Map($"/students/{studentId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map("/api/coded-values/by-parent?parentCode=SALUTS", HttpStatusCode.OK, "[]");
+        handler.Map($"/contacts?ownerType=Student&ownerId={studentId}", HttpStatusCode.OK, "[]");
+        Register(handler);
+
+        var cut = RenderEditDialog(studentId);
+
+        cut.WaitForAssertion(() => cut.Find("#studentFormFirstName").GetAttribute("value")
+            .Should().Be("Ada", "First name binds the existing student profile"));
+        cut.Find("fluent-text-field[placeholder='Last name']").GetAttribute("value")
+            .Should().Be("Lovelace", "Last name binds the existing student profile");
+        cut.Find("#studentFormNumber").GetAttribute("value")
+            .Should().Be("STU001", "Student number binds the existing student profile");
+    }
 
     [TestMethod]
     public void StudentEditDialog_ShowsGuardiansAndContacts_ForExistingStudent()
@@ -206,7 +249,7 @@ public class SectionCardDialogsBunitTests : BunitContext
             }));
         Register(handler);
 
-        var cut = Render<StudentEditDialog>(p => p.Add(x => x.StudentId, studentId));
+        var cut = RenderEditDialog(studentId);
 
         // Demographics bound from the existing student.
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Ada",

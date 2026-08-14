@@ -1,3 +1,4 @@
+using System.Linq;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
@@ -29,6 +30,64 @@ public sealed class SegmentFormModel
 
     public int MinWidth { get; set; } = 2;
     public string? UpperLimit { get; set; }
+}
+
+/// <summary>
+/// View-model for the rule form on the <c>Edit</c>/<c>Create</c> pages. Mirrors the
+/// rule DTO's top-level fields plus the ordered list of <see cref="SegmentFormModel"/>
+/// rows. The DTO → form-model projection (<see cref="From"/> / <see cref="LoadFrom"/>)
+/// lives on the model itself so it is discoverable and unit-testable — see
+/// documents/solution/dto-form-model-mapping.md.
+/// </summary>
+public sealed class EntityCodeRuleFormModel
+{
+    [System.ComponentModel.DataAnnotations.Required]
+    public string? Name { get; set; }
+
+    public string? Description { get; set; }
+
+    public bool IsActive { get; set; }
+
+    public List<SegmentFormModel> Segments { get; set; } = new();
+
+    /// <summary>
+    /// Projects an <see cref="EntityCodeRuleDto"/> into a brand-new, fully-
+    /// populated <see cref="EntityCodeRuleFormModel"/> (segments projected in
+    /// <c>Index</c> order).
+    /// </summary>
+    public static EntityCodeRuleFormModel From(EntityCodeRuleDto rule)
+    {
+        var model = new EntityCodeRuleFormModel();
+        model.LoadFrom(rule);
+        return model;
+    }
+
+    /// <summary>
+    /// Loads this model's fields from an <see cref="EntityCodeRuleDto"/> in
+    /// place. The segment rows are projected in <c>Index</c> order into fresh
+    /// <see cref="SegmentFormModel"/> instances.
+    /// </summary>
+    public void LoadFrom(EntityCodeRuleDto rule)
+    {
+        Name = rule.Name;
+        Description = rule.Description;
+        IsActive = rule.IsActive;
+        Segments = rule.Segments
+            .OrderBy(s => s.Index)
+            .Select(s => new SegmentFormModel
+            {
+                Index = s.Index,
+                Role = s.Role,
+                Type = (SegmentTypeDto)(int)s.Type,
+                FixedText = s.FixedText ?? "",
+                Prefix = s.Prefix ?? "",
+                Suffix = s.Suffix ?? "",
+                ResetPeriod = (ResetPeriodDto)(int)s.ResetPeriod,
+                MinWidth = s.MinWidth,
+                UpperLimit = s.UpperLimit
+            })
+            .ToList();
+    }
 }
 
 // ── Local copies of the server enums so the form doesn't pull in

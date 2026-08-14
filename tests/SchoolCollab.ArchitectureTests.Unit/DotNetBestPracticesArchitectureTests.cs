@@ -102,4 +102,71 @@ public class DotNetBestPracticesArchitectureTests
             "Console.WriteLine is not allowed in production code outside Main/Program.cs " +
             "(dotnet-best-practices). Files:\n" + string.Join("\n", failures));
     }
+
+    /// <summary>
+    /// FluentUI 4.14.x renders <c>ShowReadonlyDialogAsync</c> content via
+    /// <c>DynamicComponent</c> with only <c>{ "Content": &lt;DialogParameters&gt; }</c> — it does
+    /// NOT spread <c>DialogParameters</c> indexer entries onto separate <c>[Parameter]</c>s.
+    /// So a component opened that way must read its inputs from <c>Content.TryGet&lt;T&gt;(XxxKey)</c>
+    /// and must NOT declare a data-input <c>[Parameter]</c> (which silently defaults to
+    /// empty/null — the empty-guid edit-dialog bug). Only <c>[Parameter] DialogParameters Content</c>
+    /// is allowed. See documents/solution/dialog-parameter-binding.md.
+    /// </summary>
+    [TestMethod]
+    public void Dialog_ContentParameter_Only_For_ReadonlyDialogs()
+    {
+        var rx = new System.Text.RegularExpressions.Regex(
+            @"\[Parameter[^\]]*\]\s*public\s+(\S+)\s+(\w+)\s*\{",
+            System.Text.RegularExpressions.RegexOptions.Multiline);
+        var failures = new List<string>();
+
+        foreach (var file in SourceFiles(new[] { ".razor" })
+            .Where(f => File.ReadAllText(f).Contains("IDialogContentComponent<DialogParameters>", StringComparison.Ordinal)))
+        {
+            var text = File.ReadAllText(file);
+            foreach (System.Text.RegularExpressions.Match m in rx.Matches(text))
+            {
+                var type = m.Groups[1].Value;
+                var name = m.Groups[2].Value;
+                if (type != "DialogParameters" || name != "Content")
+                {
+                    failures.Add(
+                        $"{Relative(file)} declares [Parameter] {type} {name} — a ShowReadonlyDialogAsync dialog must read its " +
+                        $"inputs from Content.TryGet<...>(...), not a separate [Parameter] (dialog-parameter-binding.md).");
+                }
+            }
+        }
+
+        failures.Should().BeEmpty(string.Join("\n", failures));
+    }
+
+    /// <summary>
+    /// <c>StudentFormModel</c> fields must be projected via
+    /// <c>StudentFormModel.LoadFrom/From</c>, not copied field-by-field in a
+    /// razor file. An inline copy silently drifts out of sync (a blank UI field) with no
+    /// compile error or failing test. See documents/solution/dto-form-model-mapping.md.
+    /// </summary>
+    [TestMethod]
+    public void No_Inline_StudentFormModel_FieldCopies_In_Razor()
+    {
+        var studentFields = new[] { "StudentNumber", "FirstName", "LastName", "DateOfBirth", "GenderCodedValueId", "TitleCodedValueId" };
+        var failures = new List<string>();
+
+        foreach (var file in SourceFiles(new[] { ".razor" }))
+        {
+            var text = File.ReadAllText(file);
+            foreach (var field in studentFields)
+            {
+                // _model.FirstName = ...;  (an inline copy, not the mapping extension)
+                if (System.Text.RegularExpressions.Regex.IsMatch(text, $"_model\\.{field}\\s*="))
+                {
+                    failures.Add(
+                        $"{Relative(file)} inline-copies StudentFormModel.{field} — use " +
+                        $"StudentFormModel.LoadFrom/From instead (dto-form-model-mapping.md).");
+                }
+            }
+        }
+
+        failures.Should().BeEmpty(string.Join("\n", failures));
+    }
 }

@@ -87,7 +87,7 @@
 @code {
     [Parameter] public Guid Id { get; set; }
 
-    private readonly GradeLevelFormFields.GradeLevelFormModel _model = new();
+    private readonly GradeLevelFormModel _model = new();
     private GradeLevelDto? _grade;
     private TopicDto[] _allTopics = [];
     private List<Guid> _selectedTopicIds = new();
@@ -114,13 +114,9 @@
             _allTopics = topicsTask.Result ?? [];
             var assignments = assignmentsTask.Result ?? [];
 
-            _model.CodedValueId = _grade.CodedValueId;
-            _model.Name = _grade.Name;
-            _model.Level = _grade.Level;
-            _model.DisplayOrder = _grade.DisplayOrder;
-            _model.MinAge = _grade.MinAge;
-            _model.MaxAge = _grade.MaxAge;
-            _model.AllowedGenderCodedValueId = _grade.AllowedGenderCodedValueId;
+            // Project the grade DTO into the shared form model via the tested
+            // on-model mapping (GradeLevelFormModel.LoadFrom).
+            _model.LoadFrom(_grade);
 
             _selectedTopicIds = assignments.Select(a => a.TopicId).ToList();
             _assignmentByTopicId = assignments.ToDictionary(a => a.TopicId, a => a.Id);
