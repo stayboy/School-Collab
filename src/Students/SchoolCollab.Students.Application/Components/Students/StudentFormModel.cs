@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
+using SchoolCollab.Students.Application.Services;
 
 namespace SchoolCollab.Students.Application.Components.Students;
 
@@ -52,4 +53,36 @@ public sealed class StudentFormModel
     /// in Live mode against the existing student's persisted contacts.
     /// </summary>
     public List<ContactModel> Contacts { get; set; } = new();
+
+    /// <summary>
+    /// Projects an app-level <see cref="StudentDto"/> (the API projection
+    /// returned by <c>GetStudentByIdAsync</c>) into a brand-new, fully-populated
+    /// <see cref="StudentFormModel"/>. Use when the caller owns the model
+    /// (tests, or a page that swaps the whole model rather than mutating one).
+    /// Collection state (<see cref="GuardianLinks"/>, <see cref="Contacts"/>)
+    /// is not copied from the DTO — it starts empty.
+    /// </summary>
+    public static StudentFormModel From(StudentDto student)
+    {
+        var model = new StudentFormModel();
+        model.LoadFrom(student);
+        return model;
+    }
+
+    /// <summary>
+    /// Loads this model's profile fields from a <see cref="StudentDto"/> in
+    /// place. Use when the caller holds a <c>readonly</c> model instance it
+    /// must populate after the async load (the edit dialog / edit page keep
+    /// <c>_model</c> as a <c>readonly</c> field and mutate it after the load).
+    /// Collection state is left untouched.
+    /// </summary>
+    public void LoadFrom(StudentDto student)
+    {
+        StudentNumber = student.StudentNumber;
+        FirstName = student.FirstName;
+        LastName = student.LastName;
+        DateOfBirth = student.DateOfBirth;
+        GenderCodedValueId = student.GenderCodedValueId;
+        TitleCodedValueId = student.TitleCodedValueId;
+    }
 }

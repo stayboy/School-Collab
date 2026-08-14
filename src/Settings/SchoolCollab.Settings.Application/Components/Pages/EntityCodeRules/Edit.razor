@@ -198,7 +198,7 @@
     private bool _saving;
     private string? _error;
     private bool _isRealTenant;
-    private readonly FormModel _model = new();
+    private readonly EntityCodeRuleFormModel _model = new();
     private SegmentsGrid? _gridRef;
     private IReadOnlyList<string> _preview = [];
     private Guid? _loadedId;
@@ -251,24 +251,9 @@
             if (_disposed) return;
             if (_rule is not null)
             {
-                _model.Name = _rule.Name;
-                _model.Description = _rule.Description;
-                _model.IsActive = _rule.IsActive;
-                _model.Segments = _rule.Segments
-                    .OrderBy(s => s.Index)
-                    .Select(s => new SegmentFormModel
-                    {
-                        Index = s.Index,
-                        Role = s.Role,
-                        Type = (SegmentTypeDto)(int)s.Type,
-                        FixedText = s.FixedText ?? "",
-                        Prefix = s.Prefix ?? "",
-                        Suffix = s.Suffix ?? "",
-                        ResetPeriod = (ResetPeriodDto)(int)s.ResetPeriod,
-                        MinWidth = s.MinWidth,
-                        UpperLimit = s.UpperLimit
-                    })
-                    .ToList();
+                // Project the rule DTO into the shared form model via the tested
+                // on-model mapping (EntityCodeRuleFormModel.LoadFrom).
+                _model.LoadFrom(_rule);
 
                 _segmentOptions = _rule.Segments
                     .OrderBy(s => s.Index)
@@ -534,14 +519,5 @@
         _mutationCts?.Cancel();
         _mutationCts?.Dispose();
         _mutationCts = null;
-    }
-
-    private sealed class FormModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Name { get; set; }
-        public string? Description { get; set; }
-        public bool IsActive { get; set; }
-        public List<SegmentFormModel> Segments { get; set; } = new();
     }
 }

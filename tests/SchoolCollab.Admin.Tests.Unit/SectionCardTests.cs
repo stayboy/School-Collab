@@ -25,7 +25,7 @@ namespace SchoolCollab.Admin.Tests.Unit;
 [TestClass]
 public class SectionCardTests : BunitContext
 {
-    private sealed record TestItem(string Name, string[]? Meta = null, string? Href = null);
+    private sealed record TestItem(string Name, string[]? Meta = null, string? Href = null, Guid? Id = null);
 
     public SectionCardTests()
     {
@@ -151,6 +151,77 @@ public class SectionCardTests : BunitContext
 
         clicked.Should().NotBeNull("ItemOnClick fires when the item name is clicked");
         clicked!.Name.Should().Be("Math");
+    }
+
+    // ── Central edit-action key guard (ItemKeySelector + OnItemActionBlocked) ──
+    // These are the ONE source of truth for the "an edit action requires a
+    // non-empty item key" invariant. Every SectionCard caller that opts into
+    // ItemKeySelector inherits this guard, so we test it here once instead of
+    // repeating it for every usage. Add flows (empty/null keys on purpose) go
+    // through OnAddClick, not ItemOnClick, so they are unaffected.
+
+    [TestMethod]
+    public void ItemOnClick_With_NonEmpty_Key_Invokes()
+    {
+        var id = Guid.NewGuid();
+        TestItem? clicked = null;
+        var cut = RenderCard(new[] { new TestItem("Math", Id: id) }, p => p
+            .Add(x => x.ItemOnClick, (TestItem i) => { clicked = i; return Task.CompletedTask; })
+            .Add(x => x.ItemKeySelector, (TestItem i) => i.Id)
+            .Add(x => x.ItemNameTitle, "Edit topic"));
+
+        cut.Find("fluent-anchor.item-name").Click();
+
+        clicked.Should().NotBeNull("an item with a non-empty key invokes the edit action");
+        clicked!.Name.Should().Be("Math");
+    }
+
+    [TestMethod]
+    public void ItemOnClick_With_Empty_Key_Is_Blocked()
+    {
+        TestItem? clicked = null;
+        string? blockedName = null;
+        var cut = RenderCard(new[] { new TestItem("Math", Id: Guid.Empty) }, p => p
+            .Add(x => x.ItemOnClick, (TestItem i) => { clicked = i; return Task.CompletedTask; })
+            .Add(x => x.ItemKeySelector, (TestItem i) => i.Id)
+            .Add(x => x.ItemNameTitle, "Edit topic")
+            .Add(x => x.OnItemActionBlocked, EventCallback.Factory.Create<string>(this, name => blockedName = name)));
+
+        cut.Find("fluent-anchor.item-name").Click();
+
+        clicked.Should().BeNull("an empty-key item must NOT invoke the edit action");
+        blockedName.Should().Be("Edit topic", "the block fires with the item's display name (ItemNameTitle first)");
+    }
+
+    [TestMethod]
+    public void ItemOnClick_With_Null_Key_Is_Blocked()
+    {
+        TestItem? clicked = null;
+        string? blockedName = null;
+        var cut = RenderCard(new[] { new TestItem("Math") }, p => p
+            .Add(x => x.ItemOnClick, (TestItem i) => { clicked = i; return Task.CompletedTask; })
+            .Add(x => x.ItemKeySelector, (TestItem i) => i.Id)
+            .Add(x => x.OnItemActionBlocked, EventCallback.Factory.Create<string>(this, name => blockedName = name)));
+
+        cut.Find("fluent-anchor.item-name").Click();
+
+        clicked.Should().BeNull("a null-key item must NOT invoke the edit action");
+        blockedName.Should().Be("Math", "the block fires with the item's display name (falls back to the item text)");
+    }
+
+    [TestMethod]
+    public void ItemOnClick_Without_KeySelector_Is_Not_Guarded()
+    {
+        // When ItemKeySelector is unset, the card does NOT guard — the action
+        // fires regardless (e.g. a card that doesn't opt into the edit-key
+        // invariant).
+        TestItem? clicked = null;
+        var cut = RenderCard(new[] { new TestItem("Math") }, p => p
+            .Add(x => x.ItemOnClick, (TestItem i) => { clicked = i; return Task.CompletedTask; }));
+
+        cut.Find("fluent-anchor.item-name").Click();
+
+        clicked.Should().NotBeNull("without ItemKeySelector the action is invoked as-is");
     }
 
     [TestMethod]

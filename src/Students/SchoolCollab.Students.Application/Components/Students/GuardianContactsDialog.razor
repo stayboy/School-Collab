@@ -25,9 +25,15 @@
    plus the content entries (GuardianId / GuardianName / Subtitle). The
    dialog implements <c>IDialogContentComponent&lt;DialogParameters&gt;</c>
    only as a compile-time marker required by the two-type-arg
-   <c>IDialogService.ShowDialogAsync&lt;TContent,TData&gt;</c> overload —
-   the dialog reads everything via <c>[Parameter]</c> properties and
-   ignores the assigned Content reference.
+   <c>IDialogService.ShowDialogAsync&lt;TContent,TData&gt;</c> overload.
+
+   IMPORTANT (FluentUI 4.14.x gotcha): the dialog reads its inputs from
+   <c>Content</c> (the <c>DialogParameters</c> indexer), NOT from separate
+   <c>[Parameter]</c> properties. FluentUI renders dialog content via
+   <c>DynamicComponent</c> with only <c>{ "Content": &lt;DialogParameters&gt; }</c>
+   and does NOT spread the indexer entries onto <c>[Parameter]</c>s — so a
+   separate <c>[Parameter] Guid GuardianId</c> would silently default to
+   <see cref="Guid.Empty"/>. See documents/solution/dialog-parameter-binding.md.
 
    Test plan (spec §5): covered by GuardianContactsDialogTests
    (source-level). Cancellation mirrors ContactsEditor / GuardianContactsList. *@
@@ -114,15 +120,22 @@
 </div>
 
 @code {
+    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
+    /// indexer). Exposed so callers set the same keys they read here.</summary>
+    public const string GuardianIdKey = nameof(GuardianId);
+    public const string GuardianNameKey = nameof(GuardianName);
+    public const string SubtitleKey = nameof(Subtitle);
+
     /// <summary>The guardian whose full contact list to display. Required —
     /// no default. Changing it (e.g. re-opening for a different guardian)
-    /// triggers a reload.</summary>
-    [Parameter, EditorRequired] public Guid GuardianId { get; set; }
+    /// triggers a reload. Read from <see cref="Content"/> (see the header
+    /// comment for the FluentUI 4.14.x gotcha).</summary>
+    private Guid GuardianId => Content is { } c ? c.TryGet<Guid>(GuardianIdKey) : Guid.Empty;
 
     /// <summary>Dialog title (set by BuildShellParameters Title; this
-    /// parameter is for any case where the host additionally wants the
-    /// value available inside the body, e.g. to render in the subtitle).</summary>
-    [Parameter] public string? GuardianName { get; set; }
+    /// value is available inside the body, e.g. to render in the subtitle).
+    /// Read from <see cref="Content"/>.</summary>
+    private string? GuardianName => Content is { } c ? c.TryGet<string>(GuardianNameKey) : null;
 
     /// <summary>The hosting <see cref="FluentDialog"/> reference provided
     /// by the dialog host as a cascading parameter. Used by the footer
@@ -132,13 +145,13 @@
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
 
     /// <summary>Optional subtitle rendered under the dialog title — e.g.
-    /// <c>"Father · Primary"</c>.</summary>
-    [Parameter] public string? Subtitle { get; set; }
+    /// <c>"Father · Primary"</c>. Read from <see cref="Content"/>.</summary>
+    private string? Subtitle => Content is { } c ? c.TryGet<string>(SubtitleKey) : null;
 
     /// <summary>Required by the <c>IDialogContentComponent&lt;DialogParameters&gt;</c>
     /// contract for the two-type-arg <c>IDialogService.ShowDialogAsync</c>
-    /// overload used by <c>ShowReadonlyDialogAsync</c>. The dialog ignores
-    /// the assigned reference and reads everything via <c>[Parameter]</c>.</summary>
+    /// overload used by <c>ShowReadonlyDialogAsync</c>. The dialog reads its
+    /// inputs from this <c>DialogParameters</c> indexer (see the header comment).</summary>
     [Parameter] public DialogParameters Content { get; set; } = default!;
 
     private List<ContactDto> _contacts = new();

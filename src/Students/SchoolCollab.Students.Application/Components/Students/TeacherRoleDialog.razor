@@ -22,11 +22,20 @@
 </div>
 
 @code {
-    /// <summary>The teacher's current grade-level role (to prefill the dropdown).</summary>
-    [Parameter] public Guid? CurrentRoleId { get; set; }
+    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
+    /// indexer). Exposed so callers set the same keys they read here.</summary>
+    public const string CurrentRoleIdKey = nameof(CurrentRoleId);
+    public const string SaveKey = nameof(Save);
 
-    /// <summary>Page-owned save callback (invoked with the chosen role id).</summary>
-    [Parameter] public Func<Guid?, Task>? Save { get; set; }
+    /// <summary>The teacher's current grade-level role (to prefill the dropdown).
+    /// Read from <see cref="Content"/> — FluentUI renders dialog content via
+    /// DynamicComponent with only { "Content": &lt;DialogParameters&gt; } and does
+    /// NOT spread indexer entries onto separate <c>[Parameter]</c>s.</summary>
+    private Guid? CurrentRoleId => Content is { } c ? c.TryGet<Guid?>(CurrentRoleIdKey) : null;
+
+    /// <summary>Page-owned save callback (invoked with the chosen role id).
+    /// Read from <see cref="Content"/> (see <see cref="CurrentRoleId"/>).</summary>
+    private Func<Guid?, Task>? Save => Content is { } c ? c.TryGet<Func<Guid?, Task>>(SaveKey) : null;
 
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
     [Parameter] public DialogParameters Content { get; set; } = default!;

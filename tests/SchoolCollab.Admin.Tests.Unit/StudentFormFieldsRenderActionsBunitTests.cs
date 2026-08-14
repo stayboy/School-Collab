@@ -88,6 +88,34 @@ public class StudentFormFieldsRenderActionsBunitTests : BunitContext
     }
 
     [TestMethod]
+    public void Default_Actions_Are_RightAligned()
+    {
+        // The default ActionsAlignment is Right, and the dialog path relies on
+        // it. The FluentStack hosting the buttons renders at width:100% with
+        // its own justify-content, so we must set HorizontalAlignment=End on the
+        // stack (the outer .form-actions--right flex-end alone cannot push a
+        // full-width child). Assert the stack's inline style right-aligns.
+        var cut = Render<TestStudentFormFields>(p => p
+            .Add(x => x.RenderActions, true));
+
+        var stack = cut.Find(".form-actions .stack-horizontal");
+        stack.GetAttribute("style").Should().Contain("justify-content: end",
+            "ActionsAlignment defaults to Right, which must right-align the buttons inside the stack");
+    }
+
+    [TestMethod]
+    public void ActionsAlignment_Left_LeftAlignsButtons()
+    {
+        var cut = Render<TestStudentFormFields>(p => p
+            .Add(x => x.RenderActions, true)
+            .Add(x => x.ActionsAlignment, StudentFormFields.StudentFormActionsAlignment.Left));
+
+        var stack = cut.Find(".form-actions .stack-horizontal");
+        stack.GetAttribute("style").Should().Contain("justify-content: start",
+            "ActionsAlignment=Left must left-align the buttons inside the stack");
+    }
+
+    [TestMethod]
     public void RenderActions_False_Skips_The_Action_Row_So_Page_Can_Provide_Own()
     {
         // Edit.razor sets RenderActions="false" and provides the

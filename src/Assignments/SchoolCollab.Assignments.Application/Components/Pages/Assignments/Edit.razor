@@ -134,7 +134,7 @@
     ];
     private TargetAudienceOption? _selectedTargetAudience;
 
-    private readonly EditFormModel _model = new();
+    private readonly AssignmentEditFormModel _model = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -149,10 +149,9 @@
 
             if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
             {
-                _model.Title = _item.Title;
-                _model.Description = _item.Description;
-                _model.DueDate = _item.DueDate?.DateTime;
-                _model.MaxScore = _item.MaxScore;
+                // Project the assignment DTO into the shared form model via the
+                // tested on-model mapping (AssignmentEditFormModel.LoadFrom).
+                _model.LoadFrom(_item);
                 _mandatoryReview = _item.MandatoryReview;
                 _selectedType = _typeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
                 _selectedGradingFormat = _gradingFormatOptions.FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
@@ -238,15 +237,4 @@
         _loadCts = null;
     }
 
-    private sealed class EditFormModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Title { get; set; }
-
-        public string? Description { get; set; }
-
-        public DateTime? DueDate { get; set; }
-
-        public decimal? MaxScore { get; set; }
-    }
 }

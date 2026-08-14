@@ -55,7 +55,7 @@
                                 else if (ItemOnClick is { } onClick)
                                 {
                                     <FluentAnchor Appearance="Appearance.Hypertext" Class="item-name"
-                                                  Href="#" OnClick="() => onClick(item)" Title="@(ItemNameTitle ?? textSel(item))">
+                                                  Href="#" OnClick="() => InvokeItemClickAsync(item, onClick)" Title="@(ItemNameTitle ?? textSel(item))">
                                         @textSel(item)
                                     </FluentAnchor>
                                 }
@@ -184,8 +184,35 @@
     /// Click handler for each item; when set, the item name renders as a
     /// hypertext link (Href="#") that invokes this callback. Mutually exclusive
     /// with <see cref="ItemHrefSelector"/>.
+    ///
+    /// When <see cref="ItemKeySelector"/> is also set, this is treated as an
+    /// EDIT action (requires a non-empty entity key): the click is only invoked
+    /// if the item's key is non-empty. An empty/null key blocks the action and
+    /// fires <see cref="OnItemActionBlocked"/> instead — preventing an edit
+    /// dialog from being opened with an empty guid. (Add/create flows pass
+    /// empty/null keys on purpose and go through <c>OnAddClick</c>, not here.)
     /// </summary>
     [Parameter] public Func<TItem, Task>? ItemOnClick { get; set; }
+
+    /// <summary>
+    /// Extracts the entity key from an item. When set together with
+    /// <see cref="ItemOnClick"/>, the item click is treated as an EDIT action
+    /// and guarded: an empty/null key blocks the action (fires
+    /// <see cref="OnItemActionBlocked"/>). This centralizes the "edit requires a
+    /// non-empty id" invariant once in <see cref="SectionCard"/> instead of
+    /// repeating it in every calling handler / test.
+    /// </summary>
+    [Parameter] public Func<TItem, Guid?>? ItemKeySelector { get; set; }
+
+    /// <summary>
+    /// Fired when an EDIT item action (<see cref="ItemOnClick"/> + guarded by
+    /// <see cref="ItemKeySelector"/>) is blocked because the item's key is empty
+    /// or null. The argument is the item's display name (from
+    /// <see cref="ItemNameTitle"/> or the item text) so the caller can surface a
+    /// user-facing message. Not fired when <see cref="ItemKeySelector"/> is unset
+    /// (the action is never guarded).
+    /// </summary>
+    [Parameter] public EventCallback<string> OnItemActionBlocked { get; set; }
 
     /// <summary>
     /// Tooltip (title) for the item name link; falls back to the item text.
@@ -240,5 +267,33 @@
     /// null reference at the event-binder level.
     /// </summary>
     private Task HandleAddClickAsync() => OnAddClick?.Invoke() ?? Task.CompletedTask;
+
+    /// <summary>
+    /// Central guard for EDIT item actions (<see cref="ItemOnClick"/>). When
+    /// <see cref="ItemKeySelector"/> is set, the item key must be non-empty or
+    /// the action is blocked (and <see cref="OnItemActionBlocked"/> fires) — an
+    /// edit dialog must never be opened with an empty guid. Add/create flows
+    /// (which legitimately carry empty/null keys) go through the header Add
+    /// button, not this path. When <see cref="ItemKeySelector"/> is unset the
+    /// action is invoked as-is (no guard, e.g. a navigation-only or unguarded
+    /// card).
+    /// </summary>
+    private async Task InvokeItemClickAsync(TItem item, Func<TItem, Task> onClick)
+    {
+        if (ItemKeySelector is { } keySel)
+        {
+            var key = keySel(item);
+            if (key is null || key.Value == Guid.Empty)
+            {
+                if (OnItemActionBlocked.HasDelegate)
+                {
+                    var name = ItemNameTitle ?? ItemTextSelector?.Invoke(item) ?? "Item";
+                    await OnItemActionBlocked.InvokeAsync(name);
+                }
+                return;
+            }
+        }
+        await onClick(item);
+    }
 }
 

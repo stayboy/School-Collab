@@ -5,33 +5,66 @@
    action via ShowReadonlyDialogAsync. *@
 @implements IDialogContentComponent<DialogParameters>
 @using SchoolCollab.Students.Application.Services
-@using SchoolCollab.Admin.Shared.Components
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject ILogger<StudentEditDialog> Logger
 
-<StudentFormFields Model="_model"
-                   ShowGuardians="true"
-                   ShowContacts="true"
-                   Wide="true"
-                   StudentId="StudentId"
-                   ReadOnlyStudentNumber="true"
-                   ErrorMessage="@_error"
-                   OnValidSubmit="OnSaveAsync"
-                   SubmitLabel="Save Changes"
-                   SubmittingLabel="Saving…"
-                   Submitting="@_saving"
-                   OnCancel="CancelAsync" />
+@if (!_loaded)
+{
+    @* The student profile is still loading. We gate the whole form on
+       _loaded so the <FluentTextField @bind-Value> components are created
+       AFTER the model is populated. FluentUI's fluent-text-field Web
+       Component does not re-sync its internal value when the Blazor Value
+       attribute changes after initial connection — rendering it against an
+       empty model (the pre-load state) leaves the inputs blank even though
+       the model is populated a tick later. Gating on _loaded avoids that
+       entirely: the fields connect with the real values on first render. *@
+    <div class="student-edit-loading">
+        <FluentProgressRing />
+    </div>
+}
+else
+{
+    <StudentFormFields Model="_model"
+                       ShowGuardians="true"
+                       ShowContacts="true"
+                       Wide="true"
+                       StudentId="StudentId"
+                       ReadOnlyStudentNumber="true"
+                       ErrorMessage="@_error"
+                       OnValidSubmit="OnSaveAsync"
+                       SubmitLabel="Save Changes"
+                       SubmittingLabel="Saving…"
+                       Submitting="@_saving"
+                       OnCancel="CancelAsync" />
+}
 
 @code {
-    /// <summary>The student being edited.</summary>
-    [Parameter, EditorRequired] public Guid StudentId { get; set; }
+    /// <summary>Key used in <see cref="Content"/> for the student being edited.
+    /// Exposed so callers (Detail.razor) set the same key they read here.</summary>
+    public const string StudentIdKey = nameof(StudentId);
+
+    /// <summary>
+    /// The student being edited.
+    ///
+    /// Read from <see cref="Content"/> (the <see cref="DialogParameters"/>
+    /// indexer) rather than a separate <c>[Parameter]</c>: FluentUI renders the
+    /// dialog content via <c>DynamicComponent</c> with only
+    /// <c>Parameters = { "Content": &lt;DialogParameters&gt; }</c> — it does NOT
+    /// spread <c>DialogParameters</c> indexer entries onto the component's
+    /// <c>[Parameter]</c> properties. So a separate <c>[Parameter] Guid StudentId</c>
+    /// is never set and would silently default to <see cref="Guid.Empty"/>
+    /// (an empty-guid edit load).
+    /// </summary>
+    private Guid StudentId =>
+        Content is { } c ? c.TryGet<Guid>(StudentIdKey) : Guid.Empty;
 
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
     [Parameter] public DialogParameters Content { get; set; } = default!;
 
     private readonly StudentFormModel _model = new();
     private bool _saving;
+    private bool _loaded;
     private string? _error;
 
     protected override async Task OnInitializedAsync()
@@ -41,18 +74,22 @@
             var student = await Api.GetStudentByIdAsync(StudentId);
             if (student is not null)
             {
-                _model.StudentNumber = student.StudentNumber;
-                _model.FirstName = student.FirstName;
-                _model.LastName = student.LastName;
-                _model.DateOfBirth = student.DateOfBirth;
-                _model.GenderCodedValueId = student.GenderCodedValueId;
-                _model.TitleCodedValueId = student.TitleCodedValueId;
+                // Project the DTO into the shared form model via the tested
+                // on-model mapping (see StudentFormModel.LoadFrom).
+                _model.LoadFrom(student);
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to load student {StudentId} for edit", StudentId);
             _error = $"Could not load: {ex.Message}";
+        }
+        finally
+        {
+            // Always mark loaded so the form renders even on failure (the
+            // error surfaces via ErrorMessage and the user can still save a
+            // manually-entered profile, or cancel).
+            _loaded = true;
         }
     }
 

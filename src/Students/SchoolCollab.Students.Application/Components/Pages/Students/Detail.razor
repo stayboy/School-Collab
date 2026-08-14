@@ -726,9 +726,9 @@
 
         var parameters = new Dictionary<string, object?>
         {
-            { nameof(GuardianContactsDialog.GuardianId), link.GuardianId },
-            { nameof(GuardianContactsDialog.GuardianName), titleText },
-            { nameof(GuardianContactsDialog.Subtitle), subtitle },
+            { GuardianContactsDialog.GuardianIdKey, link.GuardianId },
+            { GuardianContactsDialog.GuardianNameKey, titleText },
+            { GuardianContactsDialog.SubtitleKey, subtitle },
         };
 
         await DialogService.ShowReadonlyDialogAsync<GuardianContactsDialog>(

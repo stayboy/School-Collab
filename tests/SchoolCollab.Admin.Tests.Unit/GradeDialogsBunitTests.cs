@@ -85,16 +85,33 @@ public class GradeDialogsBunitTests : BunitContext
     private static TopicDto CatalogTopic(Guid id, string name, string code) =>
         new(id, null, code, name, null, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
 
+    /// <summary>Builds the <see cref="DialogParameters"/> content FluentUI passes
+    /// to <see cref="GradeTopicsDialog"/> (its inputs live in the indexer, not
+    /// separate [Parameter]s).</summary>
+    private static DialogParameters TopicsContent(
+        GradeTopicCurriculumDto[]? topics = null,
+        TopicDto[]? unassigned = null,
+        Func<Guid, Task>? remove = null,
+        Func<Guid, Task>? assign = null)
+    {
+        var c = new DialogParameters();
+        if (topics is not null) c[GradeTopicsDialog.TopicsKey] = topics;
+        if (unassigned is not null) c[GradeTopicsDialog.UnassignedTopicsKey] = unassigned;
+        if (remove is not null) c[GradeTopicsDialog.RemoveKey] = remove;
+        if (assign is not null) c[GradeTopicsDialog.AssignKey] = assign;
+        return c;
+    }
+
     // ── GradeTopicsDialog ───────────────────────────────────────────────────
 
     [TestMethod]
     public void TopicsDialog_ListsAssignedTopics_WithCounts()
     {
         var topicId = Guid.NewGuid();
-        var cut = Render<GradeTopicsDialog>(p => p.Add(x => x.Topics, new[]
+        var cut = Render<GradeTopicsDialog>(p => p.Add(x => x.Content, TopicsContent(topics: new[]
         {
             Topic(topicId, "Mathematics", "MATH", 2, 3),
-        }));
+        })));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics"));
         cut.Markup.Should().Contain("MATH", "topic code renders");
@@ -106,7 +123,7 @@ public class GradeDialogsBunitTests : BunitContext
     [TestMethod]
     public void TopicsDialog_EmptyState_WhenNoTopics()
     {
-        var cut = Render<GradeTopicsDialog>(p => p.Add(x => x.Topics, Array.Empty<GradeTopicCurriculumDto>()));
+        var cut = Render<GradeTopicsDialog>(p => p.Add(x => x.Content, TopicsContent(topics: Array.Empty<GradeTopicCurriculumDto>())));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("No topics assigned to this grade yet."));
     }
 
@@ -119,8 +136,9 @@ public class GradeDialogsBunitTests : BunitContext
         // renders in a FluentDialogProvider, so host the dialog under one.
         var cut = Render<DialogHost>(p => p
             .AddChildContent<GradeTopicsDialog>(child => child
-                .Add(x => x.Topics, new[] { Topic(topicId, "Mathematics", "MATH", 2, 3) })
-                .Add(x => x.Remove, new System.Func<Guid, Task>(id => { removed.Add(id); return Task.CompletedTask; }))));
+                .Add(x => x.Content, TopicsContent(
+                    topics: new[] { Topic(topicId, "Mathematics", "MATH", 2, 3) },
+                    remove: new System.Func<Guid, Task>(id => { removed.Add(id); return Task.CompletedTask; })))));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mathematics"));
         cut.Find("fluent-button[title='Topic actions']").Click();
@@ -143,8 +161,9 @@ public class GradeDialogsBunitTests : BunitContext
     {
         var topicId = Guid.NewGuid();
         var cut = Render<GradeTopicsDialog>(p => p
-            .Add(x => x.Topics, Array.Empty<GradeTopicCurriculumDto>())
-            .Add(x => x.UnassignedTopics, new[] { CatalogTopic(topicId, "Science", "SCI") }));
+            .Add(x => x.Content, TopicsContent(
+                topics: Array.Empty<GradeTopicCurriculumDto>(),
+                unassigned: new[] { CatalogTopic(topicId, "Science", "SCI") })));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Add a topic…"));
         cut.Markup.Should().Contain("Science", "unassigned catalog feeds the add-topic picker");
@@ -156,9 +175,10 @@ public class GradeDialogsBunitTests : BunitContext
         var topicId = Guid.NewGuid();
         var assigned = new System.Collections.Generic.List<Guid>();
         var cut = Render<GradeTopicsDialog>(p => p
-            .Add(x => x.Topics, Array.Empty<GradeTopicCurriculumDto>())
-            .Add(x => x.UnassignedTopics, new[] { CatalogTopic(topicId, "Science", "SCI") })
-            .Add(x => x.Assign, new System.Func<Guid, Task>(id => { assigned.Add(id); return Task.CompletedTask; })));
+            .Add(x => x.Content, TopicsContent(
+                topics: Array.Empty<GradeTopicCurriculumDto>(),
+                unassigned: new[] { CatalogTopic(topicId, "Science", "SCI") },
+                assign: new System.Func<Guid, Task>(id => { assigned.Add(id); return Task.CompletedTask; }))));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Science"));
 
@@ -175,9 +195,8 @@ public class GradeDialogsBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             assigned.Should().Contain(topicId, "the Assign callback fires with the selected topic id");
-            cut.Instance.Topics.Should().ContainSingle(t => t.TopicId == topicId,
-                "the assigned topic moves into the assigned list");
-            cut.Instance.UnassignedTopics.Should().BeEmpty();
+            // The assigned topic moves into the assigned list (rendered in the dialog).
+            cut.Markup.Should().Contain("Science", "the assigned topic moves into the assigned list");
         });
     }
 

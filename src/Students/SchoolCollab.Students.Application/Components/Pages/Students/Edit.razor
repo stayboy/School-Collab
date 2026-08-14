@@ -337,17 +337,13 @@
             }
             else
             {
-                // Project the DTO into the shared form model. Types match
-                // (string / string / string / DateOnly? / Guid? / string / string?)
-                // so the assignment is a straight copy — no string parsing
-                // needed now that the form uses FluentDatePicker and
-                // CodedValueDropdown for the typed fields.
-                _model.StudentNumber = _student.StudentNumber;
-                _model.FirstName = _student.FirstName;
-                _model.LastName = _student.LastName;
-                _model.DateOfBirth = _student.DateOfBirth;
-                _model.GenderCodedValueId = _student.GenderCodedValueId;
-                _model.TitleCodedValueId = _student.TitleCodedValueId;
+                // Project the DTO into the shared form model via the tested
+                // on-model mapping (see StudentFormModel.LoadFrom). Types match
+                // (string / string / string / DateOnly? / Guid? / Guid?) so the
+                // projection is a straight copy — no string parsing needed now
+                // that the form uses FluentDatePicker and CodedValueDropdown
+                // for the typed fields.
+                _model.LoadFrom(_student);
                 Logger.LogInformation(
                     "Loaded student {StudentNumber} for edit with {Count} enrollment(s)",
                     _student.StudentNumber, _enrollments?.Length ?? 0);

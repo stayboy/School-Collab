@@ -409,7 +409,13 @@
             }
             else
             {
-                <FluentStack Orientation="Orientation.Horizontal" Spacing="8">
+                @* The FluentStack renders at width:100% with justify-content
+                   start, so the OUTER .form-actions--right flex-end has no
+                   effect (the stack already fills the row). To actually right-
+                   align the buttons, set HorizontalAlignment=End on the stack
+                   itself when ActionsAlignment is Right. *@
+                <FluentStack Orientation="Orientation.Horizontal" Spacing="8"
+                             HorizontalAlignment="@(ActionsAlignment == StudentFormActionsAlignment.Right ? HorizontalAlignment.End : HorizontalAlignment.Start)">
                     @if (ShowCancel)
                     {
                         <FluentButton Appearance="Appearance.Outline"
