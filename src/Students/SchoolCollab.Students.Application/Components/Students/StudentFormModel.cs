@@ -2,6 +2,8 @@ using System.ComponentModel.DataAnnotations;
 using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Students.Application.Components.Pages.Students.GradeLevels;
 using SchoolCollab.Students.Application.Services;
+using StudentGuardianViewDto = SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto;
+using ContactDto = SchoolCollab.Students.Core.DTOs.ContactDto;
 
 namespace SchoolCollab.Students.Application.Components.Students;
 
@@ -85,4 +87,72 @@ public sealed class StudentFormModel
         GenderCodedValueId = student.GenderCodedValueId;
         TitleCodedValueId = student.TitleCodedValueId;
     }
+
+    /// <summary>Postgres xmin row version captured at load, echoed back as
+    /// <c>ExpectedRowVersion</c> on save (optimistic concurrency).</summary>
+    public uint RowVersion { get; set; }
+
+    /// <summary>Guardian-link guardian-ids the client saw at load, echoed back so the
+    /// server can detect a guardian added/removed by another user since then.</summary>
+    public Guid[] LoadedGuardianIds { get; set; } = [];
+
+    /// <summary>Contact-ids the client saw at load, echoed back so the server can detect
+    /// a contact added/removed by another user since then.</summary>
+    public Guid[] LoadedContactIds { get; set; } = [];
+
+    /// <summary>
+    /// All-inclusive load: profile + guardians + contacts from the relevant DTOs, plus the
+    /// concurrency snapshot (<see cref="RowVersion"/>, <see cref="LoadedGuardianIds"/>,
+    /// <see cref="LoadedContactIds"/>) so <see cref="ToUpdateRequest"/> can echo them back.
+    /// Used by the all-inclusive edit dialog.
+    /// </summary>
+    public void LoadFrom(
+        StudentDto student,
+        IReadOnlyList<StudentGuardianViewDto> guardians,
+        IReadOnlyList<ContactDto> contacts)
+    {
+        LoadFrom(student);
+        RowVersion = student.RowVersion;
+        LoadedGuardianIds = guardians.Select(g => g.GuardianId).ToArray();
+        LoadedContactIds = contacts.Select(c => c.Id).ToArray();
+        GuardianLinks = guardians.Select(ToGuardianAssignment).ToList();
+        Contacts = contacts.Select(ToContactModel).ToList();
+    }
+
+    /// <summary>
+    /// Projects this model back to an <see cref="UpdateStudentWithLinkedDataRequest"/> for
+    /// the all-inclusive edit save (profile + guardians + contacts + concurrency snapshot).
+    /// </summary>
+    public UpdateStudentWithLinkedDataRequest ToUpdateRequest()
+    {
+        return new UpdateStudentWithLinkedDataRequest(
+            FirstName!, LastName!, DateOfBirth, GenderCodedValueId, TitleCodedValueId,
+            ExpectedRowVersion: RowVersion,
+            Guardians: GuardianLinks.Select(ToGuardianDraft).ToArray(),
+            Contacts: Contacts.Select(ToContactDraft).ToArray(),
+            LoadedGuardianIds: LoadedGuardianIds,
+            LoadedContactIds: LoadedContactIds);
+    }
+
+    private static GuardianAssignment ToGuardianAssignment(StudentGuardianViewDto g) => new(
+        g.GuardianId, g.FirstName, g.LastName, g.RelationshipCodedValueId,
+        ContactChannel: null, ContactValue: null, TitleCodedValueId: g.TitleCodedValueId,
+        Role: g.Role, IsEmergencyContact: g.IsEmergencyContact);
+
+    private static ContactModel ToContactModel(ContactDto c) => new()
+    {
+        Channel = c.Channel,
+        Value = c.Value,
+        Label = c.Label,
+        CountryCode = c.CountryCode,
+        Order = c.DisplayOrder,
+        PersistedId = c.Id
+    };
+
+    private static GuardianDraftRequest ToGuardianDraft(GuardianAssignment g) => new(
+        g.ExistingGuardianId, g.Role, g.RelationshipCodedValueId, g.IsEmergencyContact,
+        TitleCodedValueId: g.TitleCodedValueId, FirstName: g.FirstName, LastName: g.LastName);
+
+    private static ContactDraftRequest ToContactDraft(ContactModel c) => new(
+        c.Channel, c.Value, c.Label, c.CountryCode, c.Order, Id: c.PersistedId);
 }

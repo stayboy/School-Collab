@@ -169,4 +169,36 @@ public class DotNetBestPracticesArchitectureTests
 
         failures.Should().BeEmpty(string.Join("\n", failures));
     }
+
+    /// <summary>
+    /// The all-inclusive edit dialog must save the whole student (profile + guardians +
+    /// contacts) in ONE atomic request via <c>UpdateStudentWithLinkedDataAsync</c> — not the
+    /// old profile-only <c>UpdateStudentAsync</c>, and not per-row live link/unlink/contact
+    /// calls. The page-side <c>Students/Edit.razor</c> is intentionally still live (it manages
+    /// guardians/contacts over time), so this guard is scoped to the dialog file only.
+    /// See documents/solution/dto-form-model-mapping.md.
+    /// </summary>
+    [TestMethod]
+    public void StudentEditDialog_Saves_Atomically_Not_Live()
+    {
+        var file = SourceFiles(new[] { ".razor" })
+            .FirstOrDefault(f => Path.GetFileName(f).Equals("StudentEditDialog.razor", StringComparison.OrdinalIgnoreCase));
+        file.Should().NotBeNull("StudentEditDialog.razor should exist");
+        var text = File.ReadAllText(file!);
+
+        var forbidden = new[]
+        {
+            "UpdateStudentAsync",   // old profile-only save
+            "LinkGuardianAsync",    // live per-row link
+            "UnlinkGuardianAsync",  // live per-row unlink
+            "AddContactAsync",      // live per-row contact add
+            "UpdateContactAsync",   // live per-row contact update
+            "DeleteContactAsync",   // live per-row contact delete
+        };
+        var failures = forbidden.Where(t => text.Contains(t, StringComparison.Ordinal)).ToList();
+        failures.Should().BeEmpty(
+            "StudentEditDialog must save atomically via UpdateStudentWithLinkedDataAsync, not " +
+            "UpdateStudentAsync or live per-row link/unlink/contact calls (dto-form-model-mapping.md). Found: " +
+            string.Join(", ", failures));
+    }
 }

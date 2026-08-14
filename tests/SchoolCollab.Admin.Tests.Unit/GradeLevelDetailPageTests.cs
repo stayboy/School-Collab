@@ -481,6 +481,9 @@ public class GradeLevelDetailPageTests : BunitContext
         }));
         handler.Map("GET", $"/students/{studentId}", HttpStatusCode.OK,
             JsonSerializer.Serialize(StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10))));
+        // The all-inclusive edit dialog also loads the student's guardians + contacts.
+        handler.Map("GET", $"/students/{studentId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/contacts?ownerType=Student&ownerId={studentId}", HttpStatusCode.OK, "[]");
 
         var cut = Render<DialogHost>(p => p
             .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
@@ -513,6 +516,9 @@ public class GradeLevelDetailPageTests : BunitContext
         }));
         handler.Map("GET", $"/students/{studentId}", HttpStatusCode.OK,
             JsonSerializer.Serialize(StudentJson(studentId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10))));
+        // The all-inclusive edit dialog also loads the student's guardians + contacts.
+        handler.Map("GET", $"/students/{studentId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/contacts?ownerType=Student&ownerId={studentId}", HttpStatusCode.OK, "[]");
 
         var cut = Render<DialogHost>(p => p
             .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));
@@ -552,6 +558,11 @@ public class GradeLevelDetailPageTests : BunitContext
             JsonSerializer.Serialize(StudentJson(adaId, "STU001", "Ada", "Lovelace", null, new DateOnly(2015, 3, 10))));
         handler.Map("GET", $"/students/{graceId}", HttpStatusCode.OK,
             JsonSerializer.Serialize(StudentJson(graceId, "STU002", "Grace", "Hopper", null, new DateOnly(2016, 4, 20))));
+        // The all-inclusive edit dialog also loads each student's guardians + contacts.
+        handler.Map("GET", $"/students/{adaId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/contacts?ownerType=Student&ownerId={adaId}", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/{graceId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/contacts?ownerType=Student&ownerId={graceId}", HttpStatusCode.OK, "[]");
 
         var cut = Render<DialogHost>(p => p
             .AddChildContent<Detail>(child => child.Add(x => x.Id, gradeId)));

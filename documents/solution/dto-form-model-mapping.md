@@ -69,6 +69,46 @@ Call sites become one line: `_model.LoadFrom(_student);` (populate existing) or
 Both share the single `LoadFrom` mapping body, so there is exactly one place the field
 mapping lives.
 
+### All-inclusive load + model→request projection
+
+When a form model spans **multiple DTO sources** (e.g. the student edit dialog loads
+profile + guardians + contacts from three endpoints), add an **all-inclusive `LoadFrom`
+overload** that populates the whole model in one call, and a **model→request** method
+(`ToUpdateRequest()` / `ToCreateRequest()`) that projects it back for the atomic save.
+
+```csharp
+// StudentFormModel.cs
+public void LoadFrom(
+    StudentDto student,
+    IReadOnlyList<StudentGuardianViewDto> guardians,
+    IReadOnlyList<ContactDto> contacts)
+{
+    LoadFrom(student);                       // profile (the single-source overload)
+    RowVersion = student.RowVersion;         // concurrency snapshot
+    LoadedGuardianIds = guardians.Select(g => g.GuardianId).ToArray();
+    LoadedContactIds = contacts.Select(c => c.Id).ToArray();
+    GuardianLinks = guardians.Select(ToGuardianAssignment).ToList();
+    Contacts = contacts.Select(ToContactModel).ToList();
+}
+
+public UpdateStudentWithLinkedDataRequest ToUpdateRequest()
+{
+    return new UpdateStudentWithLinkedDataRequest(
+        FirstName!, LastName!, DateOfBirth, GenderCodedValueId, TitleCodedValueId,
+        ExpectedRowVersion: RowVersion,
+        Guardians: GuardianLinks.Select(ToGuardianDraft).ToArray(),
+        Contacts: Contacts.Select(ToContactDraft).ToArray(),
+        LoadedGuardianIds: LoadedGuardianIds,
+        LoadedContactIds: LoadedContactIds);
+}
+```
+
+The all-inclusive `LoadFrom` delegates to the single-source `LoadFrom` for the profile,
+then projects the child collections and captures the **concurrency snapshot** (`RowVersion`
++ the loaded guardian/contact id sets) so `ToUpdateRequest()` can echo them back for
+optimistic concurrency. The model→request method is the reverse of the load — keep both
+on the model, tested together, so the round-trip stays in lockstep.
+
 ### Why on the form model (not a separate `*Mappings` class)
 
 An earlier version of this guide kept the projection in a separate static

@@ -19,4 +19,5 @@ public sealed record GuardianAssignment(
     Guid? TitleCodedValueId,
     string? CountryCode = null,
     GuardianRole Role = GuardianRole.Primary,
-    IReadOnlyList<ContactModel>? Contacts = null);
+    IReadOnlyList<ContactModel>? Contacts = null,
+    bool IsEmergencyContact = false);

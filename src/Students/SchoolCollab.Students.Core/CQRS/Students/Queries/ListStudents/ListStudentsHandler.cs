@@ -56,7 +56,8 @@ public sealed class ListStudentsHandler(
                     s.GenderCodedValueId,
                     s.IsDeleted,
                     s.CreatedAt,
-                    s.UpdatedAt)).ToArray();
+                    s.UpdatedAt,
+                    RowVersion: s.RowVersion)).ToArray();
             },
             CacheOptions,
             tags: ["students"],

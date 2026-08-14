@@ -43,7 +43,8 @@ internal sealed class StudentRepository(StudentsDbContext db)
             .Select(x => new StudentDto(
                 x.Id, x.StudentNumber, x.TitleCodedValueId, x.FirstName, x.LastName,
                 x.DateOfBirth, x.GenderCodedValueId,
-                x.IsDeleted, x.CreatedAt, x.UpdatedAt))
+                x.IsDeleted, x.CreatedAt, x.UpdatedAt,
+                x.RowVersion))
             .ToArrayAsync(cancellationToken);
     }
 
@@ -55,7 +56,8 @@ internal sealed class StudentRepository(StudentsDbContext db)
             .Select(x => new StudentDto(
                 x.Id, x.StudentNumber, x.TitleCodedValueId, x.FirstName, x.LastName,
                 x.DateOfBirth, x.GenderCodedValueId,
-                x.IsDeleted, x.CreatedAt, x.UpdatedAt))
+                x.IsDeleted, x.CreatedAt, x.UpdatedAt,
+                x.RowVersion))
             .ToArrayAsync(cancellationToken);
     }
 }

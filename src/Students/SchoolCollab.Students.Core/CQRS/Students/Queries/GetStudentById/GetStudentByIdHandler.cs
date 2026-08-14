@@ -52,7 +52,8 @@ public sealed class GetStudentByIdHandler(
                     student.GenderCodedValueId,
                     student.IsDeleted,
                     student.CreatedAt,
-                    student.UpdatedAt);
+                    student.UpdatedAt,
+                    RowVersion: student.RowVersion);
             },
             CacheOptions,
             tags: ["students"],

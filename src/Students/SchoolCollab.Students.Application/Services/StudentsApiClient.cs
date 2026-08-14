@@ -29,7 +29,10 @@ public sealed record StudentDto(
     // Guardian count, populated client-side from the bulk guardian-counts endpoint
     int? GuardianCount = null,
     // Title salutation (SALUTS parent), projected server-side.
-    Guid? TitleCodedValueId = null);
+    Guid? TitleCodedValueId = null,
+    // Postgres xmin row version (IHasRowVersion). Echoed back from the server so the
+    // all-inclusive edit can send it as ExpectedRowVersion for optimistic concurrency.
+    uint RowVersion = 0);
 
 public sealed record GradeLevelDto(
     Guid Id,
@@ -219,13 +222,16 @@ public record GuardianDraftRequest(
     Guid? GenderCodedValueId = null,
     DateOnly? DateOfBirth = null);
 
-/// <summary>A contact row for <see cref="CreateStudentWithLinkedDataRequest"/> (reserved shape).</summary>
+/// <summary>A contact row for the create/update student requests (reserved shape).
+/// <c>Id</c> is null for a new contact; set for an update (the all-inclusive edit
+/// reconciles contact rows by id).</summary>
 public record ContactDraftRequest(
     ContactChannel Channel,
     string Value,
     string? Label = null,
     string? CountryCode = null,
-    int DisplayOrder = 0);
+    int DisplayOrder = 0,
+    Guid? Id = null);
 
 public record UpdateStudentRequest(
     string FirstName,
@@ -233,6 +239,24 @@ public record UpdateStudentRequest(
     DateOnly? DateOfBirth,
     Guid? GenderCodedValueId,
     Guid? TitleCodedValueId = null);
+
+/// <summary>Atomic update-student-with-linked-data request (Unit of Work). Mirrors the
+/// server <c>UpdateStudentWithLinkedData</c> command (<c>PUT /students/{id}/with-linked-data</c>).
+/// <c>ExpectedRowVersion</c> is the student's <c>xmin</c> the client loaded (optimistic
+/// concurrency); <c>LoadedGuardianIds</c>/<c>LoadedContactIds</c> are the guardian-link
+/// guardian-ids / contact-ids the client saw at load, so the server can detect a
+/// guardian link or contact row added or removed by another user since then.</summary>
+public record UpdateStudentWithLinkedDataRequest(
+    string FirstName,
+    string LastName,
+    DateOnly? DateOfBirth,
+    Guid? GenderCodedValueId,
+    Guid? TitleCodedValueId = null,
+    uint ExpectedRowVersion = 0,
+    GuardianDraftRequest[]? Guardians = null,
+    ContactDraftRequest[]? Contacts = null,
+    Guid[]? LoadedGuardianIds = null,
+    Guid[]? LoadedContactIds = null);
 
 public record CreateGradeLevelRequest(
     Guid CodedValueId,
@@ -712,6 +736,27 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task UpdateStudentAsync(Guid id, UpdateStudentRequest req, CancellationToken ct = default) =>
         (await _http.PutAsJsonAsync($"/students/{id}", req, ct)).EnsureSuccessStatusCode();
+
+    /// <summary>
+    /// Atomically updates a student's profile + guardians + contact rows in one request
+    /// (<c>PUT /students/{id}/with-linked-data</c>). On 409 (stale <c>ExpectedRowVersion</c>
+    /// or a concurrent guardian/contact change) throws an <see cref="HttpRequestException"/>
+    /// whose <see cref="HttpRequestException.StatusCode"/> is <see cref="HttpStatusCode.Conflict"/>
+    /// so the edit dialog can surface a "reload and retry" message.
+    /// </summary>
+    public async Task UpdateStudentWithLinkedDataAsync(
+        Guid id, UpdateStudentWithLinkedDataRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/students/{id}/with-linked-data", req, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"UpdateStudentWithLinkedData failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+    }
 
     public async Task DeleteStudentAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/{id}", ct)).EnsureSuccessStatusCode();

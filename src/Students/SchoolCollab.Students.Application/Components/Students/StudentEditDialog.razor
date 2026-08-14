@@ -1,10 +1,13 @@
 @* StudentEditDialog — edit a student's core profile in a modal dialog
    (section-card-lessons-adoption.md §9 dec 2). Wraps the shared
    <StudentFormFields> (same field set + validation as /students/{id}/edit)
-   and saves via UpdateStudentAsync. Opens from the Students card kebab Edit
+   and saves the whole student (profile + guardians + contacts) atomically via
+   UpdateStudentWithLinkedDataAsync. Opens from the Students card kebab Edit
    action via ShowReadonlyDialogAsync. *@
 @implements IDialogContentComponent<DialogParameters>
+@using System.Net
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject ILogger<StudentEditDialog> Logger
@@ -25,11 +28,17 @@
 }
 else
 {
+    @if (_concurrencyConflict)
+    {
+        <FluentMessageBar Intent="MessageIntent.Warning" class="mb-3">
+            This student was changed by someone else. Reload to see the latest and retry.
+            <FluentButton Appearance="Appearance.Accent" Size="ButtonSize.Small" OnClick="ReloadAsync">Reload</FluentButton>
+        </FluentMessageBar>
+    }
     <StudentFormFields Model="_model"
                        ShowGuardians="true"
                        ShowContacts="true"
                        Wide="true"
-                       StudentId="StudentId"
                        ReadOnlyStudentNumber="true"
                        ErrorMessage="@_error"
                        OnValidSubmit="OnSaveAsync"
@@ -65,18 +74,23 @@ else
     private readonly StudentFormModel _model = new();
     private bool _saving;
     private bool _loaded;
+    private bool _concurrencyConflict;
     private string? _error;
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
     {
         try
         {
             var student = await Api.GetStudentByIdAsync(StudentId);
             if (student is not null)
             {
-                // Project the DTO into the shared form model via the tested
-                // on-model mapping (see StudentFormModel.LoadFrom).
-                _model.LoadFrom(student);
+                var guardians = await Api.ListGuardiansByStudentAsync(StudentId) ?? [];
+                var contacts = await Api.ListContactsAsync(ContactOwnerType.Student, StudentId) ?? [];
+                // All-inclusive load: profile + guardians + contacts + the concurrency
+                // snapshot (RowVersion + loaded-id sets) so ToUpdateRequest can echo them back.
+                _model.LoadFrom(student, guardians, contacts);
             }
         }
         catch (Exception ex)
@@ -100,11 +114,14 @@ else
         _error = null;
         try
         {
-            var request = new UpdateStudentRequest(
-                _model.FirstName!, _model.LastName!,
-                _model.DateOfBirth, _model.GenderCodedValueId, _model.TitleCodedValueId);
-            await Api.UpdateStudentAsync(StudentId, request);
+            var request = _model.ToUpdateRequest();
+            await Api.UpdateStudentWithLinkedDataAsync(StudentId, request);
             if (Dialog is not null) await Dialog.CloseAsync(StudentId);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.Conflict)
+        {
+            Logger.LogWarning(ex, "Concurrent edit on student {StudentId}", StudentId);
+            _concurrencyConflict = true;
         }
         catch (Exception ex)
         {
@@ -115,6 +132,14 @@ else
         {
             _saving = false;
         }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _concurrencyConflict = false;
+        _error = null;
+        _loaded = false;
+        await LoadAsync();
     }
 
     private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();

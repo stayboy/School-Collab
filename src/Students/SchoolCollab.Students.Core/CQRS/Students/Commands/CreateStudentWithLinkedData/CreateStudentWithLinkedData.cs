@@ -39,10 +39,13 @@ public sealed record GuardianDraft(
     Guid? GenderCodedValueId = null,
     DateOnly? DateOfBirth = null);
 
-/// <summary>A contact to attach to the newly created student (reserved shape).</summary>
+/// <summary>A contact to attach to the newly created student (reserved shape).
+/// <c>Id</c> is null for a new contact; set for an update (the all-inclusive edit
+/// reconciles contacts by id).</summary>
 public sealed record ContactDraft(
     ContactChannel Channel,
     string Value,
     string? Label = null,
     string? CountryCode = null,
-    int DisplayOrder = 0);
+    int DisplayOrder = 0,
+    Guid? Id = null);

@@ -36,7 +36,8 @@ public sealed class ListStudentsForGuardianHandler(
 
                 return results.Select(s => new StudentDto(
                     s.Id, s.StudentNumber, s.TitleCodedValueId, s.FirstName, s.LastName, s.DateOfBirth,
-                    s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt)).ToArray();
+                    s.GenderCodedValueId, s.IsDeleted, s.CreatedAt, s.UpdatedAt,
+                    RowVersion: s.RowVersion)).ToArray();
             },
             CacheOptions,
             tags: ["guardians"],
