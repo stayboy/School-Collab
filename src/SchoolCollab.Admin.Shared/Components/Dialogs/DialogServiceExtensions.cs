@@ -88,16 +88,23 @@ public static class DialogServiceExtensions
     /// </summary>
     /// <typeparam name="TComponent">The dialog content type. Must be a
     /// <see cref="ComponentBase"/> AND implement
-    /// <c>IDialogContentComponent&lt;DialogParameters&gt;</c> (an empty
-    /// marker interface — the component receives its entries as
-    /// <c>[Parameter]</c> properties, no separate Content payload needed).
+    /// <c>IDialogContentComponent&lt;DialogParameters&gt;</c>. FluentUI renders the
+    /// content via <c>DynamicComponent</c> with only
+    /// <c>Parameters = { "Content": &lt;DialogParameters&gt; }</c> — it does NOT spread
+    /// <c>DialogParameters</c> indexer entries onto the component's <c>[Parameter]</c>
+    /// properties. So the component must read its inputs from
+    /// <c>Content.TryGet&lt;T&gt;(XxxKey)</c>, not from separate <c>[Parameter]</c>s.
+    /// See <c>documents/solution/dialog-parameter-binding.md</c>.
     /// </typeparam>
     /// <param name="title">Dialog title (rendered in the FluentDialog header).</param>
-    /// <param name="parameters">Content parameters (key = parameter name,
-    /// value = value). Pass <c>nameof(TComponent.MyProperty)</c> keys. Each
-    /// entry is added to <see cref="DialogParameters"/> via its indexer;
-    /// FluentUI binds indexer entries to the content component's
-    /// <c>[Parameter]</c> properties.</param>
+    /// <param name="parameters">Content entries (key/value) added to the
+    /// <see cref="DialogParameters"/> indexer. Pass the dialog's published key
+    /// constants (e.g. <c>StudentEditDialog.StudentIdKey</c>), NOT
+    /// <c>nameof</c> — the constant is declared on the dialog, so a property rename
+    /// updates the key and all callers follow; a bare <c>nameof</c> in the caller
+    /// would silently stop matching. The dialog reads these back via
+    /// <c>Content.TryGet&lt;T&gt;(key)</c> (FluentUI does NOT spread indexer entries
+    /// to <c>[Parameter]</c>s).</param>
     /// <param name="size">One of the four fixed <see cref="DialogSize"/>
     /// widths. Default <see cref="DialogSize.Medium"/> (640px) — read-only
     /// dialogs typically carry more body than a 3-field form.</param>
@@ -111,13 +118,12 @@ public static class DialogServiceExtensions
         where TComponent : ComponentBase, IDialogContentComponent<DialogParameters>
     {
         // Build a single DialogParameters carrying both the shell chrome
-        // (Title/Width/etc.) and the content parameter entries. FluentUI
-        // binds indexer entries to the content's [Parameter]s the same way
-        // it binds the typed Title/Width/PrimaryAction/etc. properties.
-        // The same instance is passed as both the TData content (the
-        // dialog component's IDialogContentComponent.Content) and the
-        // DialogParameters argument — the dialog ignores Content and
-        // reads everything via [Parameter].
+        // (Title/Width/etc.) and the content parameter entries. The same instance
+        // is passed as both the TData content (IDialogContentComponent.Content)
+        // and the DialogParameters argument — FluentUI only sets Content from the
+        // TData; indexer entries are NOT spread to [Parameter] properties. The
+        // dialog must read its inputs from Content.TryGet<T>(key), not from
+        // separate [Parameter]s. See dialog-parameter-binding.md.
         var dialogParams = BuildShellParameters(title, size);
         foreach (var kvp in parameters)
         {
