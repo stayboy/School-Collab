@@ -5,6 +5,7 @@ using SchoolCollab.Students.Core.CQRS.Students.Commands.CreateStudentWithLinkedD
 using SchoolCollab.Students.Core.CQRS.Students.Commands.DeleteStudent;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.RecoverStudent;
 using SchoolCollab.Students.Core.CQRS.Students.Commands.UpdateStudent;
+using SchoolCollab.Students.Core.CQRS.Students.Commands.UpdateStudentWithLinkedData;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentById;
 using SchoolCollab.Students.Core.CQRS.Students.Queries.GetStudentByStudentNumber;
@@ -113,6 +114,39 @@ public static class StudentRoutes
             catch (ConcurrencyException ex)
             {
                 return Results.Conflict(new { ex.Message });
+            }
+        });
+
+        // Atomic update: profile + guardians + contacts in one transaction (Unit of Work),
+        // the edit counterpart of POST /with-linked-data. Any failure rolls back the whole
+        // batch. Optimistic concurrency: a stale ExpectedRowVersion or a concurrent
+        // guardian/contact change surfaces as 409 Conflict.
+        group.MapPut("/{id:guid}/with-linked-data", async (
+            Guid id,
+            [FromBody] UpdateStudentWithLinkedData command,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<UpdateStudentWithLinkedData> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(command with { Id = id }, ct);
+                return Results.NoContent();
+            }
+            catch (StudentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ConcurrencyException ex)
+            {
+                return Results.Conflict(new { ex.Message });
+            }
+            catch (GuardianNotFoundException ex)
+            {
+                return Results.NotFound(new { ex.Message });
+            }
+            catch (GuardianLinkAlreadyExistsException)
+            {
+                return Results.Conflict(new { message = "A link already exists between this student and guardian." });
             }
         });
 

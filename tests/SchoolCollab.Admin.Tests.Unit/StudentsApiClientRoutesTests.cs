@@ -59,9 +59,11 @@ public class StudentsApiClientRoutesTests
             // Skip C# type/parameter names that happen to start with a
             // path-like string (e.g. "IContactsClient", "AddContactRequest",
             // "SubscriptionRequest") — these never start with "/contacts".
-            // Also skip XML doc comment artifacts (cref attributes, see tags).
+            // Also skip XML doc comment artifacts (cref attributes, see tags,
+            // and the "/>" closing of a cref/see tag, which the greedy regex
+            // can latch onto and span a huge non-path region).
             if (p.Contains("AddContactRequest") || p.Contains("SubscriptionRequest")) continue;
-            if (p.Contains("cref=") || p.Contains("see cref=") || p.StartsWith(">")) continue;
+            if (p.Contains("cref=") || p.Contains("see cref=") || p.StartsWith(">") || p.StartsWith("/>")) continue;
             all.Add(p);
         }
         return all.Distinct().ToList();

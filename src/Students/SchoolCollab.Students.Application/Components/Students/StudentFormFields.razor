@@ -193,7 +193,7 @@
                         <EntityGrid TItem="GuardianGridRow"
                                     Items="GuardianGridRows"
                                     GridSettings="@LinkedGridSettings"
-                                    EmptyMessage="@(IsEditMode ? "No guardians linked yet." : "No guardians added yet.")">
+                                    EmptyMessage="No guardians added yet.">
                             <Columns>
                                 <PropertyColumn Property="@(r => r.FirstName)" Title="First name" TGridItem="GuardianGridRow" TProp="string" />
                                 <PropertyColumn Property="@(r => r.LastName)" Title="Last name" TGridItem="GuardianGridRow" TProp="string" />
@@ -342,14 +342,10 @@
 
         @* Contacts section. Opt-in via ShowContacts. Mirrors the guardians
            section: a divider + a FormRow titled "Contacts". The editor is the
-           shared <ContactsEditor>:
-
-             - Edit mode (StudentId set): Live mode against the existing
-               student's persisted contacts (OwnerType=Student, OwnerId=StudentId).
-               Mutations persist immediately — no extra save step.
-             - Create mode: Buffered mode collecting into Model.Contacts. The
-               parent flushes the list to the API as part of the atomic create
-               (CreateStudentWithLinkedDataRequest.Contacts).
+           shared <ContactsEditor> in Buffered mode, collecting into
+           Model.Contacts. The parent flushes the list to the API as part of
+           the atomic create/update (CreateStudentWithLinkedDataRequest.Contacts /
+           UpdateStudentWithLinkedDataRequest.Contacts).
 
            ShowSubscription=false keeps the dialog focused on the contact
            channels themselves (matches the student Edit page's contacts
@@ -361,19 +357,10 @@
             </div>
             <FormRow Label="Contacts">
                 <div class="student-contacts">
-                    @if (IsEditMode)
-                    {
-                        <ContactsEditor OwnerType="ContactOwnerType.Student"
-                                        OwnerId="StudentId!.Value"
-                                        ShowSubscription="false" />
-                    }
-                    else
-                    {
-                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                        OwnerType="ContactOwnerType.Student"
-                                        Contacts="Model.Contacts"
-                                        ContactsChanged="OnDraftContactsChanged" />
-                    }
+                    <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                    OwnerType="ContactOwnerType.Student"
+                                    Contacts="Model.Contacts"
+                                    ContactsChanged="OnDraftContactsChanged" />
                 </div>
             </FormRow>
         }
@@ -562,10 +549,9 @@
     }
 
     // ── Guardians ──────────────────────────────────────────────────────────
-    // Create mode: drafts live on Model.GuardianLinks and are linked by the
-    // parent after the student is created. Edit mode (StudentId set): links are
-    // loaded from the API and added/removed immediately, mirroring the
-    // GradeLevelWizard's Phase 4 guardian logic.
+    // Drafts live on Model.GuardianLinks (create + all-inclusive edit dialog);
+    // the parent flushes the whole set on save. The page-side Linked mode is a
+    // pure presenter over LinkedItems (the page owns the link APIs).
 
     /// <summary>When true, renders the guardian list + add controls. Opt-in so
     /// the shared form can be embedded where guardians are managed elsewhere
@@ -575,14 +561,10 @@
 
     /// <summary>When true, renders the contacts section (the shared
     /// <see cref="ContactsEditor"/>). Opt-in so the shared form can be embedded
-    /// where contacts are managed elsewhere. In edit mode (StudentId set) the
-    /// editor runs Live against the existing student's contacts; in create mode
-    /// it runs Buffered, collecting into <see cref="StudentFormModel.Contacts"/>
-    /// for the parent to flush atomically. Enabled by the create/edit dialogs.</summary>
+    /// where contacts are managed elsewhere. The editor runs Buffered,
+    /// collecting into <see cref="StudentFormModel.Contacts"/> for the parent
+    /// to flush atomically. Enabled by the create/edit dialogs.</summary>
     [Parameter] public bool ShowContacts { get; set; }
-
-    /// <summary>Student id for edit mode. Null (default) ⇒ create mode.</summary>
-    [Parameter] public Guid? StudentId { get; set; }
 
     /// <summary>How the guardians section is rendered. <see cref="StudentFormFieldsMode.Inline"/>
     /// (default) is the historical panel-switch UX — used when this component is
@@ -633,10 +615,8 @@
     [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
     [Inject] private ILogger<StudentFormFields> Logger { get; set; } = default!;
 
-    private bool IsEditMode => StudentId.HasValue;
     private bool _loadingGuardians;
     private string? _guardianError;
-    private List<StudentGuardianViewDto> _links = new();
     private Dictionary<Guid, string> _relNames = new();
     // Spec §4.8: salutation (title) lookup for the guardian Name cell.
     // Loaded once per guardian-list refresh; covers Mr/Mrs/Ms across all
@@ -645,53 +625,25 @@
 
     protected override async Task OnInitializedAsync()
     {
-        if (IsEditMode)
-        {
-            _loadingGuardians = true;
-            try
-            {
-                await LoadGuardiansAsync(StudentId!.Value, CancellationToken.None);
-            }
-            finally
-            {
-                _loadingGuardians = false;
-            }
-        }
-    }
-
-    private async Task LoadGuardiansAsync(Guid studentId, CancellationToken ct)
-    {
-        _guardianError = null;
+        // Resolve relationship display names for any pre-loaded guardians. The
+        // all-inclusive edit dialog populates Model.GuardianLinks via LoadFrom
+        // before this component renders (the dialog gates on its own _loaded),
+        // and the Inline grid's Relationship column reads _relNames. Drafted
+        // guardians (create) resolve on add via AddDraftAsync -> EnsureRelNameAsync.
+        if (Model.GuardianLinks.Count == 0) return;
+        _loadingGuardians = true;
         try
         {
-            var links = await Api.ListGuardiansByStudentAsync(studentId, ct) ?? [];
-            _links = links.ToList();
-            _relNames = new Dictionary<Guid, string>();
-            foreach (var link in _links.Where(l => l.RelationshipCodedValueId.HasValue))
+            foreach (var g in Model.GuardianLinks)
             {
-                var cv = await CodedValuesApi.GetByIdAsync(link.RelationshipCodedValueId!.Value, ct);
-                if (cv is not null) _relNames[cv.Id] = cv.Name;
-            }
-            // Spec §4.8: batch-load salutations so the Name cell can prepend
-            // titles for any linked guardian without a per-row lookup. Failure
-            // is non-fatal — the cell falls back to FirstName + LastName.
-            try
-            {
-                var sals = await CodedValuesApi.GetChildrenByParentCodeAsync(
-                    CodedValueParent.Salutations.ToCode(), ct) ?? [];
-                _salutations = sals.ToDictionary(s => s.Id, s => s.Name);
-            }
-            catch
-            {
-                _salutations = new Dictionary<Guid, string>();
+                if (g.RelationshipCodedValueId is { } relId)
+                    await EnsureRelNameAsync(relId);
             }
         }
-        catch (Exception ex)
+        finally
         {
-            Logger.LogError(ex, "Failed to load guardians for student {StudentId}", studentId);
-            _guardianError = ex.Message;
+            _loadingGuardians = false;
         }
-        await InvokeAsync(StateHasChanged);
     }
 
     // ── Inline guardian add panel (replaces the old nested dialogs) ──
@@ -738,22 +690,19 @@
     /// <summary>The current guardian count surfaced in the Linked-mode
     /// header. In <see cref="StudentFormFieldsMode.Linked"/> mode the
     /// count is <see cref="LinkedItems"/>.<see cref="Array.Length"/>;
-    /// in Inline mode the form still owns its draft list, so the
-    /// count is <c>Model.GuardianLinks.Count + _links.Count</c> (drafts
-    /// for create, server links for edit) — but Inline mode doesn't
-    /// render the Linked header so the value is unused there.</summary>
+    /// in Inline mode the count is <c>Model.GuardianLinks.Count</c> (the
+    /// draft list) — but Inline mode doesn't render the Linked header so
+    /// the value is unused there.</summary>
     private int GuardianCount => Mode == StudentFormFieldsMode.Linked
         ? LinkedItems?.Length ?? 0
-        : (IsEditMode ? _links.Count : Model.GuardianLinks.Count);
+        : Model.GuardianLinks.Count;
 
     /// <summary>Resolves a relationship coded-value id to its display name
     /// using the already-loaded <c>_relNames</c> map. Returns null when
     /// the id is unset or the name hasn't been resolved yet — the
     /// <c>StudentGuardiansList</c> treats a null/empty result as "no
-    /// relationship to display" and renders the cell blank. The lookup
-    /// is synchronous (the map is loaded in <see cref="LoadGuardiansAsync"/>);
-    /// the <c>OnParametersSet</c> hook on the page keeps the map in sync
-    /// after every link / unlink.</summary>
+    /// relationship to display" and renders the cell blank. The map is
+    /// populated on demand by <see cref="EnsureRelNameAsync"/>.</summary>
     private string? ResolveRelName(Guid? id)
         => id is { } g && _relNames.TryGetValue(g, out var n) ? n : null;
 
@@ -822,14 +771,11 @@
     private void OnSelectedRowsChanged(Dictionary<object, GuardianPickerRow> next) => _selectedRows = next;
 
     private GuardianGridRow[] GuardianGridRows
-        => IsEditMode
-            ? _links.Select(l => new GuardianGridRow(l.GuardianId, l.FirstName, l.LastName, l.RelationshipCodedValueId, l.IsEmergencyContact)).ToArray()
-            : Model.GuardianLinks.Select((g, i) => new GuardianGridRow(i, g.FirstName, g.LastName, g.RelationshipCodedValueId, false)).ToArray();
+        => Model.GuardianLinks.Select((g, i) => new GuardianGridRow(i, g.FirstName, g.LastName, g.RelationshipCodedValueId, g.IsEmergencyContact)).ToArray();
 
     private async Task RemoveGuardianRow(object key)
     {
-        if (IsEditMode && key is Guid gId) await RemoveGuardianAsync(gId);
-        else if (!IsEditMode && key is int idx) await RemoveGuardianAsync(idx);
+        if (key is int idx) await RemoveGuardianAsync(idx);
     }
 
     private void BackToStudentSearch()
@@ -989,51 +935,20 @@
         }
     }
 
-    /// <summary>Create mode: append a draft to the model. Edit mode: create the
-    /// guardian (if new) and link it to the student immediately.</summary>
+    /// <summary>Appends a guardian draft to the model (create + all-inclusive edit
+    /// dialog both draft; the parent flushes the whole set on save).</summary>
     private async Task AddDraftAsync(GuardianAssignment assignment)
     {
-        if (IsEditMode)
-        {
-            var ct = CancellationToken.None;
-            var guardianId = assignment.ExistingGuardianId
-                ?? await Api.CreateGuardianAsync(new CreateGuardianRequest(
-                    assignment.TitleCodedValueId, assignment.FirstName, assignment.LastName, null, null, null), ct);
-            await Api.LinkGuardianAsync(new LinkGuardianRequest(
-                StudentId!.Value, guardianId, assignment.RelationshipCodedValueId, assignment.Role, false, null), ct);
-            await LoadGuardiansAsync(StudentId.Value, ct);
-        }
-        else
-        {
-            if (assignment.ExistingGuardianId is { } id && Model.GuardianLinks.Any(g => g.ExistingGuardianId == id))
-                return;
-            Model.GuardianLinks.Add(assignment);
-            if (assignment.RelationshipCodedValueId is { } relId)
-                await EnsureRelNameAsync(relId);
-            await InvokeAsync(StateHasChanged);
-        }
-    }
-
-    private async Task RemoveGuardianAsync(Guid guardianId)
-    {
-        if (!IsEditMode) return;
-        _guardianError = null;
-        try
-        {
-            await Api.UnlinkGuardianAsync(StudentId!.Value, guardianId);
-            await LoadGuardiansAsync(StudentId.Value, CancellationToken.None);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to unlink guardian {GuardianId}", guardianId);
-            _guardianError = ex.Message;
-            await InvokeAsync(StateHasChanged);
-        }
+        if (assignment.ExistingGuardianId is { } id && Model.GuardianLinks.Any(g => g.ExistingGuardianId == id))
+            return;
+        Model.GuardianLinks.Add(assignment);
+        if (assignment.RelationshipCodedValueId is { } relId)
+            await EnsureRelNameAsync(relId);
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task RemoveGuardianAsync(int index)
     {
-        if (IsEditMode) return;
         if (index < 0 || index >= Model.GuardianLinks.Count) return;
         Model.GuardianLinks.RemoveAt(index);
         await InvokeAsync(StateHasChanged);

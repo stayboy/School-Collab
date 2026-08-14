@@ -11,6 +11,9 @@ public sealed record StudentDto(
     bool IsDeleted,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
+    // Postgres xmin row version (IHasRowVersion). Echoed back to the client so the
+    // all-inclusive edit can send it as ExpectedRowVersion for optimistic concurrency.
+    uint RowVersion = 0,
     // Enriched client-side in StudentsApiClient (Age from DateOfBirth, GenderName
     // from the CodedValues module). Left null by the server projection so the
     // Students module stays decoupled from coded values. Defaults keep the 7

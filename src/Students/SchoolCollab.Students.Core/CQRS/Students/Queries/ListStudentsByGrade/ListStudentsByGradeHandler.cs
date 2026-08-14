@@ -64,7 +64,8 @@ public sealed class ListStudentsByGradeHandler(
                     s.GenderCodedValueId,
                     s.IsDeleted,
                     s.CreatedAt,
-                    s.UpdatedAt
+                    s.UpdatedAt,
+                    s.RowVersion
                 })
             .OrderBy(x => x.LastName)
             .ThenBy(x => x.FirstName)
@@ -78,7 +79,8 @@ public sealed class ListStudentsByGradeHandler(
                 x.GenderCodedValueId,
                 x.IsDeleted,
                 x.CreatedAt,
-                x.UpdatedAt))
+                x.UpdatedAt,
+                x.RowVersion))
             .ToArrayAsync(cancellationToken);
 
         return students;

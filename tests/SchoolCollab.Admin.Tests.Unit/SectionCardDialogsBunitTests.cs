@@ -264,4 +264,154 @@ public class SectionCardDialogsBunitTests : BunitContext
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("ada@example.com",
             "the edit dialog binds the existing student's contacts"));
     }
+
+    // ── StudentEditDialog: all-inclusive atomic save ─────────────────────────
+
+    /// <summary>A student JSON with the required form fields populated (DOB + gender)
+    /// so the shared form's DataAnnotations validation passes and Save fires.</summary>
+    private static Dictionary<string, object?> ValidStudentJson(Guid id, string number, string first, string last) => new()
+    {
+        ["id"] = id, ["studentNumber"] = number, ["titleCodedValueId"] = (Guid?)null,
+        ["firstName"] = first, ["lastName"] = last, ["dateOfBirth"] = "2015-03-10",
+        ["genderCodedValueId"] = Guid.NewGuid(), ["isDeleted"] = false,
+        ["createdAt"] = "2026-01-01T00:00:00Z", ["updatedAt"] = "2026-01-01T00:00:00Z",
+    };
+
+    [TestMethod]
+    public void StudentEditDialog_Save_IssuesOneAtomicUpdateRequest()
+    {
+        // The all-inclusive edit dialog must save profile + guardians + contacts in ONE
+        // request to PUT /students/{id}/with-linked-data (not the old profile-only
+        // UpdateStudentAsync, and not per-row link/unlink/contact calls).
+        var studentId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map($"/students/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(ValidStudentJson(studentId, "STU001", "Ada", "Lovelace")));
+        handler.Map($"/students/{studentId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map($"/contacts?ownerType=Student&ownerId={studentId}", HttpStatusCode.OK, "[]");
+        handler.Map($"/students/{studentId}/with-linked-data", HttpStatusCode.NoContent, "");
+        // The gender/title coded-value dropdowns resolve the selected ids.
+        handler.Map("/api/coded-values/by-parent?parentCode=GENDER", HttpStatusCode.OK, "[]");
+        handler.Map("/api/coded-values/by-parent?parentCode=SALUTS", HttpStatusCode.OK, "[]");
+        // EnrichSingleAsync resolves the gender name for a non-null gender id.
+        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK, "[]");
+        Register(handler);
+
+        var cut = RenderEditDialog(studentId);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Save Changes"));
+        // Confirm the model loaded with the required fields (so the form can validate).
+        cut.WaitForAssertion(() => cut.Find("#studentFormFirstName").GetAttribute("value")
+            .Should().Be("Ada", "the model must load before Save can validate"));
+
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(() => handler.Calls.Count(c => c.Method == "PUT").Should().Be(1,
+            "Save must issue exactly one atomic update request"));
+        var put = handler.Calls.Single(c => c.Method == "PUT");
+        put.Url.Should().Be($"/students/{studentId}/with-linked-data");
+        var req = JsonSerializer.Deserialize<UpdateStudentWithLinkedDataRequest>(put.Body!,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        req.FirstName.Should().Be("Ada");
+        req.LastName.Should().Be("Lovelace");
+        req.ExpectedRowVersion.Should().Be(0);
+        req.LoadedGuardianIds.Should().BeEmpty();
+        req.LoadedContactIds.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void StudentEditDialog_Cancel_IssuesNoRequests()
+    {
+        var studentId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map($"/students/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(ValidStudentJson(studentId, "STU001", "Ada", "Lovelace")));
+        handler.Map($"/students/{studentId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map($"/contacts?ownerType=Student&ownerId={studentId}", HttpStatusCode.OK, "[]");
+        Register(handler);
+
+        var cut = RenderEditDialog(studentId);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Save Changes"));
+
+        cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Cancel")).Click();
+
+        handler.Calls.Should().NotContain(c => c.Method == "PUT",
+            "Cancel must not issue an update request");
+    }
+
+    [TestMethod]
+    public void StudentEditDialog_ConcurrencyConflict_ShowsReload()
+    {
+        // A 409 (stale ExpectedRowVersion or a concurrent guardian/contact change) must
+        // surface a "changed by someone else — reload and retry" message with a Reload
+        // action, not a hard failure or a silent close.
+        var studentId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map($"/students/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(ValidStudentJson(studentId, "STU001", "Ada", "Lovelace")));
+        handler.Map($"/students/{studentId}/guardians", HttpStatusCode.OK, "[]");
+        handler.Map($"/contacts?ownerType=Student&ownerId={studentId}", HttpStatusCode.OK, "[]");
+        handler.Map($"/students/{studentId}/with-linked-data", HttpStatusCode.Conflict,
+            "{\"message\":\"The entity was modified by another user.\"}");
+        // The gender/title coded-value dropdowns resolve the selected ids.
+        handler.Map("/api/coded-values/by-parent?parentCode=GENDER", HttpStatusCode.OK, "[]");
+        handler.Map("/api/coded-values/by-parent?parentCode=SALUTS", HttpStatusCode.OK, "[]");
+        // EnrichSingleAsync resolves the gender name for a non-null gender id.
+        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK, "[]");
+        Register(handler);
+
+        var cut = RenderEditDialog(studentId);
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Save Changes"));
+
+        cut.Find("form").Submit();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("changed by someone else",
+            "a 409 must surface the concurrency message"));
+        cut.Markup.Should().Contain("Reload",
+            "a 409 must offer a Reload action");
+    }
+
+    [TestMethod]
+    public void StudentEditDialog_ShowsLoadedGuardianRelationship()
+    {
+        // Regression: the all-inclusive edit dialog loads guardians into
+        // Model.GuardianLinks (not the old live _links), so StudentFormFields must
+        // resolve the relationship display names for those pre-loaded guardians —
+        // otherwise the Inline grid's Relationship column renders blank.
+        var studentId = Guid.NewGuid();
+        var relId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map($"/students/{studentId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(ValidStudentJson(studentId, "STU001", "Ada", "Lovelace")));
+        handler.Map($"/students/{studentId}/guardians", HttpStatusCode.OK,
+            JsonSerializer.Serialize(new[]
+            {
+                new
+                {
+                    guardianId = Guid.NewGuid(), studentId, role = 0,
+                    relationshipCodedValueId = (Guid?)relId, isEmergencyContact = false,
+                    firstName = "Kofi", lastName = "Mensah", displayName = "Kofi Mensah",
+                    titleCodedValueId = (Guid?)null, contacts = Array.Empty<object>(),
+                    totalContactCount = 0,
+                }
+            }));
+        handler.Map($"/contacts?ownerType=Student&ownerId={studentId}", HttpStatusCode.OK, "[]");
+        handler.Map("/api/coded-values/by-parent?parentCode=GENDER", HttpStatusCode.OK, "[]");
+        handler.Map("/api/coded-values/by-parent?parentCode=SALUTS", HttpStatusCode.OK, "[]");
+        handler.Map("/api/coded-values/by-ids", HttpStatusCode.OK, "[]");
+        // The relationship name resolver (StudentFormFields.OnInitializedAsync -> EnsureRelNameAsync -> GetByIdAsync).
+        handler.Map($"/api/coded-values/{relId}", HttpStatusCode.OK,
+            JsonSerializer.Serialize(new
+            {
+                id = relId, code = "MOTHER", name = "Mother", description = (string?)null,
+                parentId = (Guid?)null, parentCode = (string?)null, isDisabled = false,
+                displayOrder = 0, createdAt = "2026-01-01T00:00:00Z", updatedAt = "2026-01-01T00:00:00Z",
+                attributes = Array.Empty<object>(), attributeDefinitions = Array.Empty<object>(),
+            }));
+        Register(handler);
+
+        var cut = RenderEditDialog(studentId);
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Mother",
+            "the loaded guardian's relationship name must display (resolved from the coded value)"));
+    }
 }

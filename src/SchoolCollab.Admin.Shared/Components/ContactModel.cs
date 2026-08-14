@@ -21,6 +21,11 @@ public sealed class ContactModel
     /// reorders. Not persisted.</summary>
     public Guid TempId { get; set; } = Guid.NewGuid();
 
+    /// <summary>The persisted <c>Contact.Id</c> this model was loaded from, or null for a
+    /// brand-new contact. Lets the all-inclusive edit reconcile contacts by id on save
+    /// (a null <see cref="PersistedId"/> means "add"; a set one means "update").</summary>
+    public Guid? PersistedId { get; set; }
+
     public ContactChannel Channel { get; set; } = ContactChannel.Email;
 
     /// <summary>The raw contact value (email address or phone number).</summary>
