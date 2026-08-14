@@ -54,36 +54,12 @@
         _error = null;
         try
         {
-            var guardians = _model.GuardianLinks
-                .Select(d => new GuardianDraftRequest(
-                    ExistingGuardianId: d.ExistingGuardianId,
-                    Role: d.Role,
-                    RelationshipCodedValueId: d.RelationshipCodedValueId,
-                    IsEmergencyContact: false,
-                    ActingGuardianId: null,
-                    TitleCodedValueId: d.TitleCodedValueId,
-                    FirstName: d.FirstName,
-                    LastName: d.LastName))
-                .ToArray();
-
-            // Contacts drafted on the form (Buffered ContactsEditor). Flushed
-            // atomically with the student + guardians (Unit of Work).
-            var contacts = _model.Contacts
-                .OrderBy(c => c.Order)
-                .Select(c => new ContactDraftRequest(
-                    c.Channel, c.Value, c.Label, c.CountryCode, c.Order))
-                .ToArray();
-
             // Single atomic call: student + drafted guardians + drafted contacts
             // (+ optional enrollment) are created together, all-or-nothing (Unit of Work).
-            var request = new CreateStudentWithLinkedDataRequest(
-                _model.FirstName!, _model.LastName!, _model.DateOfBirth,
-                _model.GenderCodedValueId, _model.TitleCodedValueId,
-                Guardians: guardians,
-                Contacts: contacts,
-                EnrollmentGradeLevelId: EnrollmentGradeLevelId,
-                EnrollmentPeriodId: EnrollmentPeriodId);
-
+            // The model→request projection (incl. the guardian emergency flag) is on
+            // StudentFormModel.ToCreateRequest — symmetric with the edit dialog's
+            // ToUpdateRequest (see documents/solution/dto-form-model-mapping.md).
+            var request = _model.ToCreateRequest(EnrollmentGradeLevelId, EnrollmentPeriodId);
             var studentId = await Api.CreateStudentWithLinkedDataAsync(request);
             if (Dialog is not null) await Dialog.CloseAsync(studentId);
         }

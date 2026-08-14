@@ -101,12 +101,31 @@ public UpdateStudentWithLinkedDataRequest ToUpdateRequest()
         LoadedGuardianIds: LoadedGuardianIds,
         LoadedContactIds: LoadedContactIds);
 }
+
+/// Create counterpart — same ToGuardianDraft/ToContactDraft converters, so create and
+/// edit stay in lockstep (e.g. the guardian emergency flag round-trips on both paths).
+/// Enrollment targets are dialog-level, so they're passed in as arguments.
+public CreateStudentWithLinkedDataRequest ToCreateRequest(
+    Guid? enrollmentGradeLevelId = null, Guid? enrollmentPeriodId = null)
+{
+    return new CreateStudentWithLinkedDataRequest(
+        FirstName!, LastName!, DateOfBirth, GenderCodedValueId, TitleCodedValueId,
+        Guardians: GuardianLinks.Select(ToGuardianDraft).ToArray(),
+        Contacts: Contacts.OrderBy(c => c.Order).Select(ToContactDraft).ToArray(),
+        EnrollmentGradeLevelId: enrollmentGradeLevelId,
+        EnrollmentPeriodId: enrollmentPeriodId);
+}
 ```
 
 The all-inclusive `LoadFrom` delegates to the single-source `LoadFrom` for the profile,
 then projects the child collections and captures the **concurrency snapshot** (`RowVersion`
 + the loaded guardian/contact id sets) so `ToUpdateRequest()` can echo them back for
-optimistic concurrency. The model→request method is the reverse of the load — keep both
+optimistic concurrency. The model→request methods are the reverse of the load —
+`ToUpdateRequest()` (edit) and `ToCreateRequest()` (create) share the same
+`ToGuardianDraft`/`ToContactDraft` converters, so the two save paths can't drift apart
+(when the create flush was inline it hardcoded the guardian emergency flag to `false`;
+sharing the converter fixed that). Keep both on the model, tested together, so the
+round-trip stays in lockstep.
 on the model, tested together, so the round-trip stays in lockstep.
 
 ### Why on the form model (not a separate `*Mappings` class)

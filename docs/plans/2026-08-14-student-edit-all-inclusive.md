@@ -367,13 +367,15 @@ concurrent change. The all-inclusive edit does it properly:
 
 ## 7. Future / v2 (explicitly deferred)
 
-- **Follow-up PR: `StudentFormModel.ToCreateRequest()`.** v1 ships only
-  `ToUpdateRequest()`; the create flow still flushes its `CreateStudentWithLinkedDataRequest`
-  inline in `Create.razor`. A small follow-up PR should extract that into an on-model
-  `ToCreateRequest()` (symmetric with `ToUpdateRequest()`), unit-test it, and update the
-  `dto-form-model-mapping.md` “All-inclusive load + model→request projection” section to
-  cover both directions. Out of scope for this PR because the create flow is untouched and
-  working; this is a consistency/testability refinement, not a behaviour change.
+- **Follow-up PR: `StudentFormModel.ToCreateRequest()`.** ✅ delivered — extracted the
+  create flow's inline `CreateStudentWithLinkedDataRequest` flush in `StudentCreateDialog`
+  into an on-model `ToCreateRequest(enrollmentGradeLevelId, enrollmentPeriodId)`,
+  symmetric with `ToUpdateRequest()` and reusing the same `ToGuardianDraft`/`ToContactDraft`
+  converters. This also fixed a latent bug (the inline flush hardcoded the guardian
+  emergency flag to `false`; the shared converter round-trips it). Unit-tested
+  (`ToCreateRequest_RoundTripsProfileGuardiansContactsAndEnrollment`); the
+  `dto-form-model-mapping.md` “All-inclusive load + model→request projection” section now
+  covers both directions.
 - **Edit page migration** to draft-then-save (using the same endpoint) — separate UX
   decision; the page's live management is intentional today.
 - **Guardian contacts editing** from the student edit dialog (today and in v1, a

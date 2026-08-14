@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Students.Application.Components.Students;
 using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Domain;
@@ -166,5 +167,50 @@ public class StudentFormModelMappingsTests
         req.Contacts.Should().ContainSingle();
         req.Contacts![0].Id.Should().Be(contact.Id);
         req.Contacts![0].Value.Should().Be("ada@example.com");
+    }
+
+    [TestMethod]
+    public void ToCreateRequest_RoundTripsProfileGuardiansContactsAndEnrollment()
+    {
+        // Create drafts the model (no DTO load); ToCreateRequest projects it back for the
+        // atomic create. Notably the guardian emergency flag must round-trip — the previous
+        // inline flush hardcoded IsEmergencyContact: false (a latent bug this fixes).
+        var gradeId = Guid.NewGuid();
+        var periodId = Guid.NewGuid();
+        var guardianId = Guid.NewGuid();
+        var model = new StudentFormModel
+        {
+            FirstName = "Ada",
+            LastName = "Lovelace",
+            DateOfBirth = new DateOnly(1815, 12, 10),
+            GenderCodedValueId = Guid.NewGuid(),
+            TitleCodedValueId = Guid.NewGuid(),
+            GuardianLinks = new()
+            {
+                new GuardianAssignment(
+                    guardianId, "Alice", "Existing", Guid.NewGuid(),
+                    null, null, Guid.NewGuid(),
+                    Role: GuardianRole.CC, IsEmergencyContact: true)
+            },
+            Contacts = new()
+            {
+                new ContactModel { Channel = ContactChannel.Email, Value = "ada@example.com", Label = "Work", Order = 0 }
+            }
+        };
+
+        var req = model.ToCreateRequest(gradeId, periodId);
+
+        req.FirstName.Should().Be("Ada");
+        req.LastName.Should().Be("Lovelace");
+        req.Guardians.Should().ContainSingle();
+        req.Guardians![0].ExistingGuardianId.Should().Be(guardianId);
+        req.Guardians![0].Role.Should().Be(GuardianRole.CC);
+        req.Guardians![0].IsEmergencyContact.Should().BeTrue(
+            "the emergency flag must round-trip (the inline flush used to hardcode false)");
+        req.Contacts.Should().ContainSingle();
+        req.Contacts![0].Id.Should().BeNull("create contacts are new (no persisted id)");
+        req.Contacts![0].Value.Should().Be("ada@example.com");
+        req.EnrollmentGradeLevelId.Should().Be(gradeId);
+        req.EnrollmentPeriodId.Should().Be(periodId);
     }
 }
