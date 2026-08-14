@@ -19,6 +19,12 @@ dialogParams["StudentId"] = student.Id;          // indexer entry
 ShowDialogAsync<StudentEditDialog, DialogParameters>(dialogParams, dialogParams);
 ```
 
+> **Why the same instance twice?** The first argument is the `TData` content (becomes
+> `IDialogContentComponent<DialogParameters>.Content`); the second is the `DialogParameters`
+> argument FluentUI reads for shell chrome (Title, Width, etc.). `DialogParameters` stores
+> shell properties as settable fields and content entries in its dictionary indexer — the
+> two namespaces don't collide, so one instance serves both roles.
+
 The intent (per the old doc comment) was that FluentUI binds each indexer entry to the
 content component's `[Parameter]` properties. **It does not.** In FluentUI 4.14.2 the
 dialog content is rendered via Blazor's `DynamicComponent` with:
@@ -47,6 +53,11 @@ The edit dialog opened but the profile fields were blank — the dialog called
   same key the dialog reads.
 - Read each input via `Content.TryGet<T>(XxxKey)` (the indexer throws
   `KeyNotFoundException` for a missing key, so use `TryGet`, not `[]`).
+  - `TryGet<T>` returns `T`, not `T?`. For reference types a missing key returns `null`;
+    for **value types** (`Guid`, `int`, …) it returns `default(T)` — `Guid.Empty`, `0` —
+    **not** `null`. So `TryGet<Guid>` yields `Guid.Empty` when the key is absent; use
+    `TryGet<Guid?>` if you need a null signal, and guard value-type reads with a null
+    check on `Content`.
 - Keep `[Parameter] public DialogParameters Content` (required by
   `IDialogContentComponent<DialogParameters>`).
 
@@ -64,6 +75,12 @@ ShowReadonlyDialogAsync<StudentEditDialog>(title,
     new Dictionary<string, object?> { { StudentEditDialog.StudentIdKey, student.Id } },
     DialogSize.ExtraLarge);
 ```
+
+**Why `StudentEditDialog.StudentIdKey` and not `nameof(StudentId)`?** The key constant is
+declared on the dialog, so if the internal property name changes the constant updates
+automatically and all callers follow. A bare `nameof(StudentId)` in the caller resolves to
+the string `"StudentId"` at compile time — if the dialog renames its property, the
+caller's string silently stops matching and the input defaults.
 
 ### Why `ShowShellDialogAsync` / `DialogShellBase` are unaffected
 
@@ -97,6 +114,12 @@ an always-rendered element:
 cut.WaitForAssertion(() => cut.Find("#studentFormFirstName").GetAttribute("value")
     .Should().Be("Ada", "the FirstName input binds the loaded student"));
 ```
+
+`WaitForAssertion` is required because the `FluentDialogProvider` flow is asynchronous:
+the dialog is shown → rendered → the content component fetches data → re-renders with
+populated inputs. A synchronous assertion fires before the data returns, so it sees
+empty inputs and fails. `WaitForAssertion` retries until the assertion passes or the bUnit
+timeout expires.
 
 Also: when a dialog reads its inputs from `Content`, tests that render the dialog directly
 must pass `Content` (a `DialogParameters` with the keys), not `.Add(x => x.SomeParam, …)`.
