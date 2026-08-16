@@ -37,7 +37,8 @@ public sealed record GuardianDraft(
     string? FirstName = null,
     string? LastName = null,
     Guid? GenderCodedValueId = null,
-    DateOnly? DateOfBirth = null);
+    DateOnly? DateOfBirth = null,
+    ContactDraft[]? Contacts = null);
 
 /// <summary>A contact to attach to the newly created student (reserved shape).
 /// <c>Id</c> is null for a new contact; set for an update (the all-inclusive edit

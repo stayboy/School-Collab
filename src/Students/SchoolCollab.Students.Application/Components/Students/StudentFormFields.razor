@@ -110,6 +110,26 @@
                                 Width="FieldWidth.W4" />
         </FormRow>
 
+        @* Contacts section. Sits between the profile fields and the guardians
+           section so the student's own contact channels are captured first.
+           The editor is the shared <ContactsEditor> in Buffered mode,
+           collecting into Model.Contacts. The parent flushes the list to the
+           API as part of the atomic create/update. *@
+        @if (ShowContacts)
+        {
+            <div class="">
+                <FluentDivider Orientation="Orientation.Horizontal" Style="width:100%" />
+            </div>
+            <FormRow Label="Contacts">
+                <div class="student-contacts">
+                    <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                    OwnerType="ContactOwnerType.Student"
+                                    Contacts="Model.Contacts"
+                                    ContactsChanged="OnDraftContactsChanged" />
+                </div>
+            </FormRow>
+        }
+
         @* Guardians section. Two modes (gated by the Mode parameter):
 
            - Inline (DEFAULT): the historical panel-switch UX. Create
@@ -189,63 +209,195 @@
                     }
                     else
                     {
-                        @* ── Linked / drafted guardians (grid list) ── *@
-                        <EntityGrid TItem="GuardianGridRow"
-                                    Items="GuardianGridRows"
-                                    GridSettings="@LinkedGridSettings"
-                                    EmptyMessage="No guardians added yet.">
-                            <Columns>
-                                <PropertyColumn Property="@(r => r.FirstName)" Title="First name" TGridItem="GuardianGridRow" TProp="string" />
-                                <PropertyColumn Property="@(r => r.LastName)" Title="Last name" TGridItem="GuardianGridRow" TProp="string" />
-                                <TemplateColumn TGridItem="GuardianGridRow" Title="Relationship" Context="cell">
-                                    <span>@(cell.RelationshipCodedValueId is { } id && _relNames.TryGetValue(id, out var rn) ? rn : "")</span>
-                                </TemplateColumn>
-                                <TemplateColumn TGridItem="GuardianGridRow" Title="" Sortable="false" Context="cell">
-                                    @if (cell.IsEmergencyContact)
-                                    {
-                                        <FluentBadge Appearance="Appearance.Accent">Emergency</FluentBadge>
-                                    }
-                                </TemplateColumn>
-                                <TemplateColumn TGridItem="GuardianGridRow" Title="" Sortable="false" Context="cell">
-                                    <FluentButton Appearance="Appearance.Lightweight" Title="Remove guardian"
-                                                  OnClick="@(() => RemoveGuardianRow(cell.Key))">
-                                        <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
-                                    </FluentButton>
-                                </TemplateColumn>
-                            </Columns>
-                        </EntityGrid>
+                        @* ── Inline "add guardian" row (List mode) ──
+                           Mimics the <ContactsEditor> add-contact form: an inline
+                           horizontal row of fields + an Accent Add button, always
+                           visible in List mode (no separate panel switch). Field
+                           set is the guardian's identity + link relationship only
+                           (Relationship / Last name / First name). Role defaults
+                           to Primary; title/salutation, emergency and contacts are
+                           NOT captured here — they're guardian-surface operations
+                           (GuardianDetail), so a newly-added guardian starts with
+                           zero contacts (the card shows "— no contacts —") until
+                           its contacts are added on the guardian surface. *@
+                        @if (_panelMode == GuardianPanelMode.List)
+                        {
+                            <div class="guardian-add-row">
+                                <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                                                    @bind-SelectedId="_newRelId"
+                                                    Placeholder="Relationship"
+                                                    Width="FieldWidth.W4" />
+                                <FluentTextField @bind-Value="_newLastName"
+                                                 Placeholder="Last name"
+                                                 class="guardian-add-field" />
+                                <FluentTextField @bind-Value="_newFirstName"
+                                                 Placeholder="First name"
+                                                 class="guardian-add-field" />
+                                <FluentButton Appearance="Appearance.Accent"
+                                              IconStart="@FluentIcons.PersonAdd"
+                                              OnClick="AddInlineGuardianAsync"
+                                              Disabled="@(_adding || string.IsNullOrWhiteSpace(_newFirstName) || string.IsNullOrWhiteSpace(_newLastName))">
+                                    Add
+                                </FluentButton>
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              IconStart="@FluentIcons.PersonAdd"
+                                              OnClick="StartAddExisting"
+                                              class="guardian-add-existing">
+                                    Add existing
+                                </FluentButton>
+                            </div>
+                        }
+
+                        @* ── Linked / drafted guardians (card list) ──
+                           A vertical list of cards that mimics the
+                           <ContactsEditor> contact-item visual: each
+                           guardian is a bordered card with a head line
+                           (person glyph + name + relationship + role /
+                           emergency badges) and a contact-summary line
+                           (up to 3 contact chips). The primary guardian's
+                           card gets the accent-tinted highlight so the
+                           primary link is the visual anchor — same
+                           convention the contacts list uses for the
+                           preferred contact. Display-only: the per-guardian
+                           contact chips are loaded from the student's
+                           guardian links' top-3 contacts and cannot be
+                           edited here (guardian contact editing still
+                           lives on the guardian surface). *@
+                        <div class="guardian-cards">
+                            @foreach (var g in GuardianGridRows)
+                            {
+                                // While the Edit panel is open, all OTHER guardian
+                                // cards hide — only the card currently being edited
+                                // stays visible (its Key is its index into
+                                // Model.GuardianLinks). Save/Cancel restores the list.
+                                if (_panelMode == GuardianPanelMode.Edit && (int)g.Key != _editingIndex)
+                                {
+                                    continue;
+                                }
+                                var relName = g.RelationshipCodedValueId is { } rid && _relNames.TryGetValue(rid, out var rn) ? rn : null;
+                                var salName = g.TitleCodedValueId is { } tid && _salutations.TryGetValue(tid, out var sn) ? sn : null;
+                                var name = string.IsNullOrWhiteSpace(salName) ? $"{g.FirstName} {g.LastName}".Trim() : $"{salName} {g.FirstName} {g.LastName}".Trim();
+                                var contacts = g.Contacts;
+                                var isPrimary = g.Role == GuardianRole.Primary;
+                                <FluentCard class="@(isPrimary ? "guardian-card guardian-card--primary" : "guardian-card")">
+                                    <div class="guardian-card-head">
+                                        <span class="guardian-card-name">👤 @name</span>
+                                        @if (!string.IsNullOrWhiteSpace(relName))
+                                        {
+                                            <span class="guardian-card-rel">(@relName)</span>
+                                        }
+                                        @if (isPrimary)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Accent" class="guardian-card-badge">Primary</FluentBadge>
+                                        }
+                                        @if (g.IsEmergencyContact)
+                                        {
+                                            <FluentBadge Appearance="Appearance.Accent" class="guardian-card-badge">Emergency</FluentBadge>
+                                        }
+                                        <span class="guardian-card-actions">
+                                            <FluentButton Appearance="Appearance.Lightweight" Title="Edit guardian"
+                                                          OnClick="@(() => StartEditGuardian((int)g.Key))">
+                                                <FluentIcon Icon="@(Icons.Regular.Size20.Edit)" />
+                                            </FluentButton>
+                                            <FluentButton Appearance="Appearance.Lightweight" Title="Remove guardian"
+                                                          OnClick="@(() => RemoveGuardianRow(g.Key))">
+                                                <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
+                                            </FluentButton>
+                                        </span>
+                                    </div>
+                                    <div class="guardian-card-contacts">
+                                        @if (contacts.Count == 0)
+                                        {
+                                            <span class="muted">— no contacts —</span>
+                                        }
+                                        else
+                                        {
+                                            @foreach (var c in contacts.Take(3))
+                                            {
+                                                <span class="guardian-contact-chip">
+                                                    <span>@ChannelGlyph(c.Channel)</span>
+                                                    <span>@FormatContactValue(c)</span>
+                                                </span>
+                                            }
+                                        }
+                                    </div>
+                                </FluentCard>
+                            }
+                        </div>
 
                         @if (!string.IsNullOrEmpty(_guardianError))
                         {
                             <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
                         }
 
-                        @* ── Panel switch: list actions, or the add section ── *@
-                        @if (_panelMode == GuardianPanelMode.List)
-                        {
-                            <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-buttons">
-                                <FluentButton Appearance="Appearance.Outline"
-                                              IconStart="@FluentIcons.PersonAdd"
-                                              OnClick="StartNewGuardian">New guardian</FluentButton>
-                                <FluentButton Appearance="Appearance.Neutral"
-                                              IconStart="@FluentIcons.PersonAdd"
-                                              OnClick="StartAddExisting">Add existing</FluentButton>
-                            </FluentStack>
-                        }
-                        else
+                        @* ── Panel switch: edit panel, or existing search ── *@
+                        @if (_panelMode == GuardianPanelMode.Edit)
                         {
                             <div class="guardian-add-section">
-                                @if (_panelMode == GuardianPanelMode.New)
+                                @{ var editedGuardian = (_editingIndex >= 0 && _editingIndex < Model.GuardianLinks.Count) ? Model.GuardianLinks[_editingIndex] : null; }
+                                <h4 class="guardian-add-title">Edit guardian</h4>
+                                <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                                    @* Draft-only fields: title + name are editable only for
+                                       not-yet-persisted guardians (ExistingGuardianId is null).
+                                       For existing guardians these don't persist through the
+                                       student save (guardian-surface operation), so they're
+                                       hidden to avoid misleading the user. *@
+                                    @if (editedGuardian is { } eg && eg.ExistingGuardianId is null)
+                                    {
+                                        <FormRow Label="Title">
+                                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                                                @bind-SelectedId="_editTitleId"
+                                                                Placeholder="Optional"
+                                                                Width="FieldWidth.W3" />
+                                        </FormRow>
+                                        <FormRow Label="First name" Required>
+                                            <FluentTextField @bind-Value="_editFirstName" Required Placeholder="First name" class="w-5" />
+                                        </FormRow>
+                                        <FormRow Label="Last name" Required>
+                                            <FluentTextField @bind-Value="_editLastName" Required Placeholder="Last name" class="w-5" />
+                                        </FormRow>
+                                    }
+                                    <FormRow Label="Relationship">
+                                        <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                                                            @bind-SelectedId="_editRelationshipId"
+                                                            Placeholder="Select relationship"
+                                                            Width="FieldWidth.W4" />
+                                    </FormRow>
+                                    <FormRow Label="Role">
+                                        <DropdownForEnum TEnum="GuardianRole"
+                                                          @bind-SelectedValue="_editRole"
+                                                          @key="@($"role-{_editingIndex}")"
+                                                          Placeholder="Select role"
+                                                          Width="FieldWidth.W3" />
+                                    </FormRow>
+                                </FluentStack>
+                                @* Contacts editor: Live mode for existing guardians
+                                   (immediate API calls), Buffered mode for drafts
+                                   (in-memory, persisted at student save time). *@
+                                @if (editedGuardian is { } eg2 && eg2.ExistingGuardianId is { } gid)
                                 {
-                                    <h4 class="guardian-add-title">New guardian</h4>
-                                    <GuardianFormFields Model="_newGuardian" />
-                                    <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
-                                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button" OnClick="SaveNewGuardianAsync">Add to list</FluentButton>
-                                        <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
-                                    </FluentStack>
+                                    <div class="guardian-edit-contacts">
+                                        <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@gid" />
+                                    </div>
                                 }
-                                else
+                                else if (editedGuardian is not null)
                                 {
+                                    <div class="guardian-edit-contacts">
+                                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                                        OwnerType="ContactOwnerType.Guardian"
+                                                        Contacts="_editContacts"
+                                                        ContactsChanged="OnEditContactsChanged" />
+                                    </div>
+                                }
+                                <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
+                                    <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button" OnClick="SaveEditGuardianAsync">Save</FluentButton>
+                                    <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
+                                </FluentStack>
+                            </div>
+                                }
+                                else if (_panelMode == GuardianPanelMode.Existing)
+                                {
+                                    <div class="guardian-add-section">
                                     <h4 class="guardian-add-title">Add existing guardian</h4>
                                     <FluentStack Orientation="Orientation.Horizontal" Spacing="4" class="guardian-tabs">
                                         <FluentButton Appearance="@(_existingTab == ExistingTab.Contact ? Appearance.Accent : Appearance.Neutral)"
@@ -331,36 +483,10 @@
                                                           OnClick="AddSelectedGuardiansAsync">Add selected</FluentButton>
                                             <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
                                         </FluentStack>
-                                    }
                                 </div>
-                        }
+                                }
                     }
                 }
-                </div>
-            </FormRow>
-        }
-
-        @* Contacts section. Opt-in via ShowContacts. Mirrors the guardians
-           section: a divider + a FormRow titled "Contacts". The editor is the
-           shared <ContactsEditor> in Buffered mode, collecting into
-           Model.Contacts. The parent flushes the list to the API as part of
-           the atomic create/update (CreateStudentWithLinkedDataRequest.Contacts /
-           UpdateStudentWithLinkedDataRequest.Contacts).
-
-           ShowSubscription=false keeps the dialog focused on the contact
-           channels themselves (matches the student Edit page's contacts
-           editor); subscription toggles live on the student view page. *@
-        @if (ShowContacts)
-        {
-            <div class="">
-                <FluentDivider Orientation="Orientation.Horizontal" Style="width:100%" />
-            </div>
-            <FormRow Label="Contacts">
-                <div class="student-contacts">
-                    <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                    OwnerType="ContactOwnerType.Student"
-                                    Contacts="Model.Contacts"
-                                    ContactsChanged="OnDraftContactsChanged" />
                 </div>
             </FormRow>
         }
@@ -646,14 +772,51 @@
         }
     }
 
-    // ── Inline guardian add panel (replaces the old nested dialogs) ──
-    private enum GuardianPanelMode { List, New, Existing }
+    // ── Inline guardian edit / add-existing panels ──
+    // List  = card list + always-visible inline add row (mimics the
+    //         ContactsEditor add-contact form). No "New" panel anymore — the
+    //         inline row replaces it.
+    // Edit  = hide all but the edited card + show its relationship/role editor.
+    // Existing = show the search + picker (unchanged).
+    private enum GuardianPanelMode { List, Edit, Existing }
     private enum ExistingTab { Contact, Student }
 
     private GuardianPanelMode _panelMode = GuardianPanelMode.List;
     private ExistingTab _existingTab = ExistingTab.Contact;
 
-    private GuardianAssignmentModel _newGuardian = GuardianAssignmentModel.ForAdd();
+    // Inline add-row state (the "add guardian" row that mimics the
+    // ContactsEditor add-contact form: Relationship + Last name + First name +
+    // an Add button, always visible in List mode). Validation is handled by the
+    // Add button's Disabled flag; the fields are cleared ONLY after a successful
+    // add (not on panel navigation) so partial input persists like the contacts
+    // editor's add row. Relationship is optional; role defaults to Primary.
+    private Guid? _newRelId;
+    private string? _newLastName;
+    private string? _newFirstName;
+    private bool _adding;
+
+    // Edit-panel state. The index of the guardian in Model.GuardianLinks
+    // currently being edited (the card's key is its list index), plus the
+    // draftable link-metadata fields (relationship / role). The guardian's
+    // name + title are NOT edited here (see the Edit panel comment): for an
+    // existing guardian they don't persist through the all-inclusive student
+    // save, and for a draft they were captured on the New panel. The
+    // emergency-contact flag is also not surfaced (see the Edit panel
+    // comment). Editing relationship + role is the always-persisting
+    // surface (UpdateStudentWithLinkedDataHandler → link.Update(...)).
+    private int _editingIndex = -1;
+    private Guid? _editRelationshipId;
+    private GuardianRole _editRole = GuardianRole.Primary;
+    // Expanded edit fields (title / name for drafts, contacts for all).
+    // Title/First/Last are only editable for DRAFT guardians (ExistingGuardianId
+    // is null — create mode). For existing guardians they don't persist through
+    // the student save (guardian-surface operation), so they're hidden.
+    private Guid? _editTitleId;
+    private string? _editFirstName;
+    private string? _editLastName;
+    // Buffered contacts list for draft guardians (ContactsEditor mutates this
+    // in place; on Save it's written back to the GuardianAssignment.Contacts).
+    private List<ContactModel> _editContacts = new();
 
     private bool _contactLoading;
     private GuardianPickerRow[] _pickerRows = [];
@@ -662,11 +825,6 @@
     private bool _studentLoading;
     private StudentDto[] _studentResults = [];
     private Guid? _selectedStudentId;
-
-    private static readonly LandingGridSettings LinkedGridSettings = new()
-    {
-        GridTemplateColumns = "minmax(140px,1.5fr) minmax(140px,1.5fr) minmax(120px,1fr) 96px 44px"
-    };
 
     private static readonly LandingGridSettings PickerGridSettings = new()
     {
@@ -722,13 +880,24 @@
         await OnRemoveGuardian.InvokeAsync(row);
     }
 
-    /// <summary>Display row for the linked/draft guardian grid.</summary>
+    /// <summary>Display row for a single guardian card. Carries the
+    /// link-level metadata (Role, Relationship, Emergency) and the
+    /// display fields (Title, Name) needed by the card head line, plus
+    /// the per-guardian contact list rendered as chips on the second
+    /// line. <see cref="Contacts"/> already includes both the
+    /// multi-contact list (populated by <see cref="StudentFormModel"/>
+    /// from the link's top-3 contacts) AND the legacy single-contact
+    /// fields for newly-created (not yet persisted) guardians — see
+    /// <see cref="BuildRowContacts"/>.</summary>
     private sealed record GuardianGridRow(
         object Key,
         string FirstName,
         string LastName,
+        Guid? TitleCodedValueId,
         Guid? RelationshipCodedValueId,
-        bool IsEmergencyContact);
+        GuardianRole Role,
+        bool IsEmergencyContact,
+        IReadOnlyList<ContactModel> Contacts);
 
     /// <summary>Display row for the "add existing" picker grid.</summary>
     private sealed record GuardianPickerRow(
@@ -739,7 +908,9 @@
         string? Subtitle);
 
     // ── Panel navigation ─────────────────────────────────────────────────────
-    private void StartNewGuardian() => _panelMode = GuardianPanelMode.New;
+    // There is no "StartNew" panel — the inline add row is always visible in
+    // List mode and adds directly (AddInlineGuardianAsync). Only Edit and
+    // Existing switch modes.
 
     private void StartAddExisting()
     {
@@ -750,14 +921,81 @@
         _selectedStudentId = null;
     }
 
+    /// <summary>Open the inline Edit panel for the guardian at
+    /// <paramref name="index"/> in <see cref="StudentFormModel.GuardianLinks"/>.
+    /// Loads the link's current relationship / role into the edit fields.
+    /// The guardian's name + title are not surfaced here — see the Edit
+    /// panel comment for why.</summary>
+    private async Task StartEditGuardian(int index)
+    {
+        if (index < 0 || index >= Model.GuardianLinks.Count) return;
+        var a = Model.GuardianLinks[index];
+        _editingIndex = index;
+        _editRelationshipId = a.RelationshipCodedValueId;
+        _editRole = a.Role;
+        _editTitleId = a.TitleCodedValueId;
+        _editFirstName = a.FirstName;
+        _editLastName = a.LastName;
+        _editContacts = (a.Contacts ?? []).ToList();
+        if (_editRelationshipId is { } relId)
+            await EnsureRelNameAsync(relId);
+        _panelMode = GuardianPanelMode.Edit;
+        await InvokeAsync(StateHasChanged);
+    }
+
     private void CancelPanel()
     {
         _panelMode = GuardianPanelMode.List;
-        _newGuardian = GuardianAssignmentModel.ForAdd();
+        // The inline add-row fields are intentionally NOT cleared here — they
+        // persist across panel navigation (mimics ContactsEditor's add row).
         _pickerRows = [];
         _selectedRows = new();
         _studentResults = [];
         _selectedStudentId = null;
+        _editingIndex = -1;
+    }
+
+    /// <summary>Apply the edited link metadata (relationship / role) back
+    /// to the drafted <see cref="GuardianAssignment"/> at
+    /// <see cref="_editingIndex"/>. Replaces the immutable record via a
+    /// <c>with</c> expression, preserving the guardian's identity (id /
+    /// name / title), its contact summary, and its emergency-contact flag
+    /// (not surfaced — see the Edit panel comment). No API call — the
+    /// change is drafted and persisted atomically with the rest of the
+    /// student on Save (UpdateStudentWithLinkedDataHandler →
+    /// link.Update(...)).</summary>
+    private async Task SaveEditGuardianAsync()
+    {
+        if (_editingIndex < 0 || _editingIndex >= Model.GuardianLinks.Count)
+        {
+            _panelMode = GuardianPanelMode.List;
+            return;
+        }
+        _guardianError = null;
+        try
+        {
+            var original = Model.GuardianLinks[_editingIndex];
+            var updated = original with
+            {
+                RelationshipCodedValueId = _editRelationshipId,
+                Role = _editRole,
+                TitleCodedValueId = _editTitleId,
+                FirstName = _editFirstName ?? original.FirstName,
+                LastName = _editLastName ?? original.LastName,
+                Contacts = _editContacts.Count == 0 ? original.Contacts : _editContacts,
+            };
+            Model.GuardianLinks[_editingIndex] = updated;
+            if (_editRelationshipId is { } relId)
+                await EnsureRelNameAsync(relId);
+            _panelMode = GuardianPanelMode.List;
+            _editingIndex = -1;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to edit guardian at index {Index}", _editingIndex);
+            _guardianError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
     }
 
     private void SwitchExistingTab(ExistingTab tab)
@@ -771,12 +1009,67 @@
     private void OnSelectedRowsChanged(Dictionary<object, GuardianPickerRow> next) => _selectedRows = next;
 
     private GuardianGridRow[] GuardianGridRows
-        => Model.GuardianLinks.Select((g, i) => new GuardianGridRow(i, g.FirstName, g.LastName, g.RelationshipCodedValueId, g.IsEmergencyContact)).ToArray();
+        => Model.GuardianLinks.Select((g, i) => new GuardianGridRow(
+            i,
+            g.FirstName ?? string.Empty,
+            g.LastName ?? string.Empty,
+            g.TitleCodedValueId,
+            g.RelationshipCodedValueId,
+            g.Role,
+            g.IsEmergencyContact,
+            BuildRowContacts(g))).ToArray();
+
+    /// <summary>Build the contact list rendered as chips under a guardian
+    /// card. Combines two sources:
+    ///   - The assignment's <c>Contacts</c> list (populated by
+    ///     <see cref="StudentFormModel"/> from the link's top-3 contacts
+    ///     for already-linked guardians).
+    ///   - The legacy single-contact fields (<c>ContactChannel</c> /
+    ///     <c>ContactValue</c> / <c>CountryCode</c>) used by the inline
+    ///     "New guardian" panel for not-yet-persisted drafts. Appended
+    ///     after the multi-contact list, so newly-added guardians show
+    ///     the value they were drafted with as the last chip.
+    /// Result is ordered by <c>Order</c> then by legacy-single to keep
+    /// the preferred (lowest Order) contact first.</summary>
+    private static List<ContactModel> BuildRowContacts(GuardianAssignment g)
+    {
+        var source = g.Contacts ?? (IReadOnlyList<ContactModel>)Array.Empty<ContactModel>();
+        var result = new List<ContactModel>(source.Count + 1);
+        result.AddRange(source);
+        if (g.ContactChannel is { } ch
+            && !string.IsNullOrWhiteSpace(g.ContactValue)
+            && !result.Any(c => c.Channel == ch && c.Value == g.ContactValue))
+        {
+            result.Add(new ContactModel
+            {
+                Channel = ch,
+                Value = g.ContactValue!,
+                CountryCode = g.CountryCode,
+                Order = result.Count,
+            });
+        }
+        return result;
+    }
 
     private async Task RemoveGuardianRow(object key)
     {
         if (key is int idx) await RemoveGuardianAsync(idx);
     }
+
+    // ── Contact-chip formatting helpers (mirrors ContactsEditor) ────────
+    private static string ChannelGlyph(ContactChannel channel) => channel switch
+    {
+        ContactChannel.Email => "✉",
+        ContactChannel.SMS => "📱",
+        ContactChannel.WhatsApp => "💬",
+        _ => "•",
+    };
+
+    private static string FormatContactValue(ContactModel c) =>
+        (c.Channel is ContactChannel.SMS or ContactChannel.WhatsApp
+         && !string.IsNullOrWhiteSpace(c.CountryCode))
+            ? $"{c.CountryCode} {c.Value}"
+            : c.Value;
 
     private void BackToStudentSearch()
     {
@@ -878,38 +1171,78 @@
     }
 
     // ── Add handlers ─────────────────────────────────────────────────────────
-    private async Task SaveNewGuardianAsync()
+    /// <summary>Add a guardian drafted in the inline add row directly to the
+    /// student's guardian links (no panel switch — the card list re-renders with
+    /// the new card). Captures only Relationship / Last name / First name (the
+    /// add-row field set); role defaults to Primary and the guardian starts with
+    /// no contacts / title. After a successful add the row fields clear so the
+    /// next entry starts fresh. Mirrors the ContactsEditor's add-contact
+    /// behaviour (inline form + Add, fields cleared on add).</summary>
+    private async Task AddInlineGuardianAsync()
     {
-        if (string.IsNullOrWhiteSpace(_newGuardian.FirstName) || string.IsNullOrWhiteSpace(_newGuardian.LastName))
+        if (string.IsNullOrWhiteSpace(_newFirstName) || string.IsNullOrWhiteSpace(_newLastName))
         {
             _guardianError = "First and last name are required.";
             await InvokeAsync(StateHasChanged);
             return;
         }
         _guardianError = null;
+        _adding = true;
         try
         {
             var assignment = new GuardianAssignment(
                 null,
-                _newGuardian.FirstName!.Trim(),
-                _newGuardian.LastName!.Trim(),
-                _newGuardian.RelationshipCodedValueId,
-                _newGuardian.ContactChannel,
-                string.IsNullOrWhiteSpace(_newGuardian.ContactValue) ? null : _newGuardian.ContactValue.Trim(),
-                _newGuardian.TitleCodedValueId,
-                _newGuardian.CountryCode);
+                _newFirstName!.Trim(),
+                _newLastName!.Trim(),
+                _newRelId,
+                ContactChannel: null,
+                ContactValue: null,
+                TitleCodedValueId: null,
+                CountryCode: null);
             await AddDraftAsync(assignment);
-            _panelMode = GuardianPanelMode.List;
-            _newGuardian = GuardianAssignmentModel.ForAdd();
-            _pickerRows = [];
+            // Clear the add row for the next entry.
+            _newFirstName = null;
+            _newLastName = null;
+            _newRelId = null;
+            // Switch to Edit view so the user can add more fields (title, role,
+            // contacts) before the card is finalized. The newly-added guardian
+            // is the last entry in GuardianLinks.
+            _editingIndex = Model.GuardianLinks.Count - 1;
+            if (_editingIndex >= 0 && _editingIndex < Model.GuardianLinks.Count)
+            {
+                var a = Model.GuardianLinks[_editingIndex];
+                _editTitleId = a.TitleCodedValueId;
+                _editFirstName = a.FirstName;
+                _editLastName = a.LastName;
+                _editRelationshipId = a.RelationshipCodedValueId;
+                _editRole = a.Role;
+                _editContacts = (a.Contacts ?? []).ToList();
+                if (_editRelationshipId is { } relId)
+                    await EnsureRelNameAsync(relId);
+                _panelMode = GuardianPanelMode.Edit;
+            }
+            else
+            {
+                _panelMode = GuardianPanelMode.List;
+            }
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Failed to add new guardian");
+            Logger.LogError(ex, "Failed to add new guardian inline");
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
         }
+        finally
+        {
+            _adding = false;
+        }
     }
+
+    /// <summary>Re-render callback for the Buffered-mode ContactsEditor in
+    /// the Edit panel. The editor mutates <see cref="_editContacts"/> in
+    /// place; this just triggers a state change so the UI reflects the
+    /// mutation (e.g. the list re-renders).</summary>
+    private Task OnEditContactsChanged() => InvokeAsync(StateHasChanged);
 
     private async Task AddSelectedGuardiansAsync()
     {

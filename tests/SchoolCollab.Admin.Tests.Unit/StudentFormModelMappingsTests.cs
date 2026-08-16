@@ -6,6 +6,7 @@ using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Domain;
 using StudentGuardianViewDto = SchoolCollab.Students.Core.DTOs.StudentGuardianViewDto;
 using ContactDto = SchoolCollab.Students.Core.DTOs.ContactDto;
+using GuardianContactViewDto = SchoolCollab.Students.Core.DTOs.GuardianContactViewDto;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -143,6 +144,52 @@ public class StudentFormModelMappingsTests
         c.PersistedId.Should().Be(contact.Id);
         c.Value.Should().Be("ada@example.com");
         c.Order.Should().Be(2);
+    }
+
+    [TestMethod]
+    public void LoadFrom_AllInclusive_MapsGuardianContacts()
+    {
+        // The student edit dialog's guardian card list renders each
+        // guardian's top-3 contacts as chips (per the card-redesign plan).
+        // ToGuardianAssignment must therefore map the per-link
+        // StudentGuardianViewDto.Contacts (Channel/Value/CountryCode) into
+        // GuardianAssignment.Contacts (ContactModel) with stable Order.
+        var student = MakeStudent();
+        var emailContact = new GuardianContactViewDto(ContactChannel.Email, "alice@example.com");
+        var phoneContact = new GuardianContactViewDto(ContactChannel.SMS, "0241234567", CountryCode: "+233");
+        var whatsAppContact = new GuardianContactViewDto(ContactChannel.WhatsApp, "0247654321", CountryCode: "+233");
+        var guardian = MakeGuardian() with { Contacts = new[] { emailContact, phoneContact, whatsAppContact } };
+        var model = new StudentFormModel();
+        model.LoadFrom(student, new[] { guardian }, Array.Empty<ContactDto>());
+
+        model.GuardianLinks.Should().ContainSingle();
+        var g = model.GuardianLinks[0];
+        g.Contacts.Should().NotBeNull("the card list needs each guardian's contacts");
+        g.Contacts!.Count.Should().Be(3);
+        g.Contacts[0].Channel.Should().Be(ContactChannel.Email);
+        g.Contacts[0].Value.Should().Be("alice@example.com");
+        g.Contacts[0].Order.Should().Be(0, "Order reflects the top-3 source index for stable display order");
+        g.Contacts[1].Channel.Should().Be(ContactChannel.SMS);
+        g.Contacts[1].CountryCode.Should().Be("+233");
+        g.Contacts[1].Order.Should().Be(1);
+        g.Contacts[2].Channel.Should().Be(ContactChannel.WhatsApp);
+        g.Contacts[2].Order.Should().Be(2);
+    }
+
+    [TestMethod]
+    public void LoadFrom_AllInclusive_EmptyGuardianContacts_RendersAsEmptyChipList()
+    {
+        // A guardian with no contacts should still produce a GuardianAssignment
+        // with an empty (not null) Contacts list, so the card list renders the
+        // muted "— no contacts —" placeholder rather than crashing.
+        var student = MakeStudent();
+        var guardian = MakeGuardian(); // no Contacts init → empty array default
+        var model = new StudentFormModel();
+        model.LoadFrom(student, new[] { guardian }, Array.Empty<ContactDto>());
+
+        var g = model.GuardianLinks[0];
+        g.Contacts.Should().NotBeNull();
+        g.Contacts.Should().BeEmpty();
     }
 
     [TestMethod]

@@ -154,3 +154,111 @@
     flex-direction: column;
     gap: 0.5rem;
 }
+
+/* ── Guardian card list (Inline-mode card redesign) ──
+   Mirrors the visual language of the <ContactsEditor> contact-item list
+   (bordered cards, head line + value line, primary accent highlight)
+   so the Guardians section and the Contacts section sit as two
+   parallel card-list blocks under the student profile. Display-only:
+   the per-guardian contact chips are loaded from each linked
+   guardian's top-3 contacts (StudentGuardianViewDto.Contacts) and
+   cannot be edited from this dialog — guardian contact editing still
+   lives on the guardian surface (GuardianDetail). */
+.guardian-cards {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.guardian-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    border-radius: 6px;
+    background: var(--neutral-layer-1, #fafafa);
+}
+
+/* Primary-guardian highlight — mirrors the contacts list's
+   .contact-item--preferred accent. The primary link is the visual
+   anchor of the list, matching the contacts list's "preferred"
+   convention. */
+.guardian-card--primary {
+    border-color: var(--accent-fill-rest, #0078d4);
+    background: var(--accent-fill-rest-area, #e6f2fa);
+}
+
+.guardian-card-head {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.guardian-card-name {
+    font-weight: 600;
+}
+
+.guardian-card-rel {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+}
+
+.guardian-card-badge {
+    white-space: nowrap;
+}
+
+.guardian-card-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+
+.guardian-card-contacts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.guardian-contact-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* ── Inline "add guardian" row (mirrors the ContactsEditor add-contact row) ──
+   A horizontal flex-wrap strip with the Relationship dropdown + Last/First
+   name fields + an Accent Add button, always visible in List mode. Sits
+   above the card list so adding is always reachable (same rhythm as the
+   contacts editor's add row). The "Add existing" Lightweight button sits
+   below it as a secondary action. */
+.guardian-add-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.guardian-add-field {
+    flex: 1 1 160px;
+    min-width: 120px;
+}
+
+.guardian-add-existing {
+    margin-left: auto;
+}
+
+/* Contacts editor embedded in the Edit panel. Gives it a divider + spacing
+   so it sits comfortably between the metadata fields and the Save/Cancel
+   actions. */
+.guardian-edit-contacts {
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+}
