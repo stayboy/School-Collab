@@ -169,6 +169,20 @@ public sealed class UpdateStudentWithLinkedDataHandler(
             {
                 // Brand-new guardian: create it, then link it.
                 var guardianId = AddNewGuardian(ctx, draft);
+                // Create the new guardian's initial contacts (only for
+                // newly-created guardians — existing guardians keep their
+                // contacts, edited on the guardian surface).
+                if (draft.Contacts is { Length: > 0 })
+                {
+                    foreach (var c in draft.Contacts)
+                    {
+                        ctx.Contacts.Add(
+                            Contact.Create(ContactOwnerType.Guardian, guardianId,
+                                    c.Channel, c.Value, c.Label, c.CountryCode,
+                                    c.DisplayOrder)
+                                .WithTenant(tenantProvider));
+                    }
+                }
                 ctx.StudentGuardians.Add(
                     StudentGuardian.Create(studentId, guardianId, draft.Role,
                             draft.RelationshipCodedValueId, draft.IsEmergencyContact,

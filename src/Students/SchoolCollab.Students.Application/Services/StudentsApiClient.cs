@@ -220,7 +220,8 @@ public record GuardianDraftRequest(
     string? FirstName = null,
     string? LastName = null,
     Guid? GenderCodedValueId = null,
-    DateOnly? DateOfBirth = null);
+    DateOnly? DateOfBirth = null,
+    ContactDraftRequest[]? Contacts = null);
 
 /// <summary>A contact row for the create/update student requests (reserved shape).
 /// <c>Id</c> is null for a new contact; set for an update (the all-inclusive edit

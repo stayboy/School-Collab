@@ -154,10 +154,29 @@ public sealed class StudentFormModel
             EnrollmentPeriodId: enrollmentPeriodId);
     }
 
-    private static GuardianAssignment ToGuardianAssignment(StudentGuardianViewDto g) => new(
-        g.GuardianId, g.FirstName, g.LastName, g.RelationshipCodedValueId,
-        ContactChannel: null, ContactValue: null, TitleCodedValueId: g.TitleCodedValueId,
-        Role: g.Role, IsEmergencyContact: g.IsEmergencyContact);
+    private static GuardianAssignment ToGuardianAssignment(StudentGuardianViewDto g)
+    {
+        // Map the per-link top-3 contact summary (Channel / Value / CountryCode)
+        // into the form-model ContactModel list. The legacy single-contact fields
+        // (ContactChannel/ContactValue/CountryCode) stay null here — they're only
+        // populated by the inline "New guardian" panel for newly-created (not
+        // yet persisted) guardians. Display-only in the edit dialog: the
+        // guardian's own contacts are still edited on the guardian surface
+        // (GuardianDetail) and never round-trip through the student save.
+        var contacts = g.Contacts
+            .Select((c, i) => new ContactModel
+            {
+                Channel = c.Channel,
+                Value = c.Value,
+                CountryCode = c.CountryCode,
+                Order = i,
+            })
+            .ToList();
+        return new GuardianAssignment(
+            g.GuardianId, g.FirstName, g.LastName, g.RelationshipCodedValueId,
+            ContactChannel: null, ContactValue: null, TitleCodedValueId: g.TitleCodedValueId,
+            Role: g.Role, IsEmergencyContact: g.IsEmergencyContact, Contacts: contacts);
+    }
 
     private static ContactModel ToContactModel(ContactDto c) => new()
     {
@@ -171,7 +190,9 @@ public sealed class StudentFormModel
 
     private static GuardianDraftRequest ToGuardianDraft(GuardianAssignment g) => new(
         g.ExistingGuardianId, g.Role, g.RelationshipCodedValueId, g.IsEmergencyContact,
-        TitleCodedValueId: g.TitleCodedValueId, FirstName: g.FirstName, LastName: g.LastName);
+        TitleCodedValueId: g.TitleCodedValueId, FirstName: g.FirstName, LastName: g.LastName,
+        Contacts: g.Contacts?.Select(c => new ContactDraftRequest(
+            c.Channel, c.Value, c.Label, c.CountryCode, c.Order, Id: c.PersistedId)).ToArray());
 
     private static ContactDraftRequest ToContactDraft(ContactModel c) => new(
         c.Channel, c.Value, c.Label, c.CountryCode, c.Order, Id: c.PersistedId);
