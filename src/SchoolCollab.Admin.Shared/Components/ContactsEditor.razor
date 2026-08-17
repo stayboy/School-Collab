@@ -120,14 +120,15 @@
                                                   class="contacts-label" />
                             </div>
                             <div class="contact-edit-actions">
+                                <FluentButton Appearance="Appearance.Outline"
+                                              OnClick="CancelEditAsync"
+                                              Disabled="@_savingEdit">
+                                    Cancel
+                                </FluentButton>
                                 <FluentButton Appearance="Appearance.Accent"
                                               OnClick="SaveEditAsync"
                                               Disabled="@(_savingEdit || string.IsNullOrWhiteSpace(_editValue))">
                                     @(_savingEdit ? "Saving…" : "Save")
-                                </FluentButton>
-                                <FluentButton Appearance="Appearance.Outline"
-                                              OnClick="CancelEditAsync">
-                                    Cancel
                                 </FluentButton>
                             </div>
                         }

@@ -197,7 +197,7 @@
                                 <FluentBadge Appearance="Appearance.Accent" class="guardian-card-badge">Emergency</FluentBadge>
                             }
                             <span class="guardian-card-actions">
-                                <FluentButton Appearance="Appearance.Lightweight" Title="Edit guardian"
+                                <FluentButton Appearance="Appearance.Lightweight" Title="Update guardian"
                                               OnClick="@(() => StartEditGuardian((int)g.Key))">
                                     <FluentIcon Icon="@(Icons.Regular.Size20.Edit)" />
                                 </FluentButton>
@@ -237,7 +237,7 @@
             {
                 <div class="guardian-add-section">
                     @{ var editedGuardian = (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count) ? GuardianLinks[_editingIndex] : null; }
-                    <h4 class="guardian-add-title">Edit guardian</h4>
+                    <h4 class="guardian-add-title">Update guardian</h4>
                     <FluentStack Orientation="Orientation.Vertical" Spacing="3">
                         @* Draft-only fields: title + name are editable only for
                            not-yet-persisted guardians (ExistingGuardianId is null).
@@ -292,8 +292,8 @@
                         </div>
                     }
                     <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
+                        <FluentButton Appearance="Appearance.Outline" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
                         <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button" OnClick="SaveEditGuardianAsync">Save</FluentButton>
-                        <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
                     </FluentStack>
                 </div>
             }

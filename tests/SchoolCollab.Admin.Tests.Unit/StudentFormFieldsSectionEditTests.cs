@@ -61,7 +61,7 @@ public class StudentFormFieldsSectionEditTests
             "the contacts section uses a CSS class for the section switch");
 
         // Active state hides the FormRow label and shows a dedicated title.
-        source.Should().Contain("Editing contacts",
+        source.Should().Contain("Update contact",
             "the contacts edit-view section has a title");
         css.Should().Contain("student-form-fields__section-row--active ::deep .form-row-label",
             "the active section hides the FormRow label via ::deep");
@@ -83,7 +83,7 @@ public class StudentFormFieldsSectionEditTests
 
         source.Should().Contain("SectionRowClass(StudentEditSection.Guardians)",
             "the guardians section uses a CSS class for the section switch");
-        source.Should().Contain("Editing guardians",
+        source.Should().Contain("Update guardian",
             "the guardians edit-view section has a title");
         css.Should().Contain("student-form-fields__section-row--hidden",
             "the CSS hides the inactive sibling section");
@@ -161,6 +161,27 @@ public class StudentFormFieldsSectionEditTests
             "inline edit has a Cancel handler");
         source.Should().Contain("contact-item--editing",
             "inline edit is rendered inside the editing list item");
+    }
+
+    [TestMethod]
+    public void InlineEditActions_UseConsistentCancelSaveOrder()
+    {
+        var contactsSource = ReadContactsEditorSource();
+        var guardiansSource = ReadGuardianSectionSource();
+
+        // Dialog-level actions and both inline editors use the same order:
+        // Cancel (Outline/Neutral) first, then Save (Accent) second.
+        var contactActionIdx = contactsSource.IndexOf("class=\"contact-edit-actions\"");
+        contactActionIdx.Should().BeGreaterThan(0);
+        var contactSlice = contactsSource.Substring(contactActionIdx, 500);
+        contactSlice.IndexOf("Cancel").Should().BeLessThan(contactSlice.IndexOf("Save"),
+            "ContactsEditor inline edit must render Cancel before Save");
+
+        var guardianActionIdx = guardiansSource.IndexOf("class=\"guardian-add-actions\"");
+        guardianActionIdx.Should().BeGreaterThan(0);
+        var guardianSlice = guardiansSource.Substring(guardianActionIdx, 300);
+        guardianSlice.IndexOf("Cancel").Should().BeLessThan(guardianSlice.IndexOf("Save"),
+            "GuardianSection inline edit must render Cancel before Save");
     }
 
     // ── Source-level: StudentEditDialog orchestration ───────────────────────

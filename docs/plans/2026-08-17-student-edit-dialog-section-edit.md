@@ -8,16 +8,16 @@
 
 ## 1. Goal
 
-Improve the student-edit dialog experience so the operator edits **contacts** or **guardians** in a focused, section-level mode rather than scrolling through an always-editable form.
+Improve the student-edit dialog experience so the operator edits **one contact** or **one guardian** in a focused, section-level mode rather than scrolling through an always-editable form.
 
-When the operator starts editing one of those sections (via the existing Edit/Save affordances inside `ContactsEditor` or `GuardianSection`):
+When the operator starts editing one of those entities (via the existing Edit/Save affordances inside `ContactsEditor` or `GuardianSection`):
 
 1. **Both** display row sections (the Contacts row and the Guardians row) are hidden.
-2. A dedicated **edit-view section** ("Editing contacts" / "Editing guardians") renders the full editor for the chosen section.
+2. A dedicated edit-view section (**"Update contact"** / **"Update guardian"**) renders the full editor for the chosen entity.
 3. All student profile fields (student number, name, title, DOB, gender) become disabled.
-4. The dialog-level submit actions (Save / Cancel) are **disabled** (shown but greyed out) — NOT removed.
-5. The chosen section's **existing** Cancel/Save buttons remain usable.
-6. On Cancel or Save inside the section editor, the dialog returns to the normal state: both display rows visible, profile fields enabled, dialog submit actions re-enabled.
+4. The dialog-level submit actions (**Cancel** / **Save**) are **disabled** (shown but greyed out) — NOT removed.
+5. The chosen entity's own **Cancel** / **Save** buttons remain usable and use the same order as the dialog actions: **Cancel first, Save second**.
+6. On Cancel or Save inside the inline editor, the dialog returns to the normal state: both display rows visible, profile fields enabled, dialog submit actions re-enabled.
 
 The enhancement applies primarily to the **student edit dialog** (`StudentEditDialog.razor`) because that is the dialog-hosted, full-student editing surface. The page form (`/students/{id}/edit`) can opt into the same `StudentFormFields` behaviour later, but its out-of-form "Direct contact" section requires separate page-level coordination and is not in this plan's primary scope.
 
@@ -65,14 +65,14 @@ Both sections are always visible side-by-side. That creates a long, busy dialog 
 │  Contacts row    (hidden)   │
 │  Guardians row   (hidden)   │
 ├─────────────────────────────┤
-│  Editing contacts           │  ← edit-view section: full ContactsEditor
-│  [Channel] [Value] [Label]  │     with inline Save/Cancel for the edited row
+│  Update contact             │  ← edit-view section: full ContactsEditor
+│  [Channel] [Value] [Label]  │     with inline Cancel/Save for the edited row
 ├─────────────────────────────┤
-│  dialog actions  (disabled) │  ← Save/Cancel greyed out
+│  dialog actions  (disabled) │  ← Cancel/Save greyed out
 └─────────────────────────────┘
 ```
 
-The `ContactsEditor` edit/remove flow opens its own `ContactChangeDialog`; that dialog already has its own Cancel/Save buttons.
+In **Buffered** mode the contact edit is inline (Cancel first, Save second). In **Live** mode the `ContactChangeDialog` still opens because per-edit audit requires a reason. Delete keeps the shared dialog in both modes (it already collects a required reason).
 
 ### 3.3 Guardians-edit state
 
@@ -86,10 +86,10 @@ The `ContactsEditor` edit/remove flow opens its own `ContactChangeDialog`; that 
 │  Contacts row    (hidden)   │
 │  Guardians row   (hidden)   │
 ├─────────────────────────────┤
-│  Editing guardians          │  ← edit-view section: full GuardianSection inline editor
+│  Update guardian            │  ← edit-view section: full GuardianSection inline editor
 │  [Cancel] [Save]            │  ← GuardianSection's own inline panel buttons
 ├─────────────────────────────┤
-│  dialog actions  (disabled) │  ← Save/Cancel greyed out
+│  dialog actions  (disabled) │  ← Cancel/Save greyed out
 └─────────────────────────────┘
 ```
 
@@ -122,12 +122,12 @@ Behaviour derived from `ActiveEditSection`:
 - `Contacts`:
   - Profile fields disabled via a computed flag `AreProfileFieldsDisabled = true`.
   - **Both** the Contacts display row and the Guardians display row are hidden.
-  - A dedicated edit-view section ("Editing contacts") renders the full `ContactsEditor`.
+  - A dedicated edit-view section ("Update contact") renders the full `ContactsEditor`.
   - The built-in form action row stays visible but its Submit/Cancel buttons are **disabled** (greyed out) — not removed.
 - `Guardians`:
   - Profile fields disabled.
   - **Both** the Contacts display row and the Guardians display row are hidden.
-  - A dedicated edit-view section ("Editing guardians") renders the full `GuardianSection` Inline editor.
+  - A dedicated edit-view section ("Update guardian") renders the full `GuardianSection` Inline editor.
   - The built-in form action row stays visible but disabled.
 
 The form wires the child components' new `IsEditingChanged` callbacks:
@@ -147,7 +147,7 @@ private async Task OnGuardiansEditingChanged(bool isEditing)
 
 No section-header Edit buttons are added, and no dedicated Cancel/Done buttons are added to the edit-view section. The child components own those interactions.
 
-### 4.2 `ContactsEditor.razor` — report editing-state changes
+### 4.2 `ContactsEditor.razor` — inline edit in Buffered mode, report state changes
 
 Add a single new parameter:
 
@@ -155,11 +155,13 @@ Add a single new parameter:
 [Parameter] public EventCallback<bool> IsEditingChanged { get; set; }
 ```
 
-The editor already opens a `ContactChangeDialog` for Edit and Remove actions. Wrap those calls with `InvokeAsync(true)` before the dialog opens and `InvokeAsync(false)` after it closes (in a `finally` so Cancel also reports closure).
+**Buffered mode:** Clicking a contact's Edit button switches that row to an inline edit form (channel dropdown, optional country-code dropdown, value, label, **Cancel**, **Save**). The editor fires `IsEditingChanged(true)` when the inline form opens and `IsEditingChanged(false)` when Save or Cancel closes it.
 
-No other behaviour changes: the add-row, list, badges, and per-row actions remain exactly as they are.
+**Live mode:** Keeps the existing `ContactChangeDialog` because per-edit contact audit requires a reason.
 
-### 4.3 `GuardianSection.razor` — report editing-state changes
+Remove/delete keeps the shared dialog in both modes (it already collects a required reason).
+
+### 4.3 `GuardianSection.razor` — inline edit panel, report state changes
 
 Add a single new parameter:
 
@@ -169,7 +171,9 @@ Add a single new parameter:
 
 Fire `true` when the inline edit panel opens (either from a card's Edit button or from the add-row path that auto-opens the panel for a newly-added guardian). Fire `false` when the panel closes via Save or Cancel.
 
-No other behaviour changes: the add-row, card list, and inline edit panel remain exactly as they are.
+The inline edit panel title is **"Update guardian"** and its action buttons are **Cancel** then **Save**.
+
+When the panel is open, **all** guardian cards are hidden; only the edit panel is visible.
 
 ### 4.4 `StudentEditDialog.razor` — mirror the section state
 
@@ -224,11 +228,11 @@ This is a safety net; the Save/Cancel buttons are already disabled during a sect
 Add scoped CSS classes to `StudentFormFields.razor.css`:
 
 - `.student-form-fields__profile-row` / `.student-form-fields__profile-row--disabled` — each profile `FormRow` is wrapped in a div so it can be dimmed and made non-interactive during a section edit without breaking the `FluentStack Spacing="3"` gaps.
-- `.student-form-fields__section-row` / `--hidden` / `--active` — each Contacts/Guardians `FormRow` is wrapped in a div so the section switch is done via CSS. This keeps the same component instance mounted. The active state hides the `FormRow` label via `::deep`, shows the `"Editing ..."` title, and draws a highlighted box around the section. The active section uses `padding-left: 0` and indents the title and `FormRow` content by the canonical **180px** so the editor lines up with the normal profile input cells above.
-- `.student-form-fields__edit-title` — the "Editing contacts" / "Editing guardians" title.
+- `.student-form-fields__section-row` / `--hidden` / `--active` — each Contacts/Guardians `FormRow` is wrapped in a div so the section switch is done via CSS. This keeps the same component instance mounted. The active state hides the `FormRow` label via `::deep`, shows the `"Update ..."` title, and draws a highlighted box around the section. The active section uses `padding-left: 0` and indents the title and `FormRow` content by the canonical **180px** so the editor lines up with the normal profile input cells above.
+- `.student-form-fields__edit-title` — the "Update contact" / "Update guardian" title.
 - `.student-form-fields__section-divider` — the horizontal rule between the profile block and each section (and between sections). Given `margin: 0.75rem 0` so it no longer touches the content below it.
 
-No read-only styling is added to `ContactsEditor` or `GuardianSection`; their normal rendering is used in both display and edit-view states.
+No read-only styling is added to `ContactsEditor` or `GuardianSection`; their normal rendering is used in both display and edit-view states. The inline edit form in `ContactsEditor` uses a new `.contact-item--editing` class and `.contact-edit-actions` row for Cancel/Save styling.
 
 ---
 
@@ -240,11 +244,13 @@ Add `StudentFormFieldsSectionEditTests.cs` (source-level assertions against the 
 
 1. `ContactsEdit_HidesSiblingSectionAndDisablesProfileAndSubmit`
    - Assert the contacts edit-view section is gated on `ActiveEditSection == Contacts` and `EnableSectionEdit`.
+   - Assert the title is **"Update contact"**.
    - Assert profile inputs use `Disabled="@AreProfileFieldsDisabled"`.
    - Assert the form action buttons use `Disabled="@(Submitting || AreProfileFieldsDisabled)"`.
 
 2. `GuardiansEdit_HidesSiblingSectionAndDisablesProfileAndSubmit`
    - Assert the guardians edit-view section is gated on `ActiveEditSection == Guardians` and `EnableSectionEdit`.
+   - Assert the title is **"Update guardian"**.
    - Assert profile fields and action buttons are disabled during the edit.
 
 3. `NormalState_ShowsBothSections`
@@ -259,17 +265,20 @@ Add `StudentFormFieldsSectionEditTests.cs` (source-level assertions against the 
    - Assert `GuardianSection` declares `IsEditingChanged` and invokes it with `true`/`false`.
 
 6. `ContactsEditor_UsesInlineEditWithSaveCancelInBufferedMode`
-   - Assert `ContactsEditor` branches Live mode to the `ContactChangeDialog` and Buffered mode to inline editing with Save/Cancel.
+   - Assert `ContactsEditor` branches Live mode to the `ContactChangeDialog` and Buffered mode to inline editing with Cancel/Save.
 
-7. `GuardianEdit_HidesDisplayViewOfEditedGuardian`
-   - Assert `GuardianSection` skips **all** guardian cards when the inline Edit panel is open — the edit panel is the only visible view of the guardian being edited.
+7. `InlineEditActions_UseConsistentCancelSaveOrder`
+   - Assert both `ContactsEditor` and `GuardianSection` inline edit action rows render **Cancel before Save**.
 
-8. `StudentEditDialog_WiresSectionEditParameters`
+8. `GuardianEdit_HidesDisplayViewOfEditedGuardian`
+   - Assert `GuardianSection` skips **all** guardian cards when the inline edit panel is open — the edit panel is the only visible view of the guardian being edited.
+
+9. `StudentEditDialog_WiresSectionEditParameters`
    - Assert the dialog passes `EnableSectionEdit="true"`, `ActiveEditSection`, and `ActiveEditSectionChanged`.
 
-8. `StudentEditDialog_DoesNotSnapshotOrAddSectionButtons`
-   - Assert the dialog does not keep `_contactsSnapshot` / `_guardianLinksSnapshot`.
-   - Assert the dialog does not wire `OnSectionEditSave` / `OnSectionEditCancel`.
+10. `StudentEditDialog_DoesNotSnapshotOrAddSectionButtons`
+    - Assert the dialog does not keep `_contactsSnapshot` / `_guardianLinksSnapshot`.
+    - Assert the dialog does not wire `OnSectionEditSave` / `OnSectionEditCancel`.
 
 ### 6.2 Playwright smoke test (optional, future)
 
@@ -279,12 +288,14 @@ A focused E2E smoke can wait until the new behaviour is stable. The existing `Co
 
 ## 7. Acceptance criteria
 
-- [x] `StudentEditDialog` opens in normal state: both sections visible, profile editable, Save/Cancel visible **and enabled**.
-- [x] Activating a contact edit (via `ContactsEditor`'s existing Edit button) hides **both** sections, disables profile, **disables** the dialog Save/Cancel (greyed out, still present), and renders an "Editing contacts" edit-view section with the full `ContactsEditor` and an inline Save/Cancel form for the edited contact.
-- [x] Activating a guardian edit (via `GuardianSection`'s existing Edit affordance) hides **both** sections, disables profile, disables the dialog Save/Cancel, and renders an "Editing guardians" edit-view section with the full `GuardianSection` inline editor (its own Save/Cancel).
-- [x] The section's own Cancel/Save buttons return the form to the normal state and re-enable the dialog Save/Cancel.
+- [x] `StudentEditDialog` opens in normal state: both sections visible, profile editable, Cancel/Save visible **and enabled**.
+- [x] Activating a contact edit (via `ContactsEditor`'s existing Edit button) hides **both** sections, disables profile, **disables** the dialog Cancel/Save (greyed out, still present), and renders an "Update contact" edit-view section with the full `ContactsEditor` and an inline Cancel/Save form for the edited contact.
+- [x] Activating a guardian edit (via `GuardianSection`'s existing Edit affordance) hides **both** sections, disables profile, disables the dialog Cancel/Save, and renders an "Update guardian" edit-view section with the full `GuardianSection` inline editor (its own Cancel/Save).
+- [x] Inline edit action buttons in both `ContactsEditor` and `GuardianSection` use the same order as the dialog actions: **Cancel first, Save second**.
+- [x] The section's own Cancel/Save buttons return the form to the normal state and re-enable the dialog Cancel/Save.
 - [x] The dialog-level Save still writes the entire student (profile + contacts + guardians) atomically, and guards against persisting while a section edit is active.
-- [x] The focused edit-view section is offset to the right by the canonical 180px label-column width, so the "Editing ..." title and the editor line up with the input cells in the normal profile rows above.
+- [x] Row spacing (gaps) in `StudentFormFields` are preserved: profile `FormRow`s and section `FormRow`s are wrapped in divs that remain direct children of the `FluentStack Spacing="3"`.
+- [x] The focused edit-view section is offset to the right by the canonical 180px label-column width, so the "Update ..." title and the editor line up with the input cells in the normal profile rows above.
 - [x] The section divider (`FluentDivider`) has vertical breathing room (`margin: 0.75rem 0`) so it no longer touches the content below it.
 - [x] When editing a guardian, the guardian card display view is hidden entirely; only the inline edit panel is shown.
 - [x] All existing callers of `StudentFormFields` continue to work unchanged when `ActiveEditSection` is not set (defaults to `None`).
