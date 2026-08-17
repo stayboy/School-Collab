@@ -870,3 +870,111 @@ The field shows the picked guardian's `FullName` (single-select display) + the b
 
 `SearchGuardiansByStudentNameRowsAsync` does `1 + N` calls (`ListStudentsAsync` + `N × ListGuardiansByStudentAsync`) where N ≤ 10 (the `Take(10)` cap). `Task.WhenAll` parallelizes the N. This is the one cost of the single-component "search guardians by student name" approach — acceptable for a typeahead, and collapsible to a single server call later via a `GET /guardians?wardSearch={q}` endpoint (§8 permits StudentsApiClient changes when needed; not required for ship). Unlike the earlier `FocusAsync()` re-open risk, this is a **latency consideration, not a correctness risk** — there is no re-entrancy or popup-state hazard.
 
+## 12. Post-PR layout refinements and review resolutions
+
+PR #171 (the implementation of §§1–11) shipped, then a short review pass
+found two layout bugs and a handful of stale references that the pre-PR
+phases didn't catch. This section records the corrections so the next
+reader of this spec sees the **final** state of the add row — not the
+intermediate one implied by §§1–11. The five items below (12.1.1, 12.1.2,
+and the F1–F6 list in 12.2) were applied in that order, in a single
+follow-up commit on `feature/add-existing-guardian-typeahead` (kept
+inside PR #171 to keep the feature reviewable as one unit).
+
+### 12.1 Layout refinements
+
+#### 12.1.1 Radio below the typeahead; relationship dropdown shrunk 150px
+
+**Before.** In existing mode, the row was
+
+```
+[Relationship ▾ 200px] [Typeahead 200px] [Radio (margin-left:auto, far-right)] [Add]
+```
+
+`.guardian-add-row` is `display:flex; flex-wrap:wrap`, so when the row's
+intrinsic width exceeded the dialog content area the Add button
+**wrapped to a second line** — the radio's `margin-left:auto` gave the
+appearance of a deliberate far-right placement, but it was masking the
+over-budget layout.
+
+**After.**
+
+```
+[Relationship ▾ 150px] [Typeahead fills row width] [Add]
+                     ┌── [Typeahead         ]
+                     └── [ ○ Contact  ○ Student ]   ← radio hangs below the input
+```
+
+Changes:
+- `FluentSelect` inline `Style="width: 200px"` → `"width: 150px"`.
+- Wrap `FluentAutocomplete` + `FluentRadioGroup` in a new `<div class="guardian-typeahead-stack">` (flex-column, `gap: 4px`).
+- Drop the far-right `margin-left: auto` on `.guardian-search-mode`; the radio now lives inside the column stack and left-aligns beneath the input.
+
+#### 12.1.2 Top-aligned inputs; typeahead fills row; action button never wraps
+
+After 12.1.1, the row still had two visible problems at common widths:
+the typeahead top was **mis-aligned** with the relationship dropdown top
+(because the row's `align-items: center` centered the 60px-tall
+typeahead-stack against the 32px-tall dropdown, so the typeahead's top
+sat above the dropdown's top), and the typeahead was still hard-pinned
+at 200px while the row had unused horizontal space.
+
+**Fix.** Three CSS moves on `.guardian-add-row` + `.guardian-typeahead-stack` + the typeahead itself:
+
+| | Before | After |
+| --- | --- | --- |
+| Row wrap | `flex-wrap: wrap` | **`flex-wrap: nowrap`** — the Add button can never drop to a second line |
+| Row alignment | `align-items: center` | **`align-items: flex-start`** — input tops align; the radio below the typeahead naturally extends past the Add button baseline |
+| Typeahead width | `Style="width: 200px"` (fixed) | `Style="width: 100%"` (inside the stack) + stack `flex: 1 1 0; min-width: 0` — the typeahead fills the remaining row width and can shrink in narrow containers |
+
+The `flex-shrink: 0` the stack had after 12.1.1 was **replaced** by
+`flex: 1 1 0; min-width: 0` here — the new flex values let the stack
+grow into the row (the whole point of making the typeahead fill) and
+allow it to shrink below content size if the dialog is unusually narrow.
+This pattern is captured in the repo skill
+`flex-row-input-alignment`.
+
+#### 12.1.3 Acceptance criteria added (§9 addendum)
+
+To make the post-review layout testable rather than implicit:
+
+- **9.6 (new) Input-top alignment.** In existing mode, the
+  `FluentSelect` (relationship) and the `FluentAutocomplete` (search)
+  top edges align (`align-items: flex-start` on `.guardian-add-row`).
+  The radio below the typeahead is permitted to extend past the Add
+  button's baseline.
+- **9.7 (new) No-wrap action button.** The Add button never wraps to a
+  second line at any normal dialog width (`flex-wrap: nowrap` on
+  `.guardian-add-row`). If the dialog is so narrow that the row would
+  overflow, the relationship dropdown or the button may shrink — but
+  the visual contract is "the Add is reachable in the same row as the
+  inputs."
+- **9.8 (new) Typeahead fills row width.** In existing mode the
+  typeahead absorbs the remaining row width
+  (`flex: 1 1 0; min-width: 0` on `.guardian-typeahead-stack`,
+  `width: 100%` on the `FluentAutocomplete`). The relationship dropdown
+  keeps its explicit 150px; the Add button keeps its content width.
+
+These three are visual contracts. As with 9.2 (divider), they require
+a browser run to confirm — the build does not catch misalignment, and
+the bUnit suite tests the model-level seams only (§9.4).
+
+### 12.2 Review resolutions (F1–F6)
+
+Listed in review order; all applied as part of the PR #171 follow-up commit.
+
+| | Finding | Resolution |
+| --- | --- | --- |
+| **F1** | Dead state `_searchQuery` — never assigned non-null, never read by any predicate. `FluentAutocomplete` owns `ValueText` internally. | Field + doc comment deleted. No call-site change needed (nothing read it). |
+| **F2** | Dead state `_selectedRow` — the radio's `@bind-Value:after` lambda was setting it to `null` on every mode toggle, but no predicate read it. `FluentAutocomplete` manages its own `SelectedOption` internally; the Add predicate uses `_existingGuardianId`. | Field + doc comment deleted; the radio's `:after` lambda removed (now plain `@bind-Value="_searchMode"`); the `ClearTypeaheadState` comment rewritten. |
+| **F3** | `_typeahead` `@ref` declared but never invoked at runtime. Kept as a hook for pending keyboard-navigation verification. | **Carried forward.** Not dead *yet* — it's the planned entry point for the 9.5 keyboard-nav check. Removed later if PR review doesn't ask for the manual nav pass. |
+| **F4** | Pick persists across the Contact ↔ Student radio toggle. | **Accepted as intentional UX.** Reset on toggle was friction (the pick is valid in either mode; only the relationship auto-prefill differs). Documented in code (the `SearchMode` enum doc comment, the `ClearTypeaheadState` comment, and the `OnTypeaheadSelectedAsync` comment block) and now here. **Known low-severity side-effect:** the `FluentAutocomplete` popup's items may be briefly stale after a toggle until the next keystroke — popup closes on blur, so this is invisible in normal flow. |
+| **F5** | Plan doc had stale "two-step" mentions in §3.1 Student mode and the §10b plan, written before the §11 single-component revision. | Both callouts now marked **⚠️ Superseded by §11**. No code change. |
+| **F6** | The `OnTypeaheadSearchAsync` handler-comment block still described the old Phase-4 manual-debounce + own-result-list semantics (`_debounce`, `Task.Delay`, `DispatchSearchAsync`, `_searchQuery`, etc.). | Comment block rewritten to §11 reality: the `FluentAutocomplete` component owns debounce (`ImmediateDelay="300"`) and ARIA combobox semantics; the handler-internal CTS only cancels a *superseded* search; the picked id persists across mode toggles. |
+
+F1/F2 are pure cleanups; F5/F6 are doc-only. F3 is an honest
+documentation choice ("not dead yet, here's why we kept it"). F4 is
+the one **product** decision in the bunch — pick persistence on
+mode toggle — and it belongs in product discussion rather than buried
+in a code comment.
+
