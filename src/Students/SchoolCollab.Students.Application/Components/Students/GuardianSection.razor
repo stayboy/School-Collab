@@ -169,11 +169,10 @@
             <div class="guardian-cards">
                 @foreach (var g in GuardianGridRows)
                 {
-                    // While the Edit panel is open, all OTHER guardian cards hide
-                    // — only the card currently being edited stays visible (its
-                    // Key is its index into GuardianLinks). Save/Cancel
-                    // restores the list.
-                    if (_panelMode == GuardianPanelMode.Edit && (int)g.Key != _editingIndex)
+                    // When the Edit panel is open, ALL guardian cards hide
+                    // — the edit panel itself is the only visible view of the
+                    // guardian being edited. Save/Cancel restores the list.
+                    if (_panelMode == GuardianPanelMode.Edit)
                     {
                         continue;
                     }
@@ -338,6 +337,11 @@
     /// the GuardianId for the API call.</summary>
     [Parameter] public EventCallback<StudentGuardianViewDto> OnRemoveGuardian { get; set; }
 
+    /// <summary>Raised when the inline edit panel opens (true) or closes
+    /// (false). Allows a parent dialog to switch to a focused section-edit UX
+    /// while a guardian is being edited inline.</summary>
+    [Parameter] public EventCallback<bool> IsEditingChanged { get; set; }
+
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
     [Inject] private ILogger<GuardianSection> Logger { get; set; } = default!;
@@ -404,6 +408,12 @@
     // in place; on Save it's written back to the GuardianAssignment.Contacts).
     private List<ContactModel> _editContacts = new();
 
+    /// <summary>Notifies the parent when the inline edit panel opens or closes.</summary>
+    private async Task NotifyIsEditingAsync(bool isEditing)
+    {
+        await IsEditingChanged.InvokeAsync(isEditing);
+    }
+
     // ── Linked-mode helpers (page-side) ──
     // In Linked mode the component is a pure presenter: the page owns the link
     // load + API calls and passes LinkedItems down. The component surfaces a
@@ -461,6 +471,7 @@
     private async Task StartEditGuardian(int index)
     {
         if (index < 0 || index >= GuardianLinks.Count) return;
+        await NotifyIsEditingAsync(true);
         var a = GuardianLinks[index];
         _editingIndex = index;
         _editRelationshipId = a.RelationshipCodedValueId;
@@ -475,8 +486,9 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    private void CancelPanel()
+    private async Task CancelPanel()
     {
+        await NotifyIsEditingAsync(false);
         _panelMode = GuardianPanelMode.List;
         // The inline add-row fields are intentionally NOT cleared here — they
         // persist across panel navigation (mimics ContactsEditor's add row).
@@ -496,6 +508,7 @@
     {
         if (_editingIndex < 0 || _editingIndex >= GuardianLinks.Count)
         {
+            await NotifyIsEditingAsync(false);
             _panelMode = GuardianPanelMode.List;
             return;
         }
@@ -515,6 +528,7 @@
             GuardianLinks[_editingIndex] = updated;
             if (_editRelationshipId is { } relId)
                 await EnsureRelNameAsync(relId);
+            await NotifyIsEditingAsync(false);
             _panelMode = GuardianPanelMode.List;
             _editingIndex = -1;
         }
@@ -644,6 +658,7 @@
                 _editContacts = (a.Contacts ?? []).ToList();
                 if (_editRelationshipId is { } relId)
                     await EnsureRelNameAsync(relId);
+                await NotifyIsEditingAsync(true);
                 _panelMode = GuardianPanelMode.Edit;
             }
             else

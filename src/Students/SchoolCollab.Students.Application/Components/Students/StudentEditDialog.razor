@@ -6,6 +6,7 @@
    action via ShowReadonlyDialogAsync. *@
 @implements IDialogContentComponent<DialogParameters>
 @using System.Net
+@using SchoolCollab.Admin.Shared.Components
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
 @using Microsoft.FluentUI.AspNetCore.Components
@@ -46,7 +47,10 @@ else
                        SubmitLabel="Save Changes"
                        SubmittingLabel="Saving…"
                        Submitting="@_saving"
-                       OnCancel="CancelAsync" />
+                       OnCancel="CancelAsync"
+                       EnableSectionEdit="true"
+                       ActiveEditSection="@_activeEditSection"
+                       ActiveEditSectionChanged="OnActiveEditSectionChanged" />
 }
 
 @code {
@@ -77,6 +81,13 @@ else
     private bool _loaded;
     private bool _concurrencyConflict;
     private string? _error;
+
+    // ── Focused section-edit state ──
+    // The dialog owns the section-edit state machine. While a section reports
+    // that it is editing, the form hides the other section, disables the
+    // profile fields, and disables the dialog's Save/Cancel. The sections'
+    // own Cancel/Save buttons remain usable.
+    private StudentFormFields.StudentEditSection _activeEditSection = StudentFormFields.StudentEditSection.None;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -111,6 +122,10 @@ else
     private async Task OnSaveAsync()
     {
         if (_saving) return;
+        // Safety guard: never persist while a section edit is active. The
+        // dialog's Save button is disabled during a section edit, but this
+        // also covers an Enter-key form submit that bypasses the button.
+        if (_activeEditSection != StudentFormFields.StudentEditSection.None) return;
         _saving = true;
         _error = null;
         try
@@ -144,4 +159,14 @@ else
     }
 
     private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+
+    // ── Focused section-edit handler ──
+    /// <summary>Fired when a child section starts or stops editing.
+    /// Simply mirrors the new section state into the dialog field so the
+    /// form hides the other section and disables the profile/actions.</summary>
+    private Task OnActiveEditSectionChanged(StudentFormFields.StudentEditSection section)
+    {
+        _activeEditSection = section;
+        return Task.CompletedTask;
+    }
 }

@@ -116,6 +116,26 @@
     margin-left: auto;
 }
 
+/* Inline edit form shown inside a list item when the contact is being
+   edited in the focused section-edit UX. Stack the identity/value rows
+   vertically and right-align the Save/Cancel actions. */
+.contact-item--editing {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+}
+
+.contact-item--editing .contacts-editor-add__identity,
+.contact-item--editing .contacts-editor-add__value {
+    width: 100%;
+}
+
+.contact-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
 /* Buffered-mode (create-time) preferred-row highlight. The lowest-Order
    contact is the preferred one; a tinted border + background make it the
    visual anchor of the list, mirroring the old GuardianContactsEditor.

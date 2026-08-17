@@ -52,109 +52,135 @@
     <DataAnnotationsValidator />
 
     @* The parent vertical stack controls the row rhythm. Spacing="3" gives
-       a comfortable 12px gap between rows — modern forms have generous
-       breathing room rather than tight packing. *@
+       a comfortable 12px gap between rows. Profile FormRows are wrapped in
+       divs so the section-edit UX can dim them as a block without breaking
+       the FluentStack spacing. The Contacts / Guardians sections are also
+       wrapped in divs so the focused section-edit UX can hide the sibling
+       section and restyle the active section via CSS while keeping the same
+       component instance mounted. *@
     <FluentStack Orientation="Orientation.Vertical" Spacing="3">
-        @* Student number. ReadOnly when editing an existing student (the
-           student number is the stable identifier the rest of the app
-           keys off; it can't be changed after creation). *@
-        <FormRow Label="Student number"
-                 Required="@(!ReadOnlyStudentNumber)"
-                 For="studentFormNumber">
-            <FluentTextField Id="studentFormNumber"
-                             @bind-Value="Model.StudentNumber"
-                             ReadOnly="@ReadOnlyStudentNumber"
-                             Required="@(!ReadOnlyStudentNumber)"
-                             Placeholder="e.g. S-2026-001"
-                             class="w-5" />
-        </FormRow>
+        <div class="@ProfileRowClass">
+            @* Student number. ReadOnly when editing an existing student (the
+               student number is the stable identifier the rest of the app
+               keys off; it can't be changed after creation). *@
+            <FormRow Label="Student number"
+                     Required="@(!ReadOnlyStudentNumber)"
+                     For="studentFormNumber">
+                <FluentTextField Id="studentFormNumber"
+                                 @bind-Value="Model.StudentNumber"
+                                 ReadOnly="@ReadOnlyStudentNumber"
+                                 Required="@(!ReadOnlyStudentNumber)"
+                                 Disabled="@AreProfileFieldsDisabled"
+                                 Placeholder="e.g. S-2026-001"
+                                 class="w-5" />
+            </FormRow>
+        </div>
 
-        @* Name. First + last sit side-by-side inside the input cell. *@
-        <FormRow Label="Name" Required For="studentFormFirstName">
-            <FluentTextField Id="studentFormFirstName"
-                             @bind-Value="Model.FirstName"
-                             Required
-                             Placeholder="First name"
-                             class="w-9" />
-            <FluentTextField @bind-Value="Model.LastName"
-                             Required
-                             Placeholder="Last name"
-                             class="w-9" />
-        </FormRow>
+        <div class="@ProfileRowClass">
+            @* Name. First + last sit side-by-side inside the input cell. *@
+            <FormRow Label="Name"
+                     Required
+                     For="studentFormFirstName">
+                <FluentTextField Id="studentFormFirstName"
+                                 @bind-Value="Model.FirstName"
+                                 Required
+                                 Disabled="@AreProfileFieldsDisabled"
+                                 Placeholder="First name"
+                                 class="w-9" />
+                <FluentTextField @bind-Value="Model.LastName"
+                                 Required
+                                 Disabled="@AreProfileFieldsDisabled"
+                                 Placeholder="Last name"
+                                 class="w-9" />
+            </FormRow>
+        </div>
 
-        @* Title. Optional salutation (SALUTS parent) — shared demographic field.
-           Simple two-way binding into the model. *@
-        <FormRow Label="Title">
-            <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                @bind-SelectedId="Model.TitleCodedValueId"
-                                Placeholder="Select title"
-                                Width="FieldWidth.W4" />
-        </FormRow>
+        <div class="@ProfileRowClass">
+            @* Title. Optional salutation (SALUTS parent) — shared demographic field.
+               Simple two-way binding into the model. *@
+            <FormRow Label="Title">
+                <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                    @bind-SelectedId="Model.TitleCodedValueId"
+                                    Disabled="@AreProfileFieldsDisabled"
+                                    Placeholder="Select title"
+                                    Width="FieldWidth.W4" />
+            </FormRow>
+        </div>
 
-        @* Date of birth + Gender. Side-by-side in one row (mirrors the
-           First/Last name row above) so the profile block takes less vertical
-           space and the Contacts + Guardians sections below have room to grow.
-           DOB is a FluentDatePicker (binds to DateTime? via a bridge); Gender
-           is a required CodedValueDropdown. Both are required — the single
-           row asterisk marks the row as having required fields. *@
-        <FormRow Label="DOB/Gender" Required For="studentFormDob">
-            <FluentDatePicker Id="studentFormDob"
-                              Value="@DateOfBirthAsDateTime"
-                              ValueChanged="@OnDateOfBirthChanged"
-                              Required
-                              class="w-3" />
-            <CodedValueDropdown Parent="CodedValueParent.Genders"
-                                @bind-SelectedId="Model.GenderCodedValueId"
-                                Placeholder="Select gender"
-                                Width="FieldWidth.W4" />
-        </FormRow>
+        <div class="@ProfileRowClass">
+            @* Date of birth + Gender. Side-by-side in one row (mirrors the
+               First/Last name row above) so the profile block takes less vertical
+               space and the Contacts + Guardians sections below have room to grow.
+               DOB is a FluentDatePicker (binds to DateTime? via a bridge); Gender
+               is a required CodedValueDropdown. Both are required — the single
+               row asterisk marks the row as having required fields. *@
+            <FormRow Label="DOB/Gender"
+                     Required
+                     For="studentFormDob">
+                <FluentDatePicker Id="studentFormDob"
+                                  Value="@DateOfBirthAsDateTime"
+                                  ValueChanged="@OnDateOfBirthChanged"
+                                  Required
+                                  Disabled="@AreProfileFieldsDisabled"
+                                  class="w-3" />
+                <CodedValueDropdown Parent="CodedValueParent.Genders"
+                                    @bind-SelectedId="Model.GenderCodedValueId"
+                                    Disabled="@AreProfileFieldsDisabled"
+                                    Placeholder="Select gender"
+                                    Width="FieldWidth.W4" />
+            </FormRow>
+        </div>
 
-        @* Contacts section. Sits between the profile fields and the guardians
-           section so the student's own contact channels are captured first.
-           The editor is the shared <ContactsEditor> in Buffered mode,
-           collecting into Model.Contacts. The parent flushes the list to the
-           API as part of the atomic create/update. *@
+        @* Contacts + Guardians sections. When <see cref="EnableSectionEdit"/>
+           is true the form uses the focused section-edit UX: when a child
+           component starts editing, it raises IsEditingChanged(true). The
+           parent then hides the OTHER section via CSS, dims the profile
+           block, disables the dialog action row, and restyles the active
+           section as a dedicated edit-view section ("Editing contacts" /
+           "Editing guardians"). The same component instance stays mounted,
+           so its inline-edit state is preserved. When <see cref="EnableSectionEdit"/>
+           is false (default) the sections render side-by-side exactly as before.
+           The section switch uses CSS on a wrapper div so the same component
+           instances are preserved and the FormRow label is hidden in active state. *@
         @if (ShowContacts)
         {
-            <div class="">
-                <FluentDivider Orientation="Orientation.Horizontal" Style="width:100%" />
+            <div class="@SectionRowClass(StudentEditSection.Contacts)">
+                <FluentDivider class="student-form-fields__section-divider" Orientation="Orientation.Horizontal" Style="width:100%" />
+                @if (ActiveEditSection == StudentEditSection.Contacts)
+                {
+                    <h4 class="student-form-fields__edit-title">Editing contacts</h4>
+                }
+                <FormRow Label="Contacts">
+                    <div class="student-contacts">
+                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                        OwnerType="ContactOwnerType.Student"
+                                        Contacts="Model.Contacts"
+                                        ContactsChanged="OnDraftContactsChanged"
+                                        IsEditingChanged="OnContactsEditingChanged" />
+                    </div>
+                </FormRow>
             </div>
-            <FormRow Label="Contacts">
-                <div class="student-contacts">
-                    <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                    OwnerType="ContactOwnerType.Student"
-                                    Contacts="Model.Contacts"
-                                    ContactsChanged="OnDraftContactsChanged" />
-                </div>
-            </FormRow>
         }
-
-        @* Guardians section. Two modes (gated by the Mode parameter), fully
-           owned by the extracted <GuardianSection> component hosted inside
-           this FormRow:
-             - Inline (DEFAULT): the historical panel-switch UX — an always-
-               visible inline "add guardian" row (relationship dropdown +
-               name fields, or the "Add Existing Guardian" typeahead), a card
-               list of linked/drafted guardians, and an Edit panel for
-               relationship / role / contacts. Right inside DIALOGS (the
-               wizard's inline form, StudentPickerDialog's create flow, etc.).
-             - Linked: the compact page-side "Guardians (N) — Manage" section
-               used by /students/{id}/edit. Fires OnManageGuardians /
-               OnRemoveGuardian; the page owns the link APIs.
-           See GuardianSection.razor for the full behavior. *@
         @if (ShowGuardians)
         {
-            <div class="">
-                <FluentDivider Orientation="Orientation.Horizontal" Style="width:100%" />
+            <div class="@SectionRowClass(StudentEditSection.Guardians)">
+                <FluentDivider class="student-form-fields__section-divider" Orientation="Orientation.Horizontal" Style="width:100%" />
+                @if (ActiveEditSection == StudentEditSection.Guardians)
+                {
+                    <h4 class="student-form-fields__edit-title">Editing guardians</h4>
+                }
+                <FormRow Label="Guardians">
+                    <div class="student-guardians-wrap">
+                        <GuardianSection GuardianLinks="Model.GuardianLinks"
+                                         Mode="Mode"
+                                         StudentId="StudentId"
+                                         LinkedItems="LinkedItems"
+                                         OnManageGuardians="OnManageGuardians"
+                                         OnRemoveGuardian="OnRemoveGuardian"
+                                         IsEditingChanged="OnGuardiansEditingChanged" />
+                    </div>
+                </FormRow>
             </div>
-            <FormRow Label="Guardians">
-                <GuardianSection GuardianLinks="Model.GuardianLinks"
-                                 Mode="Mode"
-                                 StudentId="StudentId"
-                                 LinkedItems="LinkedItems"
-                                 OnManageGuardians="OnManageGuardians"
-                                 OnRemoveGuardian="OnRemoveGuardian" />
-            </FormRow>
         }
     </FluentStack>
 
@@ -199,14 +225,14 @@
                     {
                         <FluentButton Appearance="Appearance.Outline"
                                       OnClick="@OnCancel"
-                                      Disabled="@Submitting"
+                                      Disabled="@(Submitting || AreProfileFieldsDisabled)"
                                       class="form-actions__button">
                             @CancelLabel
                         </FluentButton>
                     }
                     <FluentButton Type="ButtonType.Submit"
                                   Appearance="Appearance.Accent"
-                                  Disabled="@Submitting"
+                                  Disabled="@(Submitting || AreProfileFieldsDisabled)"
                                   class="form-actions__button">
                         @(Submitting ? SubmittingLabel : SubmitLabel)
                     </FluentButton>
@@ -232,10 +258,19 @@
     /// page forms). The <c>student-form-fields--wide</c> modifier removes
     /// that cap so the form fills a wide dialog (used by the create/edit
     /// dialogs, which host the guardians section + contacts editor and need
-    /// the full dialog width).</summary>
-    private string FormClass => Wide
-        ? "student-form-fields student-form-fields--wide"
-        : "student-form-fields";
+    /// the full dialog width). The <c>student-form-fields--section-editing</c>
+    /// modifier is added while a section edit is active so the form can dim
+    /// the profile block and highlight the active edit-view section.</summary>
+    private string FormClass
+    {
+        get
+        {
+            var cls = Wide ? "student-form-fields student-form-fields--wide" : "student-form-fields";
+            if (EnableSectionEdit && ActiveEditSection != StudentEditSection.None)
+                cls += " student-form-fields--section-editing";
+            return cls;
+        }
+    }
 
     /// <summary>When true, removes the 600px max-width cap so the form
     /// fills the full dialog width. Used by the create/edit dialogs, which
@@ -327,6 +362,66 @@
 
     /// <summary>Error message to surface above the action row. Optional.</summary>
     [Parameter] public string? ErrorMessage { get; set; }
+
+    // ── Focused section-edit UX ──────────────────────────────────────────────
+    // When EnableSectionEdit is true the form uses the focused section-edit
+    // UX: the child components (ContactsEditor / GuardianSection) raise their
+    // existing edit/remove affordances and report editing-state changes back
+    // to this form via IsEditingChanged. While a section reports that it is
+    // editing, the OTHER section is hidden, the profile fields are disabled,
+    // and the dialog action row is disabled. The section's own Cancel/Save
+    // buttons remain usable. Opt-in so existing callers (Create.razor,
+    // Edit.razor, the wizard) keep the always-editable form.
+
+    /// <summary>Which section of the student form is in focused edit mode.</summary>
+    public enum StudentEditSection { None, Contacts, Guardians }
+
+    /// <summary>When true, the form uses the focused section-edit UX described
+    /// above. Default false — existing callers render the always-editable form.</summary>
+    [Parameter] public bool EnableSectionEdit { get; set; }
+
+    /// <summary>Which section, if any, is in focused edit mode. Only meaningful
+    /// when <see cref="EnableSectionEdit"/> is true. The parent owns this state
+    /// and binds it two-way via <see cref="ActiveEditSectionChanged"/>.</summary>
+    [Parameter] public StudentEditSection ActiveEditSection { get; set; } = StudentEditSection.None;
+
+    /// <summary>Two-way binding callback for <see cref="ActiveEditSection"/>.
+    /// Fired when a child section starts or stops editing so the parent can
+    /// switch the form in and out of the focused section-edit UX.</summary>
+    [Parameter] public EventCallback<StudentEditSection> ActiveEditSectionChanged { get; set; }
+
+    /// <summary>True while a section edit is active — disables the profile fields
+    /// and the dialog action row.</summary>
+    private bool AreProfileFieldsDisabled => EnableSectionEdit && ActiveEditSection != StudentEditSection.None;
+
+    /// <summary>Class applied to every profile FormRow. Adds a disabled modifier
+    /// while a section edit is active so the row dims and ignores pointer events.</summary>
+    private string ProfileRowClass => AreProfileFieldsDisabled
+        ? "student-form-fields__profile-row student-form-fields__profile-row--disabled"
+        : "student-form-fields__profile-row";
+
+    /// <summary>Class applied to the Contacts / Guardians FormRows. When the row's
+    /// section is active the label cell is hidden and the input cell fills the row
+    /// so the section reads as a dedicated edit-view. When the OTHER section is
+    /// active this row is hidden entirely. Only applies when EnableSectionEdit is
+    /// true; existing callers keep the normal side-by-side display.</summary>
+    private string SectionRowClass(StudentEditSection section)
+    {
+        var cls = "student-form-fields__section-row";
+        if (!EnableSectionEdit || ActiveEditSection == StudentEditSection.None)
+            return cls;
+        if (ActiveEditSection == section)
+            cls += " student-form-fields__section-row--active";
+        else
+            cls += " student-form-fields__section-row--hidden";
+        return cls;
+    }
+
+    private async Task OnContactsEditingChanged(bool isEditing)
+        => await ActiveEditSectionChanged.InvokeAsync(isEditing ? StudentEditSection.Contacts : StudentEditSection.None);
+
+    private async Task OnGuardiansEditingChanged(bool isEditing)
+        => await ActiveEditSectionChanged.InvokeAsync(isEditing ? StudentEditSection.Guardians : StudentEditSection.None);
 
     // ── DOB bridge: Model.DateOfBirth is DateOnly? but
     //    FluentDatePicker.Value is DateTime?. Convert on the way in

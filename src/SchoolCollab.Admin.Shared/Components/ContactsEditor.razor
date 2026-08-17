@@ -91,70 +91,112 @@
             <ul class="contacts-list">
                 @foreach (var c in RowSource)
                 {
-                    <li class="contact-item @(c.IsPreferred ? "contact-item--preferred" : null)">
-                        <span class="contact-channel" title="@c.Channel.ToString()">@ChannelGlyph(c.Channel) @c.Channel</span>
-                        <span class="contact-value">@FormatRowValue(c)</span>
-                        @if (!string.IsNullOrWhiteSpace(c.Label))
+                    <li class="contact-item @(c.IsPreferred ? "contact-item--preferred" : null) @(_editingContactKey == c.Key ? "contact-item--editing" : null)">
+                        @if (_editingContactKey == c.Key)
                         {
-                            <span class="contact-label">(@c.Label)</span>
+                            @* Inline edit form for Buffered mode. Live mode keeps the
+                               ContactChangeDialog because per-edit audit requires a reason. *@
+                            <div class="contacts-editor-add__identity">
+                                <DropdownForEnum TEnum="ContactChannel"
+                                                  @bind-SelectedValue="_editChannel"
+                                                  @bind-SelectedValue:after="OnEditChannelChanged"
+                                                  Placeholder="Channel"
+                                                  Width="FieldWidth.W2" />
+                                @if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+                                {
+                                    <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                                        @bind-SelectedId="_editCountryCodeId"
+                                                        Placeholder="Code"
+                                                        Width="FieldWidth.W3"
+                                                        OptionText="@FormatCountryCodeOption" />
+                                }
+                            </div>
+                            <div class="contacts-editor-add__value">
+                                <FluentTextField @bind-Value="_editValue"
+                                                  Placeholder="@EditValuePlaceholder"
+                                                  class="contacts-value" />
+                                <FluentTextField @bind-Value="_editLabel"
+                                                  Placeholder="Label (optional)"
+                                                  class="contacts-label" />
+                            </div>
+                            <div class="contact-edit-actions">
+                                <FluentButton Appearance="Appearance.Accent"
+                                              OnClick="SaveEditAsync"
+                                              Disabled="@(_savingEdit || string.IsNullOrWhiteSpace(_editValue))">
+                                    @(_savingEdit ? "Saving…" : "Save")
+                                </FluentButton>
+                                <FluentButton Appearance="Appearance.Outline"
+                                              OnClick="CancelEditAsync">
+                                    Cancel
+                                </FluentButton>
+                            </div>
                         }
-                        @if (c.IsPreferred)
+                        else
                         {
-                            <FluentBadge Appearance="Appearance.Accent" class="contact-badge">
-                                @(Mode == EditorMode.Live ? "Primary" : "Preferred")
-                            </FluentBadge>
-                        }
-                        @if (Mode == EditorMode.Live)
-                        {
-                            if (c.IsVerified)
+                            <span class="contact-channel" title="@c.Channel.ToString()">@ChannelGlyph(c.Channel) @c.Channel</span>
+                            <span class="contact-value">@FormatRowValue(c)</span>
+                            @if (!string.IsNullOrWhiteSpace(c.Label))
                             {
-                                <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Verified</FluentBadge>
+                                <span class="contact-label">(@c.Label)</span>
                             }
-                            else
+                            @if (c.IsPreferred)
                             {
-                                <FluentBadge Appearance="Appearance.Neutral" class="contact-badge">Unverified</FluentBadge>
+                                <FluentBadge Appearance="Appearance.Accent" class="contact-badge">
+                                    @(Mode == EditorMode.Live ? "Primary" : "Preferred")
+                                </FluentBadge>
                             }
-                        }
-
-                        @if (Mode == EditorMode.Live && ShowSubscription)
-                        {
-                            <FluentCheckbox Value="@_subscribed.Contains(c.Key)"
-                                            ValueChanged="@(v => ToggleSubscribeAsync(c.Key, v))"
-                                            class="contact-subscribe">
-                                Subscribed
-                            </FluentCheckbox>
-                        }
-
-                        <span class="contact-actions">
-                            @if (Mode == EditorMode.Live && !c.IsVerified)
+                            @if (Mode == EditorMode.Live)
                             {
+                                if (c.IsVerified)
+                                {
+                                    <FluentBadge Appearance="Appearance.Accent" class="contact-badge">Verified</FluentBadge>
+                                }
+                                else
+                                {
+                                    <FluentBadge Appearance="Appearance.Neutral" class="contact-badge">Unverified</FluentBadge>
+                                }
+                            }
+
+                            @if (Mode == EditorMode.Live && ShowSubscription)
+                            {
+                                <FluentCheckbox Value="@_subscribed.Contains(c.Key)"
+                                                ValueChanged="@(v => ToggleSubscribeAsync(c.Key, v))"
+                                                class="contact-subscribe">
+                                    Subscribed
+                                </FluentCheckbox>
+                            }
+
+                            <span class="contact-actions">
+                                @if (Mode == EditorMode.Live && !c.IsVerified)
+                                {
+                                    <FluentButton Appearance="Appearance.Lightweight"
+                                                  Title="Mark verified"
+                                                  IconStart="@FluentIcons.Checkmark"
+                                                  OnClick="@(() => VerifyAsync(c.Key))" />
+                                }
                                 <FluentButton Appearance="Appearance.Lightweight"
-                                              Title="Mark verified"
-                                              IconStart="@FluentIcons.Checkmark"
-                                              OnClick="@(() => VerifyAsync(c.Key))" />
-                            }
-                            <FluentButton Appearance="Appearance.Lightweight"
-                                          Title="Edit contact"
-                                          IconStart="@FluentIcons.Edit"
-                                          OnClick="@(() => OnEditAsync(c))" />
-                            @* Move-up / move-down reorder. Live swaps ids
-                               and calls the reorder endpoint; Buffered swaps
-                               the in-memory list and raises ContactsChanged. *@
-                            <FluentButton Appearance="Appearance.Lightweight"
-                                          Title="Move up (higher priority)"
-                                          IconStart="@FluentIcons.ChevronUp"
-                                          Disabled="@(IsFirst(c))"
-                                          OnClick="@(() => MoveUpAsync(c.Key))" />
-                            <FluentButton Appearance="Appearance.Lightweight"
-                                          Title="Move down (lower priority)"
-                                          IconStart="@FluentIcons.ChevronDown"
-                                          Disabled="@(IsLast(c))"
-                                          OnClick="@(() => MoveDownAsync(c.Key))" />
-                            <FluentButton Appearance="Appearance.Lightweight"
-                                          Title="Remove contact"
-                                          IconStart="@FluentIcons.Delete"
-                                          OnClick="@(() => OnRemoveAsync(c))" />
-                        </span>
+                                              Title="Edit contact"
+                                              IconStart="@FluentIcons.Edit"
+                                              OnClick="@(() => OnEditAsync(c))" />
+                                @* Move-up / move-down reorder. Live swaps ids
+                                   and calls the reorder endpoint; Buffered swaps
+                                   the in-memory list and raises ContactsChanged. *@
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              Title="Move up (higher priority)"
+                                              IconStart="@FluentIcons.ChevronUp"
+                                              Disabled="@(IsFirst(c))"
+                                              OnClick="@(() => MoveUpAsync(c.Key))" />
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              Title="Move down (lower priority)"
+                                              IconStart="@FluentIcons.ChevronDown"
+                                              Disabled="@(IsLast(c))"
+                                              OnClick="@(() => MoveDownAsync(c.Key))" />
+                                <FluentButton Appearance="Appearance.Lightweight"
+                                              Title="Remove contact"
+                                              IconStart="@FluentIcons.Delete"
+                                              OnClick="@(() => OnRemoveAsync(c))" />
+                            </span>
+                        }
                     </li>
                 }
             </ul>
@@ -200,6 +242,11 @@
     /// re-rendering).</summary>
     [Parameter] public EventCallback ContactsChanged { get; set; }
 
+    /// <summary>Raised when a contact edit/remove dialog opens (true) or
+    /// closes (false). Allows a parent dialog to switch to a focused
+    /// section-edit UX while the dialog is open.</summary>
+    [Parameter] public EventCallback<bool> IsEditingChanged { get; set; }
+
     private List<ContactDto> _contacts = new();
     private HashSet<Guid> _subscribed = new();
     private bool _loading;
@@ -221,12 +268,33 @@
     private string _newValue = string.Empty;
     private string _newLabel = string.Empty;
 
+    // Inline edit form state (used instead of a dialog in focused section-edit UX).
+    private Guid? _editingContactKey;
+    private ContactChannel _editChannel = ContactChannel.Email;
+    private Guid? _editCountryCodeId;
+    private string _editValue = string.Empty;
+    private string _editLabel = string.Empty;
+    private bool _savingEdit;
+
     private string ValuePlaceholder => _newChannel switch
     {
         ContactChannel.SMS => "Phone number…",
         ContactChannel.WhatsApp => "WhatsApp number…",
         _ => "Email address…"
     };
+
+    private string EditValuePlaceholder => _editChannel switch
+    {
+        ContactChannel.SMS => "Phone number…",
+        ContactChannel.WhatsApp => "WhatsApp number…",
+        _ => "Email address…"
+    };
+
+    private void OnEditChannelChanged()
+    {
+        if (_editChannel is not (ContactChannel.SMS or ContactChannel.WhatsApp))
+            _editCountryCodeId = null;
+    }
 
     public void Dispose()
     {
@@ -447,88 +515,180 @@
         _newCountryCodeId = null;
     }
 
-    // ─── Edit / Remove with reason (dialog section switch) ─────────────
-    // Both actions open the shared ContactChangeDialog so the user can
-    // supply a required reason. Live mode calls the API immediately;
-    // Buffered mode mutates the in-memory list.
+    // ─── Edit / Remove ─────────────────────────────────────────────────
+    // Buffered mode uses inline editing with Save/Cancel inside the focused
+    // section-edit UX (no dialog). Live mode keeps the ContactChangeDialog
+    // because per-edit contact audit requires a reason.
     private async Task OnEditAsync(ContactRow row)
     {
-        var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
-            new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Edit),
-            "Edit contact",
-            DialogSize.Medium);
+        if (Mode == EditorMode.Live)
+        {
+            await OpenEditDialogAsync(row);
+            return;
+        }
 
-        if (result is null) return;
+        await StartInlineEditAsync(row);
+    }
+
+    private async Task StartInlineEditAsync(ContactRow row)
+    {
+        _editingContactKey = row.Key;
+        _editChannel = row.Channel;
+        _editValue = row.Value;
+        _editLabel = row.Label ?? string.Empty;
+
+        if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            await LoadCountryCodesAsync();
+        }
+
+        _editCountryCodeId = row.CountryCode is { } code && _countryCodeOptions is not null
+            ? _countryCodeOptions.FirstOrDefault(x => x.Name == code)?.Id
+            : null;
+
+        await IsEditingChanged.InvokeAsync(true);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OpenEditDialogAsync(ContactRow row)
+    {
+        await IsEditingChanged.InvokeAsync(true);
+        try
+        {
+            var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
+                new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Edit),
+                "Edit contact",
+                DialogSize.Medium);
+
+            if (result is null) return;
+
+            if (Mode == EditorMode.Buffered)
+            {
+                var list = Contacts;
+                if (list is null) return;
+                var target = list.FirstOrDefault(x => x.TempId == row.Key);
+                if (target is null) return;
+                target.Channel = result.Channel ?? target.Channel;
+                target.Value = result.Value ?? target.Value;
+                target.Label = result.Label;
+                target.CountryCode = result.CountryCode;
+                await NotifyChangedAsync();
+                return;
+            }
+
+            _error = null;
+            try
+            {
+                await Api.UpdateContactAsync(row.Key, new UpdateContactRequest(
+                    result.Value!,
+                    result.Label,
+                    result.Reason)
+                { CountryCode = result.CountryCode }, MutationToken);
+                await LoadAsync();
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to update contact {ContactId}", row.Key);
+                _error = ex.Message;
+                if (!_disposed) await InvokeAsync(StateHasChanged);
+            }
+        }
+        finally
+        {
+            await IsEditingChanged.InvokeAsync(false);
+        }
+    }
+
+    private async Task SaveEditAsync()
+    {
+        if (_editingContactKey is null) return;
+
+        var key = _editingContactKey.Value;
+        var countryCode = _editCountryCodeId is { } id && _countryCodeOptions is not null
+            ? _countryCodeOptions.FirstOrDefault(x => x.Id == id)?.Name
+            : null;
 
         if (Mode == EditorMode.Buffered)
         {
             var list = Contacts;
-            if (list is null) return;
-            var target = list.FirstOrDefault(x => x.TempId == row.Key);
-            if (target is null) return;
-            target.Channel = result.Channel ?? target.Channel;
-            target.Value = result.Value ?? target.Value;
-            target.Label = result.Label;
-            target.CountryCode = result.CountryCode;
-            await NotifyChangedAsync();
-            return;
+            if (list is not null)
+            {
+                var target = list.FirstOrDefault(x => x.TempId == key);
+                if (target is not null)
+                {
+                    target.Channel = _editChannel;
+                    target.Value = _editValue.Trim();
+                    target.Label = string.IsNullOrWhiteSpace(_editLabel) ? null : _editLabel.Trim();
+                    target.CountryCode = countryCode;
+                    await NotifyChangedAsync();
+                }
+            }
         }
 
-        _error = null;
-        try
-        {
-            await Api.UpdateContactAsync(row.Key, new UpdateContactRequest(
-                result.Value!,
-                result.Label,
-                result.Reason)
-            { CountryCode = result.CountryCode }, MutationToken);
-            await LoadAsync();
-        }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to update contact {ContactId}", row.Key);
-            _error = ex.Message;
-            if (!_disposed) await InvokeAsync(StateHasChanged);
-        }
+        await EndInlineEditAsync();
+    }
+
+    private async Task CancelEditAsync()
+    {
+        await EndInlineEditAsync();
+    }
+
+    private async Task EndInlineEditAsync()
+    {
+        _editingContactKey = null;
+        _editChannel = ContactChannel.Email;
+        _editValue = string.Empty;
+        _editLabel = string.Empty;
+        _editCountryCodeId = null;
+        await IsEditingChanged.InvokeAsync(false);
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task OnRemoveAsync(ContactRow row)
     {
-        var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
-            new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Delete),
-            "Delete contact",
-            DialogSize.Small);
-
-        if (result is null) return;
-
-        if (Mode == EditorMode.Buffered)
-        {
-            var list = Contacts;
-            if (list is null) return;
-            var target = list.FirstOrDefault(x => x.TempId == row.Key);
-            if (target is null) return;
-            list.Remove(target);
-            RestampOrders(list);
-            await NotifyChangedAsync();
-            return;
-        }
-
-        _error = null;
+        await IsEditingChanged.InvokeAsync(true);
         try
         {
-            await Api.DeleteContactAsync(row.Key, result.Reason, MutationToken);
-            _subscribed.Remove(row.Key);
-            await LoadAsync();
+            var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
+                new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Delete),
+                "Delete contact",
+                DialogSize.Small);
+
+            if (result is null) return;
+
+            if (Mode == EditorMode.Buffered)
+            {
+                var list = Contacts;
+                if (list is null) return;
+                var target = list.FirstOrDefault(x => x.TempId == row.Key);
+                if (target is null) return;
+                list.Remove(target);
+                RestampOrders(list);
+                await NotifyChangedAsync();
+                return;
+            }
+
+            _error = null;
+            try
+            {
+                await Api.DeleteContactAsync(row.Key, result.Reason, MutationToken);
+                _subscribed.Remove(row.Key);
+                await LoadAsync();
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to remove contact {ContactId}", row.Key);
+                _error = ex.Message;
+                if (!_disposed) await InvokeAsync(StateHasChanged);
+            }
         }
-        catch (OperationCanceledException) { }
-        catch (Exception ex)
+        finally
         {
-            if (_disposed) return;
-            Logger.LogError(ex, "Failed to remove contact {ContactId}", row.Key);
-            _error = ex.Message;
-            if (!_disposed) await InvokeAsync(StateHasChanged);
+            await IsEditingChanged.InvokeAsync(false);
         }
     }
 

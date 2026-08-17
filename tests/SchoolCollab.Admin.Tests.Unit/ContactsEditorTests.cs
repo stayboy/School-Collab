@@ -1,3 +1,4 @@
+using System.Linq;
 using System.Net;
 using System.Text.Json;
 using AngleSharp.Dom;
@@ -638,24 +639,34 @@ public class ContactsEditorTests : BunitContext
     }
 
     [TestMethod]
-    public void BufferedEdit_DialogResult_MutatesInMemoryList_WithoutApiCall()
+    public void BufferedEdit_InlineEdit_MutatesInMemoryList_WithoutApiCall()
     {
         var contacts = new List<ContactModel>
         {
             new() { Channel = ContactChannel.Email, Value = "old@x.com", Label = "Home", Order = 0 }
         };
         var targetId = contacts[0].TempId;
-        var result = new ContactChangeResult(ContactChannel.Email, "new@x.com", "Home", null, "Parent requested change", IsDeleted: false);
-        RegisterMockDialog(DialogResult.Ok(new DialogShellResult<ContactChangeResult>(result)));
         var cut = RenderBuffered(contacts);
 
         cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
         RowButton(cut, "Edit contact").Click();
 
+        // The editing row switches to an inline form with Save/Cancel.
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item--editing").Should().HaveCount(1));
+
+        var valueField = cut.Find(".contact-item--editing fluent-text-field.contacts-value");
+        valueField.Change("new@x.com");
+
+        var saveButton = cut.FindAll(".contact-item--editing .contact-edit-actions fluent-button")
+            .Cast<IElement>()
+            .First(b => b.TextContent.Trim() == "Save");
+        saveButton.Click();
+
         cut.WaitForAssertion(() =>
         {
             contacts[0].Value.Should().Be("new@x.com", "Buffered edit mutates the in-memory list");
             contacts[0].TempId.Should().Be(targetId, "the same row is edited (TempId preserved)");
+            contacts[0].Label.Should().Be("Home", "Label is preserved");
         });
 
         var fake = (FakeContactsClient)Services.GetRequiredService<IContactsClient>();
