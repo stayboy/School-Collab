@@ -88,24 +88,18 @@
                                 Width="FieldWidth.W4" />
         </FormRow>
 
-        @* Date of birth. FluentDatePicker binds to DateTime?, so we
-           convert from the model's DateOnly? on the way in and back on
-           the way out. Narrow input (160px) — a date picker doesn't
-           need more room than that. Required (spec: DOB mandatory). *@
-        <FormRow Label="Date of birth" Required For="studentFormDob">
+        @* Date of birth + Gender. Side-by-side in one row (mirrors the
+           First/Last name row above) so the profile block takes less vertical
+           space and the Contacts + Guardians sections below have room to grow.
+           DOB is a FluentDatePicker (binds to DateTime? via a bridge); Gender
+           is a required CodedValueDropdown. Both are required — the single
+           row asterisk marks the row as having required fields. *@
+        <FormRow Label="DOB/Gender" Required For="studentFormDob">
             <FluentDatePicker Id="studentFormDob"
                               Value="@DateOfBirthAsDateTime"
                               ValueChanged="@OnDateOfBirthChanged"
                               Required
                               class="w-3" />
-        </FormRow>
-
-        @* Gender. Required coded-value dropdown for the GENDER parent
-           (spec: gender mandatory). Simple two-way binding — the binder
-           updates Model.GenderCodedValueId directly; no callback boilerplate
-           needed (the previous OnGenderChanged did nothing but mirror
-           the new value into the model). *@
-        <FormRow Label="Gender" Required>
             <CodedValueDropdown Parent="CodedValueParent.Genders"
                                 @bind-SelectedId="Model.GenderCodedValueId"
                                 Placeholder="Select gender"
@@ -226,13 +220,21 @@
                         {
                             <div class="guardian-add-row">
                                 @* Local FluentSelect wrapper for the relationship picker (plan §10 Phase 2).
-                                   Renders the sentinel "Add Existing Guardian" + a non-selectable divider
-                                   + the RELATSHIPS coded values. Replaces the old CodedValueDropdown.
-                                   The sentinel sets _inExistingMode and routes through the §2.1 guard
-                                   (resolved to _pickedRelationshipId in Phase 5, null until then).
-                                   §9.2 visual divider: rendered as an <hr> inside a disabled
-                                   <fluent-option> via OptionTemplate — verify at runtime;
-                                   FluentOptionGroup is not available in FluentUI Blazor 4.14.2.
+                                   Renders the selectable "Add Existing Guardian" sentinel
+                                   with a divider line drawn underneath the label as part
+                                   of the sentinel's option template, followed by the
+                                   RELATSHIPS coded values. The sentinel sets
+                                   _inExistingMode and routes through the §2.1 guard
+                                   (resolved to _pickedRelationshipId in Phase 5, null
+                                   until then).
+                                   §9.2 visual divider: rendered as an <hr> inside the
+                                   sentinel's OptionTemplate so the trigger reads as a
+                                   section header above the real relationships. No
+                                   separate disabled <fluent-option> row for the divider
+                                   (FluentOptionGroup is not available in FluentUI
+                                   Blazor 4.14.2, and a standalone divider row was not
+                                   the design intent — the divider belongs to the
+                                   trigger's visual underline, not a line of its own).
                                    Width shrunk to 150px (from the old W4/200px) via inline Style so the Add stays inline (scoped CSS
                                    would lose to the web component's host width, mirroring the
                                    CodedValueDropdown's Width=FieldWidth.W4 inline-style pattern). *@
@@ -240,15 +242,26 @@
                                               Items="@(_relationshipOptions ?? [])"
                                               SelectedOption="@_selectedRelOption"
                                               SelectedOptionChanged="@OnRelationshipOptionChanged"
-                                              OptionValue="@(o => o.Id?.ToString() ?? "divider")"
+                                              OptionValue="@(o => o.Id?.ToString() ?? "sentinel")"
                                               Placeholder="@(_relationshipOptions is null ? "Loading…" : "Relationship")"
                                               Style="width: 150px"
                                               Disabled="@(_relationshipOptions is null)"
                                               class="guardian-rel-select">
+                                    @* Sentinel ("Add Existing Guardian") carries the
+                                       divider line UNDERNEATH its label so the trigger
+                                       reads as a section header above the real
+                                       relationships below it. No separate divider
+                                       <fluent-option> in the list — the divider is a
+                                       visual underline on the sentinel option itself
+                                       (matches the original design intent: one row,
+                                       visually separated from the relationships). *@
                                     <OptionTemplate Context="opt">
-                                        @if (opt.Kind == RelationshipOptionKind.Divider)
+                                        @if (opt.Kind == RelationshipOptionKind.Sentinel)
                                         {
-                                            <hr class="guardian-rel-divider" />
+                                            <span class="guardian-rel-sentinel">
+                                                @opt.Label
+                                                <div class="guardian-rel-divider"></div>
+                                            </span>
                                         }
                                         else
                                         {
@@ -1205,23 +1218,23 @@
 
     /// <summary>Discriminator for entries in the local relationship
     /// dropdown's option list (plan §2). <see cref="Sentinel"/> is the
-    /// selectable "Add Existing Guardian" trigger; <see cref="Divider"/> is
-    /// the non-selectable horizontal rule that visually separates the
-    /// trigger from the real relationship types; <see cref="Relationship"/>
-    /// is a real relationship coded value (RELATSHIPS child).</summary>
-    internal enum RelationshipOptionKind { Relationship, Sentinel, Divider }
+    /// selectable "Add Existing Guardian" trigger; <see cref="Relationship"/>
+    /// is a real relationship coded value (RELATSHIPS child). The divider
+    /// is rendered INSIDE the sentinel's option template (an underline
+    /// under the label) — there is no separate disabled option in the
+    /// list, so no Divider kind is needed.</summary>
+    internal enum RelationshipOptionKind { Relationship, Sentinel }
 
     /// <summary>One entry in the local relationship dropdown's option list.
     /// For <see cref="Kind"/> == <see cref="RelationshipOptionKind.Sentinel"/>
     /// <see cref="Id"/> equals <see cref="ExistingGuardianSentinel"/>;
-    /// for <see cref="RelationshipOptionKind.Divider"/> <see cref="Id"/>
-    /// is null and <see cref="IsDisabled"/> is true (FluentSelect guarantees
-    /// a disabled option can never be selected, so the divider is excluded
-    /// from value-mapping and the §6 duplicate-link checks automatically);
-    /// for <see cref="RelationshipOptionKind.Relationship"/> <see cref="Id"/>
-    /// is the coded value id and <see cref="IsDisabled"/> mirrors the
-    /// coded value's own disabled flag so tenant-disabled relationships
-    /// stay non-selectable.</summary>
+    /// for <see cref="Kind"/> == <see cref="RelationshipOptionKind.Relationship"/>
+    /// <see cref="Id"/> is the coded value id and <see cref="IsDisabled"/>
+    /// mirrors the coded value's own disabled flag so tenant-disabled
+    /// relationships stay non-selectable. (Previously there was a third
+    /// Divider kind used to render a non-selectable <hr> option; that has
+    /// been folded into the sentinel's template so the divider reads as
+    /// a section underline on the trigger, not a separate list row.)</summary>
     internal sealed record RelationshipOption(
         Guid? Id,
         string Label,
@@ -1357,10 +1370,13 @@
     ///     mode, in which case keep existing mode + the typeahead (plan §3.2
     ///     by-contact: the user picks the relationship AFTER the guardian, so
     ///     selecting a relationship must not discard the pick).
-    ///   - <see cref="RelationshipOptionKind.Divider"/> → unreachable
-    ///     (Disabled guarantees FluentSelect cannot pick it); guard anyway.
     ///   - <c>null</c> → user cleared the dropdown back to placeholder
-    ///     (no-op on state, mirrors CodedValueDropdown's clear behaviour).</summary>
+    ///     (no-op on state, mirrors CodedValueDropdown's clear behaviour).
+    ///   The <see cref="RelationshipOptionKind.Divider"/> case from earlier
+    ///   plan revisions has been removed: the divider is no longer a
+    ///   separate option line — it is rendered as a visual underline
+    ///   INSIDE the sentinel option's template (see the FluentSelect
+    ///   OptionTemplate above), so there is no disabled option to guard.</summary>
     private void OnRelationshipOptionChanged(RelationshipOption? opt)
     {
         _selectedRelOption = opt;
@@ -1389,8 +1405,10 @@
                 // typeahead visible and just swap the sentinel for this real
                 // relationship (plan §3.2 by-contact path).
                 break;
-            case RelationshipOptionKind.Divider:
             case null:
+                // User cleared the dropdown back to placeholder (no-op on
+                // state, mirrors CodedValueDropdown's clear behaviour).
+                break;
             default:
                 break;
         }
@@ -1662,16 +1680,18 @@
         {
             var items = await CodedValuesApi.GetChildrenByParentCodeAsync(
                 CodedValueParent.Relationships.ToCode(), CancellationToken.None) ?? [];
-            var options = new List<RelationshipOption>(items.Length + 2)
+            var options = new List<RelationshipOption>(items.Length + 1)
             {
                 // Top of the list: the selectable "Add Existing Guardian" trigger.
+                // The visual divider is rendered as a 1px line inside this
+                // option's template — see the OptionTemplate in the
+                // FluentSelect above — so the trigger reads as a section
+                // header above the real relationships. No separate divider
+                // entry in the list (previously a disabled RelationshipOption
+                // whose OptionTemplate emitted an <hr>; removed because the
+                // extra <fluent-option> row was not the design intent).
                 new(ExistingGuardianSentinel, "Add Existing Guardian",
                     RelationshipOptionKind.Sentinel, IsDisabled: false),
-                // Non-selectable divider (Disabled guarantees FluentSelect can
-                // never pick it; rendered as a 1px horizontal rule via the
-                // option class, Phase 2).
-                new(null, string.Empty,
-                    RelationshipOptionKind.Divider, IsDisabled: true),
             };
             foreach (var cv in items)
             {

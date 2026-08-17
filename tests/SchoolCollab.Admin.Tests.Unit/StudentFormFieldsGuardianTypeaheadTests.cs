@@ -139,14 +139,16 @@ public class StudentFormFieldsGuardianTypeaheadTests
     }
 
     [TestMethod]
-    public void RelationshipOptionKind_HasSentinelAndDivider()
+    public void RelationshipOptionKind_HasSentinelAndRelationship()
     {
-        // §11.2: the option list is sentinel → divider → relationships.
-        // The discriminator enum must have all three values.
+        // The option list is sentinel → relationships. The discriminator
+        // enum only needs those two values — a separate Divider kind was
+        // removed when the divider became a visual underline inside the
+        // sentinel's option template (no longer a list row).
         var names = System.Enum.GetNames<StudentFormFields.RelationshipOptionKind>();
         names.Should().Contain("Relationship");
         names.Should().Contain("Sentinel");
-        names.Should().Contain("Divider");
+        names.Should().NotContain("Divider");
     }
 
     [TestMethod]
