@@ -50,6 +50,11 @@ public static class Extensions
         services.AddScoped<IGuardianRepository, GuardianRepository>();
         services.AddScoped<IContactRepository, ContactRepository>();
         services.AddScoped<ITeacherRepository, TeacherRepository>();
+
+        // Audit: contact change log (who/why for edit/delete). Scoped so it can
+        // resolve the request-scoped IActorAccessor while writing into the same
+        // DbContext transaction as the mutation handler.
+        services.AddScoped<ContactAuditor>();
         services.AddScoped<IActivityGroupRepository, ActivityGroupRepository>();
         services.AddScoped<IActivityGroupMembershipRepository, ActivityGroupMembershipRepository>();
 

@@ -1,0 +1,195 @@
+@* Shared dialog for editing or deleting a single contact with a required reason.
+   Used by <ContactsEditor> in both Live and Buffered modes. The dialog collects
+   the reason and, for edits, the new channel/value/label/country-code. The
+   caller is responsible for applying the mutation (API call in Live mode,
+   in-memory list mutation in Buffered mode).
+
+   The dialog is a DialogShellBase form; the footer Submit button submits the
+   enclosing EditForm. Validation is lightweight: a required reason and a
+   non-empty value for edits. *@
+@inherits DialogShellBase<ContactChangeModel, ContactChangeResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Students.Core.Domain
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject CodedValuesApiClient CodedValuesApi
+@inject ILogger<ContactChangeDialog> Logger
+
+<div class="contact-change-dialog">
+    @if (Model.Mode == ContactChangeMode.Delete)
+    {
+        @* ── Delete mode: confirmation summary + reason ── *@
+        <FluentMessageBar Intent="MessageIntent.Warning">
+            Delete <strong>@FormatValue(Model.Channel, Model.Value, Model.CountryCode)</strong>?
+            This cannot be undone.
+        </FluentMessageBar>
+    }
+    else
+    {
+        @* ── Edit mode: contact fields ── *@
+        <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+            <div class="contact-change-edit-row">
+                <DropdownForEnum TEnum="ContactChannel"
+                                  @bind-SelectedValue="_form.Channel"
+                                  @bind-SelectedValue:after="OnChannelChanged"
+                                  Placeholder="Channel"
+                                  Width="FieldWidth.W2" />
+                @if (_form.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
+                {
+                    <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                        @bind-SelectedId="_form.CountryCodeId"
+                                        Placeholder="Code"
+                                        Width="FieldWidth.W3"
+                                        OptionText="@FormatCountryCodeOption" />
+                }
+            </div>
+            <div class="contact-change-edit-row">
+                <FluentTextField @bind-Value="_form.Value"
+                                  Placeholder="@ValuePlaceholder"
+                                  class="contacts-value" />
+                <FluentTextField @bind-Value="_form.Label"
+                                  Placeholder="Label (optional)"
+                                  class="contacts-label" />
+            </div>
+        </FluentStack>
+    }
+
+    <EditForm Model="_form" OnValidSubmit="HandleSubmitAsync">
+        <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+            <FluentTextArea @bind-Value="_form.Reason"
+                              Label="Reason"
+                              Required="true"
+                              Placeholder="@ReasonPlaceholder" />
+        </FluentStack>
+
+        <DialogShellFooter Saving="@Saving"
+                           Error="@Error"
+                           SubmitText="@(Model.Mode == ContactChangeMode.Delete ? "Delete" : "Save")"
+                           SavingText="@(Model.Mode == ContactChangeMode.Delete ? "Deleting…" : "Saving…")"
+                           OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    private sealed class FormState
+    {
+        public ContactChannel Channel { get; set; }
+        public Guid? CountryCodeId { get; set; }
+        public string Value { get; set; } = string.Empty;
+        public string? Label { get; set; }
+        public string? Reason { get; set; }
+    }
+
+    private readonly FormState _form = new();
+    private CodedValueDto[]? _countryCodeOptions;
+
+    protected override void OnModelInitialized(ContactChangeModel model)
+    {
+        _form.Channel = model.Channel;
+        _form.Value = model.Value;
+        _form.Label = model.Label;
+        _form.Reason = null;
+
+        if (model.Channel is ContactChannel.SMS or ContactChannel.WhatsApp && !string.IsNullOrWhiteSpace(model.CountryCode))
+        {
+            _ = LoadCountryCodesAndSelectAsync(model.CountryCode);
+        }
+    }
+
+    private string ValuePlaceholder => _form.Channel switch
+    {
+        ContactChannel.SMS => "Phone number…",
+        ContactChannel.WhatsApp => "WhatsApp number…",
+        _ => "Email address…"
+    };
+
+    private string ReasonPlaceholder => Model.Mode == ContactChangeMode.Delete
+        ? "Why are you deleting this contact?"
+        : "Why are you editing this contact?";
+
+    private async Task LoadCountryCodesAndSelectAsync(string countryCode)
+    {
+        try
+        {
+            _countryCodeOptions = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.CountryCallingCodes.ToCode(), CancellationToken.None) ?? [];
+
+            var match = _countryCodeOptions.FirstOrDefault(o => o.Name.Equals(countryCode, StringComparison.OrdinalIgnoreCase));
+            _form.CountryCodeId = match?.Id ?? _countryCodeOptions.FirstOrDefault(o => o.Code.Equals("CNCODES_GHA", StringComparison.OrdinalIgnoreCase))?.Id;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load country calling codes for contact edit dialog");
+        }
+    }
+
+    private async Task OnChannelChanged()
+    {
+        if (_form.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            if (_countryCodeOptions is null)
+            {
+                await LoadCountryCodesAndSelectAsync("+233");
+            }
+        }
+        else
+        {
+            _form.CountryCodeId = null;
+        }
+    }
+
+    private string? ResolveCountryCode()
+    {
+        if (_form.CountryCodeId is null || _countryCodeOptions is null) return null;
+        return _countryCodeOptions.FirstOrDefault(x => x.Id == _form.CountryCodeId)?.Name;
+    }
+
+    protected override async Task<ContactChangeResult?> SubmitAsync(ContactChangeModel model)
+    {
+        if (string.IsNullOrWhiteSpace(_form.Reason))
+        {
+            Error = "Enter a reason.";
+            return null;
+        }
+
+        if (model.Mode == ContactChangeMode.Edit)
+        {
+            if (string.IsNullOrWhiteSpace(_form.Value))
+            {
+                Error = "Contact value is required.";
+                return null;
+            }
+
+            var countryCode = _form.Channel is ContactChannel.SMS or ContactChannel.WhatsApp
+                ? ResolveCountryCode()
+                : null;
+
+            return new ContactChangeResult(
+                _form.Channel,
+                _form.Value.Trim(),
+                string.IsNullOrWhiteSpace(_form.Label) ? null : _form.Label.Trim(),
+                countryCode,
+                _form.Reason.Trim(),
+                IsDeleted: false);
+        }
+
+        // Delete mode
+        return new ContactChangeResult(
+            null, null, null, null,
+            _form.Reason.Trim(),
+            IsDeleted: true);
+    }
+
+    private static string FormatValue(ContactChannel channel, string value, string? countryCode)
+    {
+        if (channel is ContactChannel.SMS or ContactChannel.WhatsApp && !string.IsNullOrWhiteSpace(countryCode))
+            return $"{countryCode} {value}";
+        return value;
+    }
+
+    private static string FormatCountryCodeOption(CodedValueDto o)
+    {
+        var country = o.Attributes.FirstOrDefault(a => a.Key == "COUNTRY")?.Value;
+        return string.IsNullOrWhiteSpace(country) ? o.Name : $"{o.Name} ({country})";
+    }
+}

@@ -1,0 +1,1121 @@
+@* Guardian display + add-fields section for the student form. Extracted from
+    StudentFormFields.razor so the student profile form stays a lean shell and
+    the guardian panel-switch UX lives in one self-contained component.
+
+    Two modes (gated by the Mode parameter):
+
+    - Inline (DEFAULT): the historical panel-switch UX. Create mode keeps a
+      draft list on the model that the parent links after the student is
+      saved; edit mode loads the links from the API and links / unlinks
+      immediately. Adding a guardian is an INLINE section switch (no nested
+      dialog): the always-visible inline "add guardian" row (relationship
+      dropdown + name fields, or the "Add Existing Guardian" typeahead) adds
+      directly to the card list; the Edit panel refines relationship / role /
+      contacts. This is the right UX inside DIALOGS — the user is already
+      modal, and nested dialogs are the anti-pattern the dialog-ui skill
+      explicitly warns against.
+
+    - Linked: the page-side compact section. Used by /students/{id}/edit.
+      Renders a "Guardians (N) — Manage" header with a button that fires
+      OnManageGuardians. The parent page opens GuardianPickerDialog on click,
+      calls the link APIs on confirm, and reloads. The per-row delete button
+      fires OnRemoveGuardian. No inline create, no nested dialog, no per-form
+      EditForm.
+
+    The component owns the same <GuardianLinks> reference the parent
+    binds, so every add / edit / remove drafts into the list the parent
+    flushes atomically on save. In Linked mode it is a pure presenter over
+    LinkedItems.
+
+    Hosted inside a shared <FormRow> (Label="Guardians") by the parent;
+    this component renders only the .student-guardians container, not the
+    row itself. *@
+@using SchoolCollab.Students.Core.DTOs
+@using SchoolCollab.Students.Core.Domain
+@implements IAsyncDisposable
+
+<div class="student-guardians @(Mode == StudentFormFieldsMode.Linked ? "student-form-guardians--linked" : null)">
+    @if (Mode == StudentFormFieldsMode.Linked)
+    {
+        <div class="student-guardians-linked-header">
+            <span class="student-guardians-linked-count">
+                <strong>@GuardianCount</strong> @(GuardianCount == 1 ? "guardian" : "guardians")
+            </span>
+            <FluentButton Appearance="Appearance.Accent"
+                          Size="ButtonSize.Small"
+                          IconStart="@FluentIcons.PersonAdd"
+                          Disabled="@_loadingGuardians"
+                          OnClick="OnManageGuardians">
+                Manage
+            </FluentButton>
+        </div>
+        @if (!string.IsNullOrEmpty(_guardianError))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_guardianError</FluentMessageBar>
+        }
+        <StudentGuardiansList Items="LinkedItems"
+                               RelationshipNameLookup="ResolveRelName"
+                               SalutationLookup="ResolveSalutation"
+                               OnRemove="OnLinkedRemoveAsync" />
+    }
+    else
+    {
+        @if (_loadingGuardians)
+        {
+            <FluentProgressRing />
+        }
+        else
+        {
+            @* ── Inline "add guardian" row (List mode) ──
+               Mimics the <ContactsEditor> add-contact form: an inline horizontal
+               row of fields + an Accent Add button, always visible in List mode
+               (no separate panel switch). Field set is the guardian's identity +
+               link relationship only (Relationship / Last name / First name).
+               Role defaults to Primary; title/salutation, emergency and contacts
+               are NOT captured here — they're guardian-surface operations. *@
+            @if (_panelMode == GuardianPanelMode.List)
+            {
+                <div class="guardian-add-row">
+                    @* Local FluentSelect wrapper for the relationship picker.
+                       Renders the selectable "Add Existing Guardian" sentinel with
+                       a divider line drawn underneath the label as part of the
+                       sentinel's option template, followed by the RELATSHIPS coded
+                       values. The sentinel sets _inExistingMode. Width shrunk to
+                       150px (from the old W4/200px) via inline Style so the Add
+                       stays inline (scoped CSS would lose to the web component's
+                       host width). *@
+                    <FluentSelect TOption="RelationshipOption"
+                                  Items="@(_relationshipOptions ?? [])"
+                                  SelectedOption="@_selectedRelOption"
+                                  SelectedOptionChanged="@OnRelationshipOptionChanged"
+                                  OptionValue="@(o => o.Id?.ToString() ?? "sentinel")"
+                                  Placeholder="@(_relationshipOptions is null ? "Loading…" : "Relationship")"
+                                  Style="width: 150px"
+                                  Disabled="@(_relationshipOptions is null)"
+                                  class="guardian-rel-select">
+                        @* Sentinel ("Add Existing Guardian") carries the divider
+                           line UNDERNEATH its label so the trigger reads as a
+                           section header above the real relationships below it. *@
+                        <OptionTemplate Context="opt">
+                            @if (opt.Kind == RelationshipOptionKind.Sentinel)
+                            {
+                                <span class="guardian-rel-sentinel">
+                                    @opt.Label
+                                    <div class="guardian-rel-divider"></div>
+                                </span>
+                            }
+                            else
+                            {
+                                @opt.Label
+                            }
+                        </OptionTemplate>
+                    </FluentSelect>
+                    @* Name fields (free-text new guardian) vs. typeahead (existing guardian). *@
+                    @if (!InExistingMode)
+                    {
+                        <FluentTextField @bind-Value="_newLastName"
+                                         Placeholder="Last name"
+                                         class="guardian-add-field" />
+                        <FluentTextField @bind-Value="_newFirstName"
+                                         Placeholder="First name"
+                                         class="guardian-add-field" />
+                    }
+                    else
+                    {
+                        <div class="guardian-typeahead-stack">
+                        <FluentAutocomplete TOption="GuardianSearchRow"
+                                            @ref="_typeahead"
+                                            Multiple="false"
+                                            MaximumOptionsSearch="30"
+                                            ImmediateDelay="300"
+                                            ShowProgressIndicator="true"
+                                            AutoComplete="off"
+                                            Placeholder="Search by guardian or student name…"
+                                            OptionText="@(r => r.FullName)"
+                                            OptionComparer="@GuardianSearchRowComparer.Instance"
+                                            OptionTemplate="@RowTemplate"
+                                            OnOptionsSearch="@OnTypeaheadSearchAsync"
+                                            SelectedOptionChanged="@OnTypeaheadSelectedAsync"
+                                            Style="width: 100%"
+                                            class="guardian-typeahead" />
+                        <FluentRadioGroup @bind-Value="_searchMode"
+                                          class="guardian-search-mode"
+                                          aria-label="Search mode">
+                            <FluentRadio Value="@SearchMode.Contact">Contact</FluentRadio>
+                            <FluentRadio Value="@SearchMode.Student">Student</FluentRadio>
+                        </FluentRadioGroup>
+                        </div>
+                    }
+                    <FluentButton Appearance="Appearance.Accent"
+                                  IconStart="@FluentIcons.PersonAdd"
+                                  OnClick="AddInlineGuardianAsync"
+                                  Disabled="@(_adding
+                                             || (InExistingMode && _existingGuardianId is null)
+                                             || (!InExistingMode && (string.IsNullOrWhiteSpace(_newFirstName) || string.IsNullOrWhiteSpace(_newLastName))))">
+                        Add
+                    </FluentButton>
+
+                </div>
+            }
+
+            @* ── Linked / drafted guardians (card list) ──
+               A vertical list of cards that mimics the <ContactsEditor>
+               contact-item visual: each guardian is a bordered card with a head
+               line (person glyph + name + relationship + role / emergency badges)
+               and a contact-summary line (up to 3 contact chips). The primary
+               guardian's card gets the accent-tinted highlight. Display-only:
+               the per-guardian contact chips are loaded from the student's
+               guardian links' top-3 contacts and cannot be edited here. *@
+            <div class="guardian-cards">
+                @foreach (var g in GuardianGridRows)
+                {
+                    // While the Edit panel is open, all OTHER guardian cards hide
+                    // — only the card currently being edited stays visible (its
+                    // Key is its index into GuardianLinks). Save/Cancel
+                    // restores the list.
+                    if (_panelMode == GuardianPanelMode.Edit && (int)g.Key != _editingIndex)
+                    {
+                        continue;
+                    }
+                    var relName = g.RelationshipCodedValueId is { } rid && _relNames.TryGetValue(rid, out var rn) ? rn : null;
+                    var salName = g.TitleCodedValueId is { } tid && _salutations.TryGetValue(tid, out var sn) ? sn : null;
+                    var name = string.IsNullOrWhiteSpace(salName) ? $"{g.FirstName} {g.LastName}".Trim() : $"{salName} {g.FirstName} {g.LastName}".Trim();
+                    var contacts = g.Contacts;
+                    var isPrimary = g.Role == GuardianRole.Primary;
+                    <FluentCard class="@(isPrimary ? "guardian-card guardian-card--primary" : "guardian-card")">
+                        <div class="guardian-card-head">
+                            <span class="guardian-card-name">👤 @name</span>
+                            @if (!string.IsNullOrWhiteSpace(relName))
+                            {
+                                <span class="guardian-card-rel">(@relName)</span>
+                            }
+                            @if (isPrimary)
+                            {
+                                <FluentBadge Appearance="Appearance.Accent" class="guardian-card-badge">Primary</FluentBadge>
+                            }
+                            @if (g.IsEmergencyContact)
+                            {
+                                <FluentBadge Appearance="Appearance.Accent" class="guardian-card-badge">Emergency</FluentBadge>
+                            }
+                            <span class="guardian-card-actions">
+                                <FluentButton Appearance="Appearance.Lightweight" Title="Edit guardian"
+                                              OnClick="@(() => StartEditGuardian((int)g.Key))">
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.Edit)" />
+                                </FluentButton>
+                                <FluentButton Appearance="Appearance.Lightweight" Title="Remove guardian"
+                                              OnClick="@(() => RemoveGuardianRow(g.Key))">
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.Delete)" />
+                                </FluentButton>
+                            </span>
+                        </div>
+                        <div class="guardian-card-contacts">
+                            @if (contacts.Count == 0)
+                            {
+                                <span class="muted">— no contacts —</span>
+                            }
+                            else
+                            {
+                                @foreach (var c in contacts.Take(3))
+                                {
+                                    <span class="guardian-contact-chip">
+                                        <span>@ChannelGlyph(c.Channel)</span>
+                                        <span>@FormatContactValue(c)</span>
+                                    </span>
+                                }
+                            }
+                        </div>
+                    </FluentCard>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(_guardianError))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
+            }
+
+            @* ── Panel switch: edit panel ── *@
+            @if (_panelMode == GuardianPanelMode.Edit)
+            {
+                <div class="guardian-add-section">
+                    @{ var editedGuardian = (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count) ? GuardianLinks[_editingIndex] : null; }
+                    <h4 class="guardian-add-title">Edit guardian</h4>
+                    <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                        @* Draft-only fields: title + name are editable only for
+                           not-yet-persisted guardians (ExistingGuardianId is null).
+                           For existing guardians these don't persist through the
+                           student save (guardian-surface operation), so they're
+                           hidden to avoid misleading the user. *@
+                        @if (editedGuardian is { } eg && eg.ExistingGuardianId is null)
+                        {
+                            <FormRow Label="Title">
+                                <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                                    @bind-SelectedId="_editTitleId"
+                                                    Placeholder="Optional"
+                                                    Width="FieldWidth.W3" />
+                            </FormRow>
+                            <FormRow Label="First name" Required>
+                                <FluentTextField @bind-Value="_editFirstName" Required Placeholder="First name" class="w-5" />
+                            </FormRow>
+                            <FormRow Label="Last name" Required>
+                                <FluentTextField @bind-Value="_editLastName" Required Placeholder="Last name" class="w-5" />
+                            </FormRow>
+                        }
+                        <FormRow Label="Relationship">
+                            <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                                                @bind-SelectedId="_editRelationshipId"
+                                                Placeholder="Select relationship"
+                                                Width="FieldWidth.W4" />
+                        </FormRow>
+                        <FormRow Label="Role">
+                            <DropdownForEnum TEnum="GuardianRole"
+                                              @bind-SelectedValue="_editRole"
+                                              @key="@($"role-{_editingIndex}")"
+                                              Placeholder="Select role"
+                                              Width="FieldWidth.W3" />
+                        </FormRow>
+                    </FluentStack>
+                    @* Contacts editor: Live mode for existing guardians (immediate
+                       API calls), Buffered mode for drafts (in-memory, persisted at
+                       student save time). *@
+                    @if (editedGuardian is { } eg2 && eg2.ExistingGuardianId is { } gid)
+                    {
+                        <div class="guardian-edit-contacts">
+                            <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@gid" />
+                        </div>
+                    }
+                    else if (editedGuardian is not null)
+                    {
+                        <div class="guardian-edit-contacts">
+                            <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                            OwnerType="ContactOwnerType.Guardian"
+                                            Contacts="_editContacts"
+                                            ContactsChanged="OnEditContactsChanged" />
+                        </div>
+                    }
+                    <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
+                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button" OnClick="SaveEditGuardianAsync">Save</FluentButton>
+                        <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
+                    </FluentStack>
+                </div>
+            }
+        }
+    }
+</div>
+
+@code {
+    /// <summary>The draft / linked guardian list. Same reference the parent
+    /// binds to its <c>Model.GuardianLinks</c> — every mutation here drafts into
+    /// the list the parent flushes atomically on save. The parent supplies
+    /// it (the component never owns the list; the parent's model owns it).</summary>
+    [Parameter, EditorRequired] public List<GuardianAssignment> GuardianLinks { get; set; } = default!;
+
+    /// <summary>How the section is rendered: <see cref="StudentFormFieldsMode.Inline"/>
+    /// (dialog panel-switch UX) or <see cref="StudentFormFieldsMode.Linked"/>
+    /// (page-side "Guardians (N) — Manage" presenter).</summary>
+    [Parameter] public StudentFormFieldsMode Mode { get; set; } = StudentFormFieldsMode.Inline;
+
+    /// <summary>The id of the student being edited, or <c>null</c> when the form
+    /// is creating a new student. The "add existing guardian" typeahead passes
+    /// this as <c>excludeStudentId</c> so already-linked guardians are hidden
+    /// server-side.</summary>
+    [Parameter] public Guid? StudentId { get; set; }
+
+    /// <summary>Linked-mode only: the current links for the student, as projected
+    /// by <c>GET /students/{id}/guardians</c>. The page owns the load and passes
+    /// the result down so the component is a pure presenter in this mode.
+    /// Ignored in Inline mode (the component loads the links itself there).</summary>
+    [Parameter] public StudentGuardianViewDto[]? LinkedItems { get; set; }
+
+    /// <summary>Linked-mode only: fires when the user clicks the "Manage" button.
+    /// The page opens <c>GuardianPickerDialog</c>, calls <c>LinkGuardianAsync</c>
+    /// on the returned <c>GuardianAssignment</c> array, and reloads. The
+    /// component does not own any dialog opens in Linked mode.</summary>
+    [Parameter] public EventCallback OnManageGuardians { get; set; }
+
+    /// <summary>Linked-mode only: fires when the user clicks the per-row Remove
+    /// button. The page calls <c>UnlinkGuardianAsync</c> and reloads. The
+    /// argument is the <see cref="StudentGuardianViewDto"/> row so the page has
+    /// the GuardianId for the API call.</summary>
+    [Parameter] public EventCallback<StudentGuardianViewDto> OnRemoveGuardian { get; set; }
+
+    [Inject] private StudentsApiClient Api { get; set; } = default!;
+    [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
+    [Inject] private ILogger<GuardianSection> Logger { get; set; } = default!;
+
+    private bool _loadingGuardians;
+    private string? _guardianError;
+    private Dictionary<Guid, string> _relNames = new();
+    // Spec §4.8: salutation (title) lookup for the guardian Name cell.
+    // Loaded once per guardian-list refresh; covers Mr/Mrs/Ms across all
+    // linked guardians. Empty when salutations aren't configured.
+    private Dictionary<Guid, string> _salutations = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load the local relationship dropdown's options (sentinel + RELATSHIPS
+        // coded values). The add row is always visible in List mode, so the
+        // dropdown must load regardless of pre-loaded guardians.
+        await BuildRelationshipOptionsAsync();
+
+        // Resolve relationship display names for any pre-loaded guardians.
+        if (GuardianLinks.Count == 0) return;
+        _loadingGuardians = true;
+        try
+        {
+            foreach (var g in GuardianLinks)
+            {
+                if (g.RelationshipCodedValueId is { } relId)
+                    await EnsureRelNameAsync(relId);
+            }
+        }
+        finally
+        {
+            _loadingGuardians = false;
+        }
+    }
+
+    // ── Inline guardian edit panel ──
+    // List  = card list + always-visible inline add row (mimics the
+    //         ContactsEditor add-contact form).
+    // Edit  = hide all but the edited card + show its relationship/role editor.
+    private enum GuardianPanelMode { List, Edit }
+
+    private GuardianPanelMode _panelMode = GuardianPanelMode.List;
+
+    // Inline add-row state (the "add guardian" row). Validation is handled by the
+    // Add button's Disabled flag; the fields are cleared ONLY after a successful
+    // add. Relationship is optional; role defaults to Primary.
+    private Guid? _newRelId;
+    private string? _newLastName;
+    private string? _newFirstName;
+    private bool _adding;
+
+    // Edit-panel state. The index of the guardian in GuardianLinks currently
+    // being edited (the card's key is its list index), plus the draftable
+    // link-metadata fields (relationship / role) and expanded draft fields
+    // (title / name for drafts, contacts for all).
+    private int _editingIndex = -1;
+    private Guid? _editRelationshipId;
+    private GuardianRole _editRole = GuardianRole.Primary;
+    private Guid? _editTitleId;
+    private string? _editFirstName;
+    private string? _editLastName;
+    // Buffered contacts list for draft guardians (ContactsEditor mutates this
+    // in place; on Save it's written back to the GuardianAssignment.Contacts).
+    private List<ContactModel> _editContacts = new();
+
+    // ── Linked-mode helpers (page-side) ──
+    // In Linked mode the component is a pure presenter: the page owns the link
+    // load + API calls and passes LinkedItems down. The component surfaces a
+    // count + a Manage button + a read-only grid + a per-row delete that fires
+    // OnRemoveGuardian.
+
+    /// <summary>The current guardian count surfaced in the Linked-mode header.
+    /// In <see cref="StudentFormFieldsMode.Linked"/> mode the count is
+    /// <see cref="LinkedItems"/>.<see cref="Array.Length"/>; in Inline mode the
+    /// count is <c>GuardianLinks.Count</c> (the draft list) — but Inline mode
+    /// doesn't render the Linked header so the value is unused there.</summary>
+    private int GuardianCount => Mode == StudentFormFieldsMode.Linked
+        ? LinkedItems?.Length ?? 0
+        : GuardianLinks.Count;
+
+    /// <summary>Resolves a relationship coded-value id to its display name using
+    /// the already-loaded <c>_relNames</c> map. Returns null when the id is unset
+    /// or the name hasn't been resolved yet — <c>StudentGuardiansList</c> treats
+    /// a null/empty result as "no relationship to display".</summary>
+    private string? ResolveRelName(Guid? id)
+        => id is { } g && _relNames.TryGetValue(g, out var n) ? n : null;
+
+    private string? ResolveSalutation(Guid? id)
+        => id is { } g && _salutations.TryGetValue(g, out var n) ? n : null;
+
+    /// <summary>Linked-mode per-row delete handler. Fire-and-forget the async
+    /// <see cref="OnRemoveGuardian"/> callback; the component doesn't await its
+    /// own completion (the page owns the actual unlink + reload).</summary>
+    private async Task OnLinkedRemoveAsync(StudentGuardianViewDto row)
+    {
+        await OnRemoveGuardian.InvokeAsync(row);
+    }
+
+    /// <summary>Display row for a single guardian card. Carries the link-level
+    /// metadata (Role, Relationship, Emergency) and the display fields (Title,
+    /// Name) needed by the card head line, plus the per-guardian contact list
+    /// rendered as chips on the second line.</summary>
+    private sealed record GuardianGridRow(
+        object Key,
+        string FirstName,
+        string LastName,
+        Guid? TitleCodedValueId,
+        Guid? RelationshipCodedValueId,
+        GuardianRole Role,
+        bool IsEmergencyContact,
+        IReadOnlyList<ContactModel> Contacts);
+
+    // ── Panel navigation ──
+    // There is no "StartNew" panel — the inline add row is always visible in
+    // List mode and adds directly (AddInlineGuardianAsync). Only Edit switches.
+
+    /// <summary>Open the inline Edit panel for the guardian at
+    /// <paramref name="index"/> in <see cref="GuardianLinks"/>. Loads the link's
+    /// current relationship / role into the edit fields.</summary>
+    private async Task StartEditGuardian(int index)
+    {
+        if (index < 0 || index >= GuardianLinks.Count) return;
+        var a = GuardianLinks[index];
+        _editingIndex = index;
+        _editRelationshipId = a.RelationshipCodedValueId;
+        _editRole = a.Role;
+        _editTitleId = a.TitleCodedValueId;
+        _editFirstName = a.FirstName;
+        _editLastName = a.LastName;
+        _editContacts = (a.Contacts ?? []).ToList();
+        if (_editRelationshipId is { } relId)
+            await EnsureRelNameAsync(relId);
+        _panelMode = GuardianPanelMode.Edit;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void CancelPanel()
+    {
+        _panelMode = GuardianPanelMode.List;
+        // The inline add-row fields are intentionally NOT cleared here — they
+        // persist across panel navigation (mimics ContactsEditor's add row).
+        _editingIndex = -1;
+        // Cancel any in-flight typeahead search and clear the transient search
+        // session. The add-row selection persists.
+        ClearTypeaheadState();
+    }
+
+    /// <summary>Apply the edited link metadata (relationship / role) back to the
+    /// drafted <see cref="GuardianAssignment"/> at <see cref="_editingIndex"/>.
+    /// Replaces the immutable record via a <c>with</c> expression, preserving the
+    /// guardian's identity (id / name / title), its contact summary, and its
+    /// emergency-contact flag. No API call — the change is drafted and persisted
+    /// atomically with the rest of the student on Save.</summary>
+    private async Task SaveEditGuardianAsync()
+    {
+        if (_editingIndex < 0 || _editingIndex >= GuardianLinks.Count)
+        {
+            _panelMode = GuardianPanelMode.List;
+            return;
+        }
+        _guardianError = null;
+        try
+        {
+            var original = GuardianLinks[_editingIndex];
+            var updated = original with
+            {
+                RelationshipCodedValueId = _editRelationshipId,
+                Role = _editRole,
+                TitleCodedValueId = _editTitleId,
+                FirstName = _editFirstName ?? original.FirstName,
+                LastName = _editLastName ?? original.LastName,
+                Contacts = _editContacts.Count == 0 ? original.Contacts : _editContacts,
+            };
+            GuardianLinks[_editingIndex] = updated;
+            if (_editRelationshipId is { } relId)
+                await EnsureRelNameAsync(relId);
+            _panelMode = GuardianPanelMode.List;
+            _editingIndex = -1;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to edit guardian at index {Index}", _editingIndex);
+            _guardianError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private GuardianGridRow[] GuardianGridRows
+        => GuardianLinks.Select((g, i) => new GuardianGridRow(
+            i,
+            g.FirstName ?? string.Empty,
+            g.LastName ?? string.Empty,
+            g.TitleCodedValueId,
+            g.RelationshipCodedValueId,
+            g.Role,
+            g.IsEmergencyContact,
+            BuildRowContacts(g))).ToArray();
+
+    /// <summary>Build the contact list rendered as chips under a guardian card.
+    /// Combines the assignment's <c>Contacts</c> list with the legacy
+    /// single-contact fields for not-yet-persisted drafts. Result is ordered by
+    /// <c>Order</c> then by legacy-single to keep the preferred (lowest Order)
+    /// contact first.</summary>
+    private static List<ContactModel> BuildRowContacts(GuardianAssignment g)
+    {
+        var source = g.Contacts ?? (IReadOnlyList<ContactModel>)Array.Empty<ContactModel>();
+        var result = new List<ContactModel>(source.Count + 1);
+        result.AddRange(source);
+        if (g.ContactChannel is { } ch
+            && !string.IsNullOrWhiteSpace(g.ContactValue)
+            && !result.Any(c => c.Channel == ch && c.Value == g.ContactValue))
+        {
+            result.Add(new ContactModel
+            {
+                Channel = ch,
+                Value = g.ContactValue!,
+                CountryCode = g.CountryCode,
+                Order = result.Count,
+            });
+        }
+        return result;
+    }
+
+    private async Task RemoveGuardianRow(object key)
+    {
+        if (key is int idx) await RemoveGuardianAsync(idx);
+    }
+
+    // ── Contact-chip formatting helpers (mirrors ContactsEditor) ────────
+    private static string ChannelGlyph(ContactChannel channel) => channel switch
+    {
+        ContactChannel.Email => "✉",
+        ContactChannel.SMS => "📱",
+        ContactChannel.WhatsApp => "💬",
+        _ => "•",
+    };
+
+    private static string FormatContactValue(ContactModel c) =>
+        (c.Channel is ContactChannel.SMS or ContactChannel.WhatsApp
+         && !string.IsNullOrWhiteSpace(c.CountryCode))
+            ? $"{c.CountryCode} {c.Value}"
+            : c.Value;
+
+    // ── Add handlers ─────────────────────────────────────────────────────────
+    /// <summary>Add a guardian drafted in the inline add row directly to the
+    /// guardian links (no panel switch — the card list re-renders with the new
+    /// card). Captures only Relationship / Last name / First name; role defaults
+    /// to Primary and the guardian starts with no contacts / title. After a
+    /// successful add the row fields clear so the next entry starts fresh.</summary>
+    private async Task AddInlineGuardianAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newFirstName) || string.IsNullOrWhiteSpace(_newLastName))
+        {
+            _guardianError = "First and last name are required.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        _guardianError = null;
+        _adding = true;
+        try
+        {
+            // §2.1 guard: the sentinel UI value never reaches the save path.
+            // Sentinel → the picked real relationship (or null).
+            var relationshipForDraft = _newRelId == ExistingGuardianSentinel
+                ? _pickedRelationshipId
+                : _newRelId;
+            var assignment = new GuardianAssignment(
+                ExistingGuardianId: _existingGuardianId,
+                _newFirstName!.Trim(),
+                _newLastName!.Trim(),
+                relationshipForDraft,
+                ContactChannel: null,
+                ContactValue: null,
+                TitleCodedValueId: _pickedTitleId,
+                CountryCode: null);
+            await AddDraftAsync(assignment);
+            // Clear the add row for the next entry.
+            _newFirstName = null;
+            _newLastName = null;
+            _newRelId = null;
+            // Reset the existing-mode workflow after a successful add so the add
+            // row returns to its free-text placeholder state.
+            if (_inExistingMode)
+            {
+                _inExistingMode = false;
+                _existingGuardianId = null;
+                _pickedRelationshipId = null;
+                _pickedTitleId = null;
+                _selectedRelOption = null;
+                ClearTypeaheadState();
+            }
+            // Switch to Edit view so the user can add more fields (title, role,
+            // contacts) before the card is finalized.
+            _editingIndex = GuardianLinks.Count - 1;
+            if (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count)
+            {
+                var a = GuardianLinks[_editingIndex];
+                _editTitleId = a.TitleCodedValueId;
+                _editFirstName = a.FirstName;
+                _editLastName = a.LastName;
+                _editRelationshipId = a.RelationshipCodedValueId;
+                _editRole = a.Role;
+                _editContacts = (a.Contacts ?? []).ToList();
+                if (_editRelationshipId is { } relId)
+                    await EnsureRelNameAsync(relId);
+                _panelMode = GuardianPanelMode.Edit;
+            }
+            else
+            {
+                _panelMode = GuardianPanelMode.List;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to add new guardian inline");
+            _guardianError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    /// <summary>Re-render callback for the Buffered-mode ContactsEditor in the
+    /// Edit panel. The editor mutates <see cref="_editContacts"/> in place; this
+    /// just triggers a state change so the UI reflects the mutation.</summary>
+    private Task OnEditContactsChanged() => InvokeAsync(StateHasChanged);
+
+    /// <summary>Appends a guardian draft to the list (create + all-inclusive edit
+    /// dialog both draft; the parent flushes the whole set on save).</summary>
+    private async Task AddDraftAsync(GuardianAssignment assignment)
+    {
+        if (assignment.ExistingGuardianId is { } id && GuardianLinks.Any(g => g.ExistingGuardianId == id))
+            return;
+        GuardianLinks.Add(assignment);
+        if (assignment.RelationshipCodedValueId is { } relId)
+            await EnsureRelNameAsync(relId);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RemoveGuardianAsync(int index)
+    {
+        if (index < 0 || index >= GuardianLinks.Count) return;
+        GuardianLinks.RemoveAt(index);
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task EnsureRelNameAsync(Guid relId)
+    {
+        if (_relNames.ContainsKey(relId)) return;
+        try
+        {
+            var cv = await CodedValuesApi.GetByIdAsync(relId, CancellationToken.None);
+            if (cv is not null) _relNames[cv.Id] = cv.Name;
+        }
+        catch
+        {
+            // Non-fatal: the relationship name is only a display nicety.
+        }
+    }
+
+    // ── Add-existing-guardian typeahead ──
+
+    /// <summary>UI-only sentinel Guid for the "Add Existing Guardian" trigger
+    /// line item in the local relationship dropdown. Never reaches the save path
+    /// — AddInlineGuardianAsync resolves it to the picked real relationship (or
+    /// null) before constructing the <see cref="GuardianAssignment"/>.
+    /// Stability asserted by a unit test.</summary>
+    internal static readonly Guid ExistingGuardianSentinel =
+        new("e1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c");
+
+    /// <summary>Discriminator for entries in the local relationship dropdown's
+    /// option list. <see cref="Sentinel"/> is the selectable "Add Existing
+    /// Guardian" trigger; <see cref="Relationship"/> is a real relationship coded
+    /// value. The divider is rendered INSIDE the sentinel's option template (an
+    /// underline under the label) — there is no separate disabled option in the
+    /// list, so no Divider kind is needed.</summary>
+    internal enum RelationshipOptionKind { Relationship, Sentinel }
+
+    /// <summary>One entry in the local relationship dropdown's option list. For
+    /// <see cref="Kind"/> == <see cref="RelationshipOptionKind.Sentinel"/>
+    /// <see cref="Id"/> equals <see cref="ExistingGuardianSentinel"/>; for
+    /// <see cref="Kind"/> == <see cref="RelationshipOptionKind.Relationship"/>
+    /// <see cref="Id"/> is the coded value id.</summary>
+    internal sealed record RelationshipOption(
+        Guid? Id,
+        string Label,
+        RelationshipOptionKind Kind,
+        bool IsDisabled);
+
+    /// <summary>One row in the "add existing guardian" typeahead results.
+    /// <see cref="RelationshipName"/> is set in by-student mode and null in
+    /// by-contact mode. <see cref="WardCount"/> is <c>null</c> when enrichment
+    /// failed (renders "—").</summary>
+    internal sealed record GuardianSearchRow(
+        Guid Id,
+        string FullName,
+        string? RelationshipName,
+        int? WardCount,
+        string FirstName,
+        string LastName,
+        Guid? TitleCodedValueId,
+        Guid? RelationshipCodedValueId,
+        string? MatchedStudentName,
+        string? MatchedStudentNumber);
+
+    /// <summary>The loaded option list for the local relationship dropdown
+    /// (sentinel + RELATSHIPS coded values, in that order). Populated by
+    /// <see cref="BuildRelationshipOptionsAsync"/> in OnInitializedAsync. Null
+    /// while loading; empty after a load failure.</summary>
+    private RelationshipOption[]? _relationshipOptions;
+
+    // Existing-mode state for the typeahead.
+    private bool _inExistingMode;
+
+    /// <summary>Which typeahead search dimension is active.
+    /// <see cref="Contact"/> searches tenants-wide by guardian name;
+    /// <see cref="Student"/> searches by student name and lists that student's
+    /// guardians directly.</summary>
+    private enum SearchMode { Contact, Student }
+    private SearchMode _searchMode = SearchMode.Contact;
+
+    /// <summary>The id of the existing guardian currently picked from the
+    /// typeahead, or null when no pick is made yet.</summary>
+    private Guid? _existingGuardianId;
+
+    /// <summary>The relationship the typeahead picked up for the chosen existing
+    /// guardian, used to seed the relationship dropdown after a pick and as the
+    /// fallback when the sentinel is resolved. Null in by-contact mode (the user
+    /// picks); set in by-student mode from
+    /// <c>StudentGuardianViewDto.RelationshipCodedValueId</c>.</summary>
+    private Guid? _pickedRelationshipId;
+
+    /// <summary>The salutation title id the typeahead picked up for the chosen
+    /// existing guardian, used to prefill the model on a pick.</summary>
+    private Guid? _pickedTitleId;
+
+    /// <summary>Debounce CTS for the typeahead's search handler. Cancel-and-
+    /// restart on each keystroke for the ~300 ms debounce window.
+    /// <see cref="DisposeAsync"/> handles the null case.</summary>
+    private CancellationTokenSource? _searchCts;
+
+    /// <summary>Reference to the typeahead component, used to focus + re-open
+    /// programmatically if needed. Currently unused at runtime — kept for future
+    /// keyboard-nav helpers.</summary>
+    private FluentAutocomplete<GuardianSearchRow>? _typeahead;
+
+    /// <summary>Equality comparer for <see cref="GuardianSearchRow"/> used by
+    /// <c>FluentAutocomplete.OptionComparer</c>. Compares by
+    /// <see cref="GuardianSearchRow.Id"/> so a re-search returns fresh record
+    /// instances without the component dropping the selected row. A guardian
+    /// linked to two matching students yields two rows — both kept.</summary>
+    internal sealed class GuardianSearchRowComparer : IEqualityComparer<GuardianSearchRow>
+    {
+        public static readonly GuardianSearchRowComparer Instance = new();
+        public bool Equals(GuardianSearchRow? x, GuardianSearchRow? y) =>
+            x is null ? y is null : y is not null && x.Id == y.Id;
+        public int GetHashCode(GuardianSearchRow obj) => obj.Id.GetHashCode();
+    }
+
+    /// <summary>True when the sentinel trigger is selected — the free-text name
+    /// fields are swapped for the typeahead input + radio.</summary>
+    private bool InExistingMode => _inExistingMode;
+
+    /// <summary>The currently selected option in the local relationship
+    /// dropdown. Synced from the add-row state so the dropdown reflects
+    /// <see cref="_newRelId"/>.</summary>
+    private RelationshipOption? _selectedRelOption;
+
+    /// <summary>Handles the local relationship dropdown's selection change. Maps
+    /// the picked option back to the add-row state:
+    ///   - <see cref="RelationshipOptionKind.Sentinel"/> → enter existing-
+    ///     guardian mode, set <see cref="_newRelId"/> to the sentinel, clear the
+    ///     typeahead pick state, reset the search results.
+    ///   - <see cref="RelationshipOptionKind.Relationship"/> → real relationship:
+    ///     bind the id — UNLESS a guardian has already been picked in existing
+    ///     mode, in which case keep existing mode + the typeahead.
+    ///   - <c>null</c> → user cleared the dropdown back to placeholder (no-op).</summary>
+    private void OnRelationshipOptionChanged(RelationshipOption? opt)
+    {
+        _selectedRelOption = opt;
+        switch (opt?.Kind)
+        {
+            case RelationshipOptionKind.Sentinel:
+                _inExistingMode = true;
+                _newRelId = ExistingGuardianSentinel;
+                _existingGuardianId = null;
+                _pickedRelationshipId = null;
+                _pickedTitleId = null;
+                ClearTypeaheadState();
+                break;
+            case RelationshipOptionKind.Relationship when opt.Id is { } relId:
+                _newRelId = relId;
+                if (_existingGuardianId is null)
+                {
+                    // Free-text new-guardian flow: exit existing mode and discard
+                    // any typeahead search state.
+                    _inExistingMode = false;
+                    ClearTypeaheadState();
+                }
+                break;
+            case null:
+                // User cleared the dropdown back to placeholder (no-op).
+                break;
+            default:
+                break;
+        }
+    }
+
+    /// <summary>Resets the transient typeahead search state. Cancels any in-flight
+    /// debounce CTS and clears the search session. Does NOT touch the add-row
+    /// selection (_inExistingMode, _selectedRelOption, _newRelId,
+    /// _existingGuardianId, _pickedRelationshipId, _pickedTitleId, _newFirstName,
+    /// _newLastName) — those persist across navigation and are reset separately.</summary>
+    private void ClearTypeaheadState()
+    {
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
+    }
+
+    /// <summary>Formats the per-guardian ward count cell. Null → "—"; 1 →
+    /// "+1 ward"; n → "+N wards". Pure function; lives here so the result row
+    /// markup stays a one-liner and the unit test can pin the labels without
+    /// rendering the component.</summary>
+    internal static string WardLabel(int? n) => n switch
+    {
+        null => "—",
+        1 => "+1 ward",
+        _ => $"+{n} wards",
+    };
+
+    // ── Typeahead search handlers ──
+    // A single FluentAutocomplete owns the popup, the 300 ms debounce
+    // (ImmediateDelay="300"), keyboard nav, and ARIA combobox role. These
+    // handlers only supply options + resolve the pick. The handler-internal
+    // CancellationTokenSource provides cancel-on-supersede. Min 2 chars before
+    // any API call. Radio toggle switches the search dimension; a pick persists
+    // across the toggle.
+
+    /// <summary>The set of guardian ids already linked or drafted for this
+    /// student, used as the client-side duplicate filter. The server-side
+    /// <c>excludeStudentId</c> hides already-linked guardians; this catches
+    /// drafted-but-not-yet-saved guardians that the server filter can't see.</summary>
+    private HashSet<Guid> DraftedGuardianIds()
+        => GuardianLinks
+            .Where(g => g.ExistingGuardianId is { })
+            .Select(g => g.ExistingGuardianId!.Value)
+            .ToHashSet();
+
+    /// <summary>The single typeahead callback. Switches on <see cref="_searchMode"/>:
+    /// Contact → <see cref="SearchContactRowsAsync"/>; Student →
+    /// <see cref="SearchGuardiansByStudentNameRowsAsync"/>. Min 2 chars.</summary>
+    private async Task OnTypeaheadSearchAsync(OptionsSearchEventArgs<GuardianSearchRow> e)
+    {
+        var q = (e.Text ?? string.Empty).Trim();
+        if (q.Length < 2) { e.Items = []; return; }      // §9.1
+
+        _searchCts?.Cancel(); _searchCts?.Dispose();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+        try
+        {
+            e.Items = _searchMode == SearchMode.Contact
+                ? await SearchContactRowsAsync(q, ct)
+                : await SearchGuardiansByStudentNameRowsAsync(q, ct);
+            if (ct.IsCancellationRequested) e.Items = [];
+        }
+        catch (OperationCanceledException) { e.Items = []; }
+    }
+
+    /// <summary>Contact-mode search. Calls
+    /// <c>Api.ListGuardiansAsync(ct, search: q, excludeStudentId: StudentId)</c>
+    /// so already-linked guardians are hidden server-side. Relationship is null
+    /// (by-contact omits it); matched-student context is null. Ward counts from
+    /// the client-enriched <c>GuardianDto.StudentCount</c>. Capped at 30 rows.</summary>
+    private async Task<GuardianSearchRow[]> SearchContactRowsAsync(string q, CancellationToken ct)
+    {
+        var items = await Api.ListGuardiansAsync(ct, search: q, excludeStudentId: StudentId) ?? [];
+        var linkedIds = DraftedGuardianIds();
+        return items
+            .Where(g => !linkedIds.Contains(g.Id))
+            .Take(30)
+            .Select(g => new GuardianSearchRow(
+                g.Id,
+                FormatGuardianName(g.TitleName, g.FirstName, g.LastName, g.DisplayName),
+                RelationshipName: null,
+                WardCount: g.StudentCount,
+                FirstName: g.FirstName,
+                LastName: g.LastName,
+                TitleCodedValueId: g.TitleCodedValueId,
+                RelationshipCodedValueId: null,
+                MatchedStudentName: null,
+                MatchedStudentNumber: null))
+            .ToArray();
+    }
+
+    /// <summary>Student-mode search. Single-step: type a <em>student</em> name →
+    /// list <em>guardians</em> of matching students. Orchestration:
+    /// <c>Api.ListStudentsAsync</c> (exclude current <see cref="StudentId"/>) →
+    /// <see cref="Task.WhenAll"/> of <c>Api.ListGuardiansByStudentAsync</c> per
+    /// match (N+1, bounded by the <c>Take(10)</c> cap) → flatten to guardian rows
+    /// carrying the matched student + the link's relationship + bulk ward counts.
+    /// A guardian linked to two matching students appears twice — intended. Capped
+    /// at 30 rows.</summary>
+    private async Task<GuardianSearchRow[]> SearchGuardiansByStudentNameRowsAsync(string q, CancellationToken ct)
+    {
+        var students = await Api.ListStudentsAsync(ct, search: q) ?? [];
+        students = students
+            .Where(s => StudentId is null || s.Id != StudentId.Value)
+            .Take(10)   // §11.8 N+1 cap
+            .ToArray();
+        if (students.Length == 0) return [];
+
+        // Parallelize the N+1 guardian loads.
+        var linkArrays = await Task.WhenAll(students.Select(s => Api.ListGuardiansByStudentAsync(s.Id, ct)));
+        ct.ThrowIfCancellationRequested();
+
+        var linkedIds = DraftedGuardianIds();
+        var rows = new List<GuardianSearchRow>();
+        foreach (var (student, links) in students.Zip(linkArrays, (s, l) => (s, l ?? [])))
+        {
+            // Ensure any new relationship coded-value ids are resolved for the
+            // (Relationship) label.
+            var newRelIds = links
+                .Where(l => l.RelationshipCodedValueId is { } rid && !_relNames.ContainsKey(rid))
+                .Select(l => l.RelationshipCodedValueId!.Value)
+                .Distinct();
+            foreach (var rid in newRelIds)
+                await EnsureRelNameAsync(rid);
+
+            foreach (var l in links)
+            {
+                if (linkedIds.Contains(l.GuardianId)) continue;
+                string? relName = l.RelationshipCodedValueId is { } id && _relNames.TryGetValue(id, out var rn) ? rn : null;
+                rows.Add(new GuardianSearchRow(
+                    l.GuardianId,
+                    $"{l.FirstName} {l.LastName}".Trim(),
+                    relName,
+                    WardCount: null,   // filled below from bulk
+                    FirstName: l.FirstName,
+                    LastName: l.LastName,
+                    TitleCodedValueId: l.TitleCodedValueId,
+                    RelationshipCodedValueId: l.RelationshipCodedValueId,
+                    MatchedStudentName: $"{student.FirstName} {student.LastName}".Trim(),
+                    MatchedStudentNumber: student.StudentNumber));
+            }
+        }
+
+        // Bulk-load ward counts. Failure non-fatal.
+        if (rows.Count > 0)
+        {
+            try
+            {
+                var counts = await Api.ListStudentCountsByGuardiansAsync(rows.Select(r => r.Id).Distinct(), ct);
+                var dict = counts.ToDictionary(c => c.GuardianId, c => c.Count);
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    var r = rows[i];
+                    rows[i] = r with { WardCount = dict.TryGetValue(r.Id, out var c) ? c : null };
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to enrich guardian ward counts");
+            }
+        }
+        return rows.Take(30).ToArray();
+    }
+
+    /// <summary>Selection → draft. Single branch — every row is a guardian.
+    /// By-student: prefill relationship + sync the relationship dropdown to the
+    /// real relationship (swaps the sentinel). By-contact: leave relationship
+    /// null for the user to pick.</summary>
+    private async Task OnTypeaheadSelectedAsync(GuardianSearchRow? row)
+    {
+        if (row is null) return;
+        _existingGuardianId = row.Id;
+        _newFirstName = row.FirstName;
+        _newLastName = row.LastName;
+        _pickedTitleId = row.TitleCodedValueId;
+        if (_searchMode == SearchMode.Student && row.RelationshipCodedValueId is { } relId)
+        {
+            _pickedRelationshipId = relId;
+            _newRelId = relId;
+            _selectedRelOption = _relationshipOptions?.FirstOrDefault(
+                o => o.Kind == RelationshipOptionKind.Relationship && o.Id == relId);
+        }
+        else
+        {
+            _pickedRelationshipId = null;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Per-option row template. Two-line: line 1 = <c>FullName
+    /// (Relationship) +N wards</c> (green far-right); line 2 = matched student
+    /// <c>Name #Number</c> (muted, Student mode only).</summary>
+    private RenderFragment<GuardianSearchRow> RowTemplate => context =>
+    @<div class="guardian-search-row">
+        <div class="guardian-search-primary">
+            <span class="guardian-search-name">@context.FullName</span>
+            @if (context.RelationshipName is { } rel)
+            {
+                <span class="guardian-search-rel">(@rel)</span>
+            }
+            <span class="guardian-search-wards">@WardLabel(context.WardCount)</span>
+        </div>
+        @if (context.MatchedStudentName is { } stu)
+        {
+            <div class="guardian-search-student">
+                @stu
+                @if (context.MatchedStudentNumber is { } num)
+                {
+                    <span class="muted"> #@num</span>
+                }
+            </div>
+        }
+    </div>;
+
+    /// <summary>Formats a guardian's display name for the typeahead row. Mirrors
+    /// the existing card head-line format: title + first + last, trimmed; falls
+    /// back to DisplayName when title is missing; falls back to FirstLast when
+    /// DisplayName is also missing.</summary>
+    private static string FormatGuardianName(string? titleName, string firstName, string lastName, string? displayName)
+    {
+        if (!string.IsNullOrWhiteSpace(titleName))
+            return $"{titleName} {firstName} {lastName}".Trim();
+        if (!string.IsNullOrWhiteSpace(displayName))
+            return displayName;
+        return $"{firstName} {lastName}".Trim();
+    }
+
+    /// <summary>Loads RELATSHIPS coded values and prepends the sentinel option.
+    /// Called from <see cref="OnInitializedAsync"/>. Failures are non-fatal: the
+    /// dropdown falls back to an empty list and the load error is logged.</summary>
+    private async Task BuildRelationshipOptionsAsync()
+    {
+        try
+        {
+            var items = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.Relationships.ToCode(), CancellationToken.None) ?? [];
+            var options = new List<RelationshipOption>(items.Length + 1)
+            {
+                // Top of the list: the selectable "Add Existing Guardian" trigger.
+                // The visual divider is rendered as a line inside this option's
+                // template — see the OptionTemplate in the FluentSelect above.
+                new(ExistingGuardianSentinel, "Add Existing Guardian",
+                    RelationshipOptionKind.Sentinel, IsDisabled: false),
+            };
+            foreach (var cv in items)
+            {
+                options.Add(new(cv.Id, cv.Name,
+                    RelationshipOptionKind.Relationship, IsDisabled: cv.IsDisabled));
+            }
+            _relationshipOptions = options.ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load relationship coded values");
+            _relationshipOptions = [];
+        }
+    }
+
+    /// <summary>Disposes the typeahead debounce CTS. The CTS is null until the
+    /// search handler runs; the null-check makes DisposeAsync safe regardless of
+    /// which phase the component is torn down at.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_searchCts is { } cts)
+        {
+            cts.Cancel();
+            cts.Dispose();
+            _searchCts = null;
+        }
+        await ValueTask.CompletedTask;
+        GC.SuppressFinalize(this);
+    }
+}

@@ -1527,11 +1527,37 @@ public sealed class StudentsApiClient : IContactsClient
         return result!.Id;
     }
 
-    public async Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/contacts/{id}", req, ct)).EnsureSuccessStatusCode();
+    public async Task<ContactAuditEntryDto[]?> ListContactAuditEntriesAsync(
+        Guid? contactId = null,
+        ContactOwnerType? ownerType = null,
+        Guid? ownerId = null,
+        int skip = 0,
+        int take = 50,
+        CancellationToken ct = default)
+    {
+        var query = new List<string>();
+        if (contactId.HasValue) query.Add($"contactId={contactId.Value:D}");
+        if (ownerType.HasValue) query.Add($"ownerType={ownerType.Value}");
+        if (ownerId.HasValue) query.Add($"ownerId={ownerId.Value:D}");
+        query.Add($"skip={skip}");
+        query.Add($"take={take}");
+        var url = "/contacts/audit?" + string.Join("&", query);
+        return await _http.GetFromJsonAsync<ContactAuditEntryDto[]>(url, ct);
+    }
 
-    public async Task DeleteContactAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.DeleteAsync($"/contacts/{id}", ct)).EnsureSuccessStatusCode();
+    public async Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/contacts/{id}", req, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    public async Task DeleteContactAsync(Guid id, string reason, CancellationToken ct = default)
+    {
+        var url = string.IsNullOrWhiteSpace(reason)
+            ? $"/contacts/{id}"
+            : $"/contacts/{id}?reason={Uri.EscapeDataString(reason)}";
+        (await _http.DeleteAsync(url, ct)).EnsureSuccessStatusCode();
+    }
 
     public async Task VerifyContactAsync(Guid id, CancellationToken ct = default) =>
         (await _http.PostAsync($"/contacts/{id}/verify", null, ct)).EnsureSuccessStatusCode();

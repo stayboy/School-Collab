@@ -33,6 +33,7 @@
 @using SchoolCollab.Admin.Shared.Services
 @inject IContactsClient Api
 @inject CodedValuesApiClient CodedValuesApi
+@inject IDialogService DialogService
 @inject ILogger<ContactsEditor> Logger
 
 <div class="contacts-editor">
@@ -45,31 +46,35 @@
     else
     {
         <div class="contacts-editor-add">
-            <DropdownForEnum TEnum="ContactChannel"
-                              @bind-SelectedValue="_newChannel"
-                              @bind-SelectedValue:after="OnChannelChanged"
-                              Placeholder="Channel"
-                              Width="FieldWidth.W2" />
-            @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
-            {
-                <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                    @bind-SelectedId="_newCountryCodeId"
-                                    Placeholder="Code"
-                                    Width="FieldWidth.W3"
-                                    OptionText="@FormatCountryCodeOption" />
-            }
-            <FluentTextField @bind-Value="_newValue"
-                              Placeholder="@ValuePlaceholder"
-                              class="contacts-value" />
-            <FluentTextField @bind-Value="_newLabel"
-                              Placeholder="Label (optional)"
-                              class="contacts-label" />
-            <FluentButton Appearance="Appearance.Accent"
-                          IconStart="@FluentIcons.Add"
-                          OnClick="AddAsync"
-                          Disabled="@(_adding || string.IsNullOrWhiteSpace(_newValue))">
-                @(_adding ? "Adding…" : "Add")
-            </FluentButton>
+            <div class="contacts-editor-add__identity">
+                <DropdownForEnum TEnum="ContactChannel"
+                                  @bind-SelectedValue="_newChannel"
+                                  @bind-SelectedValue:after="OnChannelChanged"
+                                  Placeholder="Channel"
+                                  Width="FieldWidth.W2" />
+                @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+                {
+                    <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                        @bind-SelectedId="_newCountryCodeId"
+                                        Placeholder="Code"
+                                        Width="FieldWidth.W3"
+                                        OptionText="@FormatCountryCodeOption" />
+                }
+            </div>
+            <div class="contacts-editor-add__value">
+                <FluentTextField @bind-Value="_newValue"
+                                  Placeholder="@ValuePlaceholder"
+                                  class="contacts-value" />
+                <FluentTextField @bind-Value="_newLabel"
+                                  Placeholder="Label (optional)"
+                                  class="contacts-label" />
+                <FluentButton Appearance="Appearance.Accent"
+                              IconStart="@FluentIcons.Add"
+                              OnClick="AddAsync"
+                              Disabled="@(_adding || string.IsNullOrWhiteSpace(_newValue))">
+                    @(_adding ? "Adding…" : "Add")
+                </FluentButton>
+            </div>
         </div>
 
         @if (!string.IsNullOrEmpty(_error))
@@ -128,6 +133,10 @@
                                               IconStart="@FluentIcons.Checkmark"
                                               OnClick="@(() => VerifyAsync(c.Key))" />
                             }
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          Title="Edit contact"
+                                          IconStart="@FluentIcons.Edit"
+                                          OnClick="@(() => OnEditAsync(c))" />
                             @* Move-up / move-down reorder. Live swaps ids
                                and calls the reorder endpoint; Buffered swaps
                                the in-memory list and raises ContactsChanged. *@
@@ -144,7 +153,7 @@
                             <FluentButton Appearance="Appearance.Lightweight"
                                           Title="Remove contact"
                                           IconStart="@FluentIcons.Delete"
-                                          OnClick="@(() => RemoveAsync(c.Key))" />
+                                          OnClick="@(() => OnRemoveAsync(c))" />
                         </span>
                     </li>
                 }
@@ -438,14 +447,67 @@
         _newCountryCodeId = null;
     }
 
-    // ─── Remove ────────────────────────────────────────────────────────
-    private async Task RemoveAsync(Guid key)
+    // ─── Edit / Remove with reason (dialog section switch) ─────────────
+    // Both actions open the shared ContactChangeDialog so the user can
+    // supply a required reason. Live mode calls the API immediately;
+    // Buffered mode mutates the in-memory list.
+    private async Task OnEditAsync(ContactRow row)
     {
+        var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
+            new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Edit),
+            "Edit contact",
+            DialogSize.Medium);
+
+        if (result is null) return;
+
         if (Mode == EditorMode.Buffered)
         {
             var list = Contacts;
             if (list is null) return;
-            var target = list.FirstOrDefault(x => x.TempId == key);
+            var target = list.FirstOrDefault(x => x.TempId == row.Key);
+            if (target is null) return;
+            target.Channel = result.Channel ?? target.Channel;
+            target.Value = result.Value ?? target.Value;
+            target.Label = result.Label;
+            target.CountryCode = result.CountryCode;
+            await NotifyChangedAsync();
+            return;
+        }
+
+        _error = null;
+        try
+        {
+            await Api.UpdateContactAsync(row.Key, new UpdateContactRequest(
+                result.Value!,
+                result.Label,
+                result.Reason)
+            { CountryCode = result.CountryCode }, MutationToken);
+            await LoadAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to update contact {ContactId}", row.Key);
+            _error = ex.Message;
+            if (!_disposed) await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task OnRemoveAsync(ContactRow row)
+    {
+        var result = await DialogService.ShowShellDialogAsync<ContactChangeDialog, ContactChangeModel, ContactChangeResult>(
+            new ContactChangeModel(row.Key, row.Channel, row.Value, row.Label, row.CountryCode, ContactChangeMode.Delete),
+            "Delete contact",
+            DialogSize.Small);
+
+        if (result is null) return;
+
+        if (Mode == EditorMode.Buffered)
+        {
+            var list = Contacts;
+            if (list is null) return;
+            var target = list.FirstOrDefault(x => x.TempId == row.Key);
             if (target is null) return;
             list.Remove(target);
             RestampOrders(list);
@@ -456,15 +518,15 @@
         _error = null;
         try
         {
-            await Api.DeleteContactAsync(key, MutationToken);
-            _subscribed.Remove(key);
+            await Api.DeleteContactAsync(row.Key, result.Reason, MutationToken);
+            _subscribed.Remove(row.Key);
             await LoadAsync();
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
             if (_disposed) return;
-            Logger.LogError(ex, "Failed to remove contact {ContactId}", key);
+            Logger.LogError(ex, "Failed to remove contact {ContactId}", row.Key);
             _error = ex.Message;
             if (!_disposed) await InvokeAsync(StateHasChanged);
         }

@@ -485,4 +485,58 @@ public class StudentDetailSectionsTests
         source.Should().Contain("EnableActivityGroups",
             "the Activity Groups section must be gated behind FEATURE:EnableActivityGroups");
     }
+
+    // ─── Contact history section (spec 2026-08-17 §6.3 / §7.3) ─────────
+    // The append-only audit log of contact edits/deletes is surfaced as a
+    // compact timeline below the Guardians section. Detail.razor is heavy
+    // to fake (concrete StudentsApiClient + TenantGate), so these follow the
+    // source-level pattern used by the other section tests.
+
+    [TestMethod]
+    public void Detail_Has_ContactHistory_Section_With_Count_Badge()
+    {
+        var source = ReadDetailSource();
+        source.Should().Contain("Contact history",
+            "the student Detail page must render a Contact history section");
+        // The header shows a live count badge next to the title.
+        source.Should().Contain("_contactHistory.Length",
+            "the Contact history header shows a count badge bound to the loaded entries");
+        source.Should().Contain("<FluentBadge",
+            "the Contact history count badge uses a FluentBadge");
+    }
+
+    [TestMethod]
+    public void Detail_ContactHistory_Section_Is_After_Guardians()
+    {
+        var source = ReadDetailSource();
+        var guardiansIdx = source.IndexOf("Guardians", StringComparison.Ordinal);
+        var historyIdx = source.IndexOf("Contact history", StringComparison.Ordinal);
+        guardiansIdx.Should().BeGreaterThan(-1, "the Guardians section exists");
+        historyIdx.Should().BeGreaterThan(guardiansIdx,
+            "the Contact history section must appear below the Guardians section");
+    }
+
+    [TestMethod]
+    public void Detail_ContactHistory_Loads_For_Student_Owner()
+    {
+        var source = ReadDetailSource();
+        source.Should().Contain("ListContactAuditEntriesAsync",
+            "the page calls the audit history endpoint");
+        source.Should().Contain("ownerType: ContactOwnerType.Student",
+            "history is loaded scoped to the student owner type");
+        source.Should().Contain("ownerId: Id",
+            "history is loaded for the current student id");
+    }
+
+    [TestMethod]
+    public void Detail_ContactHistory_Has_Loading_Error_And_Empty_States()
+    {
+        var source = ReadDetailSource();
+        source.Should().Contain("_contactHistoryLoading",
+            "the history section has a loading spinner state");
+        source.Should().Contain("_contactHistoryError",
+            "the history section surfaces load errors");
+        source.Should().Contain("No contact changes recorded yet.",
+            "the history section has an empty state");
+    }
 }

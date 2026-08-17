@@ -21,6 +21,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<StudentGuardian> StudentGuardians => Set<StudentGuardian>();
     public DbSet<Contact> Contacts => Set<Contact>();
     public DbSet<ContactSubscription> ContactSubscriptions => Set<ContactSubscription>();
+    public DbSet<ContactAuditEntry> ContactAuditEntries => Set<ContactAuditEntry>();
     public DbSet<GradeNotificationPolicy> GradeNotificationPolicies => Set<GradeNotificationPolicy>();
     public DbSet<Teacher> Teachers => Set<Teacher>();
     public DbSet<TeacherGradeLevel> TeacherGradeLevels => Set<TeacherGradeLevel>();
@@ -54,6 +55,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new StudentGuardianConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ContactConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ContactSubscriptionConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new ContactAuditEntryConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new GradeNotificationPolicyConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TeacherGradeLevelConfiguration(() => CurrentTenantId));

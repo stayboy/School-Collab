@@ -1,12 +1,15 @@
 using System.Net;
 using System.Text.Json;
+using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
 using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
 using SchoolCollab.Admin.Shared.Constants;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Core.Contracts;
@@ -51,7 +54,8 @@ public class ContactsEditorTests : BunitContext
 
         public Func<Task<ContactDto[]?>>? OnListContacts { get; set; }
         public Func<AddContactRequest, Task<Guid>>? OnAddContact { get; set; }
-        public Func<Guid, Task>? OnDeleteContact { get; set; }
+        public Func<Guid, string, Task>? OnDeleteContact { get; set; }
+        public Func<Guid, UpdateContactRequest, Task>? OnUpdateContact { get; set; }
         public Func<Guid, Task>? OnVerifyContact { get; set; }
         public Func<Task<SubscribedContactDto[]?>>? OnListSubscribed { get; set; }
         public Func<Guid, Task>? OnSubscribe { get; set; }
@@ -61,6 +65,12 @@ public class ContactsEditorTests : BunitContext
         public int AddContactCalls;
         public string? LastRequestedValue;
         public string? LastRequestedCountryCode;
+        public int UpdateContactCalls;
+        public Guid? LastUpdatedId;
+        public UpdateContactRequest? LastUpdateRequest;
+        public int DeleteContactCalls;
+        public Guid? LastDeletedId;
+        public string? LastDeleteReason;
 
         public Task<ContactDto[]?> ListContactsAsync(ContactOwnerType ownerType, Guid ownerId, CancellationToken ct = default)
         {
@@ -91,14 +101,32 @@ public class ContactsEditorTests : BunitContext
         }
 
         public Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default)
-            => throw new NotSupportedException("UpdateContactAsync is not exercised by ContactsEditor.");
-
-        public Task DeleteContactAsync(Guid id, CancellationToken ct = default)
         {
-            if (OnDeleteContact is not null) return OnDeleteContact(id);
+            UpdateContactCalls++;
+            LastUpdatedId = id;
+            LastUpdateRequest = req;
+            if (OnUpdateContact is not null) return OnUpdateContact(id, req);
+            return Task.CompletedTask;
+        }
+
+        public Task DeleteContactAsync(Guid id, string reason, CancellationToken ct = default)
+        {
+            DeleteContactCalls++;
+            LastDeletedId = id;
+            LastDeleteReason = reason;
+            if (OnDeleteContact is not null) return OnDeleteContact(id, reason);
             Contacts.RemoveAll(c => c.Id == id);
             return Task.CompletedTask;
         }
+
+        public Task<ContactAuditEntryDto[]?> ListContactAuditEntriesAsync(
+            Guid? contactId = null,
+            ContactOwnerType? ownerType = null,
+            Guid? ownerId = null,
+            int skip = 0,
+            int take = 50,
+            CancellationToken ct = default)
+            => Task.FromResult<ContactAuditEntryDto[]?>([]);
 
         public Task VerifyContactAsync(Guid id, CancellationToken ct = default)
         {
@@ -498,5 +526,170 @@ public class ContactsEditorTests : BunitContext
             rows[1].ClassList.Should().NotContain("contact-item--preferred");
             rows[1].TextContent.Should().NotContain("Preferred");
         });
+    }
+
+    // ─── Edit / Remove with reason (spec 2026-08-17 §7.2) ───────────────
+    // Both actions open the shared ContactChangeDialog via
+    // DialogService.ShowShellDialogAsync. Live mode forwards the dialog's
+    // reason to the API; Buffered mode mutates the in-memory list. The
+    // dialog service is mocked (GradeNotificationPolicyEditorTests pattern)
+    // so the reason-collection contract is exercised deterministically.
+
+    private static ContactDto NewContact(Guid id, string value = "a@x.com")
+        => new(id, ContactOwnerType.Student, OwnerId, ContactChannel.Email, value, "Home",
+            IsVerified: false, IsDeleted: false, CreatedAt: default, UpdatedAt: default);
+
+    private static IElement RowButton(IRenderedComponent<ContactsEditor> cut, string title)
+        => cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == title);
+
+    /// <summary>
+    /// Registers a mocked <see cref="IDialogService"/> that returns
+    /// <paramref name="result"/> when <c>ContactChangeDialog</c> is opened.
+    /// Returns the mock so tests can <c>Verify</c> the open occurred.
+    /// </summary>
+    private Mock<IDialogService> RegisterMockDialog(DialogResult result)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(result));
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<ContactChangeDialog, DialogShellData<ContactChangeModel>>(
+                It.IsAny<DialogShellData<ContactChangeModel>>(), It.IsAny<DialogParameters>()))
+            .ReturnsAsync(dialogRef.Object);
+        Services.AddSingleton(dialogMock.Object);
+        return dialogMock;
+    }
+
+    [TestMethod]
+    public void LiveEdit_ClickingEdit_OpensContactChangeDialog()
+    {
+        var fake = new FakeContactsClient();
+        fake.Contacts.Add(NewContact(Guid.NewGuid()));
+        var dialogMock = RegisterMockDialog(DialogResult.Cancel());
+        var cut = RenderEditor(fake);
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
+        RowButton(cut, "Edit contact").Click();
+
+        cut.WaitForAssertion(() =>
+            dialogMock.Verify(d => d.ShowDialogAsync<ContactChangeDialog, DialogShellData<ContactChangeModel>>(
+                It.IsAny<DialogShellData<ContactChangeModel>>(), It.IsAny<DialogParameters>()), Times.Once));
+    }
+
+    [TestMethod]
+    public void LiveDelete_ClickingDelete_OpensContactChangeDialog()
+    {
+        var fake = new FakeContactsClient();
+        fake.Contacts.Add(NewContact(Guid.NewGuid()));
+        var dialogMock = RegisterMockDialog(DialogResult.Cancel());
+        var cut = RenderEditor(fake);
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
+        RowButton(cut, "Remove contact").Click();
+
+        cut.WaitForAssertion(() =>
+            dialogMock.Verify(d => d.ShowDialogAsync<ContactChangeDialog, DialogShellData<ContactChangeModel>>(
+                It.IsAny<DialogShellData<ContactChangeModel>>(), It.IsAny<DialogParameters>()), Times.Once));
+    }
+
+    [TestMethod]
+    public void LiveEdit_DialogReason_FlowsToUpdateContactAsync()
+    {
+        var contactId = Guid.NewGuid();
+        var fake = new FakeContactsClient();
+        fake.Contacts.Add(NewContact(contactId, "old@x.com"));
+        var result = new ContactChangeResult(ContactChannel.Email, "new@x.com", "Home", null, "Parent requested change", IsDeleted: false);
+        RegisterMockDialog(DialogResult.Ok(new DialogShellResult<ContactChangeResult>(result)));
+        var cut = RenderEditor(fake);
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
+        RowButton(cut, "Edit contact").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            fake.UpdateContactCalls.Should().Be(1, "the confirmed edit dialog must call the update API");
+            fake.LastUpdatedId.Should().Be(contactId);
+            fake.LastUpdateRequest!.Reason.Should().Be("Parent requested change",
+                "the required dialog reason must flow to the update request");
+            fake.LastUpdateRequest.Value.Should().Be("new@x.com");
+        });
+    }
+
+    [TestMethod]
+    public void LiveDelete_DialogReason_FlowsToDeleteContactAsync()
+    {
+        var contactId = Guid.NewGuid();
+        var fake = new FakeContactsClient();
+        fake.Contacts.Add(NewContact(contactId));
+        var result = new ContactChangeResult(null, null, null, null, "Duplicate entry", IsDeleted: true);
+        RegisterMockDialog(DialogResult.Ok(new DialogShellResult<ContactChangeResult>(result)));
+        var cut = RenderEditor(fake);
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
+        RowButton(cut, "Remove contact").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            fake.DeleteContactCalls.Should().Be(1, "the confirmed delete dialog must call the delete API");
+            fake.LastDeletedId.Should().Be(contactId);
+            fake.LastDeleteReason.Should().Be("Duplicate entry",
+                "the required dialog reason must flow to the delete request");
+        });
+    }
+
+    [TestMethod]
+    public void BufferedEdit_DialogResult_MutatesInMemoryList_WithoutApiCall()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "old@x.com", Label = "Home", Order = 0 }
+        };
+        var targetId = contacts[0].TempId;
+        var result = new ContactChangeResult(ContactChannel.Email, "new@x.com", "Home", null, "Parent requested change", IsDeleted: false);
+        RegisterMockDialog(DialogResult.Ok(new DialogShellResult<ContactChangeResult>(result)));
+        var cut = RenderBuffered(contacts);
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
+        RowButton(cut, "Edit contact").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            contacts[0].Value.Should().Be("new@x.com", "Buffered edit mutates the in-memory list");
+            contacts[0].TempId.Should().Be(targetId, "the same row is edited (TempId preserved)");
+        });
+
+        var fake = (FakeContactsClient)Services.GetRequiredService<IContactsClient>();
+        fake.UpdateContactCalls.Should().Be(0, "Buffered edit must not call the update API");
+        fake.DeleteContactCalls.Should().Be(0);
+        cut.FindAll(".contacts-error").Should().BeEmpty("no API call means no error bar");
+    }
+
+    [TestMethod]
+    public void BufferedDelete_DialogResult_RemovesFromInMemoryList_WithoutApiCall()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "a@x.com", Order = 0 },
+            new() { Channel = ContactChannel.SMS, Value = "5551234", Order = 1 },
+        };
+        var removeId = contacts[0].TempId;
+        var result = new ContactChangeResult(null, null, null, null, "Duplicate", IsDeleted: true);
+        RegisterMockDialog(DialogResult.Ok(new DialogShellResult<ContactChangeResult>(result)));
+        var cut = RenderBuffered(contacts);
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(2));
+        RowButton(cut, "Remove contact").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            contacts.Should().HaveCount(1, "Buffered delete removes the row from the in-memory list");
+            contacts.Should().NotContain(c => c.TempId == removeId);
+            contacts[0].Value.Should().Be("5551234", "the surviving row is the other contact");
+        });
+
+        var fake = (FakeContactsClient)Services.GetRequiredService<IContactsClient>();
+        fake.DeleteContactCalls.Should().Be(0, "Buffered delete must not call the delete API");
+        fake.UpdateContactCalls.Should().Be(0);
+        cut.FindAll(".contacts-error").Should().BeEmpty("no API call means no error bar");
     }
 }

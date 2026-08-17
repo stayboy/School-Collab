@@ -4,7 +4,11 @@
    (src/SchoolCollab.Admin.Shared/Components/FormRow.razor.css). This
    stylesheet only carries the STUDENT-FORM-SPECIFIC bits: form
    max-width, per-input widths, error message, and the action-row
-   separator. */
+   separator.
+
+   The Guardians section styles were extracted with the guardian logic
+   into GuardianSection.razor.css (owned by the <GuardianSection>
+   component). */
 
 /* Cap the form width so the fields don't stretch uncomfortably wide on
    big screens. Matches the 600px cap the previous per-page
@@ -16,7 +20,7 @@
 }
 
 /* Wide variant: removes the 600px cap so the form fills a wide dialog
-   (used by the create/edit dialogs, which host the guardians grid +
+   (used by the create/edit dialogs, which host the guardians section +
    contacts editor and need the full dialog width). */
 .student-form-fields--wide {
     max-width: none;
@@ -79,70 +83,13 @@
        row (where the original buttons sized to their text). */
 }
 
-/* Horizontal separator between the student fields and the opt-in Guardians
-   section. Wraps a <FluentDivider /> to provide consistent vertical breathing
-   room (margin/padding) that matches the .form-actions separator. */
+/* Horizontal separator between the student fields and the opt-in
+   Guardians section. Wraps a <FluentDivider /> to provide consistent
+   vertical breathing room (margin/padding) that matches the
+   .form-actions separator. */
 .student-section-separator {
     margin-top: 1rem;
     padding-top: 1rem;
-}
-
-/* ── Guardians section (opt-in via ShowGuardians) ── */
-.student-guardians {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-}
-.guardian-add-buttons {
-    margin-top: 0.25rem;
-}
-.muted {
-    color: var(--neutral-foreground-hint, #6b6b6b);
-}
-
-/* ── Linked mode (page-side, opt-in via Mode="Linked") ──
-   Compact "Guardians (N) — Manage" header + read-only grid +
-   per-row delete. Used by /students/{id}/edit (and any future page
-   that owns its own Save flow + DialogService). The modifier is
-   applied to the same .student-guardians wrapper the dialog
-   callers use, so the default styles don't need to be overridden —
-   this only adds the header row and tighter spacing. */
-.student-form-guardians--linked {
-    gap: 0.375rem;
-}
-.student-guardians-linked-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.5rem;
-    padding-bottom: 0.25rem;
-    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
-}
-.student-guardians-linked-count {
-    color: var(--neutral-foreground-hint, #6b6b6b);
-    font-size: 0.95rem;
-}
-
-/* ── Guardian add section (inline panel switch, no nested dialog) ── */
-.guardian-add-section {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    margin-top: 0.5rem;
-    padding: 0.75rem;
-    border: 1px solid var(--neutral-stroke-divider, #e0e0e0);
-    border-radius: 6px;
-    background: var(--neutral-layer-2, #fafafa);
-}
-.guardian-add-title {
-    margin: 0;
-    font-size: 0.95rem;
-}
-.guardian-tabs {
-    margin: 0.25rem 0;
-}
-.guardian-add-actions {
-    margin-top: 0.25rem;
 }
 
 /* ── Contacts section (opt-in via ShowContacts) ──
@@ -153,245 +100,4 @@
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
-}
-
-/* ── Guardian card list (Inline-mode card redesign) ──
-   Mirrors the visual language of the <ContactsEditor> contact-item list
-   (bordered cards, head line + value line, primary accent highlight)
-   so the Guardians section and the Contacts section sit as two
-   parallel card-list blocks under the student profile. Display-only:
-   the per-guardian contact chips are loaded from each linked
-   guardian's top-3 contacts (StudentGuardianViewDto.Contacts) and
-   cannot be edited from this dialog — guardian contact editing still
-   lives on the guardian surface (GuardianDetail). */
-.guardian-cards {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.guardian-card {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 8px 10px;
-    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
-    border-radius: 6px;
-    background: var(--neutral-layer-1, #fafafa);
-}
-
-/* Primary-guardian highlight — mirrors the contacts list's
-   .contact-item--preferred accent. The primary link is the visual
-   anchor of the list, matching the contacts list's "preferred"
-   convention. */
-.guardian-card--primary {
-    border-color: var(--accent-fill-rest, #0078d4);
-    background: var(--accent-fill-rest-area, #e6f2fa);
-}
-
-.guardian-card-head {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.guardian-card-name {
-    font-weight: 600;
-}
-
-.guardian-card-rel {
-    color: var(--neutral-foreground-hint, #6b6b6b);
-    font-style: italic;
-}
-
-.guardian-card-badge {
-    white-space: nowrap;
-}
-
-.guardian-card-actions {
-    display: flex;
-    align-items: center;
-    gap: 2px;
-    margin-left: auto;
-}
-
-.guardian-card-contacts {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-
-.guardian-contact-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-}
-
-/* ── Inline "add guardian" row (mirrors the ContactsEditor add-contact row) ──
-   A horizontal flex-wrap strip with the Relationship dropdown + Last/First
-   name fields + an Accent Add button, always visible in List mode. Sits
-   above the card list so adding is always reachable (same rhythm as the
-   contacts editor's add row). The "Add existing" Lightweight button sits
-   below it as a secondary action. */
-.guardian-add-row {
-    display: flex;
-    flex-wrap: nowrap;       /* prevent Add button from dropping to a new line */
-    align-items: flex-start; /* align input tops; the radio below the typeahead
-                                naturally extends past the button baseline */
-    gap: 8px;
-    margin-bottom: 4px;
-}
-
-/* Two name fields each fill half of the "name fields" region. Their total
-   rendered width (2 × ~160px + gap) is the same visual region the existing-
-   guardian typeahead must occupy when the sentinel is selected, so the
-   Add button stays in the same horizontal position and the row keeps the
-   same overall width in both modes. */
-.guardian-add-field {
-    flex: 0 0 calc(50% - 4px); /* half the region, accounting for the 8px gap */
-    min-width: 120px;
-}
-
-/* The existing-guardian typeahead stack must match the combined width of the
-   two .guardian-add-field inputs, preserving the row width and Add-button
-   position when switching between "new guardian" and "existing guardian" modes.
-   Fixed width equals two name-field bases plus the 8px gap between them. */
-.guardian-typeahead-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 0 0 auto;
-    width: calc(320px + 8px); /* matches two 160px name fields + gap */
-    min-width: 0;
-}
-
-/* Contacts editor embedded in the Edit panel. Gives it a divider + spacing
-   so it sits comfortably between the metadata fields and the Save/Cancel
-   actions. */
-.guardian-edit-contacts {
-    margin-top: 0.5rem;
-    padding-top: 0.5rem;
-    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
-}
-
-/* ── Local relationship dropdown (plan §10 Phase 2) ──
-   The local FluentSelect wrapper that renders the "Add Existing Guardian"
-   sentinel + a non-selectable divider + the RELATSHIPS coded values.
-   Width is driven by the component's inline Style="width: 150px" (shrunk from W4/200px so the Add stays inline,
-   matches the old CodedValueDropdown Width=FieldWidth.W4 — scoped CSS
-   would lose to the web component's host width). The class is the hook
-   for any future per-instance overrides. */
-.guardian-rel-select {
-    /* Width: inline style (see FluentSelect Style parameter). */
-}
-
-/* Sentinel option wrapper. Wraps the "Add Existing Guardian" label and
-   the divider line (rendered as a 1px <div> below the label) so the trigger
-   reads as a section header with an underline.
-
-   Why a flex column: the <fluent-option> web component's shadow DOM lays
-   its default slot out as a flex ROW (it exposes named `start`/`end` slots —
-   see FluentUI Blazor's SelectWithOptionTemplate example). A bare block
-   element in a flex row becomes a row item sitting BESIDE the label, not
-   below it. Forcing this wrapper to a full-width flex column makes the
-   label stack above the line so it reads as an underline across the full
-   option width. Width:100% so the column fills the default-slot region
-   regardless of the option's row layout. */
-.guardian-rel-sentinel {
-    display: flex;
-    flex-direction: column;
-    width: 100%;
-}
-
-/* The visual divider line under the sentinel option. Rendered as a
-   1px-tall <div> inside the sentinel's option template (plan §2 / §9.2 —
-   relocated from a separate disabled <fluent-option> to inside the sentinel
-   option so the trigger carries its own underline). The <div> element is
-   emitted by Blazor inside the template and carries the [b-hash] scope
-   attribute, so this scoped selector matches it. Using a background color
-   instead of a border avoids browser-specific <hr> styling and web-component
-   slot resets that can suppress or reshape border-based lines. The line is
-   2px tall with a stronger stroke colour so it is clearly visible against the
-   option background, and it stretches the full content width of the dropdown
-   item (no horizontal margins). flex-shrink:0 keeps it from collapsing in a
-   flex container. */
-.guardian-rel-divider {
-    height: 2px;
-    background-color: var(--neutral-stroke-rest, #737373);
-    margin: 4px 0 0;
-    flex-shrink: 0;
-    min-width: 0;
-}
-
-/* ── Existing-guardian typeahead (plan §11) ──
-   Replaces the name fields in the add row when the sentinel trigger is
-   selected. A single FluentAutocomplete owns the popup, the debounce
-   (ImmediateDelay="300"), keyboard nav, ARIA combobox role, and the
-   selected-value display. The far-right Student/Contact radio still
-   toggles the search dimension (§11.3). Per-row markup lives in the
-   OptionTemplate RenderFragment (RowTemplate) — two lines:
-     line 1: guardian name (relationship) green +N wards (far-right)
-     line 2: matched student name #number (muted, Student mode only) */
-
-/* Search-mode radio group, stacked below the typeahead input inside
-   .guardian-typeahead-stack (§11 layout revision). Horizontal
-   (Contact | Student); left-aligned to sit under the typeahead's left
-   edge. The old far-right push (margin-left:auto) is removed now that
-   the radio lives below the input, not beside it. */
-.guardian-search-mode {
-    /* left-aligned within the column stack; no far-right push */
-}
-
-/* Vertical wrapper holding the typeahead input above the search-mode
-   radio. flex:1 grows the stack to fill the remaining row width so the
-   typeahead (width:100% inside the stack) absorbs horizontal space
-   instead of being fixed at 200px — keeping the Add button inline in
-   .guardian-add-row (nowrap). min-width:0 lets the stack shrink in
-   tight containers; the radio below is narrower and left-aligns. */
-.guardian-typeahead-stack {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1 1 0;
-    min-width: 0;
-}
-
-/* Primary line of a result row (plan §11.2). Flex row with the
-   guardian name on the left, the optional (Relationship) label
-   inline, and the ward count pushed far-right via margin-left:auto
-   on .guardian-search-wards. */
-.guardian-search-primary {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-}
-.guardian-search-name {
-    font-weight: 600;
-}
-.guardian-search-rel {
-    color: var(--neutral-foreground-hint, #6b6b6b);
-    font-style: italic;
-}
-/* Ward count — accent green (matches the +N wards accent), far-right
-   via margin-left:auto so it sits on the trailing edge of the flex row
-   regardless of whether the relationship label is shown. */
-.guardian-search-wards {
-    margin-left: auto;
-    color: var(--accent-fill-rest, #0078d4);
-    white-space: nowrap;
-}
-
-/* Secondary line of a result row (Student mode only — plan §11.2).
-   Muted, slightly smaller than the primary line, shows the student
-   whose match produced this guardian. */
-.guardian-search-student {
-    color: var(--neutral-foreground-hint, #6b6b6b);
-    font-size: 0.875em;
-    padding-left: 0;
-    margin-top: 2px;
 }

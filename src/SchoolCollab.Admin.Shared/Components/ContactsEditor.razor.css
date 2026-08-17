@@ -17,6 +17,31 @@
     gap: 8px;
 }
 
+/* Group the channel + optional country-code dropdowns so they stay
+   together as a single flex item. This lets the value/label/button
+   group wrap to its own line on narrower containers, giving the
+   value field the full remaining width instead of sharing a cramped
+   line with the identity dropdowns. */
+.contacts-editor-add__identity {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+}
+
+/* Value + label + Add button stay on one line as a group so the value
+   field can greedily fill the group's width. The group itself wraps
+   underneath the identity group when space is tight. */
+.contacts-editor-add__value {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
 /* Channel + country-code dropdown widths are now driven by the FieldWidth
    enum (Width="FieldWidth.W1" / W2) on <DropdownForEnum> / <CodedValueDropdown>,
    which emits an inline style that beats this scoped stylesheet. The old
@@ -24,12 +49,13 @@
    when the call sites switched to the enum — do not reintroduce them. */
 
 .contacts-value {
-    flex: 1 1 320px;
-    min-width: 260px;
+    flex: 1 1 0;
+    min-width: 200px;
 }
 
 .contacts-label {
-    width: 140px;
+    flex: 0 1 140px;
+    min-width: 100px;
 }
 
 .contacts-primary {

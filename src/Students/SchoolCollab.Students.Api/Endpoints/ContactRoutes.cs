@@ -10,6 +10,7 @@ using SchoolCollab.Students.Core.CQRS.Contacts.Commands.VerifyContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Queries.GetSubscription;
 using SchoolCollab.Students.Core.CQRS.Contacts.Queries.ListContacts;
 using SchoolCollab.Students.Core.CQRS.Contacts.Queries.ListSubscribedContacts;
+using SchoolCollab.Students.Core.CQRS.Contacts.Queries.ListContactAuditEntries;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.DTOs;
@@ -44,7 +45,12 @@ public static class ContactRoutes
         {
             try
             {
-                await handler.HandleAsync(new UpdateContact(id, req.Value, req.Label) { CountryCode = req.CountryCode }, ct);
+                if (string.IsNullOrWhiteSpace(req.Reason))
+                {
+                    return Results.BadRequest("A reason is required.");
+                }
+
+                await handler.HandleAsync(new UpdateContact(id, req.Value, req.Label, req.Reason) { CountryCode = req.CountryCode }, ct);
                 return Results.NoContent();
             }
             catch (ContactNotFoundException)
@@ -59,12 +65,18 @@ public static class ContactRoutes
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
+            [FromQuery] string? reason,
             [FromServices] ICommandHandler<DeleteContact> handler,
             CancellationToken ct) =>
         {
+            if (string.IsNullOrWhiteSpace(reason))
+            {
+                return Results.BadRequest("A reason is required.");
+            }
+
             try
             {
-                await handler.HandleAsync(new DeleteContact(id), ct);
+                await handler.HandleAsync(new DeleteContact(id, reason!), ct);
                 return Results.NoContent();
             }
             catch (ContactNotFoundException)
@@ -136,6 +148,18 @@ public static class ContactRoutes
             return Results.NoContent();
         });
 
+        // Contact change history (who/why for edit/delete).
+        group.MapGet("/audit", async (
+            [FromQuery] Guid? contactId,
+            [FromQuery] ContactOwnerType? ownerType,
+            [FromQuery] Guid? ownerId,
+            [FromQuery] int? skip,
+            [FromQuery] int? take,
+            [FromServices] IQueryHandler<ListContactAuditEntries, ContactAuditEntryDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListContactAuditEntries(
+                contactId, ownerType, ownerId, skip ?? 0, take ?? 50), ct)));
+
         // Cross-BC resolver contract (spec §9 G5).
         group.MapGet("/subscribed", async (
             ContactOwnerType ownerType,
@@ -160,7 +184,7 @@ public static class ContactRoutes
     }
 }
 
-internal record UpdateContactRequest(string Value, string? Label)
+internal record UpdateContactRequest(string Value, string? Label, string Reason)
 {
     public string? CountryCode { get; init; }
 }

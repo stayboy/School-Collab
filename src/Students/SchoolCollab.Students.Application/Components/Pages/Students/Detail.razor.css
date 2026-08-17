@@ -29,6 +29,56 @@
     grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
     gap: 16px 24px;
 }
+/* ── Contact history ─────────────────────────────────────────────────
+   Compact timeline of contact edit/delete audit rows below the guardians
+   section. Each entry shows actor, timestamp, change kind badge, value
+   before/after, and reason. */
+.student-contact-history {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.student-contact-history__entry {
+    padding: 10px 12px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    border-radius: 6px;
+    background: var(--neutral-layer-1, #fafafa);
+}
+
+.student-contact-history__meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    font-size: 0.85rem;
+    margin-bottom: 6px;
+}
+
+.student-contact-history__actor {
+    font-weight: 600;
+}
+
+.student-contact-history__change {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+
+.student-contact-history__value-line {
+    font-family: var(--font-monospace, monospace);
+    font-size: 0.95rem;
+}
+
+.student-contact-history__reason {
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
 .muted { color: var(--neutral-foreground-hint); }
 
 /* ── Enrollments table ─────────────────────────────────────────────── */

@@ -2,13 +2,20 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
+using SchoolCollab.Students.Core.Services;
 
 namespace SchoolCollab.Students.Core.CQRS.Contacts.Commands.DeleteContact;
 
 public sealed class DeleteContactHandler(
     IContactRepository repository,
+    StudentsDbContext db,
+    ITenantProvider tenantProvider,
+    ContactAuditor auditor,
     HybridCache cache,
     ILogger<DeleteContactHandler> logger) : ICommandHandler<DeleteContact>
 {
@@ -18,6 +25,14 @@ public sealed class DeleteContactHandler(
             ?? throw new ContactNotFoundException(command.Id);
 
         contact.SoftDelete();
+
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        auditor.Record(
+            db,
+            tenantId,
+            contact,
+            ContactChangeKind.Deleted,
+            command.Reason);
 
         try
         {

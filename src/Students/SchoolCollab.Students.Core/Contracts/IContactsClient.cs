@@ -19,7 +19,16 @@ public interface IContactsClient
 
     Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default);
 
-    Task DeleteContactAsync(Guid id, CancellationToken ct = default);
+    Task DeleteContactAsync(Guid id, string reason, CancellationToken ct = default);
+
+    /// <summary>Append-only contact change history (who/why for edit/delete).</summary>
+    Task<ContactAuditEntryDto[]?> ListContactAuditEntriesAsync(
+        Guid? contactId = null,
+        ContactOwnerType? ownerType = null,
+        Guid? ownerId = null,
+        int skip = 0,
+        int take = 50,
+        CancellationToken ct = default);
 
     Task VerifyContactAsync(Guid id, CancellationToken ct = default);
 
@@ -52,8 +61,8 @@ public record AddContactRequest(
     public int DisplayOrder { get; init; }
 }
 
-/// <summary>Request body for updating a contact's value / label.</summary>
-public record UpdateContactRequest(string Value, string? Label)
+/// <summary>Request body for updating a contact's value / label + reason.</summary>
+public record UpdateContactRequest(string Value, string? Label, string Reason)
 {
     public string? CountryCode { get; init; }
 }

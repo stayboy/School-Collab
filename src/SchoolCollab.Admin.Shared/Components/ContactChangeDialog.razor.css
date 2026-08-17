@@ -1,0 +1,25 @@
+/* ContactChangeDialog: form layout for edit + reason, and delete confirmation. */
+
+.contact-change-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.contact-change-edit-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.contact-change-edit-row .contacts-value {
+    flex: 1 1 0;
+    min-width: 200px;
+}
+
+.contact-change-edit-row .contacts-label {
+    flex: 0 1 140px;
+    min-width: 100px;
+}
