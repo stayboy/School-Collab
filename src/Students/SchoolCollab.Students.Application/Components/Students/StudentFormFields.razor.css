@@ -239,8 +239,9 @@
    below it as a secondary action. */
 .guardian-add-row {
     display: flex;
-    flex-wrap: wrap;
-    align-items: center;
+    flex-wrap: nowrap;       /* prevent Add button from dropping to a new line */
+    align-items: flex-start; /* align input tops; the radio below the typeahead
+                                naturally extends past the button baseline */
     gap: 8px;
     margin-bottom: 4px;
 }
@@ -261,4 +262,98 @@
     margin-top: 0.5rem;
     padding-top: 0.5rem;
     border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+}
+
+/* ── Local relationship dropdown (plan §10 Phase 2) ──
+   The local FluentSelect wrapper that renders the "Add Existing Guardian"
+   sentinel + a non-selectable divider + the RELATSHIPS coded values.
+   Width is driven by the component's inline Style="width: 150px" (shrunk from W4/200px so the Add stays inline,
+   matches the old CodedValueDropdown Width=FieldWidth.W4 — scoped CSS
+   would lose to the web component's host width). The class is the hook
+   for any future per-instance overrides. */
+.guardian-rel-select {
+    /* Width: inline style (see FluentSelect Style parameter). */
+}
+
+/* The non-selectable horizontal divider option. Rendered as an <hr>
+   inside a disabled <fluent-option> via OptionTemplate (plan §2 / §9.2).
+   The <hr> element is emitted by Blazor inside the template and carries
+   the [b-hash] scope attribute, so this scoped selector matches it.
+   Muted/hint colour, flush vertical margins so it sits between the
+   sentinel trigger and the first real relationship with no extra
+   breathing room. */
+.guardian-rel-divider {
+    border: none;
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    margin: 4px 6px;
+    height: 0;
+}
+
+/* ── Existing-guardian typeahead (plan §11) ──
+   Replaces the name fields in the add row when the sentinel trigger is
+   selected. A single FluentAutocomplete owns the popup, the debounce
+   (ImmediateDelay="300"), keyboard nav, ARIA combobox role, and the
+   selected-value display. The far-right Student/Contact radio still
+   toggles the search dimension (§11.3). Per-row markup lives in the
+   OptionTemplate RenderFragment (RowTemplate) — two lines:
+     line 1: guardian name (relationship) green +N wards (far-right)
+     line 2: matched student name #number (muted, Student mode only) */
+
+/* Search-mode radio group, stacked below the typeahead input inside
+   .guardian-typeahead-stack (§11 layout revision). Horizontal
+   (Contact | Student); left-aligned to sit under the typeahead's left
+   edge. The old far-right push (margin-left:auto) is removed now that
+   the radio lives below the input, not beside it. */
+.guardian-search-mode {
+    /* left-aligned within the column stack; no far-right push */
+}
+
+/* Vertical wrapper holding the typeahead input above the search-mode
+   radio. flex:1 grows the stack to fill the remaining row width so the
+   typeahead (width:100% inside the stack) absorbs horizontal space
+   instead of being fixed at 200px — keeping the Add button inline in
+   .guardian-add-row (nowrap). min-width:0 lets the stack shrink in
+   tight containers; the radio below is narrower and left-aligns. */
+.guardian-typeahead-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+/* Primary line of a result row (plan §11.2). Flex row with the
+   guardian name on the left, the optional (Relationship) label
+   inline, and the ward count pushed far-right via margin-left:auto
+   on .guardian-search-wards. */
+.guardian-search-primary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+.guardian-search-name {
+    font-weight: 600;
+}
+.guardian-search-rel {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+}
+/* Ward count — accent green (matches the +N wards accent), far-right
+   via margin-left:auto so it sits on the trailing edge of the flex row
+   regardless of whether the relationship label is shown. */
+.guardian-search-wards {
+    margin-left: auto;
+    color: var(--accent-fill-rest, #0078d4);
+    white-space: nowrap;
+}
+
+/* Secondary line of a result row (Student mode only — plan §11.2).
+   Muted, slightly smaller than the primary line, shows the student
+   whose match produced this guardian. */
+.guardian-search-student {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.875em;
+    padding-left: 0;
+    margin-top: 2px;
 }

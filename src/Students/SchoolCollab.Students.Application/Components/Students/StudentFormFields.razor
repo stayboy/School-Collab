@@ -43,6 +43,8 @@
 @using SchoolCollab.Students.Core.Domain
 @using StudentDto = SchoolCollab.Students.Application.Services.StudentDto
 
+@implements IAsyncDisposable
+
 <EditForm Model="@Model" OnValidSubmit="@OnValidSubmit" @ref="_editForm" class="@FormClass">
     <DataAnnotationsValidator />
 
@@ -223,29 +225,88 @@
                         @if (_panelMode == GuardianPanelMode.List)
                         {
                             <div class="guardian-add-row">
-                                <CodedValueDropdown Parent="CodedValueParent.Relationships"
-                                                    @bind-SelectedId="_newRelId"
-                                                    Placeholder="Relationship"
-                                                    Width="FieldWidth.W4" />
-                                <FluentTextField @bind-Value="_newLastName"
-                                                 Placeholder="Last name"
-                                                 class="guardian-add-field" />
-                                <FluentTextField @bind-Value="_newFirstName"
-                                                 Placeholder="First name"
-                                                 class="guardian-add-field" />
+                                @* Local FluentSelect wrapper for the relationship picker (plan §10 Phase 2).
+                                   Renders the sentinel "Add Existing Guardian" + a non-selectable divider
+                                   + the RELATSHIPS coded values. Replaces the old CodedValueDropdown.
+                                   The sentinel sets _inExistingMode and routes through the §2.1 guard
+                                   (resolved to _pickedRelationshipId in Phase 5, null until then).
+                                   §9.2 visual divider: rendered as an <hr> inside a disabled
+                                   <fluent-option> via OptionTemplate — verify at runtime;
+                                   FluentOptionGroup is not available in FluentUI Blazor 4.14.2.
+                                   Width shrunk to 150px (from the old W4/200px) via inline Style so the Add stays inline (scoped CSS
+                                   would lose to the web component's host width, mirroring the
+                                   CodedValueDropdown's Width=FieldWidth.W4 inline-style pattern). *@
+                                <FluentSelect TOption="RelationshipOption"
+                                              Items="@(_relationshipOptions ?? [])"
+                                              SelectedOption="@_selectedRelOption"
+                                              SelectedOptionChanged="@OnRelationshipOptionChanged"
+                                              OptionValue="@(o => o.Id?.ToString() ?? "divider")"
+                                              Placeholder="@(_relationshipOptions is null ? "Loading…" : "Relationship")"
+                                              Style="width: 150px"
+                                              Disabled="@(_relationshipOptions is null)"
+                                              class="guardian-rel-select">
+                                    <OptionTemplate Context="opt">
+                                        @if (opt.Kind == RelationshipOptionKind.Divider)
+                                        {
+                                            <hr class="guardian-rel-divider" />
+                                        }
+                                        else
+                                        {
+                                            @opt.Label
+                                        }
+                                    </OptionTemplate>
+                                </FluentSelect>
+                                @* Name fields (free-text new guardian) vs. typeahead (existing guardian).
+                                   Plan §10 Phase 3: hide the name inputs when the sentinel is picked and
+                                   render the debounced typeahead input + far-right Student/Contact radio.
+                                   Phase 4 wires the debounced search handler; Phase 5 wires pick → prefill. *@
+                                @if (!InExistingMode)
+                                {
+                                    <FluentTextField @bind-Value="_newLastName"
+                                                     Placeholder="Last name"
+                                                     class="guardian-add-field" />
+                                    <FluentTextField @bind-Value="_newFirstName"
+                                                     Placeholder="First name"
+                                                     class="guardian-add-field" />
+                                }
+                                else
+                                {
+                                    <div class="guardian-typeahead-stack">
+                                    <FluentAutocomplete TOption="GuardianSearchRow"
+                                                        @ref="_typeahead"
+                                                        Multiple="false"
+                                                        MaximumOptionsSearch="30"
+                                                        ImmediateDelay="300"
+                                                        ShowProgressIndicator="true"
+                                                        AutoComplete="off"
+                                                        Placeholder="Search by guardian or student name…"
+                                                        OptionText="@(r => r.FullName)"
+                                                        OptionComparer="@GuardianSearchRowComparer.Instance"
+                                                        OptionTemplate="@RowTemplate"
+                                                        OnOptionsSearch="@OnTypeaheadSearchAsync"
+                                                        SelectedOptionChanged="@OnTypeaheadSelectedAsync"
+                                                        Style="width: 100%"
+                                                        class="guardian-typeahead" />
+                                    <FluentRadioGroup @bind-Value="_searchMode"
+                                                      class="guardian-search-mode"
+                                                      aria-label="Search mode">
+                                        <FluentRadio Value="@SearchMode.Contact">Contact</FluentRadio>
+                                        <FluentRadio Value="@SearchMode.Student">Student</FluentRadio>
+                                    </FluentRadioGroup>
+                                    </div>
+                                }
                                 <FluentButton Appearance="Appearance.Accent"
                                               IconStart="@FluentIcons.PersonAdd"
                                               OnClick="AddInlineGuardianAsync"
-                                              Disabled="@(_adding || string.IsNullOrWhiteSpace(_newFirstName) || string.IsNullOrWhiteSpace(_newLastName))">
+                                              Disabled="@(_adding
+                                                         || (InExistingMode && _existingGuardianId is null)
+                                                         || (!InExistingMode && (string.IsNullOrWhiteSpace(_newFirstName) || string.IsNullOrWhiteSpace(_newLastName))))">
                                     Add
                                 </FluentButton>
-                                <FluentButton Appearance="Appearance.Lightweight"
-                                              IconStart="@FluentIcons.PersonAdd"
-                                              OnClick="StartAddExisting"
-                                              class="guardian-add-existing">
-                                    Add existing
-                                </FluentButton>
+
                             </div>
+
+
                         }
 
                         @* ── Linked / drafted guardians (card list) ──
@@ -395,96 +456,7 @@
                                 </FluentStack>
                             </div>
                                 }
-                                else if (_panelMode == GuardianPanelMode.Existing)
-                                {
-                                    <div class="guardian-add-section">
-                                    <h4 class="guardian-add-title">Add existing guardian</h4>
-                                    <FluentStack Orientation="Orientation.Horizontal" Spacing="4" class="guardian-tabs">
-                                        <FluentButton Appearance="@(_existingTab == ExistingTab.Contact ? Appearance.Accent : Appearance.Neutral)"
-                                                      Type="ButtonType.Button" OnClick="@(() => SwitchExistingTab(ExistingTab.Contact))">By contact</FluentButton>
-                                        <FluentButton Appearance="@(_existingTab == ExistingTab.Student ? Appearance.Accent : Appearance.Neutral)"
-                                                      Type="ButtonType.Button" OnClick="@(() => SwitchExistingTab(ExistingTab.Student))">By student</FluentButton>
-                                    </FluentStack>
 
-                                    @if (_existingTab == ExistingTab.Contact)
-                                    {
-                                        <EntityGrid TItem="GuardianPickerRow"
-                                                    Items="_pickerRows"
-                                                    GridSettings="@PickerGridSettings"
-                                                    Loading="_contactLoading"
-                                                    EmptyMessage="Type a contact email or phone to search."
-                                                    ShowSearch="true"
-                                                    SearchChanged="@OnContactSearchAsync"
-                                                    SearchPlaceholder="Search by email or phone"
-                                                    Selected="_selectedRows"
-                                                    SelectedChanged="@OnSelectedRowsChanged"
-                                                    GetKey="@(r => r.Id)"
-                                                    GetDisplayName="@(r => $"{r.FirstName} {r.LastName}")"
-                                                    GetSubtitle="@(r => r.Subtitle)"
-                                                    ShowChips="false">
-                                            <Columns>
-                                                <PropertyColumn Property="@(r => r.FirstName)" Title="First name" TGridItem="GuardianPickerRow" TProp="string" />
-                                                <PropertyColumn Property="@(r => r.LastName)" Title="Last name" TGridItem="GuardianPickerRow" TProp="string" />
-                                                <TemplateColumn TGridItem="GuardianPickerRow" Title="Contact" Context="cell">
-                                                    <span>@cell.Subtitle</span>
-                                                </TemplateColumn>
-                                            </Columns>
-                                        </EntityGrid>
-                                    }
-                                    else
-                                    {
-                                        @if (_selectedStudentId is null)
-                                        {
-                                            <EntityGrid TItem="StudentDto"
-                                                        Items="_studentResults"
-                                                        GridSettings="@StudentGridSettings"
-                                                        Loading="_studentLoading"
-                                                        EmptyMessage="Type a student name or number to search."
-                                                        ShowSearch="true"
-                                                        SearchChanged="@OnStudentSearchAsync"
-                                                        SearchPlaceholder="Search students by name or number">
-                                                <Columns>
-                                                    <PropertyColumn Property="@(s => s.StudentNumber)" Title="Number" TGridItem="StudentDto" TProp="string" />
-                                                    <PropertyColumn Property="@(s => s.FirstName)" Title="First name" TGridItem="StudentDto" TProp="string" />
-                                                    <PropertyColumn Property="@(s => s.LastName)" Title="Last name" TGridItem="StudentDto" TProp="string" />
-                                                    <TemplateColumn TGridItem="StudentDto" Title="" Sortable="false" Context="cell">
-                                                        <FluentButton Appearance="Appearance.Lightweight" OnClick="@(() => SelectStudentAsync(cell.Id))">Choose</FluentButton>
-                                                    </TemplateColumn>
-                                                </Columns>
-                                            </EntityGrid>
-                                        }
-                                        else
-                                        {
-                                            <EntityGrid TItem="GuardianPickerRow"
-                                                        Items="_pickerRows"
-                                                        GridSettings="@PickerGridSettings"
-                                                        EmptyMessage="This student has no guardians."
-                                                        Selected="_selectedRows"
-                                                        SelectedChanged="@OnSelectedRowsChanged"
-                                                        GetKey="@(r => r.Id)"
-                                                        GetDisplayName="@(r => $"{r.FirstName} {r.LastName}")"
-                                                        GetSubtitle="@(r => r.Subtitle)"
-                                                        ShowChips="false">
-                                                <Columns>
-                                                    <PropertyColumn Property="@(r => r.FirstName)" Title="First name" TGridItem="GuardianPickerRow" TProp="string" />
-                                                    <PropertyColumn Property="@(r => r.LastName)" Title="Last name" TGridItem="GuardianPickerRow" TProp="string" />
-                                                    <TemplateColumn TGridItem="GuardianPickerRow" Title="Relationship" Context="cell">
-                                                        <span>@(cell.RelationshipCodedValueId is { } id && _relNames.TryGetValue(id, out var rn) ? rn : "")</span>
-                                                    </TemplateColumn>
-                                                </Columns>
-                                            </EntityGrid>
-                                            <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="BackToStudentSearch">Back</FluentButton>
-                                        }
-                                    }
-
-                                        <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
-                                            <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button"
-                                                          Disabled="@(_selectedRows.Count == 0)"
-                                                          OnClick="AddSelectedGuardiansAsync">Add selected</FluentButton>
-                                            <FluentButton Appearance="Appearance.Neutral" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
-                                        </FluentStack>
-                                </div>
-                                }
                     }
                 }
                 </div>
@@ -685,6 +657,16 @@
     /// and /students/{id}/edit.</summary>
     [Parameter] public bool ShowGuardians { get; set; }
 
+    /// <summary>The id of the student being edited, or <c>null</c> when the
+    /// form is creating a new student (no server-linked guardians to
+    /// exclude). The "add existing guardian" typeahead passes this as
+    /// <c>excludeStudentId</c> to <c>Api.ListGuardiansAsync</c> so already-
+    /// linked guardians are hidden server-side. Set by <c>StudentEditDialog</c>
+    /// (reads its internal <c>StudentId</c>) and by <c>Edit.razor</c>;
+    /// <c>Create.razor</c> and the wizard inline form leave it null.
+    /// Plan §10 Phase 0.</summary>
+    [Parameter] public Guid? StudentId { get; set; }
+
     /// <summary>When true, renders the contacts section (the shared
     /// <see cref="ContactsEditor"/>). Opt-in so the shared form can be embedded
     /// where contacts are managed elsewhere. The editor runs Buffered,
@@ -751,6 +733,16 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Load the local relationship dropdown's options (sentinel + divider
+        // + RELATSHIPS coded values) when the guardians section is shown.
+        // Independent of whether the model pre-loaded any guardians — the add
+        // row is always visible in List mode, so the dropdown must load.
+        // Plan §10 Phase 1; the dropdown is rendered in Phase 2.
+        if (ShowGuardians)
+        {
+            await BuildRelationshipOptionsAsync();
+        }
+
         // Resolve relationship display names for any pre-loaded guardians. The
         // all-inclusive edit dialog populates Model.GuardianLinks via LoadFrom
         // before this component renders (the dialog gates on its own _loaded),
@@ -778,11 +770,11 @@
     //         inline row replaces it.
     // Edit  = hide all but the edited card + show its relationship/role editor.
     // Existing = show the search + picker (unchanged).
-    private enum GuardianPanelMode { List, Edit, Existing }
-    private enum ExistingTab { Contact, Student }
+    private enum GuardianPanelMode { List, Edit }
+    
 
     private GuardianPanelMode _panelMode = GuardianPanelMode.List;
-    private ExistingTab _existingTab = ExistingTab.Contact;
+    
 
     // Inline add-row state (the "add guardian" row that mimics the
     // ContactsEditor add-contact form: Relationship + Last name + First name +
@@ -818,23 +810,7 @@
     // in place; on Save it's written back to the GuardianAssignment.Contacts).
     private List<ContactModel> _editContacts = new();
 
-    private bool _contactLoading;
-    private GuardianPickerRow[] _pickerRows = [];
-    private Dictionary<object, GuardianPickerRow> _selectedRows = new();
 
-    private bool _studentLoading;
-    private StudentDto[] _studentResults = [];
-    private Guid? _selectedStudentId;
-
-    private static readonly LandingGridSettings PickerGridSettings = new()
-    {
-        GridTemplateColumns = "minmax(160px,2fr) minmax(160px,2fr) minmax(160px,2fr)"
-    };
-
-    private static readonly LandingGridSettings StudentGridSettings = new()
-    {
-        GridTemplateColumns = "minmax(120px,1fr) minmax(160px,2fr) minmax(160px,2fr) 80px"
-    };
 
     // ── Linked-mode helpers (page-side) ──
     //
@@ -900,26 +876,14 @@
         IReadOnlyList<ContactModel> Contacts);
 
     /// <summary>Display row for the "add existing" picker grid.</summary>
-    private sealed record GuardianPickerRow(
-        Guid Id,
-        string FirstName,
-        string LastName,
-        Guid? RelationshipCodedValueId,
-        string? Subtitle);
+
 
     // ── Panel navigation ─────────────────────────────────────────────────────
     // There is no "StartNew" panel — the inline add row is always visible in
     // List mode and adds directly (AddInlineGuardianAsync). Only Edit and
     // Existing switch modes.
 
-    private void StartAddExisting()
-    {
-        _panelMode = GuardianPanelMode.Existing;
-        _existingTab = ExistingTab.Contact;
-        _pickerRows = [];
-        _selectedRows = new();
-        _selectedStudentId = null;
-    }
+
 
     /// <summary>Open the inline Edit panel for the guardian at
     /// <paramref name="index"/> in <see cref="StudentFormModel.GuardianLinks"/>.
@@ -948,11 +912,10 @@
         _panelMode = GuardianPanelMode.List;
         // The inline add-row fields are intentionally NOT cleared here — they
         // persist across panel navigation (mimics ContactsEditor's add row).
-        _pickerRows = [];
-        _selectedRows = new();
-        _studentResults = [];
-        _selectedStudentId = null;
         _editingIndex = -1;
+        // Phase 5/§11: cancel any in-flight typeahead search and clear the
+        // transient search session. The add-row selection persists.
+        ClearTypeaheadState();
     }
 
     /// <summary>Apply the edited link metadata (relationship / role) back
@@ -998,15 +961,9 @@
         }
     }
 
-    private void SwitchExistingTab(ExistingTab tab)
-    {
-        _existingTab = tab;
-        _pickerRows = [];
-        _selectedRows = new();
-        _selectedStudentId = null;
-    }
 
-    private void OnSelectedRowsChanged(Dictionary<object, GuardianPickerRow> next) => _selectedRows = next;
+
+
 
     private GuardianGridRow[] GuardianGridRows
         => Model.GuardianLinks.Select((g, i) => new GuardianGridRow(
@@ -1071,104 +1028,15 @@
             ? $"{c.CountryCode} {c.Value}"
             : c.Value;
 
-    private void BackToStudentSearch()
-    {
-        _selectedStudentId = null;
-        _pickerRows = [];
-    }
+
 
     // ── Search: by contact (matches guardian name OR contact value) ───────────
-    private async Task OnContactSearchAsync(string? search)
-    {
-        _selectedRows = new();
-        _contactLoading = true;
-        var ct = CancellationToken.None;
-        try
-        {
-            var guardians = (await Api.ListGuardiansAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search))?.Take(30).ToArray() ?? [];
-            var rows = new List<GuardianPickerRow>();
-            foreach (var g in guardians)
-            {
-                string? contact = null;
-                try
-                {
-                    var contacts = await Api.ListContactsAsync(ContactOwnerType.Guardian, g.Id, ct);
-                    // Spec §4.9: preferred contact is the one with the
-                    // lowest DisplayOrder; fall back to the first contact.
-                    contact = contacts?
-                        .OrderBy(c => c.DisplayOrder)
-                        .FirstOrDefault()?.Value;
-                }
-                catch
-                {
-                    // Non-fatal: contact display is a nicety.
-                }
-                rows.Add(new GuardianPickerRow(g.Id, g.FirstName, g.LastName, null, contact));
-            }
-            _pickerRows = rows.ToArray();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Guardian contact search failed");
-            _pickerRows = [];
-        }
-        finally
-        {
-            _contactLoading = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
+
 
     // ── Search: by student → list that student's guardians ───────────────────
-    private async Task OnStudentSearchAsync(string? search)
-    {
-        _studentLoading = true;
-        var ct = CancellationToken.None;
-        try
-        {
-            _studentResults = await Api.ListStudentsAsync(ct, string.IsNullOrWhiteSpace(search) ? null : search) ?? [];
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Student search failed");
-            _studentResults = [];
-        }
-        finally
-        {
-            _studentLoading = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
 
-    private async Task SelectStudentAsync(Guid studentId)
-    {
-        _selectedStudentId = studentId;
-        _selectedRows = new();
-        _studentLoading = true;
-        var ct = CancellationToken.None;
-        try
-        {
-            var links = await Api.ListGuardiansByStudentAsync(studentId, ct) ?? [];
-            var rows = new List<GuardianPickerRow>();
-            foreach (var l in links)
-            {
-                if (l.RelationshipCodedValueId is { } relId)
-                    await EnsureRelNameAsync(relId);
-                rows.Add(new GuardianPickerRow(l.GuardianId, l.FirstName, l.LastName, l.RelationshipCodedValueId, null));
-            }
-            _pickerRows = rows.ToArray();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Failed to load the student's guardians");
-            _pickerRows = [];
-        }
-        finally
-        {
-            _studentLoading = false;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
+
+
 
     // ── Add handlers ─────────────────────────────────────────────────────────
     /// <summary>Add a guardian drafted in the inline add row directly to the
@@ -1190,20 +1058,49 @@
         _adding = true;
         try
         {
+            // §2.1 guard: the sentinel UI value never reaches the save path.
+            // Phase 2: _pickedRelationshipId is always null (Phase 5 wires the
+            // typeahead prefill), so sentinel → null relationship (valid: a
+            // "no relationship" link). Phase 5 will resolve to the picked real
+            // relationship via _pickedRelationshipId. Without this guard, picking
+            // the sentinel and hitting Add would persist the sentinel Guid as
+            // a relationship (constraint violation / dangling reference).
+            var relationshipForDraft = _newRelId == ExistingGuardianSentinel
+                ? _pickedRelationshipId
+                : _newRelId;
             var assignment = new GuardianAssignment(
-                null,
+                // Phase 5: link the picked existing guardian (null for the
+                // free-text new-guardian path). AddDraftAsync no-ops on a
+                // duplicate ExistingGuardianId (§6.1).
+                ExistingGuardianId: _existingGuardianId,
                 _newFirstName!.Trim(),
                 _newLastName!.Trim(),
-                _newRelId,
+                relationshipForDraft,
                 ContactChannel: null,
                 ContactValue: null,
-                TitleCodedValueId: null,
+                // Phase 5: prefill the title from the picked guardian
+                // (_pickedTitleId is null on the free-text path, which has
+                // no inline title picker).
+                TitleCodedValueId: _pickedTitleId,
                 CountryCode: null);
             await AddDraftAsync(assignment);
             // Clear the add row for the next entry.
             _newFirstName = null;
             _newLastName = null;
             _newRelId = null;
+            // Phase 5: reset the existing-mode workflow after a successful add
+            // so the add row returns to its free-text placeholder state. The
+            // sentinel is a trigger (not a real relationship), so the dropdown
+            // returns to placeholder rather than persisting the sentinel.
+            if (_inExistingMode)
+            {
+                _inExistingMode = false;
+                _existingGuardianId = null;
+                _pickedRelationshipId = null;
+                _pickedTitleId = null;
+                _selectedRelOption = null;
+                ClearTypeaheadState();
+            }
             // Switch to Edit view so the user can add more fields (title, role,
             // contacts) before the card is finalized. The newly-added guardian
             // is the last entry in GuardianLinks.
@@ -1244,29 +1141,7 @@
     /// mutation (e.g. the list re-renders).</summary>
     private Task OnEditContactsChanged() => InvokeAsync(StateHasChanged);
 
-    private async Task AddSelectedGuardiansAsync()
-    {
-        _guardianError = null;
-        try
-        {
-            foreach (var row in _selectedRows.Values)
-            {
-                var assignment = new GuardianAssignment(row.Id, row.FirstName, row.LastName, row.RelationshipCodedValueId, null, null, null);
-                await AddDraftAsync(assignment);
-            }
-            _panelMode = GuardianPanelMode.List;
-            _pickerRows = [];
-            _selectedRows = new();
-            _studentResults = [];
-            _selectedStudentId = null;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Failed to add selected guardians");
-            _guardianError = ex.Message;
-            await InvokeAsync(StateHasChanged);
-        }
-    }
+
 
     /// <summary>Appends a guardian draft to the model (create + all-inclusive edit
     /// dialog both draft; the parent flushes the whole set on save).</summary>
@@ -1308,5 +1183,522 @@
     private async Task OnDraftContactsChanged()
     {
         await InvokeAsync(StateHasChanged);
+    }
+
+    // ── Add-existing-guardian typeahead (plan §10 Phase 1: compile-only) ──
+    // These fields, option/row models, and lifecycle method are introduced
+    // now so the markup and behavior changes in Phases 2–5 can land
+    // incrementally. Nothing here is rendered or read yet — Phase 2 wires
+    // the local FluentSelect wrapper; Phases 3–5 add the typeahead UI,
+    // search handlers, and selection→draft flow.
+
+    /// <summary>UI-only sentinel Guid for the "Add Existing Guardian"
+    /// trigger line item in the local relationship dropdown. Never reaches
+    /// the save path — AddInlineGuardianAsync resolves it to the picked
+    /// real relationship (or null) before constructing the
+    /// <see cref="GuardianAssignment"/> (plan §2.1 guard, wired in Phase 5).
+    /// Picked as a random v4 Guid (not Guid.Empty, which collides with
+    /// nullable Guid defaults and the CodedValueDropdown "none" sentinel).
+    /// Stability asserted by a unit test (plan §9.3).</summary>
+    internal static readonly Guid ExistingGuardianSentinel =
+        new("e1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c");
+
+    /// <summary>Discriminator for entries in the local relationship
+    /// dropdown's option list (plan §2). <see cref="Sentinel"/> is the
+    /// selectable "Add Existing Guardian" trigger; <see cref="Divider"/> is
+    /// the non-selectable horizontal rule that visually separates the
+    /// trigger from the real relationship types; <see cref="Relationship"/>
+    /// is a real relationship coded value (RELATSHIPS child).</summary>
+    internal enum RelationshipOptionKind { Relationship, Sentinel, Divider }
+
+    /// <summary>One entry in the local relationship dropdown's option list.
+    /// For <see cref="Kind"/> == <see cref="RelationshipOptionKind.Sentinel"/>
+    /// <see cref="Id"/> equals <see cref="ExistingGuardianSentinel"/>;
+    /// for <see cref="RelationshipOptionKind.Divider"/> <see cref="Id"/>
+    /// is null and <see cref="IsDisabled"/> is true (FluentSelect guarantees
+    /// a disabled option can never be selected, so the divider is excluded
+    /// from value-mapping and the §6 duplicate-link checks automatically);
+    /// for <see cref="RelationshipOptionKind.Relationship"/> <see cref="Id"/>
+    /// is the coded value id and <see cref="IsDisabled"/> mirrors the
+    /// coded value's own disabled flag so tenant-disabled relationships
+    /// stay non-selectable.</summary>
+    internal sealed record RelationshipOption(
+        Guid? Id,
+        string Label,
+        RelationshipOptionKind Kind,
+        bool IsDisabled);
+
+    /// <summary>One row in the "add existing guardian" typeahead results
+    /// (plan §4.1). <see cref="RelationshipName"/> is set in by-student
+    /// mode (resolved from <c>StudentGuardianViewDto.RelationshipCodedValueId</c>)
+    /// and null in by-contact mode — a relationship is per student↔guardian
+    /// link, not a guardian property (plan §3.2). <see cref="WardCount"/>
+    /// is <c>null</c> when enrichment failed (renders "—" per plan §4).</summary>
+    internal sealed record GuardianSearchRow(
+        Guid Id,
+        string FullName,
+        string? RelationshipName,
+        int? WardCount,
+        // Phase 5 prefill source — NOT part of the §4.1 display shape. Appended
+        // after the four §4.1 positions so the documented display order stays
+        // stable; the markup only reads FullName/RelationshipName/WardCount.
+        // Carried on the row (rather than refetched on pick) so
+        // PickExistingGuardianAsync can prefill name/title/relationship without
+        // a second API round-trip.
+        string FirstName,
+        string LastName,
+        Guid? TitleCodedValueId,
+        Guid? RelationshipCodedValueId,
+        // §11 Student-mode match context (null in Contact mode):
+        string? MatchedStudentName,
+        string? MatchedStudentNumber);
+
+    /// <summary>The loaded option list for the local relationship dropdown
+    /// (sentinel + divider + RELATSHIPS coded values, in that order).
+    /// Populated by <see cref="BuildRelationshipOptionsAsync"/> in
+    /// OnInitializedAsync when <see cref="ShowGuardians"/> is true.
+    /// Null while loading; empty after a load failure (the dropdown falls
+    /// back to no options — non-fatal, matches the CodedValueDropdown's
+    /// own error UX).</summary>
+    private RelationshipOption[]? _relationshipOptions;
+
+    // Existing-mode state for the typeahead (plan §3 / §11).
+    private bool _inExistingMode;
+
+    /// <summary>Which typeahead search dimension is active. Per §11 both
+    /// modes are single-step (the §10 two-step student flow was superseded):
+    /// <see cref="Contact"/> searches tenants-wide by guardian name;
+    /// <see cref="Student"/> searches by student name and lists that
+    /// student's guardians directly. Rendered as a <c>FluentRadioGroup</c>
+    /// on the far right of the typeahead input. A pick persists across a
+    /// mode toggle (no reset — §11 review decision).</summary>
+    private enum SearchMode { Contact, Student }
+    private SearchMode _searchMode = SearchMode.Contact;
+
+
+
+
+
+    /// <summary>The id of the existing guardian currently picked from the
+    /// typeahead, or null when no pick is made yet. Set by the row click
+    /// handler in Phase 5; read by the §2.1 guard in
+    /// <see cref="AddInlineGuardianAsync"/> and the Add-disabled predicate
+    /// (§6.3).</summary>
+    private Guid? _existingGuardianId;
+
+    /// <summary>The relationship the typeahead picked up for the chosen
+    /// existing guardian, used to seed the relationship dropdown after a
+    /// pick (Phase 5) and as the fallback when the sentinel is resolved
+    /// (§2.1 guard). Null in by-contact mode (the user picks); set in
+    /// by-student mode from <c>StudentGuardianViewDto.RelationshipCodedValueId</c>.</summary>
+    private Guid? _pickedRelationshipId;
+
+    /// <summary>The salutation title id the typeahead picked up for the
+    /// chosen existing guardian, used to prefill the model on a pick
+    /// (Phase 5). Null when the picked guardian has no title.</summary>
+    private Guid? _pickedTitleId;
+
+
+
+    /// <summary>Debounce CTS for the typeahead's search handler (Phase 4).
+    /// Cancel-and-restart on each keystroke for the ~300 ms debounce
+    /// window declared in plan §9.1. Null until Phase 4 creates it;
+    /// <see cref="DisposeAsync"/> handles the null case.</summary>
+    private CancellationTokenSource? _searchCts;
+
+    /// <summary>Reference to the typeahead component, used to focus + re-open
+    /// programmatically if needed (e.g. to reset the popup). Currently
+    /// unused at runtime — kept for future keyboard-nav helpers.</summary>
+    private FluentAutocomplete<GuardianSearchRow>? _typeahead;
+
+    /// <summary>Equality comparer for <see cref="GuardianSearchRow"/> used by
+    /// <c>FluentAutocomplete.OptionComparer</c> (§11.2). Compares by
+    /// <see cref="GuardianSearchRow.Id"/> so a re-search returns fresh
+    /// record instances without the component dropping the selected row.
+    /// NOTE: a guardian linked to two matching students yields two rows
+    /// (different relationship / match context) — both are kept; the
+    /// user picks the specific (guardian, student) link.</summary>
+    internal sealed class GuardianSearchRowComparer : IEqualityComparer<GuardianSearchRow>
+    {
+        public static readonly GuardianSearchRowComparer Instance = new();
+        public bool Equals(GuardianSearchRow? x, GuardianSearchRow? y) =>
+            x is null ? y is null : y is not null && x.Id == y.Id;
+        public int GetHashCode(GuardianSearchRow obj) => obj.Id.GetHashCode();
+    }
+
+    /// <summary>True when the sentinel trigger is selected — Phase 3 swaps
+    /// the free-text name fields for the typeahead input + radio. The
+    /// getter (not the raw field) is what Phase 3's markup binds to so
+    /// the sentinel-flip in Phase 2's SelectedOptionChanged handler reads
+    /// cleanly.</summary>
+    private bool InExistingMode => _inExistingMode;
+
+    /// <summary>The currently selected option in the local relationship
+    /// dropdown. Synced from the add-row state so the dropdown reflects
+    /// <see cref="_newRelId"/> (Phase 2: set by the handler; Phase 5: also
+    /// set when the typeahead prefill assigns <see cref="_pickedRelationshipId"/>).
+    /// The web-component select manages DOM-level selection via its
+    /// <c>SelectedOption</c> parameter; this field mirrors it for re-render
+    /// consistency and round-trips.</summary>
+    private RelationshipOption? _selectedRelOption;
+
+    /// <summary>Handles the local relationship dropdown's selection change
+    /// (plan §10 Phase 2). Maps the picked option back to the add-row state:
+    ///   - <see cref="RelationshipOptionKind.Sentinel"/> → enter existing-
+    ///     guardian mode, set <see cref="_newRelId"/> to the sentinel (the
+    ///     §2.1 guard in AddInlineGuardianAsync resolves it to the picked
+    ///     real relationship in Phase 5, or null until then — defensive,
+    ///     prevents the sentinel leaking as a saved relationship Guid),
+    ///     clear the typeahead pick state so the Add button stays disabled
+    ///     until a real pick (§6.3), and reset the search results.
+    ///   - <see cref="RelationshipOptionKind.Relationship"/> → real
+    ///     relationship: bind the id, identical to the old CodedValueDropdown's
+    ///     two-way bind — UNLESS a guardian has already been picked in existing
+    ///     mode, in which case keep existing mode + the typeahead (plan §3.2
+    ///     by-contact: the user picks the relationship AFTER the guardian, so
+    ///     selecting a relationship must not discard the pick).
+    ///   - <see cref="RelationshipOptionKind.Divider"/> → unreachable
+    ///     (Disabled guarantees FluentSelect cannot pick it); guard anyway.
+    ///   - <c>null</c> → user cleared the dropdown back to placeholder
+    ///     (no-op on state, mirrors CodedValueDropdown's clear behaviour).</summary>
+    private void OnRelationshipOptionChanged(RelationshipOption? opt)
+    {
+        _selectedRelOption = opt;
+        switch (opt?.Kind)
+        {
+            case RelationshipOptionKind.Sentinel:
+                _inExistingMode = true;
+                _newRelId = ExistingGuardianSentinel;
+                _existingGuardianId = null;
+                _pickedRelationshipId = null;
+                _pickedTitleId = null;
+                ClearTypeaheadState();
+                break;
+            case RelationshipOptionKind.Relationship when opt.Id is { } relId:
+                _newRelId = relId;
+                if (_existingGuardianId is null)
+                {
+                    // Free-text new-guardian flow: exit existing mode and
+                    // discard any typeahead search state (Phase 5 review
+                    // Finding 1 — previously left _searchRows/
+                    // _studentSearchResults/_pickedStudent/_searchCts lingering).
+                    _inExistingMode = false;
+                    ClearTypeaheadState();
+                }
+                // else: a guardian was picked in existing mode — keep the
+                // typeahead visible and just swap the sentinel for this real
+                // relationship (plan §3.2 by-contact path).
+                break;
+            case RelationshipOptionKind.Divider:
+            case null:
+            default:
+                break;
+        }
+    }
+
+
+    /// <summary>Resets the transient typeahead search state (plan §10
+    /// Phase 5 — rolled in from the Phase-4 review's Finding 1).
+    /// Cancels any in-flight debounce CTS and clears the search results /
+    /// query / loading flag / picked-student step-2 state. Does NOT touch
+    /// the add-row selection (_inExistingMode, _selectedRelOption,
+    /// _newRelId, _existingGuardianId, _pickedRelationshipId,
+    /// _pickedTitleId, _newFirstName, _newLastName) — those are add-row
+    /// state that persists across navigation and is reset separately on
+    /// sentinel re-select / relationship change / post-add.
+    /// Called from: OnRelationshipOptionChanged (both branches), the
+    /// post-add reset, and CancelPanel.</summary>
+    private void ClearTypeaheadState()
+    {
+        // §11: cancel any in-flight typeahead search. The FluentAutocomplete
+        // owns its popup Items + ValueText; we only cancel the shared search
+        // CTS here. The pick (_existingGuardianId) persists until the next
+        // pick or the post-add reset in AddInlineGuardianAsync.
+        _searchCts?.Cancel();
+        _searchCts?.Dispose();
+        _searchCts = null;
+    }
+
+    /// <summary>Formats the per-guardian ward count cell (plan §4).
+    /// Null → "—" (enrichment failure or pending). 1 → "+1 ward".
+    /// n → "+N wards". Pure function; lives here so the result row
+    /// markup stays a one-liner and the Phase 7 test can pin the labels
+    /// without rendering the component.</summary>
+    internal static string WardLabel(int? n) => n switch
+    {
+        null => "—",
+        1 => "+1 ward",
+        _ => $"+{n} wards",
+    };
+
+    // ── Typeahead search handlers (§11) ──
+    // A single FluentAutocomplete owns the popup, the 300 ms debounce
+    // (ImmediateDelay="300"), keyboard nav, and ARIA combobox role. These
+    // handlers only supply options + resolve the pick. The handler-internal
+    // CancellationTokenSource provides cancel-on-supersede (the component's
+    // OptionsSearchEventArgs carries no CancellationToken). Min 2 chars
+    // before any API call (§9.1). Radio toggle switches the search
+    // dimension; a pick persists across the toggle (§11 review decision).
+
+
+
+
+
+
+
+
+
+    /// <summary>The set of guardian ids already linked or drafted for this
+    /// student, used as the client-side duplicate filter (§6.1). The
+    /// server-side <c>excludeStudentId</c> hides already-linked guardians;
+    /// this catches drafted-but-not-yet-saved guardians that the server
+    /// filter can't see (create + all-inclusive edit dialogs).</summary>
+    private HashSet<Guid> DraftedGuardianIds()
+        => Model.GuardianLinks
+            .Where(g => g.ExistingGuardianId is { })
+            .Select(g => g.ExistingGuardianId!.Value)
+            .ToHashSet();
+    /// <summary>The single typeahead callback (plan §11.3). Switches on
+    /// <see cref="_searchMode"/>: Contact → <see cref="SearchContactRowsAsync"/>
+    /// (guardian-name search); Student → <see cref="SearchGuardiansByStudentNameRowsAsync"/>
+    /// (student-name → their guardians, single-step, §11). Min 2 chars (§9.1).
+    /// Cancellation is handler-internal (<see cref="OptionsSearchEventArgs{T}"/>
+    /// carries no <see cref="System.Threading.CancellationToken"/>); the
+    /// component-level debounce is <c>ImmediateDelay="300"</c>.</summary>
+    private async Task OnTypeaheadSearchAsync(OptionsSearchEventArgs<GuardianSearchRow> e)
+    {
+        var q = (e.Text ?? string.Empty).Trim();
+        if (q.Length < 2) { e.Items = []; return; }      // §9.1
+
+        _searchCts?.Cancel(); _searchCts?.Dispose();
+        _searchCts = new CancellationTokenSource();
+        var ct = _searchCts.Token;
+        try
+        {
+            e.Items = _searchMode == SearchMode.Contact
+                ? await SearchContactRowsAsync(q, ct)
+                : await SearchGuardiansByStudentNameRowsAsync(q, ct);
+            if (ct.IsCancellationRequested) e.Items = [];
+        }
+        catch (OperationCanceledException) { e.Items = []; }
+    }
+
+    /// <summary>Contact-mode search (plan §11.3). Calls
+    /// <c>Api.ListGuardiansAsync(ct, search: q, excludeStudentId: StudentId)</c>
+    /// so already-linked guardians are hidden server-side (§3.1 / §6.1).
+    /// Relationship is null (§3.2 by-contact omits it); matched-student
+    /// context is null (Contact mode). Ward counts from the client-enriched
+    /// <c>GuardianDto.StudentCount</c>. Capped at 30 rows.</summary>
+    private async Task<GuardianSearchRow[]> SearchContactRowsAsync(string q, CancellationToken ct)
+    {
+        var items = await Api.ListGuardiansAsync(ct, search: q, excludeStudentId: StudentId) ?? [];
+        var linkedIds = DraftedGuardianIds();
+        return items
+            .Where(g => !linkedIds.Contains(g.Id))
+            .Take(30)
+            .Select(g => new GuardianSearchRow(
+                g.Id,
+                FormatGuardianName(g.TitleName, g.FirstName, g.LastName, g.DisplayName),
+                RelationshipName: null,
+                WardCount: g.StudentCount,
+                FirstName: g.FirstName,
+                LastName: g.LastName,
+                TitleCodedValueId: g.TitleCodedValueId,
+                RelationshipCodedValueId: null,
+                MatchedStudentName: null,
+                MatchedStudentNumber: null))
+            .ToArray();
+    }
+
+    /// <summary>Student-mode search (plan §11.3). Single-step: type a
+    /// <em>student</em> name → list <em>guardians</em> of matching students.
+    /// Orchestration: <c>Api.ListStudentsAsync</c> (exclude current
+    /// <see cref="StudentId"/>, §6.2) → <see cref="Task.WhenAll"/> of
+    /// <c>Api.ListGuardiansByStudentAsync</c> per match (N+1, bounded by
+    /// the <c>Take(10)</c> cap; §11.8) → flatten to guardian rows carrying
+    /// the matched student + the link's relationship + bulk ward counts.
+    /// A guardian linked to two matching students appears twice (different
+    /// relationship / match context) — intended; the user picks the specific
+    /// link. Capped at 30 rows.</summary>
+    private async Task<GuardianSearchRow[]> SearchGuardiansByStudentNameRowsAsync(string q, CancellationToken ct)
+    {
+        var students = await Api.ListStudentsAsync(ct, search: q) ?? [];
+        students = students
+            .Where(s => StudentId is null || s.Id != StudentId.Value)
+            .Take(10)   // §11.8 N+1 cap
+            .ToArray();
+        if (students.Length == 0) return [];
+
+        // Parallelize the N+1 guardian loads.
+        var linkArrays = await Task.WhenAll(students.Select(s => Api.ListGuardiansByStudentAsync(s.Id, ct)));
+        ct.ThrowIfCancellationRequested();
+
+        var linkedIds = DraftedGuardianIds();
+        var rows = new List<GuardianSearchRow>();
+        foreach (var (student, links) in students.Zip(linkArrays, (s, l) => (s, l ?? [])))
+        {
+            // Ensure any new relationship coded-value ids are resolved for the
+            // (Relationship) label.
+            var newRelIds = links
+                .Where(l => l.RelationshipCodedValueId is { } rid && !_relNames.ContainsKey(rid))
+                .Select(l => l.RelationshipCodedValueId!.Value)
+                .Distinct();
+            foreach (var rid in newRelIds)
+                await EnsureRelNameAsync(rid);
+
+            foreach (var l in links)
+            {
+                if (linkedIds.Contains(l.GuardianId)) continue;
+                string? relName = l.RelationshipCodedValueId is { } id && _relNames.TryGetValue(id, out var rn) ? rn : null;
+                rows.Add(new GuardianSearchRow(
+                    l.GuardianId,
+                    $"{l.FirstName} {l.LastName}".Trim(),
+                    relName,
+                    WardCount: null,   // filled below from bulk
+                    FirstName: l.FirstName,
+                    LastName: l.LastName,
+                    TitleCodedValueId: l.TitleCodedValueId,
+                    RelationshipCodedValueId: l.RelationshipCodedValueId,
+                    MatchedStudentName: $"{student.FirstName} {student.LastName}".Trim(),
+                    MatchedStudentNumber: student.StudentNumber));
+            }
+        }
+
+        // Bulk-load ward counts (§11.3 last bullet). Failure non-fatal.
+        if (rows.Count > 0)
+        {
+            try
+            {
+                var counts = await Api.ListStudentCountsByGuardiansAsync(rows.Select(r => r.Id).Distinct(), ct);
+                var dict = counts.ToDictionary(c => c.GuardianId, c => c.Count);
+                for (var i = 0; i < rows.Count; i++)
+                {
+                    var r = rows[i];
+                    rows[i] = r with { WardCount = dict.TryGetValue(r.Id, out var c) ? c : null };
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Failed to enrich guardian ward counts");
+            }
+        }
+        return rows.Take(30).ToArray();
+    }
+
+    /// <summary>Selection → draft (plan §11.4). Single branch — every row is a
+    /// guardian. By-student: prefill relationship + sync the relationship
+    /// dropdown to the real relationship (swaps the sentinel). By-contact:
+    /// leave relationship null for the user to pick (§3.2).</summary>
+    private async Task OnTypeaheadSelectedAsync(GuardianSearchRow? row)
+    {
+        if (row is null) return;
+        _existingGuardianId = row.Id;
+        _newFirstName = row.FirstName;
+        _newLastName = row.LastName;
+        _pickedTitleId = row.TitleCodedValueId;
+        if (_searchMode == SearchMode.Student && row.RelationshipCodedValueId is { } relId)
+        {
+            _pickedRelationshipId = relId;
+            _newRelId = relId;
+            _selectedRelOption = _relationshipOptions?.FirstOrDefault(
+                o => o.Kind == RelationshipOptionKind.Relationship && o.Id == relId);
+        }
+        else
+        {
+            _pickedRelationshipId = null;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Per-option row template (plan §11.2). Two-line:
+    /// line 1 = <c>FullName (Relationship) +N wards</c> (green far-right);
+    /// line 2 = matched student <c>Name #Number</c> (muted, Student mode only).</summary>
+    private RenderFragment<GuardianSearchRow> RowTemplate => context =>
+    @<div class="guardian-search-row">
+        <div class="guardian-search-primary">
+            <span class="guardian-search-name">@context.FullName</span>
+            @if (context.RelationshipName is { } rel)
+            {
+                <span class="guardian-search-rel">(@rel)</span>
+            }
+            <span class="guardian-search-wards">@WardLabel(context.WardCount)</span>
+        </div>
+        @if (context.MatchedStudentName is { } stu)
+        {
+            <div class="guardian-search-student">
+                @stu
+                @if (context.MatchedStudentNumber is { } num)
+                {
+                    <span class="muted"> #@num</span>
+                }
+            </div>
+        }
+    </div>;
+
+
+    /// <summary>Formats a guardian's display name for the typeahead row
+    /// (plan §4 "title + name via the existing salutations/_relNames").
+    /// Mirrors the existing card head-line format: title + first + last,
+    /// trimmed; falls back to DisplayName when title is missing; falls
+    /// back to FirstLast when DisplayName is also missing.</summary>
+    private static string FormatGuardianName(string? titleName, string firstName, string lastName, string? displayName)
+    {
+        if (!string.IsNullOrWhiteSpace(titleName))
+            return $"{titleName} {firstName} {lastName}".Trim();
+        if (!string.IsNullOrWhiteSpace(displayName))
+            return displayName;
+        return $"{firstName} {lastName}".Trim();
+    }
+
+    /// <summary>Loads RELATSHIPS coded values and prepends the sentinel +
+    /// divider option. Called from <see cref="OnInitializedAsync"/> when
+    /// <see cref="ShowGuardians"/> is true. Failures are non-fatal: the
+    /// dropdown falls back to an empty list and the load error is logged
+    /// (matches the CodedValueDropdown's own error UX — the add row is
+    /// still usable for free-text entry with no relationship picked).</summary>
+    private async Task BuildRelationshipOptionsAsync()
+    {
+        try
+        {
+            var items = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.Relationships.ToCode(), CancellationToken.None) ?? [];
+            var options = new List<RelationshipOption>(items.Length + 2)
+            {
+                // Top of the list: the selectable "Add Existing Guardian" trigger.
+                new(ExistingGuardianSentinel, "Add Existing Guardian",
+                    RelationshipOptionKind.Sentinel, IsDisabled: false),
+                // Non-selectable divider (Disabled guarantees FluentSelect can
+                // never pick it; rendered as a 1px horizontal rule via the
+                // option class, Phase 2).
+                new(null, string.Empty,
+                    RelationshipOptionKind.Divider, IsDisabled: true),
+            };
+            foreach (var cv in items)
+            {
+                options.Add(new(cv.Id, cv.Name,
+                    RelationshipOptionKind.Relationship, IsDisabled: cv.IsDisabled));
+            }
+            _relationshipOptions = options.ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load relationship coded values");
+            _relationshipOptions = [];
+        }
+    }
+
+    /// <summary>Disposes the typeahead debounce CTS (Phase 4). The CTS is
+    /// null in Phase 1 (no handler yet); the null-check makes DisposeAsync
+    /// safe regardless of which phase the component is torn down at.</summary>
+    public async ValueTask DisposeAsync()
+    {
+        if (_searchCts is { } cts)
+        {
+            cts.Cancel();
+            cts.Dispose();
+            _searchCts = null;
+        }
+        await ValueTask.CompletedTask;
+        GC.SuppressFinalize(this);
     }
 }
