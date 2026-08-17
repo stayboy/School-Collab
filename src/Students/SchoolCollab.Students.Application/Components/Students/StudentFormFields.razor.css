@@ -246,13 +246,27 @@
     margin-bottom: 4px;
 }
 
+/* Two name fields each fill half of the "name fields" region. Their total
+   rendered width (2 × ~160px + gap) is the same visual region the existing-
+   guardian typeahead must occupy when the sentinel is selected, so the
+   Add button stays in the same horizontal position and the row keeps the
+   same overall width in both modes. */
 .guardian-add-field {
-    flex: 1 1 160px;
+    flex: 0 0 calc(50% - 4px); /* half the region, accounting for the 8px gap */
     min-width: 120px;
 }
 
-.guardian-add-existing {
-    margin-left: auto;
+/* The existing-guardian typeahead stack must match the combined width of the
+   two .guardian-add-field inputs, preserving the row width and Add-button
+   position when switching between "new guardian" and "existing guardian" modes.
+   Fixed width equals two name-field bases plus the 8px gap between them. */
+.guardian-typeahead-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 0 0 auto;
+    width: calc(320px + 8px); /* matches two 160px name fields + gap */
+    min-width: 0;
 }
 
 /* Contacts editor embedded in the Edit panel. Gives it a divider + spacing
@@ -275,18 +289,42 @@
     /* Width: inline style (see FluentSelect Style parameter). */
 }
 
-/* The non-selectable horizontal divider option. Rendered as an <hr>
-   inside a disabled <fluent-option> via OptionTemplate (plan §2 / §9.2).
-   The <hr> element is emitted by Blazor inside the template and carries
-   the [b-hash] scope attribute, so this scoped selector matches it.
-   Muted/hint colour, flush vertical margins so it sits between the
-   sentinel trigger and the first real relationship with no extra
-   breathing room. */
+/* Sentinel option wrapper. Wraps the "Add Existing Guardian" label and
+   the divider line (rendered as a 1px <div> below the label) so the trigger
+   reads as a section header with an underline.
+
+   Why a flex column: the <fluent-option> web component's shadow DOM lays
+   its default slot out as a flex ROW (it exposes named `start`/`end` slots —
+   see FluentUI Blazor's SelectWithOptionTemplate example). A bare block
+   element in a flex row becomes a row item sitting BESIDE the label, not
+   below it. Forcing this wrapper to a full-width flex column makes the
+   label stack above the line so it reads as an underline across the full
+   option width. Width:100% so the column fills the default-slot region
+   regardless of the option's row layout. */
+.guardian-rel-sentinel {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+/* The visual divider line under the sentinel option. Rendered as a
+   1px-tall <div> inside the sentinel's option template (plan §2 / §9.2 —
+   relocated from a separate disabled <fluent-option> to inside the sentinel
+   option so the trigger carries its own underline). The <div> element is
+   emitted by Blazor inside the template and carries the [b-hash] scope
+   attribute, so this scoped selector matches it. Using a background color
+   instead of a border avoids browser-specific <hr> styling and web-component
+   slot resets that can suppress or reshape border-based lines. The line is
+   2px tall with a stronger stroke colour so it is clearly visible against the
+   option background, and it stretches the full content width of the dropdown
+   item (no horizontal margins). flex-shrink:0 keeps it from collapsing in a
+   flex container. */
 .guardian-rel-divider {
-    border: none;
-    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
-    margin: 4px 6px;
-    height: 0;
+    height: 2px;
+    background-color: var(--neutral-stroke-rest, #737373);
+    margin: 4px 0 0;
+    flex-shrink: 0;
+    min-width: 0;
 }
 
 /* ── Existing-guardian typeahead (plan §11) ──
