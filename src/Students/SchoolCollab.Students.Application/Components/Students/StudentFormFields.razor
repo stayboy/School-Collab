@@ -165,10 +165,6 @@
         {
             <div class="@SectionRowClass(StudentEditSection.Guardians)">
                 <FluentDivider class="student-form-fields__section-divider" Orientation="Orientation.Horizontal" Style="width:100%" />
-                @if (ActiveEditSection == StudentEditSection.Guardians)
-                {
-                    <h4 class="student-form-fields__edit-title">Update guardian</h4>
-                }
                 <FormRow Label="Guardians">
                     <div class="student-guardians-wrap">
                         <GuardianSection GuardianLinks="Model.GuardianLinks"

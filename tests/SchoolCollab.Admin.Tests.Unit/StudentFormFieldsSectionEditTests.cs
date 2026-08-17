@@ -80,11 +80,18 @@ public class StudentFormFieldsSectionEditTests
     {
         var source = ReadFormFieldsSource();
         var css = ReadFormFieldsCssSource();
+        var guardians = ReadGuardianSectionSource();
 
         source.Should().Contain("SectionRowClass(StudentEditSection.Guardians)",
             "the guardians section uses a CSS class for the section switch");
-        source.Should().Contain("Update guardian",
-            "the guardians edit-view section has a title");
+
+        // The "Update guardian" heading is rendered by the GuardianSection edit
+        // panel, not by StudentFormFields (so it appears exactly once).
+        source.Should().NotContain("student-form-fields__edit-title\">Update guardian</h4>",
+            "StudentFormFields no longer renders a duplicate 'Update guardian' title");
+        guardians.Should().Contain("guardian-add-title\">Update guardian</h4>",
+            "the GuardianSection inline edit panel owns the 'Update guardian' title");
+
         css.Should().Contain("student-form-fields__section-row--hidden",
             "the CSS hides the inactive sibling section");
         source.Should().Contain("Disabled=\"@AreProfileFieldsDisabled\"",
@@ -198,6 +205,24 @@ public class StudentFormFieldsSectionEditTests
             "the guardian card loop must skip all cards when the edit panel is open");
         source.Should().NotContain("(int)g.Key != _editingIndex",
             "do not keep the edited guardian card visible above the edit panel");
+    }
+
+    [TestMethod]
+    public void GuardianEdit_UsesSingleRelationshipRoleRow()
+    {
+        var guardians = ReadGuardianSectionSource();
+
+        // The edit panel puts Relationship and Role side-by-side on one
+        // FormRow labelled "Relationship/Role" (mirrors the First/Last name
+        // and DOB/Gender rows), rather than two separate stacked rows.
+        guardians.Should().Contain("Label=\"Relationship/Role\"",
+            "the Relationship and Role pickers share one FormRow");
+        guardians.Should().Contain("<DropdownForEnum TEnum=\"GuardianRole\"",
+            "the Role picker sits inside the combined Relationship/Role row");
+        guardians.Should().NotContain("Label=\"Relationship\">",
+            "there is no separate stacked Relationship row");
+        guardians.Should().NotContain("Label=\"Role\">",
+            "there is no separate stacked Role row");
     }
 
     [TestMethod]

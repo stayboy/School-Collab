@@ -86,12 +86,14 @@ In **Buffered** mode the contact edit is inline (Cancel first, Save second). In 
 │  Contacts row    (hidden)   │
 │  Guardians row   (hidden)   │
 ├─────────────────────────────┤
-│  Update guardian            │  ← edit-view section: full GuardianSection inline editor
+│  Update guardian            │  ← GuardianSection inline edit panel (owns the title)
+│  Relationship/Role  [inline]│  ← relationship + role dropdowns on one row
 │  [Cancel] [Save]            │  ← GuardianSection's own inline panel buttons
 ├─────────────────────────────┤
 │  dialog actions  (disabled) │  ← Cancel/Save greyed out
 └─────────────────────────────┘
-```
+
+The "Update guardian" heading appears exactly once — owned by the `GuardianSection` edit panel itself, not by `StudentFormFields`. (No duplicate outer section title.)```
 
 ---
 
@@ -127,7 +129,8 @@ Behaviour derived from `ActiveEditSection`:
 - `Guardians`:
   - Profile fields disabled.
   - **Both** the Contacts display row and the Guardians display row are hidden.
-  - A dedicated edit-view section ("Update guardian") renders the full `GuardianSection` Inline editor.
+  - Stays as a normal `FormRow` with no outer section title. The `GuardianSection` inline editor is shown, and its own edit panel renders the single "Update guardian" heading once.
+  - Relationship and Role dropdowns sit inline on one `FormRow` labelled **"Relationship/Role"** (mirrors the DOB/Gender row).
   - The built-in form action row stays visible but disabled.
 
 The form wires the child components' new `IsEditingChanged` callbacks:
@@ -171,7 +174,7 @@ Add a single new parameter:
 
 Fire `true` when the inline edit panel opens (either from a card's Edit button or from the add-row path that auto-opens the panel for a newly-added guardian). Fire `false` when the panel closes via Save or Cancel.
 
-The inline edit panel title is **"Update guardian"** and its action buttons are **Cancel** then **Save**.
+The inline edit panel is the sole owner of the **"Update guardian"** heading (there is no duplicate section title in `StudentFormFields`). Its action buttons are **Cancel** then **Save**. Within the panel, the Relationship and Role pickers sit side-by-side on a single `FormRow` labelled **"Relationship/Role"**, matching the First/Last name row above.
 
 When the panel is open, **all** guardian cards are hidden; only the edit panel is visible.
 
@@ -229,7 +232,7 @@ Add scoped CSS classes to `StudentFormFields.razor.css`:
 
 - `.student-form-fields__profile-row` / `.student-form-fields__profile-row--disabled` — each profile `FormRow` is wrapped in a div so it can be dimmed and made non-interactive during a section edit without breaking the `FluentStack Spacing="3"` gaps.
 - `.student-form-fields__section-row` / `--hidden` / `--active` — each Contacts/Guardians `FormRow` is wrapped in a div so the section switch is done via CSS. This keeps the same component instance mounted. The active state hides the `FormRow` label via `::deep`, shows the `"Update ..."` title, and draws a highlighted box around the section. The active section uses `padding-left: 0` and indents the title and `FormRow` content by the canonical **180px** so the editor lines up with the normal profile input cells above.
-- `.student-form-fields__edit-title` — the "Update contact" / "Update guardian" title.
+- `.student-form-fields__edit-title` — the "Update contact" title, shown only for the Contacts section (the guardians section does not render an outer title; `GuardianSection` owns its own "Update guardian" heading).
 - `.student-form-fields__section-divider` — the horizontal rule between the profile block and each section (and between sections). Given `margin: 0.75rem 0` so it no longer touches the content below it.
 
 No read-only styling is added to `ContactsEditor` or `GuardianSection`; their normal rendering is used in both display and edit-view states. The inline edit form in `ContactsEditor` uses a new `.contact-item--editing` class and `.contact-edit-actions` row for Cancel/Save styling.
@@ -250,8 +253,11 @@ Add `StudentFormFieldsSectionEditTests.cs` (source-level assertions against the 
 
 2. `GuardiansEdit_HidesSiblingSectionAndDisablesProfileAndSubmit`
    - Assert the guardians edit-view section is gated on `ActiveEditSection == Guardians` and `EnableSectionEdit`.
-   - Assert the title is **"Update guardian"**.
+   - Assert `StudentFormFields` no longer renders a duplicate "Update guardian" title, and the `GuardianSection` panel owns the single heading.
    - Assert profile fields and action buttons are disabled during the edit.
+
+3. `GuardianEdit_UsesSingleRelationshipRoleRow`
+   - Assert the `GuardianSection` edit panel renders Relationship and Role on a single `FormRow` labelled **"Relationship/Role"** (not two separate rows).
 
 3. `NormalState_ShowsBothSections`
    - Assert both sections render side-by-side in the normal state.

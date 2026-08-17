@@ -259,17 +259,15 @@
                                 <FluentTextField @bind-Value="_editLastName" Required Placeholder="Last name" class="w-5" />
                             </FormRow>
                         }
-                        <FormRow Label="Relationship">
+                        <FormRow Label="Relationship/Role" Required>
                             <CodedValueDropdown Parent="CodedValueParent.Relationships"
                                                 @bind-SelectedId="_editRelationshipId"
-                                                Placeholder="Select relationship"
+                                                Placeholder="Relationship"
                                                 Width="FieldWidth.W4" />
-                        </FormRow>
-                        <FormRow Label="Role">
                             <DropdownForEnum TEnum="GuardianRole"
                                               @bind-SelectedValue="_editRole"
                                               @key="@($"role-{_editingIndex}")"
-                                              Placeholder="Select role"
+                                              Placeholder="Role"
                                               Width="FieldWidth.W3" />
                         </FormRow>
                     </FluentStack>
