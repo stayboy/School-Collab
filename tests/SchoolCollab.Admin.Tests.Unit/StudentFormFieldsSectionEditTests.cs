@@ -51,20 +51,18 @@ public class StudentFormFieldsSectionEditTests
     // ── Source-level: StudentFormFields section-edit structure ──────────────
 
     [TestMethod]
-    public void ContactsEdit_HidesSiblingSectionAndDisablesProfileAndSubmit()
+    public void ContactsEdit_DisablesProfileAndSubmitButDoesNotHideGuardians()
     {
         var source = ReadFormFieldsSource();
         var css = ReadFormFieldsCssSource();
 
-        // The contacts section is restyled via a CSS class on its FormRow.
-        source.Should().Contain("SectionRowClass(StudentEditSection.Contacts)",
-            "the contacts section uses a CSS class for the section switch");
-
-        // Active state hides the FormRow label and shows a dedicated title.
-        source.Should().Contain("Update contact",
-            "the contacts edit-view section has a title");
-        css.Should().Contain("student-form-fields__section-row--active ::deep .form-row-label",
-            "the active section hides the FormRow label via ::deep");
+        // The contacts section no longer uses a CSS switch that hides siblings.
+        source.Should().NotContain("SectionRowClass(StudentEditSection.Contacts)",
+            "SectionRowClass should not take a section argument; sections are never hidden");
+        css.Should().NotContain("student-form-fields__section-row--hidden",
+            "there is no hidden modifier because both sections stay visible");
+        css.Should().NotContain("student-form-fields__section-row--active",
+            "there is no active-section restyling; the drawer overlays the full content");
 
         // Profile fields are disabled while a section edit is active.
         source.Should().Contain("Disabled=\"@AreProfileFieldsDisabled\"",
@@ -76,24 +74,26 @@ public class StudentFormFieldsSectionEditTests
     }
 
     [TestMethod]
-    public void GuardiansEdit_HidesSiblingSectionAndDisablesProfileAndSubmit()
+    public void GuardiansEdit_DisablesProfileAndSubmitButDoesNotHideContacts()
     {
         var source = ReadFormFieldsSource();
         var css = ReadFormFieldsCssSource();
         var guardians = ReadGuardianSectionSource();
 
-        source.Should().Contain("SectionRowClass(StudentEditSection.Guardians)",
-            "the guardians section uses a CSS class for the section switch");
+        source.Should().NotContain("SectionRowClass(StudentEditSection.Guardians)",
+            "SectionRowClass should not take a section argument; sections are never hidden");
+        css.Should().NotContain("student-form-fields__section-row--hidden",
+            "there is no hidden modifier because both sections stay visible");
+        css.Should().NotContain("student-form-fields__section-row--active",
+            "there is no active-section restyling; the drawer overlays the full content");
 
-        // The "Update guardian" heading is rendered by the GuardianSection edit
-        // panel, not by StudentFormFields (so it appears exactly once).
+        // The "Update guardian" title is owned by the embedded SideDrawer in
+        // GuardianSection, not by StudentFormFields.
         source.Should().NotContain("student-form-fields__edit-title\">Update guardian</h4>",
-            "StudentFormFields no longer renders a duplicate 'Update guardian' title");
-        guardians.Should().Contain("guardian-add-title\">Update guardian</h4>",
-            "the GuardianSection inline edit panel owns the 'Update guardian' title");
+            "StudentFormFields does not render a 'Update guardian' title");
+        guardians.Should().Contain("Title=\"Update guardian\"",
+            "the GuardianSection edit drawer owns the 'Update guardian' title");
 
-        css.Should().Contain("student-form-fields__section-row--hidden",
-            "the CSS hides the inactive sibling section");
         source.Should().Contain("Disabled=\"@AreProfileFieldsDisabled\"",
             "profile fields are disabled during a section edit");
     }
@@ -121,13 +121,14 @@ public class StudentFormFieldsSectionEditTests
     {
         var source = ReadFormFieldsSource();
 
-        // The section-edit behaviour is gated on EnableSectionEdit (default
-        // false), so existing callers (Create.razor, Edit.razor, the wizard)
-        // keep the always-editable form.
+        // The drawer-based edit UX is gated on EnableSectionEdit (default false),
+        // so existing callers (Create.razor, Edit.razor, the wizard) keep the
+        // always-editable form. When enabled, AreProfileFieldsDisabled disables
+        // profile fields and the dialog action row while a drawer is open.
         source.Should().Contain("public bool EnableSectionEdit { get; set; }",
             "EnableSectionEdit defaults to false so existing callers are unchanged");
-        source.Should().Contain("if (!EnableSectionEdit || ActiveEditSection == StudentEditSection.None)",
-            "SectionRowClass guards the switch with EnableSectionEdit");
+        source.Should().Contain("AreProfileFieldsDisabled",
+            "profile/action disabling is still driven by the section-edit state");
     }
 
     [TestMethod]
@@ -152,59 +153,120 @@ public class StudentFormFieldsSectionEditTests
     }
 
     [TestMethod]
-    public void ContactsEditor_UsesInlineEditWithSaveCancelInBufferedMode()
+    public void SideDrawer_SupportsEmbeddedMode()
     {
-        var source = ReadContactsEditorSource();
+        var source = ReadSource(
+            "SchoolCollab.Admin.Shared/Components/SideDrawer.razor");
+        var css = ReadSource(
+            "SchoolCollab.Admin.Shared/Components/SideDrawer.razor.css");
 
-        // Buffered mode edits the contact inline; Live mode keeps the dialog
-        // because per-edit audit requires a reason.
-        source.Should().Contain("if (Mode == EditorMode.Live)",
-            "ContactsEditor branches Live mode to the dialog");
-        source.Should().Contain("await StartInlineEditAsync(row);",
-            "Buffered mode starts inline editing");
-        source.Should().Contain("SaveEditAsync",
-            "inline edit has a Save handler");
-        source.Should().Contain("CancelEditAsync",
-            "inline edit has a Cancel handler");
-        source.Should().Contain("contact-item--editing",
-            "inline edit is rendered inside the editing list item");
+        source.Should().Contain("public bool Embedded { get; set; }",
+            "SideDrawer exposes an Embedded parameter");
+        css.Should().Contain("side-drawer-panel--embedded",
+            "Embedded panel uses position: absolute");
+        css.Should().Contain("side-drawer-backdrop--embedded",
+            "Embedded backdrop uses position: absolute");
     }
 
     [TestMethod]
-    public void InlineEditActions_UseConsistentCancelSaveOrder()
+    public void ContactsEditor_UsesEmbeddedDrawerWithSaveCancelInBufferedMode()
     {
+        var source = ReadContactsEditorSource();
+
+        // Buffered mode edits the contact via an embedded SideDrawer inside
+        // the dialog content; Live mode keeps the dialog because per-edit
+        // audit requires a reason.
+        source.Should().Contain("if (Mode == EditorMode.Live)",
+            "ContactsEditor branches Live mode to the dialog");
+        source.Should().Contain("Embedded=\"true\"",
+            "ContactsEditor's Buffered edit drawer is Embedded (positioned inside the form content stack)");
+        source.Should().Contain("SaveEditFromDrawerAsync",
+            "the drawer's Save handler commits and closes");
+        source.Should().Contain("SaveEditAsync",
+            "the edit mutation handler exists");
+        source.Should().Contain("_editDrawerOpen",
+            "the edit-drawer open state is tracked");
+    }
+
+    [TestMethod]
+    public void StudentFormFields_ContentStack_IsPositionedAncestorForDrawer()
+    {
+        var source = ReadFormFieldsSource();
+        var css = ReadFormFieldsCssSource();
+        var contactsCss = ReadSource(
+            "SchoolCollab.Admin.Shared/Components/ContactsEditor.razor.css");
+        var guardiansCss = ReadSource(
+            "Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor.css");
+
+        // The FluentStack that wraps all form content is the containing block
+        // for embedded SideDrawers, so the drawer overlays the full form content
+        // in the dialog rather than just one section.
+        source.Should().Contain("Class=\"student-form-fields__content-stack\"",
+            "the form content FluentStack gets a class for positioning");
+        css.Should().Contain(".student-form-fields__content-stack {",
+            "the content-stack CSS rule exists");
+        css.Should().Contain("position: relative",
+            "the content stack establishes the containing block");
+
+        // Component roots must NOT be positioned so the drawer fills the parent
+        // content stack instead of the component's own bounds.
+        contactsCss.Should().NotContain(".contacts-editor {\n    position: relative",
+            "ContactsEditor root must not be positioned (drawer fills form content)");
+        guardiansCss.Should().NotContain(".student-guardians {\n    position: relative",
+            "GuardianSection root must not be positioned (drawer fills form content)");
+        css.Should().NotContain(".student-form-fields__section-row {\n    position: relative",
+            "section rows must not be positioned (drawer fills form content)");
+    }
+
+    [TestMethod]
+    public void EditActions_UseConsistentCancelSaveOrder()
+    {
+        // The student edit dialog and all child edit drawers/panels share the
+        // same action order: Cancel (Outline/Neutral) first, then Save
+        // (Accent) second.
         var contactsSource = ReadContactsEditorSource();
         var guardiansSource = ReadGuardianSectionSource();
 
-        // Dialog-level actions and both inline editors use the same order:
-        // Cancel (Outline/Neutral) first, then Save (Accent) second.
-        var contactActionIdx = contactsSource.IndexOf("class=\"contact-edit-actions\"");
-        contactActionIdx.Should().BeGreaterThan(0);
-        var contactSlice = contactsSource.Substring(contactActionIdx, 500);
-        contactSlice.IndexOf("Cancel").Should().BeLessThan(contactSlice.IndexOf("Save"),
-            "ContactsEditor inline edit must render Cancel before Save");
+        // ContactsEditor: the buffered edit now lives in the embedded
+        // SideDrawer. The drawer footer is rendered by the shared SideDrawer
+        // component with ShowCancel=true (Cancel, Outline) then ShowSubmit=true
+        // (Save, Accent) in that order. Assert the markup-side wiring rather
+        // than a CSS class (the drawer footer owns the CSS).
+        contactsSource.Should().Contain("ShowCancel=\"true\"",
+            "ContactsEditor's edit drawer declares ShowCancel=true (Cancel first)");
+        contactsSource.Should().Contain("ShowSubmit=\"true\"",
+            "ContactsEditor's edit drawer declares ShowSubmit=true (Save after Cancel)");
 
-        var guardianActionIdx = guardiansSource.IndexOf("class=\"guardian-add-actions\"");
-        guardianActionIdx.Should().BeGreaterThan(0);
-        var guardianSlice = guardiansSource.Substring(guardianActionIdx, 300);
-        guardianSlice.IndexOf("Cancel").Should().BeLessThan(guardianSlice.IndexOf("Save"),
-            "GuardianSection inline edit must render Cancel before Save");
+        // GuardianSection: the edit form is also hosted in an embedded SideDrawer,
+        // so the same Cancel-first/Save-second order is declared via ShowCancel
+        // and ShowSubmit. The legacy inline guardian-add-actions buttons are gone.
+        guardiansSource.Should().Contain("ShowCancel=\"true\"",
+            "GuardianSection's edit drawer declares ShowCancel=true (Cancel first)");
+        guardiansSource.Should().Contain("ShowSubmit=\"true\"",
+            "GuardianSection's edit drawer declares ShowSubmit=true (Save after Cancel)");
+        guardiansSource.Should().NotContain("class=\"guardian-add-actions\"",
+            "GuardianSection no longer renders its own inline Cancel/Save action row");
     }
 
     // ── Source-level: StudentEditDialog orchestration ───────────────────────
 
     [TestMethod]
-    public void GuardianEdit_HidesDisplayViewOfEditedGuardian()
+    public void GuardianEdit_KeepsCardsVisibleAndUsesEmbeddedSideDrawer()
     {
         var source = ReadGuardianSectionSource();
 
-        // When the inline edit panel opens, no guardian cards should remain
-        // visible — the edit panel is the only view of the guardian being
-        // edited (matches the focused section-edit UX used for contacts).
-        source.Should().Contain("if (_panelMode == GuardianPanelMode.Edit)",
-            "the guardian card loop must skip all cards when the edit panel is open");
-        source.Should().NotContain("(int)g.Key != _editingIndex",
-            "do not keep the edited guardian card visible above the edit panel");
+        // The embedded drawer slides over the card list; the cards themselves
+        // stay rendered (the drawer's backdrop blocks interaction with them).
+        source.Should().NotContain("if (_panelMode == GuardianPanelMode.Edit)",
+            "the guardian card loop should not hide cards when the edit drawer is open");
+
+        // GuardianSection uses the same embedded SideDrawer pattern as contacts.
+        source.Should().Contain("<SideDrawer Embedded=\"true\"",
+            "GuardianSection renders an embedded SideDrawer for edit");
+        source.Should().Contain("OpenChanged=\"OnEditDrawerOpenChangedAsync\"",
+            "the drawer's open state is forwarded to the section");
+        source.Should().Contain("OnSubmitAsync=\"SaveEditGuardianAsync\"",
+            "the drawer's Save handler commits and closes");
     }
 
     [TestMethod]

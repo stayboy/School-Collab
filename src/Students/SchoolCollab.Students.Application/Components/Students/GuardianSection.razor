@@ -4,16 +4,16 @@
 
     Two modes (gated by the Mode parameter):
 
-    - Inline (DEFAULT): the historical panel-switch UX. Create mode keeps a
+    - Inline (DEFAULT): the drawer-based edit UX. Create mode keeps a
       draft list on the model that the parent links after the student is
       saved; edit mode loads the links from the API and links / unlinks
-      immediately. Adding a guardian is an INLINE section switch (no nested
-      dialog): the always-visible inline "add guardian" row (relationship
-      dropdown + name fields, or the "Add Existing Guardian" typeahead) adds
-      directly to the card list; the Edit panel refines relationship / role /
-      contacts. This is the right UX inside DIALOGS — the user is already
-      modal, and nested dialogs are the anti-pattern the dialog-ui skill
-      explicitly warns against.
+      immediately. Adding a guardian is an INLINE add row (no nested dialog):
+      the always-visible inline "add guardian" row (relationship dropdown +
+      name fields, or the "Add Existing Guardian" typeahead) adds directly to
+      the card list; the Edit drawer refines relationship / role / contacts.
+      This is the right UX inside DIALOGS — the user is already modal, and
+      nested dialogs are the anti-pattern the dialog-ui skill explicitly warns
+      against.
 
     - Linked: the page-side compact section. Used by /students/{id}/edit.
       Renders a "Guardians (N) — Manage" header with a button that fires
@@ -169,13 +169,6 @@
             <div class="guardian-cards">
                 @foreach (var g in GuardianGridRows)
                 {
-                    // When the Edit panel is open, ALL guardian cards hide
-                    // — the edit panel itself is the only visible view of the
-                    // guardian being edited. Save/Cancel restores the list.
-                    if (_panelMode == GuardianPanelMode.Edit)
-                    {
-                        continue;
-                    }
                     var relName = g.RelationshipCodedValueId is { } rid && _relNames.TryGetValue(rid, out var rn) ? rn : null;
                     var salName = g.TitleCodedValueId is { } tid && _salutations.TryGetValue(tid, out var sn) ? sn : null;
                     var name = string.IsNullOrWhiteSpace(salName) ? $"{g.FirstName} {g.LastName}".Trim() : $"{salName} {g.FirstName} {g.LastName}".Trim();
@@ -232,69 +225,72 @@
                 <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
             }
 
-            @* ── Panel switch: edit panel ── *@
-            @if (_panelMode == GuardianPanelMode.Edit)
-            {
-                <div class="guardian-add-section">
-                    @{ var editedGuardian = (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count) ? GuardianLinks[_editingIndex] : null; }
-                    <h4 class="guardian-add-title">Update guardian</h4>
-                    <FluentStack Orientation="Orientation.Vertical" Spacing="3">
-                        @* Draft-only fields: title + name are editable only for
-                           not-yet-persisted guardians (ExistingGuardianId is null).
-                           For existing guardians these don't persist through the
-                           student save (guardian-surface operation), so they're
-                           hidden to avoid misleading the user. *@
-                        @if (editedGuardian is { } eg && eg.ExistingGuardianId is null)
-                        {
-                            <FormRow Label="Title">
-                                <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                                    @bind-SelectedId="_editTitleId"
-                                                    Placeholder="Optional"
-                                                    Width="FieldWidth.W3" />
-                            </FormRow>
-                            <FormRow Label="First name" Required>
-                                <FluentTextField @bind-Value="_editFirstName" Required Placeholder="First name" class="w-5" />
-                            </FormRow>
-                            <FormRow Label="Last name" Required>
-                                <FluentTextField @bind-Value="_editLastName" Required Placeholder="Last name" class="w-5" />
-                            </FormRow>
-                        }
-                        <FormRow Label="Relationship/Role" Required>
-                            <CodedValueDropdown Parent="CodedValueParent.Relationships"
-                                                @bind-SelectedId="_editRelationshipId"
-                                                Placeholder="Relationship"
-                                                Width="FieldWidth.W4" />
-                            <DropdownForEnum TEnum="GuardianRole"
-                                              @bind-SelectedValue="_editRole"
-                                              @key="@($"role-{_editingIndex}")"
-                                              Placeholder="Role"
-                                              Width="FieldWidth.W3" />
+            @* ── Embedded edit drawer (Inline mode) ──
+               The edit form slides in as an embedded SideDrawer inside the
+               section so the user stays in the student edit dialog. *@
+            <SideDrawer Embedded="true"
+                        Open="@(_panelMode == GuardianPanelMode.Edit)"
+                        OpenChanged="OnEditDrawerOpenChangedAsync"
+                        Title="Update guardian"
+                        Width="420px"
+                        ShowCancel="true"
+                        CancelText="Cancel"
+                        ShowSubmit="true"
+                        SubmitText="Save"
+                        OnSubmitAsync="SaveEditGuardianAsync">
+                @{ var editedGuardian = (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count) ? GuardianLinks[_editingIndex] : null; }
+                <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+                    @* Draft-only fields: title + name are editable only for
+                       not-yet-persisted guardians (ExistingGuardianId is null).
+                       For existing guardians these don't persist through the
+                       student save (guardian-surface operation), so they're
+                       hidden to avoid misleading the user. *@
+                    @if (editedGuardian is { } eg && eg.ExistingGuardianId is null)
+                    {
+                        <FormRow Label="Title">
+                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
+                                                @bind-SelectedId="_editTitleId"
+                                                Placeholder="Optional"
+                                                Width="FieldWidth.W3" />
                         </FormRow>
-                    </FluentStack>
-                    @* Contacts editor: Live mode for existing guardians (immediate
-                       API calls), Buffered mode for drafts (in-memory, persisted at
-                       student save time). *@
-                    @if (editedGuardian is { } eg2 && eg2.ExistingGuardianId is { } gid)
-                    {
-                        <div class="guardian-edit-contacts">
-                            <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@gid" />
-                        </div>
+                        <FormRow Label="First name" Required>
+                            <FluentTextField @bind-Value="_editFirstName" Required Placeholder="First name" class="w-5" />
+                        </FormRow>
+                        <FormRow Label="Last name" Required>
+                            <FluentTextField @bind-Value="_editLastName" Required Placeholder="Last name" class="w-5" />
+                        </FormRow>
                     }
-                    else if (editedGuardian is not null)
-                    {
-                        <div class="guardian-edit-contacts">
-                            <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                            OwnerType="ContactOwnerType.Guardian"
-                                            Contacts="_editContacts"
-                                            ContactsChanged="OnEditContactsChanged" />
-                        </div>
-                    }
-                    <FluentStack Orientation="Orientation.Horizontal" Spacing="8" class="guardian-add-actions">
-                        <FluentButton Appearance="Appearance.Outline" Type="ButtonType.Button" OnClick="CancelPanel">Cancel</FluentButton>
-                        <FluentButton Appearance="Appearance.Accent" Type="ButtonType.Button" OnClick="SaveEditGuardianAsync">Save</FluentButton>
-                    </FluentStack>
-                </div>
-            }
+                    <FormRow Label="Relationship/Role" Required>
+                        <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                                            @bind-SelectedId="_editRelationshipId"
+                                            Placeholder="Relationship"
+                                            Width="FieldWidth.W4" />
+                        <DropdownForEnum TEnum="GuardianRole"
+                                          @bind-SelectedValue="_editRole"
+                                          @key="@($"role-{_editingIndex}")"
+                                          Placeholder="Role"
+                                          Width="FieldWidth.W3" />
+                    </FormRow>
+                </FluentStack>
+                @* Contacts editor: Live mode for existing guardians (immediate
+                   API calls), Buffered mode for drafts (in-memory, persisted at
+                   student save time). *@
+                @if (editedGuardian is { } eg2 && eg2.ExistingGuardianId is { } gid)
+                {
+                    <div class="guardian-edit-contacts">
+                        <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@gid" />
+                    </div>
+                }
+                else if (editedGuardian is not null)
+                {
+                    <div class="guardian-edit-contacts">
+                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                        OwnerType="ContactOwnerType.Guardian"
+                                        Contacts="_editContacts"
+                                        ContactsChanged="OnEditContactsChanged" />
+                    </div>
+                }
+            </SideDrawer>
         }
     }
 </div>
@@ -335,7 +331,7 @@
     /// the GuardianId for the API call.</summary>
     [Parameter] public EventCallback<StudentGuardianViewDto> OnRemoveGuardian { get; set; }
 
-    /// <summary>Raised when the inline edit panel opens (true) or closes
+    /// <summary>Raised when the edit drawer opens (true) or closes
     /// (false). Allows a parent dialog to switch to a focused section-edit UX
     /// while a guardian is being edited inline.</summary>
     [Parameter] public EventCallback<bool> IsEditingChanged { get; set; }
@@ -376,7 +372,7 @@
         }
     }
 
-    // ── Inline guardian edit panel ──
+    // ── Guardian edit drawer ──
     // List  = card list + always-visible inline add row (mimics the
     //         ContactsEditor add-contact form).
     // Edit  = hide all but the edited card + show its relationship/role editor.
@@ -406,7 +402,7 @@
     // in place; on Save it's written back to the GuardianAssignment.Contacts).
     private List<ContactModel> _editContacts = new();
 
-    /// <summary>Notifies the parent when the inline edit panel opens or closes.</summary>
+    /// <summary>Notifies the parent when the edit drawer opens or closes.</summary>
     private async Task NotifyIsEditingAsync(bool isEditing)
     {
         await IsEditingChanged.InvokeAsync(isEditing);
@@ -463,7 +459,7 @@
     // There is no "StartNew" panel — the inline add row is always visible in
     // List mode and adds directly (AddInlineGuardianAsync). Only Edit switches.
 
-    /// <summary>Open the inline Edit panel for the guardian at
+    /// <summary>Open the edit drawer for the guardian at
     /// <paramref name="index"/> in <see cref="GuardianLinks"/>. Loads the link's
     /// current relationship / role into the edit fields.</summary>
     private async Task StartEditGuardian(int index)
@@ -496,19 +492,33 @@
         ClearTypeaheadState();
     }
 
+    /// <summary>Handles the embedded edit drawer's close request (Cancel,
+    /// ×, backdrop, or Escape). Discards any pending edit and returns to list
+    /// view.</summary>
+    private Task OnEditDrawerOpenChangedAsync(bool open)
+    {
+        if (!open && _panelMode == GuardianPanelMode.Edit)
+        {
+            return CancelPanel();
+        }
+        return Task.CompletedTask;
+    }
+
     /// <summary>Apply the edited link metadata (relationship / role) back to the
     /// drafted <see cref="GuardianAssignment"/> at <see cref="_editingIndex"/>.
     /// Replaces the immutable record via a <c>with</c> expression, preserving the
     /// guardian's identity (id / name / title), its contact summary, and its
     /// emergency-contact flag. No API call — the change is drafted and persisted
-    /// atomically with the rest of the student on Save.</summary>
-    private async Task SaveEditGuardianAsync()
+    /// atomically with the rest of the student on Save. Returns true so the
+    /// SideDrawer closes on success; returns false when an error is shown so the
+    /// drawer stays open.</summary>
+    private async Task<bool> SaveEditGuardianAsync()
     {
         if (_editingIndex < 0 || _editingIndex >= GuardianLinks.Count)
         {
             await NotifyIsEditingAsync(false);
             _panelMode = GuardianPanelMode.List;
-            return;
+            return true;
         }
         _guardianError = null;
         try
@@ -529,12 +539,14 @@
             await NotifyIsEditingAsync(false);
             _panelMode = GuardianPanelMode.List;
             _editingIndex = -1;
+            return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to edit guardian at index {Index}", _editingIndex);
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
+            return false;
         }
     }
 

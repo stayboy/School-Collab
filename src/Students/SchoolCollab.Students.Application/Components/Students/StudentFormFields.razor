@@ -52,13 +52,11 @@
     <DataAnnotationsValidator />
 
     @* The parent vertical stack controls the row rhythm. Spacing="3" gives
-       a comfortable 12px gap between rows. Profile FormRows are wrapped in
-       divs so the section-edit UX can dim them as a block without breaking
-       the FluentStack spacing. The Contacts / Guardians sections are also
-       wrapped in divs so the focused section-edit UX can hide the sibling
-       section and restyle the active section via CSS while keeping the same
-       component instance mounted. *@
-    <FluentStack Orientation="Orientation.Vertical" Spacing="3">
+       a comfortable 12px gap between rows. The stack is the positioned
+       ancestor for any embedded SideDrawer opened by child components, so
+       the edit drawer slides in over the full form content rather than over
+       a single section. *@
+    <FluentStack Orientation="Orientation.Vertical" Spacing="3" Class="student-form-fields__content-stack">
         <div class="@ProfileRowClass">
             @* Student number. ReadOnly when editing an existing student (the
                student number is the stable identifier the rest of the app
@@ -131,25 +129,15 @@
             </FormRow>
         </div>
 
-        @* Contacts + Guardians sections. When <see cref="EnableSectionEdit"/>
-           is true the form uses the focused section-edit UX: when a child
-           component starts editing, it raises IsEditingChanged(true). The
-           parent then hides the OTHER section via CSS, dims the profile
-           block, disables the dialog action row, and restyles the active
-           section as a dedicated edit-view section ("Update contact" /
-           "Update guardian"). The same component instance stays mounted,
-           so its inline-edit state is preserved. When <see cref="EnableSectionEdit"/>
-           is false (default) the sections render side-by-side exactly as before.
-           The section switch uses CSS on a wrapper div so the same component
-           instances are preserved and the FormRow label is hidden in active state. *@
+        @* Contacts + Guardians sections. Both sections stay visible at all
+           times. When a child component starts editing it raises IsEditingChanged(true);
+           the parent dims the profile fields and disables the dialog action row
+           so the operator focuses on the embedded SideDrawer, but neither section
+           is hidden. *@
         @if (ShowContacts)
         {
-            <div class="@SectionRowClass(StudentEditSection.Contacts)">
+            <div class="student-form-fields__section-row">
                 <FluentDivider class="student-form-fields__section-divider" Orientation="Orientation.Horizontal" Style="width:100%" />
-                @if (ActiveEditSection == StudentEditSection.Contacts)
-                {
-                    <h4 class="student-form-fields__edit-title">Update contact</h4>
-                }
                 <FormRow Label="Contacts">
                     <div class="student-contacts">
                         <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
@@ -163,7 +151,7 @@
         }
         @if (ShowGuardians)
         {
-            <div class="@SectionRowClass(StudentEditSection.Guardians)">
+            <div class="student-form-fields__section-row">
                 <FluentDivider class="student-form-fields__section-divider" Orientation="Orientation.Horizontal" Style="width:100%" />
                 <FormRow Label="Guardians">
                     <div class="student-guardians-wrap">
@@ -257,16 +245,9 @@
     /// the full dialog width). The <c>student-form-fields--section-editing</c>
     /// modifier is added while a section edit is active so the form can dim
     /// the profile block and highlight the active edit-view section.</summary>
-    private string FormClass
-    {
-        get
-        {
-            var cls = Wide ? "student-form-fields student-form-fields--wide" : "student-form-fields";
-            if (EnableSectionEdit && ActiveEditSection != StudentEditSection.None)
-                cls += " student-form-fields--section-editing";
-            return cls;
-        }
-    }
+    private string FormClass => Wide
+        ? "student-form-fields student-form-fields--wide"
+        : "student-form-fields";
 
     /// <summary>When true, removes the 600px max-width cap so the form
     /// fills the full dialog width. Used by the create/edit dialogs, which
@@ -387,7 +368,7 @@
     [Parameter] public EventCallback<StudentEditSection> ActiveEditSectionChanged { get; set; }
 
     /// <summary>True while a section edit is active — disables the profile fields
-    /// and the dialog action row.</summary>
+    /// and the dialog action row while the embedded SideDrawer is open.</summary>
     private bool AreProfileFieldsDisabled => EnableSectionEdit && ActiveEditSection != StudentEditSection.None;
 
     /// <summary>Class applied to every profile FormRow. Adds a disabled modifier
@@ -395,23 +376,6 @@
     private string ProfileRowClass => AreProfileFieldsDisabled
         ? "student-form-fields__profile-row student-form-fields__profile-row--disabled"
         : "student-form-fields__profile-row";
-
-    /// <summary>Class applied to the Contacts / Guardians FormRows. When the row's
-    /// section is active the label cell is hidden and the input cell fills the row
-    /// so the section reads as a dedicated edit-view. When the OTHER section is
-    /// active this row is hidden entirely. Only applies when EnableSectionEdit is
-    /// true; existing callers keep the normal side-by-side display.</summary>
-    private string SectionRowClass(StudentEditSection section)
-    {
-        var cls = "student-form-fields__section-row";
-        if (!EnableSectionEdit || ActiveEditSection == StudentEditSection.None)
-            return cls;
-        if (ActiveEditSection == section)
-            cls += " student-form-fields__section-row--active";
-        else
-            cls += " student-form-fields__section-row--hidden";
-        return cls;
-    }
 
     private async Task OnContactsEditingChanged(bool isEditing)
         => await ActiveEditSectionChanged.InvokeAsync(isEditing ? StudentEditSection.Contacts : StudentEditSection.None);

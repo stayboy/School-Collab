@@ -651,15 +651,16 @@ public class ContactsEditorTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
         RowButton(cut, "Edit contact").Click();
 
-        // The editing row switches to an inline form with Save/Cancel.
-        cut.WaitForAssertion(() => cut.FindAll(".contact-item--editing").Should().HaveCount(1));
+        // Buffered mode opens an embedded SideDrawer with the edit form
+        // (channel + value + label + Save/Cancel) inside the dialog content.
+        cut.WaitForAssertion(() => cut.FindAll(".side-drawer-panel--embedded").Should().HaveCount(1));
 
-        var valueField = cut.Find(".contact-item--editing fluent-text-field.contacts-value");
+        var valueField = cut.Find(".side-drawer-panel--embedded fluent-text-field.contacts-value");
         valueField.Change("new@x.com");
 
-        var saveButton = cut.FindAll(".contact-item--editing .contact-edit-actions fluent-button")
+        var saveButton = cut.FindAll(".side-drawer-panel--embedded .side-drawer-btn-submit")
             .Cast<IElement>()
-            .First(b => b.TextContent.Trim() == "Save");
+            .First();
         saveButton.Click();
 
         cut.WaitForAssertion(() =>

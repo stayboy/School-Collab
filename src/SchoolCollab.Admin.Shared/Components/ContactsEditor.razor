@@ -91,50 +91,8 @@
             <ul class="contacts-list">
                 @foreach (var c in RowSource)
                 {
-                    <li class="contact-item @(c.IsPreferred ? "contact-item--preferred" : null) @(_editingContactKey == c.Key ? "contact-item--editing" : null)">
-                        @if (_editingContactKey == c.Key)
-                        {
-                            @* Inline edit form for Buffered mode. Live mode keeps the
-                               ContactChangeDialog because per-edit audit requires a reason. *@
-                            <div class="contacts-editor-add__identity">
-                                <DropdownForEnum TEnum="ContactChannel"
-                                                  @bind-SelectedValue="_editChannel"
-                                                  @bind-SelectedValue:after="OnEditChannelChanged"
-                                                  Placeholder="Channel"
-                                                  Width="FieldWidth.W2" />
-                                @if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
-                                {
-                                    <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                                        @bind-SelectedId="_editCountryCodeId"
-                                                        Placeholder="Code"
-                                                        Width="FieldWidth.W3"
-                                                        OptionText="@FormatCountryCodeOption" />
-                                }
-                            </div>
-                            <div class="contacts-editor-add__value">
-                                <FluentTextField @bind-Value="_editValue"
-                                                  Placeholder="@EditValuePlaceholder"
-                                                  class="contacts-value" />
-                                <FluentTextField @bind-Value="_editLabel"
-                                                  Placeholder="Label (optional)"
-                                                  class="contacts-label" />
-                            </div>
-                            <div class="contact-edit-actions">
-                                <FluentButton Appearance="Appearance.Outline"
-                                              OnClick="CancelEditAsync"
-                                              Disabled="@_savingEdit">
-                                    Cancel
-                                </FluentButton>
-                                <FluentButton Appearance="Appearance.Accent"
-                                              OnClick="SaveEditAsync"
-                                              Disabled="@(_savingEdit || string.IsNullOrWhiteSpace(_editValue))">
-                                    @(_savingEdit ? "Saving…" : "Save")
-                                </FluentButton>
-                            </div>
-                        }
-                        else
-                        {
-                            <span class="contact-channel" title="@c.Channel.ToString()">@ChannelGlyph(c.Channel) @c.Channel</span>
+                    <li class="contact-item @(c.IsPreferred ? "contact-item--preferred" : null)">
+                        <span class="contact-channel" title="@c.Channel.ToString()">@ChannelGlyph(c.Channel) @c.Channel</span>
                             <span class="contact-value">@FormatRowValue(c)</span>
                             @if (!string.IsNullOrWhiteSpace(c.Label))
                             {
@@ -197,12 +155,59 @@
                                               IconStart="@FluentIcons.Delete"
                                               OnClick="@(() => OnRemoveAsync(c))" />
                             </span>
-                        }
                     </li>
                 }
             </ul>
         }
     }
+
+    @* Edit drawer (Buffered mode). Live mode keeps the ContactChangeDialog
+       because per-edit audit requires a reason. Embedded = true positions the
+       drawer relative to the nearest positioned ancestor in the dialog content
+       (the parent content stack) so it overlays the full form content rather
+       than the whole viewport.
+
+       The parent content stack in StudentFormFields has position: relative,
+       so this drawer fills the full form content inside the dialog. *@
+    <SideDrawer Embedded="true"
+                Open="_editDrawerOpen"
+                OpenChanged="OnEditDrawerOpenChangedAsync"
+                Title="Edit contact"
+                Width="420px"
+                ShowCancel="true"
+                CancelText="Cancel"
+                ShowSubmit="true"
+                SubmitText="Save"
+                OnSubmitAsync="SaveEditFromDrawerAsync">
+        @if (_editingContactKey is not null)
+        {
+            <div class="contacts-editor-add__identity">
+                <DropdownForEnum TEnum="ContactChannel"
+                                  @bind-SelectedValue="_editChannel"
+                                  @bind-SelectedValue:after="OnEditChannelChanged"
+                                  Placeholder="Channel"
+                                  Width="FieldWidth.W2" />
+                @if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+                {
+                    <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                        @bind-SelectedId="_editCountryCodeId"
+                                        Placeholder="Code"
+                                        Width="FieldWidth.W3"
+                                        OptionText="@FormatCountryCodeOption" />
+                }
+            </div>
+            <div class="contacts-editor-add__value">
+                <FluentTextField @bind-Value="_editValue"
+                                  Placeholder="@EditValuePlaceholder"
+                                  Disabled="@_savingEdit"
+                                  class="contacts-value" />
+                <FluentTextField @bind-Value="_editLabel"
+                                  Placeholder="Label (optional)"
+                                  Disabled="@_savingEdit"
+                                  class="contacts-label" />
+            </div>
+        }
+    </SideDrawer>
 </div>
 
 @code {
@@ -269,8 +274,12 @@
     private string _newValue = string.Empty;
     private string _newLabel = string.Empty;
 
-    // Inline edit form state (used instead of a dialog in focused section-edit UX).
+    // Edit drawer state. Buffered mode opens a SideDrawer (embedded in the
+    // dialog content) instead of the legacy inline form. The drawer keeps the
+    // same _editChannel / _editValue / _editLabel / _editCountryCodeId state
+    // plus a busy flag.
     private Guid? _editingContactKey;
+    private bool _editDrawerOpen;
     private ContactChannel _editChannel = ContactChannel.Email;
     private Guid? _editCountryCodeId;
     private string _editValue = string.Empty;
@@ -516,19 +525,18 @@
         _newCountryCodeId = null;
     }
 
-    // ─── Edit / Remove ─────────────────────────────────────────────────
-    // Buffered mode uses inline editing with Save/Cancel inside the focused
-    // section-edit UX (no dialog). Live mode keeps the ContactChangeDialog
-    // because per-edit contact audit requires a reason.
-    private async Task OnEditAsync(ContactRow row)
+    // ─── Edit / Remove ─────────────────────────────────────────
+    // Buffered mode opens a SideDrawer (embedded in the dialog content) for
+    // the single-contact edit. Live mode keeps the ContactChangeDialog because
+    // per-edit contact audit requires a reason.
+    private Task OnEditAsync(ContactRow row)
     {
         if (Mode == EditorMode.Live)
         {
-            await OpenEditDialogAsync(row);
-            return;
+            return OpenEditDialogAsync(row);
         }
 
-        await StartInlineEditAsync(row);
+        return StartInlineEditAsync(row);
     }
 
     private async Task StartInlineEditAsync(ContactRow row)
@@ -547,8 +555,29 @@
             ? _countryCodeOptions.FirstOrDefault(x => x.Name == code)?.Id
             : null;
 
+        _editDrawerOpen = true;
         await IsEditingChanged.InvokeAsync(true);
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Mirrors the drawer's OpenChanged back into our state. The
+    /// SideDrawer's Cancel / × / backdrop / Escape all flip Open to false;
+    /// we clear edit state and re-render so the list returns to normal.</summary>
+    private Task OnEditDrawerOpenChangedAsync(bool open)
+    {
+        if (!open && _editingContactKey is not null)
+        {
+            return EndInlineEditAsync();
+        }
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Save handler for the drawer. Commits the edit and closes the
+    /// drawer by returning true (SideDrawer auto-closes on true).</summary>
+    private async Task<bool> SaveEditFromDrawerAsync()
+    {
+        await SaveEditAsync();
+        return true;
     }
 
     private async Task OpenEditDialogAsync(ContactRow row)
@@ -639,6 +668,7 @@
     private async Task EndInlineEditAsync()
     {
         _editingContactKey = null;
+        _editDrawerOpen = false;
         _editChannel = ContactChannel.Email;
         _editValue = string.Empty;
         _editLabel = string.Empty;

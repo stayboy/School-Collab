@@ -122,57 +122,17 @@
     pointer-events: none;
 }
 
-/* ── Focused section-edit UX (EnableSectionEdit) ──
-   Section rows switch between normal display and focused edit-view via CSS
-   so the same component instance stays mounted. The FormRow's label cell is
-   hidden in active state; the input cell (the actual editor) fills the row.
-   The inactive sibling section is hidden entirely. */
+/* The parent FluentStack is the containing block for any embedded
+   SideDrawer opened by child components, so the edit drawer slides in
+   over the full form content rather than over a single section. */
+.student-form-fields__content-stack {
+    position: relative;
+}
+
+/* Both Contacts and Guardians sections remain visible while a child edit
+   drawer is open; the drawer itself overlays the full form content. */
 .student-form-fields__section-row {
     /* normal display */
-}
-
-.student-form-fields__section-row--hidden {
-    display: none;
-}
-
-.student-form-fields__section-row--active ::deep .form-row-label {
-    display: none;
-}
-
-.student-form-fields__section-row--active ::deep .form-row-input {
-    flex: 1 1 100%;
-    min-width: 0;
-}
-
-.student-form-fields__edit-title {
-    display: none;
-    margin: 0 0 0.5rem 0;
-    font-size: 1rem;
-    font-weight: 600;
-}
-
-.student-form-fields__section-row--active .student-form-fields__edit-title {
-    display: block;
-}
-
-.student-form-fields__section-row--active {
-    padding: 1rem 1rem 1rem 0; /* no left padding so the edit-view content can align with the 180px label column */
-    border: 1px solid var(--neutral-stroke-rest, #e0e0e0);
-    border-radius: 8px;
-    background: var(--neutral-layer-2, #f5f5f5);
-}
-
-/* In active edit-view the FormRow label is hidden, so we indent the
-   entire row content by the canonical 180px label-column width. This
-   makes the editor line up with the input cells in the normal profile
-   rows above, preserving the form's vertical axis. */
-.student-form-fields__section-row--active ::deep .form-row {
-    padding-left: 180px;
-}
-
-/* The "Editing ..." title is also aligned to the input-cell axis. */
-.student-form-fields__section-row--active .student-form-fields__edit-title {
-    margin-left: 180px;
 }
 
 /* Wrapper for the Guardians display section. */
