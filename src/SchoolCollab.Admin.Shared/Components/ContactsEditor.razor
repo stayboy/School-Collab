@@ -136,6 +136,7 @@
                                 <FluentButton Appearance="Appearance.Lightweight"
                                               Title="Edit contact"
                                               IconStart="@FluentIcons.Edit"
+                                              Disabled="@EditDisabled"
                                               OnClick="@(() => OnEditAsync(c))" />
                                 @* Move-up / move-down reorder. Live swaps ids
                                    and calls the reorder endpoint; Buffered swaps
@@ -161,53 +162,10 @@
         }
     }
 
-    @* Edit drawer (Buffered mode). Live mode keeps the ContactChangeDialog
-       because per-edit audit requires a reason. Embedded = true positions the
-       drawer relative to the nearest positioned ancestor in the dialog content
-       (the parent content stack) so it overlays the full form content rather
-       than the whole viewport.
-
-       The parent content stack in StudentFormFields has position: relative,
-       so this drawer fills the full form content inside the dialog. *@
-    <SideDrawer Embedded="true"
-                Open="_editDrawerOpen"
-                OpenChanged="OnEditDrawerOpenChangedAsync"
-                Title="Edit contact"
-                Width="420px"
-                ShowCancel="true"
-                CancelText="Cancel"
-                ShowSubmit="true"
-                SubmitText="Save"
-                OnSubmitAsync="SaveEditFromDrawerAsync">
-        @if (_editingContactKey is not null)
-        {
-            <div class="contacts-editor-add__identity">
-                <DropdownForEnum TEnum="ContactChannel"
-                                  @bind-SelectedValue="_editChannel"
-                                  @bind-SelectedValue:after="OnEditChannelChanged"
-                                  Placeholder="Channel"
-                                  Width="FieldWidth.W2" />
-                @if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
-                {
-                    <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                        @bind-SelectedId="_editCountryCodeId"
-                                        Placeholder="Code"
-                                        Width="FieldWidth.W3"
-                                        OptionText="@FormatCountryCodeOption" />
-                }
-            </div>
-            <div class="contacts-editor-add__value">
-                <FluentTextField @bind-Value="_editValue"
-                                  Placeholder="@EditValuePlaceholder"
-                                  Disabled="@_savingEdit"
-                                  class="contacts-value" />
-                <FluentTextField @bind-Value="_editLabel"
-                                  Placeholder="Label (optional)"
-                                  Disabled="@_savingEdit"
-                                  class="contacts-label" />
-            </div>
-        }
-    </SideDrawer>
+    @* No embedded drawer. Buffered-mode edits publish their edit form up to
+       the host (StudentFormFields → StudentEditDialog), which renders it
+       inside the shared <DialogDrawer>. Live mode keeps the
+       ContactChangeDialog because per-edit audit requires a reason. *@
 </div>
 
 @code {
@@ -253,6 +211,24 @@
     /// section-edit UX while the dialog is open.</summary>
     [Parameter] public EventCallback<bool> IsEditingChanged { get; set; }
 
+    /// <summary>When true, disables the per-row Edit button. Used when the
+    /// editor is nested inside another drawer (e.g. the draft-guardian
+    /// edit form): the nested editor has no shared <c>DialogDrawer</c> to
+    /// host a contact edit, so clicking Edit would silently no-op. Disabling
+    /// the trigger removes the dead path while Add/Remove (which mutate
+    /// <c>Contacts</c> directly or open <c>ContactChangeDialog</c>) still
+    /// work. Default false.</summary>
+    [Parameter] public bool EditDisabled { get; set; }
+
+    /// <summary>Callback that publishes a Buffered-mode edit up to the host
+    /// (whether the edit began). Raised with a <see cref="SectionEditContext"/>
+    /// wrapping the edit fragment + submit / cancel callbacks when a Buffered
+    /// edit begins, and with <c>null</c> when it ends (Cancel / Escape /
+    /// backdrop / Save). The host (typically <c>StudentFormFields</c>)
+    /// forwards the context to the dialog, which renders it inside the
+    /// shared <c>DialogDrawer</c>.</summary>
+    [Parameter] public EventCallback<SectionEditContext?> SectionEditContextChanged { get; set; }
+
     private List<ContactDto> _contacts = new();
     private HashSet<Guid> _subscribed = new();
     private bool _loading;
@@ -274,17 +250,16 @@
     private string _newValue = string.Empty;
     private string _newLabel = string.Empty;
 
-    // Edit drawer state. Buffered mode opens a SideDrawer (embedded in the
-    // dialog content) instead of the legacy inline form. The drawer keeps the
-    // same _editChannel / _editValue / _editLabel / _editCountryCodeId state
-    // plus a busy flag.
+    // Edit state. Buffered mode publishes the edit form up to the host
+    // (StudentFormFields → StudentEditDialog) which renders it inside the
+    // shared DialogDrawer. The fragment captures _editChannel / _editValue /
+    // _editLabel / _editCountryCodeId via closure so the host is just chrome;
+    // the editor remains the owner of the working copy.
     private Guid? _editingContactKey;
-    private bool _editDrawerOpen;
     private ContactChannel _editChannel = ContactChannel.Email;
     private Guid? _editCountryCodeId;
     private string _editValue = string.Empty;
     private string _editLabel = string.Empty;
-    private bool _savingEdit;
 
     private string ValuePlaceholder => _newChannel switch
     {
@@ -299,12 +274,6 @@
         ContactChannel.WhatsApp => "WhatsApp number…",
         _ => "Email address…"
     };
-
-    private void OnEditChannelChanged()
-    {
-        if (_editChannel is not (ContactChannel.SMS or ContactChannel.WhatsApp))
-            _editCountryCodeId = null;
-    }
 
     public void Dispose()
     {
@@ -555,29 +524,105 @@
             ? _countryCodeOptions.FirstOrDefault(x => x.Name == code)?.Id
             : null;
 
-        _editDrawerOpen = true;
+        // Publish the edit form up to the host (StudentFormFields →
+        // StudentEditDialog) which renders it inside the shared
+        // DialogDrawer. The fragment captures the editor's _edit* state via
+        // closure so the host is just chrome.
+        await PublishEditContextAsync();
         await IsEditingChanged.InvokeAsync(true);
         await InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Mirrors the drawer's OpenChanged back into our state. The
-    /// SideDrawer's Cancel / × / backdrop / Escape all flip Open to false;
-    /// we clear edit state and re-render so the list returns to normal.</summary>
-    private Task OnEditDrawerOpenChangedAsync(bool open)
+    /// <summary>Builds the edit form's render fragment from the editor's
+    /// _edit* state and pushes it up to the host. Called once when an
+    /// inline edit begins.</summary>
+    private RenderFragment BuildEditFragment() => builder =>
     {
-        if (!open && _editingContactKey is not null)
+        builder.OpenElement(0, "div");
+        builder.AddAttribute(1, "class", "contacts-editor-add__identity");
+        builder.OpenComponent<DropdownForEnum<ContactChannel>>(2);
+        builder.AddAttribute(3, "SelectedValue", _editChannel);
+        builder.AddAttribute(4, "SelectedValueChanged", EventCallback.Factory.Create<ContactChannel>(this, OnEditChannelChanged));
+        builder.AddAttribute(5, "Placeholder", "Channel");
+        builder.AddAttribute(6, "Width", FieldWidth.W2);
+        builder.CloseComponent();
+        if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
         {
-            return EndInlineEditAsync();
+            builder.OpenComponent<CodedValueDropdown>(10);
+            builder.AddAttribute(11, "Parent", CodedValueParent.CountryCallingCodes);
+            builder.AddAttribute(12, "SelectedId", _editCountryCodeId);
+            builder.AddAttribute(13, "SelectedIdChanged", EventCallback.Factory.Create<Guid?>(this, v => _editCountryCodeId = v));
+            builder.AddAttribute(14, "Placeholder", "Code");
+            builder.AddAttribute(15, "Width", FieldWidth.W3);
+            builder.AddAttribute(16, "OptionText", (Func<CodedValueDto, string>)FormatCountryCodeOption);
+            builder.CloseComponent();
         }
-        return Task.CompletedTask;
+        builder.CloseElement(); // contacts-editor-add__identity
+
+        builder.OpenElement(20, "div");
+        builder.AddAttribute(21, "class", "contacts-editor-add__value");
+        builder.OpenComponent<FluentTextField>(22);
+        builder.AddAttribute(23, "Value", _editValue);
+        builder.AddAttribute(24, "ValueChanged", EventCallback.Factory.Create<string>(this, v => _editValue = v));
+        builder.AddAttribute(25, "Placeholder", EditValuePlaceholder);
+        builder.AddAttribute(26, "class", "contacts-value");
+        builder.CloseComponent();
+        builder.OpenComponent<FluentTextField>(27);
+        builder.AddAttribute(28, "Value", _editLabel);
+        builder.AddAttribute(29, "ValueChanged", EventCallback.Factory.Create<string>(this, v => _editLabel = v));
+        builder.AddAttribute(30, "Placeholder", "Label (optional)");
+        builder.AddAttribute(31, "class", "contacts-label");
+        builder.CloseComponent();
+        builder.CloseElement(); // contacts-editor-add__value
+    };
+
+    /// <summary>Re-publishes the edit context when the contact channel
+    /// changes so the host re-renders the fragment and the channel-gated
+    /// country-code field appears / disappears. The published
+    /// <see cref="SectionEditContext.Content"/> is a <c>RenderFragment</c>
+    /// that the host <c>DialogDrawer</c> renders; once rendered it is
+    /// frozen — it only re-executes when the section re-publishes. Without
+    /// this, switching Email → SMS would never reveal the country-code
+    /// picker (and SMS → Email would never hide it). Also loads the country
+    /// calling codes on demand when entering SMS / WhatsApp, and clears a
+    /// stale country-code selection when leaving them so it does not leak
+    /// into the saved contact.</summary>
+    private async Task OnEditChannelChanged(ContactChannel v)
+    {
+        _editChannel = v;
+        if (v == ContactChannel.SMS || v == ContactChannel.WhatsApp)
+        {
+            if (_countryCodeOptions is null) await LoadCountryCodesAsync();
+        }
+        else
+        {
+            _editCountryCodeId = null;
+        }
+        await PublishEditContextAsync();
     }
 
-    /// <summary>Save handler for the drawer. Commits the edit and closes the
-    /// drawer by returning true (SideDrawer auto-closes on true).</summary>
-    private async Task<bool> SaveEditFromDrawerAsync()
+    /// <summary>Builds and publishes the edit context for the current inline
+    /// edit. The host forwards it to the dialog which renders it inside the
+    /// shared <c>DialogDrawer</c>.</summary>
+    private async Task PublishEditContextAsync()
     {
-        await SaveEditAsync();
-        return true;
+        if (!SectionEditContextChanged.HasDelegate) return;
+        var fragment = BuildEditFragment();
+        var ctx = new SectionEditContext(
+            SectionKey: "Contacts",
+            Title: "Edit contact",
+            Content: fragment,
+            Submit: SubmitInlineEditAsync,
+            Cancel: CancelInlineEditAsync);
+        await SectionEditContextChanged.InvokeAsync(ctx);
+    }
+
+    /// <summary>Clears the published edit context (sends <c>null</c> up to
+    /// the host) when an edit ends — Cancel, Save, or Remove.</summary>
+    private async Task ClearPublishedEditContextAsync()
+    {
+        if (!SectionEditContextChanged.HasDelegate) return;
+        await SectionEditContextChanged.InvokeAsync(null);
     }
 
     private async Task OpenEditDialogAsync(ContactRow row)
@@ -660,19 +705,30 @@
         await EndInlineEditAsync();
     }
 
-    private async Task CancelEditAsync()
+    /// <summary>Public entry point invoked by the shared
+    /// <c>DialogDrawer</c>'s Cancel button (× / backdrop / Escape
+    /// arrive via the host clearing the edit context, which calls this).
+    /// Discards the working copy and tears down the edit state.</summary>
+    public Task CancelInlineEditAsync() => EndInlineEditAsync();
+
+    /// <summary>Public entry point invoked by the shared
+    /// <c>DialogDrawer</c>'s Submit button. Applies the edit to the
+    /// in-memory list (Buffered mode) and tears down the edit state.
+    /// Returns <c>true</c> so the drawer auto-closes on success.</summary>
+    public async Task<bool> SubmitInlineEditAsync()
     {
-        await EndInlineEditAsync();
+        await SaveEditAsync();
+        return true;
     }
 
     private async Task EndInlineEditAsync()
     {
         _editingContactKey = null;
-        _editDrawerOpen = false;
         _editChannel = ContactChannel.Email;
         _editValue = string.Empty;
         _editLabel = string.Empty;
         _editCountryCodeId = null;
+        await ClearPublishedEditContextAsync();
         await IsEditingChanged.InvokeAsync(false);
         await InvokeAsync(StateHasChanged);
     }

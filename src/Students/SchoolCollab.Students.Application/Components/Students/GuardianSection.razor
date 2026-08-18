@@ -73,9 +73,9 @@
                link relationship only (Relationship / Last name / First name).
                Role defaults to Primary; title/salutation, emergency and contacts
                are NOT captured here — they're guardian-surface operations. *@
-            @if (_panelMode == GuardianPanelMode.List)
-            {
-                <div class="guardian-add-row">
+            @* Always visible in Inline mode (no internal panel switch — the host
+               drawer overlays the section when an edit is in progress). *@
+            <div class="guardian-add-row">
                     @* Local FluentSelect wrapper for the relationship picker.
                        Renders the selectable "Add Existing Guardian" sentinel with
                        a divider line drawn underneath the label as part of the
@@ -156,7 +156,6 @@
                     </FluentButton>
 
                 </div>
-            }
 
             @* ── Linked / drafted guardians (card list) ──
                A vertical list of cards that mimics the <ContactsEditor>
@@ -225,72 +224,10 @@
                 <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_guardianError</FluentMessageBar>
             }
 
-            @* ── Embedded edit drawer (Inline mode) ──
-               The edit form slides in as an embedded SideDrawer inside the
-               section so the user stays in the student edit dialog. *@
-            <SideDrawer Embedded="true"
-                        Open="@(_panelMode == GuardianPanelMode.Edit)"
-                        OpenChanged="OnEditDrawerOpenChangedAsync"
-                        Title="Update guardian"
-                        Width="420px"
-                        ShowCancel="true"
-                        CancelText="Cancel"
-                        ShowSubmit="true"
-                        SubmitText="Save"
-                        OnSubmitAsync="SaveEditGuardianAsync">
-                @{ var editedGuardian = (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count) ? GuardianLinks[_editingIndex] : null; }
-                <FluentStack Orientation="Orientation.Vertical" Spacing="3">
-                    @* Draft-only fields: title + name are editable only for
-                       not-yet-persisted guardians (ExistingGuardianId is null).
-                       For existing guardians these don't persist through the
-                       student save (guardian-surface operation), so they're
-                       hidden to avoid misleading the user. *@
-                    @if (editedGuardian is { } eg && eg.ExistingGuardianId is null)
-                    {
-                        <FormRow Label="Title">
-                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                                @bind-SelectedId="_editTitleId"
-                                                Placeholder="Optional"
-                                                Width="FieldWidth.W3" />
-                        </FormRow>
-                        <FormRow Label="First name" Required>
-                            <FluentTextField @bind-Value="_editFirstName" Required Placeholder="First name" class="w-5" />
-                        </FormRow>
-                        <FormRow Label="Last name" Required>
-                            <FluentTextField @bind-Value="_editLastName" Required Placeholder="Last name" class="w-5" />
-                        </FormRow>
-                    }
-                    <FormRow Label="Relationship/Role" Required>
-                        <CodedValueDropdown Parent="CodedValueParent.Relationships"
-                                            @bind-SelectedId="_editRelationshipId"
-                                            Placeholder="Relationship"
-                                            Width="FieldWidth.W4" />
-                        <DropdownForEnum TEnum="GuardianRole"
-                                          @bind-SelectedValue="_editRole"
-                                          @key="@($"role-{_editingIndex}")"
-                                          Placeholder="Role"
-                                          Width="FieldWidth.W3" />
-                    </FormRow>
-                </FluentStack>
-                @* Contacts editor: Live mode for existing guardians (immediate
-                   API calls), Buffered mode for drafts (in-memory, persisted at
-                   student save time). *@
-                @if (editedGuardian is { } eg2 && eg2.ExistingGuardianId is { } gid)
-                {
-                    <div class="guardian-edit-contacts">
-                        <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@gid" />
-                    </div>
-                }
-                else if (editedGuardian is not null)
-                {
-                    <div class="guardian-edit-contacts">
-                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                        OwnerType="ContactOwnerType.Guardian"
-                                        Contacts="_editContacts"
-                                        ContactsChanged="OnEditContactsChanged" />
-                    </div>
-                }
-            </SideDrawer>
+            @* No embedded drawer. The edit form is published up to the host
+               (StudentFormFields → StudentEditDialog) which renders it inside
+               the shared <DialogDrawer>. The host owns the chrome (title +
+               Cancel/Save); the section owns the fields + working copy. *@
         }
     }
 </div>
@@ -331,10 +268,19 @@
     /// the GuardianId for the API call.</summary>
     [Parameter] public EventCallback<StudentGuardianViewDto> OnRemoveGuardian { get; set; }
 
-    /// <summary>Raised when the edit drawer opens (true) or closes
+    /// <summary>Raised when the edit form opens (true) or closes
     /// (false). Allows a parent dialog to switch to a focused section-edit UX
     /// while a guardian is being edited inline.</summary>
     [Parameter] public EventCallback<bool> IsEditingChanged { get; set; }
+
+    /// <summary>Callback that publishes a guardian edit up to the host.
+    /// Raised with a <see cref="SectionEditContext"/> wrapping the edit
+    /// fragment + submit / cancel callbacks when a guardian edit begins,
+    /// and with <c>null</c> when it ends (Cancel / Escape / backdrop /
+    /// Save). The host (typically <c>StudentFormFields</c>) forwards the
+    /// context to the dialog, which renders it inside the shared
+    /// <c>DialogDrawer</c>.</summary>
+    [Parameter] public EventCallback<SectionEditContext?> SectionEditContextChanged { get; set; }
 
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
@@ -372,13 +318,12 @@
         }
     }
 
-    // ── Guardian edit drawer ──
-    // List  = card list + always-visible inline add row (mimics the
-    //         ContactsEditor add-contact form).
-    // Edit  = hide all but the edited card + show its relationship/role editor.
-    private enum GuardianPanelMode { List, Edit }
-
-    private GuardianPanelMode _panelMode = GuardianPanelMode.List;
+    // ── Guardian edit state ──
+    // The section no longer owns an internal panel switch — the host
+    // (StudentFormFields → StudentEditDialog) renders the shared
+    // <DialogDrawer>. The section owns only the working copy: the index of
+    // the guardian in GuardianLinks being edited and the editable link-
+    // metadata fields (relationship / role / title / name / contacts).
 
     // Inline add-row state (the "add guardian" row). Validation is handled by the
     // Add button's Disabled flag; the fields are cleared ONLY after a successful
@@ -461,11 +406,11 @@
 
     /// <summary>Open the edit drawer for the guardian at
     /// <paramref name="index"/> in <see cref="GuardianLinks"/>. Loads the link's
-    /// current relationship / role into the edit fields.</summary>
+    /// current relationship / role into the edit fields, then publishes the
+    /// edit form up to the host via <see cref="SectionEditContextChanged"/>.</summary>
     private async Task StartEditGuardian(int index)
     {
         if (index < 0 || index >= GuardianLinks.Count) return;
-        await NotifyIsEditingAsync(true);
         var a = GuardianLinks[index];
         _editingIndex = index;
         _editRelationshipId = a.RelationshipCodedValueId;
@@ -476,33 +421,167 @@
         _editContacts = (a.Contacts ?? []).ToList();
         if (_editRelationshipId is { } relId)
             await EnsureRelNameAsync(relId);
-        _panelMode = GuardianPanelMode.Edit;
+        // Publish the edit form up to the host so the dialog drawer can
+        // render it. The fragment captures the section's _edit* state via
+        // closure so the host is just chrome.
+        await PublishEditContextAsync();
+        await NotifyIsEditingAsync(true);
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task CancelPanel()
     {
         await NotifyIsEditingAsync(false);
-        _panelMode = GuardianPanelMode.List;
         // The inline add-row fields are intentionally NOT cleared here — they
         // persist across panel navigation (mimics ContactsEditor's add row).
         _editingIndex = -1;
         // Cancel any in-flight typeahead search and clear the transient search
         // session. The add-row selection persists.
         ClearTypeaheadState();
+        await ClearPublishedEditContextAsync();
     }
 
-    /// <summary>Handles the embedded edit drawer's close request (Cancel,
-    /// ×, backdrop, or Escape). Discards any pending edit and returns to list
-    /// view.</summary>
-    private Task OnEditDrawerOpenChangedAsync(bool open)
+    /// <summary>Builds and publishes the edit context for the current
+    /// guardian edit. The host forwards it to the dialog which renders
+    /// it inside the shared <c>DialogDrawer</c>.</summary>
+    private async Task PublishEditContextAsync()
     {
-        if (!open && _panelMode == GuardianPanelMode.Edit)
-        {
-            return CancelPanel();
-        }
-        return Task.CompletedTask;
+        if (!SectionEditContextChanged.HasDelegate) return;
+        var editedGuardian = (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count) ? GuardianLinks[_editingIndex] : null;
+        var indexAtBuild = _editingIndex;
+        var fragment = BuildEditFragment(editedGuardian, indexAtBuild);
+        var ctx = new SectionEditContext(
+            SectionKey: "Guardians",
+            Title: "Update guardian",
+            Content: fragment,
+            Submit: SaveEditGuardianAsync,
+            Cancel: CancelPanel);
+        await SectionEditContextChanged.InvokeAsync(ctx);
     }
+
+    /// <summary>Clears the published edit context (sends <c>null</c> up to
+    /// the host) when an edit ends — Cancel, Save, or Remove.</summary>
+    private async Task ClearPublishedEditContextAsync()
+    {
+        if (!SectionEditContextChanged.HasDelegate) return;
+        await SectionEditContextChanged.InvokeAsync(null);
+    }
+
+    /// <summary>Builds the edit form's render fragment. Captures the
+    /// current <see cref="_editingIndex"/> via closure so the draft-only
+    /// fields render correctly even if the parent re-renders the fragment
+    /// mid-edit. The <c>indexAtBuild</c> parameter fixes the closure
+    /// value at build time.</summary>
+    private RenderFragment BuildEditFragment(GuardianAssignment? editedGuardian, int indexAtBuild) => builder =>
+    {
+        var sequence = 0;
+        builder.OpenElement(sequence++, "div");
+        builder.AddAttribute(sequence++, "class", "guardian-edit-form");
+        // Title/name fields are only editable for drafts (ExistingGuardianId
+        // is null). For existing guardians these don't persist through the
+        // student save (guardian-surface operation), so they're hidden.
+        if (editedGuardian is { } eg && eg.ExistingGuardianId is null)
+        {
+            builder.OpenComponent<FormRow>(sequence++);
+            builder.AddAttribute(sequence++, "Label", "Title");
+            builder.AddAttribute(sequence++, "ChildContent", (RenderFragment)((bb) =>
+            {
+                bb.OpenComponent<CodedValueDropdown>(0);
+                bb.AddAttribute(1, "Parent", CodedValueParent.Salutations);
+                bb.AddAttribute(2, "SelectedId", _editTitleId);
+                bb.AddAttribute(3, "SelectedIdChanged", EventCallback.Factory.Create<Guid?>(this, v => _editTitleId = v));
+                bb.AddAttribute(4, "Placeholder", "Optional");
+                bb.AddAttribute(5, "Width", FieldWidth.W3);
+                bb.CloseComponent();
+            }));
+            builder.CloseComponent();
+
+            builder.OpenComponent<FormRow>(sequence++);
+            builder.AddAttribute(sequence++, "Label", "First name");
+            builder.AddAttribute(sequence++, "Required", true);
+            builder.AddAttribute(sequence++, "ChildContent", (RenderFragment)((bb) =>
+            {
+                bb.OpenComponent<FluentTextField>(0);
+                bb.AddAttribute(1, "Value", _editFirstName);
+                bb.AddAttribute(2, "ValueChanged", EventCallback.Factory.Create<string?>(this, v => _editFirstName = v));
+                bb.AddAttribute(3, "Required", true);
+                bb.AddAttribute(4, "Placeholder", "First name");
+                bb.AddAttribute(5, "class", "w-5");
+                bb.CloseComponent();
+            }));
+            builder.CloseComponent();
+
+            builder.OpenComponent<FormRow>(sequence++);
+            builder.AddAttribute(sequence++, "Label", "Last name");
+            builder.AddAttribute(sequence++, "Required", true);
+            builder.AddAttribute(sequence++, "ChildContent", (RenderFragment)((bb) =>
+            {
+                bb.OpenComponent<FluentTextField>(0);
+                bb.AddAttribute(1, "Value", _editLastName);
+                bb.AddAttribute(2, "ValueChanged", EventCallback.Factory.Create<string?>(this, v => _editLastName = v));
+                bb.AddAttribute(3, "Required", true);
+                bb.AddAttribute(4, "Placeholder", "Last name");
+                bb.AddAttribute(5, "class", "w-5");
+                bb.CloseComponent();
+            }));
+            builder.CloseComponent();
+        }
+
+        // Relationship / Role row (always shown).
+        builder.OpenComponent<FormRow>(sequence++);
+        builder.AddAttribute(sequence++, "Label", "Relationship/Role");
+        builder.AddAttribute(sequence++, "Required", true);
+        builder.AddAttribute(sequence++, "ChildContent", (RenderFragment)((bb) =>
+        {
+            bb.OpenComponent<CodedValueDropdown>(0);
+            bb.AddAttribute(1, "Parent", CodedValueParent.Relationships);
+            bb.AddAttribute(2, "SelectedId", _editRelationshipId);
+            bb.AddAttribute(3, "SelectedIdChanged", EventCallback.Factory.Create<Guid?>(this, v => _editRelationshipId = v));
+            bb.AddAttribute(4, "Placeholder", "Relationship");
+            bb.AddAttribute(5, "Width", FieldWidth.W4);
+            bb.CloseComponent();
+
+            bb.OpenComponent<DropdownForEnum<GuardianRole>>(6);
+            bb.AddAttribute(7, "SelectedValue", _editRole);
+            bb.AddAttribute(8, "SelectedValueChanged", EventCallback.Factory.Create<GuardianRole>(this, v => _editRole = v));
+            bb.AddAttribute(9, "Placeholder", "Role");
+            bb.AddAttribute(10, "Width", FieldWidth.W3);
+            bb.AddAttribute(11, "key", $"role-{indexAtBuild}");
+            bb.CloseComponent();
+        }));
+        builder.CloseComponent();
+
+        // Contacts editor: Live for existing guardians, Buffered for drafts.
+        if (editedGuardian is { } eg2 && eg2.ExistingGuardianId is { } gid)
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "guardian-edit-contacts");
+            builder.OpenComponent<ContactsEditor>(sequence++);
+            builder.AddAttribute(sequence++, "OwnerType", ContactOwnerType.Guardian);
+            builder.AddAttribute(sequence++, "OwnerId", gid);
+            builder.CloseComponent();
+            builder.CloseElement();
+        }
+        else if (editedGuardian is not null)
+        {
+            builder.OpenElement(sequence++, "div");
+            builder.AddAttribute(sequence++, "class", "guardian-edit-contacts");
+            builder.OpenComponent<ContactsEditor>(sequence++);
+            builder.AddAttribute(sequence++, "Mode", ContactsEditor.EditorMode.Buffered);
+            builder.AddAttribute(sequence++, "OwnerType", ContactOwnerType.Guardian);
+            builder.AddAttribute(sequence++, "Contacts", _editContacts);
+            builder.AddAttribute(sequence++, "ContactsChanged", EventCallback.Factory.Create(this, OnEditContactsChanged));
+            // The nested editor lives inside the guardian's DialogDrawer and has
+            // no shared drawer of its own to host a contact edit, so per-row
+            // Edit is disabled (clicking it would be a silent no-op). Add/Remove
+            // (which mutate _editContacts directly) still work.
+            builder.AddAttribute(sequence++, "EditDisabled", true);
+            builder.CloseComponent();
+            builder.CloseElement();
+        }
+
+        builder.CloseElement(); // guardian-edit-form
+    };
 
     /// <summary>Apply the edited link metadata (relationship / role) back to the
     /// drafted <see cref="GuardianAssignment"/> at <see cref="_editingIndex"/>.
@@ -510,14 +589,14 @@
     /// guardian's identity (id / name / title), its contact summary, and its
     /// emergency-contact flag. No API call — the change is drafted and persisted
     /// atomically with the rest of the student on Save. Returns true so the
-    /// SideDrawer closes on success; returns false when an error is shown so the
-    /// drawer stays open.</summary>
-    private async Task<bool> SaveEditGuardianAsync()
+    /// DialogDrawer closes on success; returns false when an error is shown so
+    /// the drawer stays open.</summary>
+    public async Task<bool> SaveEditGuardianAsync()
     {
         if (_editingIndex < 0 || _editingIndex >= GuardianLinks.Count)
         {
             await NotifyIsEditingAsync(false);
-            _panelMode = GuardianPanelMode.List;
+            await ClearPublishedEditContextAsync();
             return true;
         }
         _guardianError = null;
@@ -537,8 +616,8 @@
             if (_editRelationshipId is { } relId)
                 await EnsureRelNameAsync(relId);
             await NotifyIsEditingAsync(false);
-            _panelMode = GuardianPanelMode.List;
             _editingIndex = -1;
+            await ClearPublishedEditContextAsync();
             return true;
         }
         catch (Exception ex)
@@ -668,12 +747,10 @@
                 _editContacts = (a.Contacts ?? []).ToList();
                 if (_editRelationshipId is { } relId)
                     await EnsureRelNameAsync(relId);
+                // Publish the edit form up to the host so the dialog drawer
+                // opens with the new guardian's edit form ready.
+                await PublishEditContextAsync();
                 await NotifyIsEditingAsync(true);
-                _panelMode = GuardianPanelMode.Edit;
-            }
-            else
-            {
-                _panelMode = GuardianPanelMode.List;
             }
         }
         catch (Exception ex)

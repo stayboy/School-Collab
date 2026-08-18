@@ -169,27 +169,33 @@ public class StudentFormFieldsSectionEditTests
     }
 
     [TestMethod]
-    public void ContactsEditor_UsesEmbeddedDrawerWithSaveCancelInBufferedMode()
+    public void ContactsEditor_UsesPublishUpForDialogDrawer()
     {
         var source = ReadContactsEditorSource();
 
-        // Buffered mode edits the contact via an embedded SideDrawer inside
-        // the dialog content; Live mode keeps the dialog because per-edit
-        // audit requires a reason.
+        // Buffered mode edits the contact by publishing a SectionEditContext
+        // up to the host (StudentFormFields → StudentEditDialog), which
+        // renders it inside the shared DialogDrawer. Live mode keeps the
+        // ContactChangeDialog because per-edit audit requires a reason.
         source.Should().Contain("if (Mode == EditorMode.Live)",
             "ContactsEditor branches Live mode to the dialog");
-        source.Should().Contain("Embedded=\"true\"",
-            "ContactsEditor's Buffered edit drawer is Embedded (positioned inside the form content stack)");
-        source.Should().Contain("SaveEditFromDrawerAsync",
-            "the drawer's Save handler commits and closes");
+        source.Should().Contain("SectionEditContextChanged",
+            "the editor publishes its edit context via SectionEditContextChanged");
+        source.Should().Contain("SubmitInlineEditAsync",
+            "the publish-up context wraps the editor's public Submit method");
+        source.Should().Contain("CancelInlineEditAsync",
+            "the publish-up context wraps the editor's public Cancel method");
+        source.Should().NotContain("_editDrawerOpen",
+            "the editor no longer owns an embedded drawer; the dialog owns the chrome");
+
         source.Should().Contain("SaveEditAsync",
             "the edit mutation handler exists");
-        source.Should().Contain("_editDrawerOpen",
-            "the edit-drawer open state is tracked");
+        source.Should().Contain("_editingContactKey",
+            "the edit working-copy key is tracked");
     }
 
     [TestMethod]
-    public void StudentFormFields_ContentStack_IsPositionedAncestorForDrawer()
+    public void StudentFormFields_HasNoPositionedAncestor_ForDrawer()
     {
         var source = ReadFormFieldsSource();
         var css = ReadFormFieldsCssSource();
@@ -198,93 +204,100 @@ public class StudentFormFieldsSectionEditTests
         var guardiansCss = ReadSource(
             "Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor.css");
 
-        // The FluentStack that wraps all form content is the containing block
-        // for embedded SideDrawers, so the drawer overlays the full form content
-        // in the dialog rather than just one section.
-        source.Should().Contain("Class=\"student-form-fields__content-stack\"",
-            "the form content FluentStack gets a class for positioning");
-        css.Should().Contain(".student-form-fields__content-stack {",
-            "the content-stack CSS rule exists");
-        css.Should().Contain("position: relative",
-            "the content stack establishes the containing block");
-
-        // Component roots must NOT be positioned so the drawer fills the parent
-        // content stack instead of the component's own bounds.
+        // The dialog host (.student-edit-dialog-root in StudentEditDialog)
+        // is the positioned ancestor for the shared DialogDrawer. The form
+        // itself does NOT add position: relative to the content stack,
+        // component roots, or section rows — the dialog owns positioning.
+        css.Should().NotContain(".student-form-fields__content-stack {",
+            "the form does not establish its own containing block; the dialog root does");
         contactsCss.Should().NotContain(".contacts-editor {\n    position: relative",
-            "ContactsEditor root must not be positioned (drawer fills form content)");
+            "ContactsEditor root must not be positioned (dialog root is the anchor)");
         guardiansCss.Should().NotContain(".student-guardians {\n    position: relative",
-            "GuardianSection root must not be positioned (drawer fills form content)");
+            "GuardianSection root must not be positioned (dialog root is the anchor)");
         css.Should().NotContain(".student-form-fields__section-row {\n    position: relative",
-            "section rows must not be positioned (drawer fills form content)");
+            "section rows must not be positioned (dialog root is the anchor)");
     }
 
     [TestMethod]
     public void EditActions_UseConsistentCancelSaveOrder()
     {
-        // The student edit dialog and all child edit drawers/panels share the
-        // same action order: Cancel (Outline/Neutral) first, then Save
-        // (Accent) second.
+        // The shared DialogDrawer (hosted by StudentEditDialog) owns the
+        // chrome: ShowCancel=true (Cancel, Outline) then ShowSubmit=true
+        // (Save, Accent) in that order. Both ContactsEditor and
+        // GuardianSection now publish their edit context up to the dialog;
+        // neither renders its own drawer markup.
+        var dialogSource = ReadSource(
+            "SchoolCollab.Admin.Shared/Components/DialogDrawer.razor");
+
+        dialogSource.Should().Contain("public bool ShowCancel { get; set; }",
+            "DialogDrawer exposes ShowCancel");
+        dialogSource.Should().Contain("public bool ShowSubmit { get; set; }",
+            "DialogDrawer exposes ShowSubmit");
+        dialogSource.Should().Contain("dialog-drawer-btn-cancel",
+            "DialogDrawer's Cancel button class is named consistently");
+        dialogSource.Should().Contain("dialog-drawer-btn-submit",
+            "DialogDrawer's Submit button class is named consistently");
+        dialogSource.Should().Contain("ShowCancel=\"true\"",
+            "the dialog wires ShowCancel=true for the Cancel button (rendered first)");
+        dialogSource.Should().Contain("ShowSubmit=\"true\"",
+            "the dialog wires ShowSubmit=true for the Save button (rendered second)");
+
         var contactsSource = ReadContactsEditorSource();
         var guardiansSource = ReadGuardianSectionSource();
-
-        // ContactsEditor: the buffered edit now lives in the embedded
-        // SideDrawer. The drawer footer is rendered by the shared SideDrawer
-        // component with ShowCancel=true (Cancel, Outline) then ShowSubmit=true
-        // (Save, Accent) in that order. Assert the markup-side wiring rather
-        // than a CSS class (the drawer footer owns the CSS).
-        contactsSource.Should().Contain("ShowCancel=\"true\"",
-            "ContactsEditor's edit drawer declares ShowCancel=true (Cancel first)");
-        contactsSource.Should().Contain("ShowSubmit=\"true\"",
-            "ContactsEditor's edit drawer declares ShowSubmit=true (Save after Cancel)");
-
-        // GuardianSection: the edit form is also hosted in an embedded SideDrawer,
-        // so the same Cancel-first/Save-second order is declared via ShowCancel
-        // and ShowSubmit. The legacy inline guardian-add-actions buttons are gone.
-        guardiansSource.Should().Contain("ShowCancel=\"true\"",
-            "GuardianSection's edit drawer declares ShowCancel=true (Cancel first)");
-        guardiansSource.Should().Contain("ShowSubmit=\"true\"",
-            "GuardianSection's edit drawer declares ShowSubmit=true (Save after Cancel)");
-        guardiansSource.Should().NotContain("class=\"guardian-add-actions\"",
-            "GuardianSection no longer renders its own inline Cancel/Save action row");
+        contactsSource.Should().NotContain("SideDrawer Embedded",
+            "ContactsEditor no longer renders its own embedded SideDrawer");
+        guardiansSource.Should().NotContain("SideDrawer Embedded",
+            "GuardianSection no longer renders its own embedded SideDrawer");
+        contactsSource.Should().NotContain("class=\"guardian-add-actions\"",
+            "GuardianSection no longer renders an inline Cancel/Save action row");
+        var editDialogSource = ReadEditDialogSource();
+        editDialogSource.Should().Contain("SubmitText=\"Save\"",
+            "the dialog wires SubmitText='Save' on the shared DialogDrawer");
+        contactsSource.Should().Contain("Title: \"Edit contact\"",
+            "the published context title is 'Edit contact'");
+        guardiansSource.Should().Contain("Title: \"Update guardian\"",
+            "the published context title is 'Update guardian'");
     }
 
     // ── Source-level: StudentEditDialog orchestration ───────────────────────
 
     [TestMethod]
-    public void GuardianEdit_KeepsCardsVisibleAndUsesEmbeddedSideDrawer()
+    public void GuardianEdit_KeepsCardsVisibleAndPublishesEditContext()
     {
         var source = ReadGuardianSectionSource();
 
-        // The embedded drawer slides over the card list; the cards themselves
-        // stay rendered (the drawer's backdrop blocks interaction with them).
+        // GuardianSection no longer renders its own embedded drawer — the
+        // shared DialogDrawer (hosted by StudentEditDialog) owns the chrome.
+        // Both sections stay visible; the drawer's backdrop blocks
+        // interaction with the underlying form.
         source.Should().NotContain("if (_panelMode == GuardianPanelMode.Edit)",
-            "the guardian card loop should not hide cards when the edit drawer is open");
-
-        // GuardianSection uses the same embedded SideDrawer pattern as contacts.
-        source.Should().Contain("<SideDrawer Embedded=\"true\"",
-            "GuardianSection renders an embedded SideDrawer for edit");
-        source.Should().Contain("OpenChanged=\"OnEditDrawerOpenChangedAsync\"",
-            "the drawer's open state is forwarded to the section");
-        source.Should().Contain("OnSubmitAsync=\"SaveEditGuardianAsync\"",
-            "the drawer's Save handler commits and closes");
+            "the guardian card loop should not hide cards when an edit is in progress");
+        source.Should().NotContain("<SideDrawer Embedded=\"true\"",
+            "GuardianSection no longer renders its own SideDrawer");
+        source.Should().NotContain("GuardianPanelMode",
+            "the legacy internal panel switch is gone");
+        source.Should().Contain("SectionEditContextChanged",
+            "GuardianSection publishes its edit context up to the host");
+        source.Should().Contain("SaveEditGuardianAsync",
+            "the publish-up context wraps SaveEditGuardianAsync as Submit");
+        source.Should().Contain("CancelPanel",
+            "the publish-up context wraps CancelPanel as Cancel");
     }
 
     [TestMethod]
-    public void GuardianEdit_UsesSingleRelationshipRoleRow()
+    public void GuardianEdit_BuildsRelationshipRoleRow_InEditFragment()
     {
-        var guardians = ReadGuardianSectionSource();
+        var source = ReadGuardianSectionSource();
 
-        // The edit panel puts Relationship and Role side-by-side on one
-        // FormRow labelled "Relationship/Role" (mirrors the First/Last name
-        // and DOB/Gender rows), rather than two separate stacked rows.
-        guardians.Should().Contain("Label=\"Relationship/Role\"",
-            "the Relationship and Role pickers share one FormRow");
-        guardians.Should().Contain("<DropdownForEnum TEnum=\"GuardianRole\"",
+        // The Relationship + Role pair lives inside the dynamic
+        // BuildEditFragment RenderFragment builder — not in static
+        // markup. Assert the builder wires both pickers on a single
+        // "Relationship/Role" FormRow (mirrors the First/Last name and
+        // DOB/Gender rows elsewhere in the form).
+        source.Should().Contain("Label", "Relationship/Role",
+            "the relationship + role FormRow label appears in the edit form builder");
+        source.Should().Contain("<DropdownForEnum<GuardianRole>>",
             "the Role picker sits inside the combined Relationship/Role row");
-        guardians.Should().NotContain("Label=\"Relationship\">",
-            "there is no separate stacked Relationship row");
-        guardians.Should().NotContain("Label=\"Role\">",
-            "there is no separate stacked Role row");
     }
 
     [TestMethod]
@@ -316,5 +329,56 @@ public class StudentFormFieldsSectionEditTests
             "the dialog should not have a section-edit save callback");
         source.Should().NotContain("OnSectionEditCancel",
             "the dialog should not have a section-edit cancel callback");
+    }
+
+    [TestMethod]
+    public void StudentEditDialog_HostsSharedDialogDrawer()
+    {
+        var source = ReadEditDialogSource();
+        var css = ReadSource(
+            "Students/SchoolCollab.Students.Application/Components/Students/StudentEditDialog.razor.css");
+
+        // The dialog owns the shared DialogDrawer (one drawer, hosted by
+        // the dialog, not by the sections). The dialog wraps its body in
+        // .student-edit-dialog-root which is the positioned ancestor
+        // (position: relative; height: 100%) for the drawer.
+        source.Should().Contain("<DialogDrawer",
+            "the dialog renders a DialogDrawer");
+        source.Should().Contain("Side=\"DialogDrawerSide.Right\"",
+            "the drawer anchors to the right edge of the dialog body by default");
+        source.Should().Contain("ShowCancel=\"true\"",
+            "the drawer's Cancel button is shown");
+        source.Should().Contain("ShowSubmit=\"true\"",
+            "the drawer's Save button is shown");
+        source.Should().Contain("SectionEditContent=\"@_sectionEditContent\"",
+            "the dialog reads the active section's edit context");
+        source.Should().Contain("SectionEditContentChanged=\"OnSectionEditContentChanged\"",
+            "the dialog forwards child edit contexts to its own field");
+        source.Should().Contain("class=\"student-edit-dialog-root\"",
+            "the dialog content is wrapped in the positioned root");
+        css.Should().Contain(".student-edit-dialog-root {",
+            "the positioned-root CSS rule exists");
+        css.Should().Contain("position: relative;",
+            "the positioned root is the drawer's containing block");
+        css.Should().Contain("height: 100%;",
+            "the positioned root fills the dialog body height");
+    }
+
+    [TestMethod]
+    public void StudentEditDialog_CancelsPreviousContextOnSectionSwap()
+    {
+        var source = ReadEditDialogSource();
+
+        // Rework for the section-swap data-loss bug: if a new edit context
+        // arrives while a previous one is still set (e.g. clicking Edit on a
+        // contact while a guardian edit drawer is open), the previous
+        // context's Cancel must run FIRST so that section tears down its
+        // working copy. Otherwise its pending edits are silently lost on save.
+        source.Should().Contain("await previous.Cancel();",
+            "swapping sections cancels the previous edit context's working copy");
+        source.Should().Contain("previous.SectionKey != ctx.SectionKey",
+            "a swap is detected by a differing SectionKey, so a same-section re-publish (reactive UI update) does NOT cancel the in-flight edit");
+        source.Should().Contain("OnSectionEditContentChanged(SectionEditContext? ctx)",
+            "the swap-cancel lives in the dialog's section-content handler");
     }
 }

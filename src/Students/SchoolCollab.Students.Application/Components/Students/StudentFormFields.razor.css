@@ -122,12 +122,9 @@
     pointer-events: none;
 }
 
-/* The parent FluentStack is the containing block for any embedded
-   SideDrawer opened by child components, so the edit drawer slides in
-   over the full form content rather than over a single section. */
-.student-form-fields__content-stack {
-    position: relative;
-}
+/* Both Contacts and Guardians sections remain visible while a child edit
+   drawer is open; the drawer itself overlays the full dialog content area
+   (positioning is owned by the host dialog, not this form). */
 
 /* Both Contacts and Guardians sections remain visible while a child edit
    drawer is open; the drawer itself overlays the full form content. */

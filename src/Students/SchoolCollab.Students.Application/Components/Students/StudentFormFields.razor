@@ -144,7 +144,8 @@
                                         OwnerType="ContactOwnerType.Student"
                                         Contacts="Model.Contacts"
                                         ContactsChanged="OnDraftContactsChanged"
-                                        IsEditingChanged="OnContactsEditingChanged" />
+                                        IsEditingChanged="OnContactsEditingChanged"
+                                        SectionEditContextChanged="OnContactsEditContextChanged" />
                     </div>
                 </FormRow>
             </div>
@@ -161,7 +162,8 @@
                                          LinkedItems="LinkedItems"
                                          OnManageGuardians="OnManageGuardians"
                                          OnRemoveGuardian="OnRemoveGuardian"
-                                         IsEditingChanged="OnGuardiansEditingChanged" />
+                                         IsEditingChanged="OnGuardiansEditingChanged"
+                                         SectionEditContextChanged="OnGuardiansEditContextChanged" />
                     </div>
                 </FormRow>
             </div>
@@ -367,8 +369,21 @@
     /// switch the form in and out of the focused section-edit UX.</summary>
     [Parameter] public EventCallback<StudentEditSection> ActiveEditSectionChanged { get; set; }
 
+    /// <summary>The edit context (title + content fragment + submit / cancel
+    /// callbacks) published by the active child section when a contact or
+    /// guardian edit begins, or <c>null</c> when the edit ends. The host
+    /// (typically <c>StudentEditDialog</c>) renders this inside the shared
+    /// <c>DialogDrawer</c>.</summary>
+    [Parameter] public SectionEditContext? SectionEditContent { get; set; }
+
+    /// <summary>Two-way binding callback for <see cref="SectionEditContent"/>.
+    /// Fired with the child's published context when an edit begins and
+    /// with <c>null</c> when it ends. The host forwards the context to the
+    /// dialog, which renders it inside the shared <c>DialogDrawer</c>.</summary>
+    [Parameter] public EventCallback<SectionEditContext?> SectionEditContentChanged { get; set; }
+
     /// <summary>True while a section edit is active — disables the profile fields
-    /// and the dialog action row while the embedded SideDrawer is open.</summary>
+    /// and the dialog action row while the shared <c>DialogDrawer</c> is open.</summary>
     private bool AreProfileFieldsDisabled => EnableSectionEdit && ActiveEditSection != StudentEditSection.None;
 
     /// <summary>Class applied to every profile FormRow. Adds a disabled modifier
@@ -382,6 +397,21 @@
 
     private async Task OnGuardiansEditingChanged(bool isEditing)
         => await ActiveEditSectionChanged.InvokeAsync(isEditing ? StudentEditSection.Guardians : StudentEditSection.None);
+
+    // ── Section edit context publish-up ──
+    // ContactsEditor / GuardianSection push their edit context up here when
+    // they begin / end a Buffered edit. We forward it to the host (the
+    // StudentEditDialog) which renders it inside the shared DialogDrawer.
+
+    /// <summary>Forwards the ContactsEditor's edit context up to the
+    /// host. The dialog renders it inside the shared <c>DialogDrawer</c>.</summary>
+    private Task OnContactsEditContextChanged(SectionEditContext? ctx)
+        => SectionEditContentChanged.InvokeAsync(ctx);
+
+    /// <summary>Forwards the GuardianSection's edit context up to the
+    /// host. The dialog renders it inside the shared <c>DialogDrawer</c>.</summary>
+    private Task OnGuardiansEditContextChanged(SectionEditContext? ctx)
+        => SectionEditContentChanged.InvokeAsync(ctx);
 
     // ── DOB bridge: Model.DateOfBirth is DateOnly? but
     //    FluentDatePicker.Value is DateTime?. Convert on the way in

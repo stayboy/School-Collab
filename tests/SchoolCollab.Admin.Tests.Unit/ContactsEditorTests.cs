@@ -4,6 +4,7 @@ using System.Text.Json;
 using AngleSharp.Dom;
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -529,6 +530,46 @@ public class ContactsEditorTests : BunitContext
         });
     }
 
+    [TestMethod]
+    public void EditDisabled_DisablesPerRowEditButton_ButKeepsAddEnabled()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "a@x.com", Order = 0 }
+        };
+
+        // When the editor is nested (e.g. the draft-guardian edit form inside
+        // the shared DialogDrawer), there is no second drawer to host a
+        // contact edit, so per-row Edit is disabled. Add (which mutates
+        // Contacts directly) and Remove still work.
+        // Register the fake services BEFORE rendering so DI resolves.
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        Services.AddSingleton<IContactsClient>(new FakeContactsClient());
+        Services.AddSingleton(new CodedValuesApiClient(http));
+        Services.AddSingleton(NullLogger<ContactsEditor>.Instance);
+        var cut = Render<ContactsEditor>(parameters => parameters
+            .Add(p => p.Mode, ContactsEditor.EditorMode.Buffered)
+            .Add(p => p.OwnerType, ContactOwnerType.Guardian)
+            .Add(p => p.Contacts, contacts)
+            .Add(p => p.ShowSubscription, false)
+            .Add(p => p.EditDisabled, true));
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
+
+        var editButton = RowButton(cut, "Edit contact");
+        editButton.HasAttribute("disabled").Should().BeTrue(
+            "the per-row Edit button is disabled when EditDisabled=true");
+
+        // The Add row stays usable when EditDisabled=true: it only disables
+        // while an Add is in flight or the value field is empty, never
+        // because of EditDisabled. Type a value to prove it's actionable.
+        cut.Find("fluent-text-field.contacts-value").Change("new@x.com");
+        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        addButton.HasAttribute("disabled").Should().BeFalse(
+            "the Add row stays usable when EditDisabled=true");
+    }
+
     // ─── Edit / Remove with reason (spec 2026-08-17 §7.2) ───────────────
     // Both actions open the shared ContactChangeDialog via
     // DialogService.ShowShellDialogAsync. Live mode forwards the dialog's
@@ -639,41 +680,57 @@ public class ContactsEditorTests : BunitContext
     }
 
     [TestMethod]
-    public void BufferedEdit_InlineEdit_MutatesInMemoryList_WithoutApiCall()
+    public async Task BufferedEdit_PublishesSectionEditContext_AndSubmitMutatesInMemoryList()
     {
         var contacts = new List<ContactModel>
         {
             new() { Channel = ContactChannel.Email, Value = "old@x.com", Label = "Home", Order = 0 }
         };
         var targetId = contacts[0].TempId;
-        var cut = RenderBuffered(contacts);
 
-        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
-        RowButton(cut, "Edit contact").Click();
+        // The editor no longer renders its own edit drawer; it publishes a
+        // SectionEditContext (title + fragment + submit/cancel callbacks) up
+        // to the host, which renders it inside the shared DialogDrawer. The
+        // test captures the published context, drives the host to invoke the
+        // submit callback (which is what the DialogDrawer's footer does), and
+        // asserts the in-memory list was mutated.
+        var published = await RenderBufferedCapturingContextAsync(contacts);
 
-        // Buffered mode opens an embedded SideDrawer with the edit form
-        // (channel + value + label + Save/Cancel) inside the dialog content.
-        cut.WaitForAssertion(() => cut.FindAll(".side-drawer-panel--embedded").Should().HaveCount(1));
+        var ok = await published.Submit();
 
-        var valueField = cut.Find(".side-drawer-panel--embedded fluent-text-field.contacts-value");
-        valueField.Change("new@x.com");
-
-        var saveButton = cut.FindAll(".side-drawer-panel--embedded .side-drawer-btn-submit")
-            .Cast<IElement>()
-            .First();
-        saveButton.Click();
-
-        cut.WaitForAssertion(() =>
-        {
-            contacts[0].Value.Should().Be("new@x.com", "Buffered edit mutates the in-memory list");
-            contacts[0].TempId.Should().Be(targetId, "the same row is edited (TempId preserved)");
-            contacts[0].Label.Should().Be("Home", "Label is preserved");
-        });
+        ok.Should().BeTrue("Buffered submit returns true so the drawer auto-closes");
+        contacts[0].Value.Should().Be("old@x.com", "no field changes were made by this test; the working copy persists");
+        contacts[0].TempId.Should().Be(targetId, "the same row is edited (TempId preserved)");
+        contacts[0].Label.Should().Be("Home", "Label is preserved");
 
         var fake = (FakeContactsClient)Services.GetRequiredService<IContactsClient>();
         fake.UpdateContactCalls.Should().Be(0, "Buffered edit must not call the update API");
         fake.DeleteContactCalls.Should().Be(0);
-        cut.FindAll(".contacts-error").Should().BeEmpty("no API call means no error bar");
+        published.Title.Should().Be("Edit contact", "the drawer title matches the section");
+    }
+
+    [TestMethod]
+    public async Task BufferedEdit_PublishedSubmit_WithChangedFields_MutatesList()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "old@x.com", Label = "Home", Order = 0 }
+        };
+
+        var (cut, published) = await RenderBufferedCapturingContextWithCutAsync(contacts);
+
+        // Mutate the editor's working-copy fields via reflection (the test
+        // is verifying that the working copy, when committed via the submit
+        // callback, mutates the in-memory list).
+        var editValueField = typeof(ContactsEditor).GetField("_editValue",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        editValueField.SetValue(cut.Instance, "new@x.com");
+
+        var ok = await published.Submit();
+
+        ok.Should().BeTrue();
+        contacts[0].Value.Should().Be("new@x.com", "Buffered submit mutates the in-memory list with the edited value");
+        contacts[0].Label.Should().Be("Home", "Label is preserved");
     }
 
     [TestMethod]
@@ -703,5 +760,124 @@ public class ContactsEditorTests : BunitContext
         fake.DeleteContactCalls.Should().Be(0, "Buffered delete must not call the delete API");
         fake.UpdateContactCalls.Should().Be(0);
         cut.FindAll(".contacts-error").Should().BeEmpty("no API call means no error bar");
+    }
+
+    [TestMethod]
+    public async Task BufferedEdit_ChannelChange_RePublishesAndRevealsCountryCodeField()
+    {
+        // Regression for the frozen-fragment bug: the published edit form is a
+        // RenderFragment that the host DialogDrawer renders once and then holds
+        // frozen — it only re-executes when the section RE-PUBLISHES. Without a
+        // re-publish on channel change, switching Email -> SMS would never
+        // reveal the channel-gated country-code picker (and the host would keep
+        // showing the stale Email fragment). OnEditChannelChanged re-publishes so
+        // the host re-renders the fragment with the new channel.
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.Email, Value = "a@x.com", Order = 0 }
+        };
+
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var fake = new FakeContactsClient();
+        Services.AddSingleton<IContactsClient>(fake);
+        Services.AddSingleton(new CodedValuesApiClient(http));
+        Services.AddSingleton(NullLogger<ContactsEditor>.Instance);
+
+        SectionEditContext? lastPublished = null;
+        var cut = Render<ContactsEditor>(parameters => parameters
+            .Add(p => p.Mode, ContactsEditor.EditorMode.Buffered)
+            .Add(p => p.OwnerType, ContactOwnerType.Guardian)
+            .Add(p => p.Contacts, contacts)
+            .Add(p => p.ShowSubscription, false)
+            .Add(p => p.SectionEditContextChanged, EventCallback.Factory.Create<SectionEditContext?>(this, ctx => lastPublished = ctx)));
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(1));
+        RowButton(cut, "Edit contact").Click();
+        for (var i = 0; i < 40 && lastPublished is null; i++) await Task.Delay(25);
+
+        var emailCtx = lastPublished!;
+        emailCtx.SectionKey.Should().Be("Contacts",
+            "the contact edit context carries the Contacts section key so the host can tell a same-section re-publish from a cross-section swap");
+
+        // Email contact -> the published fragment has only the channel picker
+        // (DropdownForEnum renders a <fluent-select>). No country-code picker.
+        var emailRender = Render(emailCtx.Content);
+        emailRender.FindAll("fluent-select").Should().HaveCount(1,
+            "an Email contact has no country-code picker");
+
+        // Simulate the user switching the channel to SMS. OnEditChannelChanged
+        // re-publishes a fresh context (with a fresh fragment built from the
+        // updated _editChannel) so the host re-renders.
+        var onChannel = typeof(ContactsEditor).GetMethod("OnEditChannelChanged",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
+        await (Task)onChannel.Invoke(cut.Instance, new object[] { ContactChannel.SMS })!;
+
+        var smsCtx = lastPublished!;
+        smsCtx.Should().NotBeSameAs(emailCtx,
+            "the channel change must re-publish a fresh context (otherwise the host never re-renders the frozen fragment)");
+
+        // SMS contact -> the re-published fragment now has the channel picker
+        // AND the country-code picker (CodedValueDropdown renders a second
+        // <fluent-select>).
+        var smsRender = Render(smsCtx.Content);
+        smsRender.FindAll("fluent-select").Should().HaveCount(2,
+            "switching to SMS reveals the channel-gated country-code picker");
+    }
+
+    // ── Publish-up helpers ──
+    // Buffered mode no longer renders its own drawer; it publishes a
+    // SectionEditContext up to the host (StudentFormFields →
+    // StudentEditDialog → shared DialogDrawer). These helpers register the
+    // standard fake services, then render the editor with a
+    // SectionEditContextChanged callback that captures the published
+    // context and clicks Edit so the test can drive the host callbacks.
+
+    private async Task<SectionEditContext> RenderBufferedCapturingContextAsync(
+        List<ContactModel> contacts,
+        ContactOwnerType ownerType = ContactOwnerType.Guardian)
+    {
+        var (_, ctx) = await RenderBufferedCapturingContextWithCutAsync(contacts, ownerType);
+        return ctx;
+    }
+
+    private async Task<(IRenderedComponent<ContactsEditor>, SectionEditContext)>
+        RenderBufferedCapturingContextWithCutAsync(
+            List<ContactModel> contacts,
+            ContactOwnerType ownerType = ContactOwnerType.Guardian)
+    {
+        // Register the standard fake services BEFORE rendering so the
+        // component can resolve IContactsClient / CodedValuesApiClient /
+        // ILogger on first render.
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var fake = new FakeContactsClient
+        {
+            OnAddContact = _ => throw new InvalidOperationException("Buffered mode must not call AddContactAsync")
+        };
+        Services.AddSingleton<IContactsClient>(fake);
+        Services.AddSingleton(new CodedValuesApiClient(http));
+        Services.AddSingleton(NullLogger<ContactsEditor>.Instance);
+
+        SectionEditContext? published = null;
+        var cut = Render<ContactsEditor>(parameters => parameters
+            .Add(p => p.Mode, ContactsEditor.EditorMode.Buffered)
+            .Add(p => p.OwnerType, ownerType)
+            .Add(p => p.Contacts, contacts)
+            .Add(p => p.ShowSubscription, false)
+            .Add(p => p.SectionEditContextChanged, EventCallback.Factory.Create<SectionEditContext?>(this, ctx => published = ctx)));
+
+        cut.WaitForAssertion(() => cut.FindAll(".contact-item").Should().HaveCount(contacts.Count));
+        RowButton(cut, "Edit contact").Click();
+
+        // Wait for the publish-up to fire (SectionEditContextChanged runs
+        // via InvokeAsync so we poll briefly).
+        for (var i = 0; i < 40 && published is null; i++)
+        {
+            await Task.Delay(25);
+        }
+
+        published.Should().NotBeNull("the editor must publish a SectionEditContext when Buffered edit begins");
+        return (cut, published!);
     }
 }
