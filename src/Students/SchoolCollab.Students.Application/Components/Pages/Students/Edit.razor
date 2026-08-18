@@ -61,7 +61,7 @@
                 <div class="student-edit-grid">
                     <div class="student-edit-grid__fields">
                         @* Page-side guardian management: the form is in
-                           <see cref="StudentFormFields.StudentFormFieldsMode.Linked"/>
+                           <see cref="StudentFormFieldsMode.Linked"/>
                            mode, so the guardians section is a compact
                            "Guardians (N) — Manage" header that opens
                            <c>GuardianPickerDialog</c> (page owns the link
@@ -73,7 +73,7 @@
                         <StudentFormFields @ref="_form"
                                            Model="_model"
                                            ShowGuardians="true"
-                                           Mode="StudentFormFields.StudentFormFieldsMode.Linked"
+                                           Mode="StudentFormFieldsMode.Linked"
                                            StudentId="Id"
                                            LinkedItems="_links.ToArray()"
                                            OnManageGuardians="OnManageGuardiansAsync"

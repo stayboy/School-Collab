@@ -26,6 +26,27 @@
     outline: none;
 }
 
+/* ── Embedded mode (position: absolute) ──
+   The drawer fills its nearest `position: relative` ancestor instead of
+   the viewport. Used when hosting the drawer inside a dialog or card so
+   it slides in within the parent bounds. The parent must establish a
+   containing block (e.g. position: relative) for this to work. */
+.side-drawer-panel--embedded {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    height: auto;
+    max-width: 100%;
+    z-index: 50;
+}
+
+.side-drawer-backdrop--embedded {
+    position: absolute;
+    inset: 0;
+    z-index: 49;
+}
+
 .side-drawer-header {
     display: flex;
     align-items: center;

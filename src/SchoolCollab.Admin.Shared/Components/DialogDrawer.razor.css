@@ -1,0 +1,188 @@
+/* Dialog-content drawer. The drawer fills the dialog body content area
+   (between the title bar and the actions bar) without overlapping
+   either. Positioning strategy: the host wraps the drawer in a
+   position: relative; height: 100% container; the drawer is
+   position: absolute; inset: 0 inside that wrapper. Because
+   .fluent-dialog-body is the 1fr grid row, the wrapper has a definite
+   height, and the drawer fills it exactly. */
+
+/* Backdrop: dims the main form. Position absolute inside the
+   containing block (the dialog body) — NOT fixed to the viewport. */
+.dialog-drawer-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.32);
+    z-index: 40;
+    animation: dialog-drawer-fade-in 120ms ease-out;
+}
+
+/* Backdrop hidden — used by the sidebar (split-pane) mode where the
+   main form stays interactive. The element still occupies the space so
+   pointer events pass through to the form behind it. */
+.dialog-drawer-backdrop--hidden {
+    display: none;
+}
+
+/* Panel: fills the dialog body vertically (top/bottom: 0; height: auto)
+   and anchors to the chosen edge via the inline PanelSideStyle. The
+   inline width (from Width parameter) is set on the <aside>. */
+.dialog-drawer-panel {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    height: auto;
+    background: var(--neutral-layer-1, #fff);
+    color: var(--neutral-foreground-1, #1f1f1f);
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    animation: dialog-drawer-slide-in 180ms ease-out;
+    outline: none;
+    max-width: 100%;
+}
+
+/* Anchor variants. The CSS only carries the box-shadow direction; the
+   horizontal edge is set inline (left:0 / right:0) so it is colocated
+   with the Side parameter. */
+.dialog-drawer-panel--right {
+    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+}
+
+.dialog-drawer-panel--left {
+    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.18);
+}
+
+.dialog-drawer-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    flex: 0 0 auto;
+}
+
+.dialog-drawer-title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.dialog-drawer-dismiss {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    color: inherit;
+    font-size: 1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+
+.dialog-drawer-dismiss:hover {
+    background: var(--neutral-stroke-subtle, rgba(0, 0, 0, 0.06));
+}
+
+.dialog-drawer-dismiss:focus-visible {
+    outline: 2px solid var(--accent-fill-rest, #0078d4);
+    outline-offset: 1px;
+}
+
+.dialog-drawer-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    padding: 0.75rem 1rem;
+}
+
+.dialog-drawer-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    border-top: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    flex: 0 0 auto;
+}
+
+.dialog-drawer-btn {
+    appearance: none;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0.4rem 0.9rem;
+    font: inherit;
+    line-height: 1.2;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 80px;
+    justify-content: center;
+}
+
+.dialog-drawer-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+.dialog-drawer-btn:focus-visible {
+    outline: 2px solid var(--accent-fill-rest, #0078d4);
+    outline-offset: 1px;
+}
+
+.dialog-drawer-btn-cancel {
+    background: transparent;
+    color: var(--neutral-foreground-1, #1f1f1f);
+    border-color: var(--neutral-stroke-rest, #c0c0c0);
+}
+
+.dialog-drawer-btn-cancel:hover:not(:disabled) {
+    background: var(--neutral-stroke-subtle, rgba(0, 0, 0, 0.06));
+}
+
+.dialog-drawer-btn-submit {
+    background: var(--accent-fill-rest, #0078d4);
+    color: var(--neutral-foreground-on-accent, #ffffff);
+}
+
+.dialog-drawer-btn-submit:hover:not(:disabled) {
+    background: var(--accent-fill-hover, #106ebe);
+}
+
+.dialog-drawer-spinner {
+    width: 0.9em;
+    height: 0.9em;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    border-radius: 50%;
+    animation: dialog-drawer-spin 0.7s linear infinite;
+}
+
+@keyframes dialog-drawer-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+@keyframes dialog-drawer-slide-in {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+}
+
+/* The slide-in is reversed for left-anchored panels. */
+.dialog-drawer-panel--left {
+    animation-name: dialog-drawer-slide-in-left;
+}
+
+@keyframes dialog-drawer-slide-in-left {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(0); }
+}
+
+@keyframes dialog-drawer-spin {
+    to { transform: rotate(360deg); }
+}

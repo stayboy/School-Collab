@@ -56,7 +56,8 @@ public class TeacherDetailPageBunitTests : BunitContext
 
         public Task<Guid> AddContactAsync(AddContactRequest req, CancellationToken ct = default) => Task.FromResult(Guid.NewGuid());
         public Task UpdateContactAsync(Guid id, UpdateContactRequest req, CancellationToken ct = default) => Task.CompletedTask;
-        public Task DeleteContactAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
+        public Task DeleteContactAsync(Guid id, string reason, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<ContactAuditEntryDto[]?> ListContactAuditEntriesAsync(Guid? contactId = null, ContactOwnerType? ownerType = null, Guid? ownerId = null, int skip = 0, int take = 50, CancellationToken ct = default) => Task.FromResult<ContactAuditEntryDto[]?>(Array.Empty<ContactAuditEntryDto>());
         public Task VerifyContactAsync(Guid id, CancellationToken ct = default) => Task.CompletedTask;
         public Task SetContactOrderAsync(Guid id, int order, CancellationToken ct = default) => Task.CompletedTask;
         public Task ReorderContactsAsync(ContactOwnerType ownerType, Guid ownerId, IReadOnlyList<Guid> orderedIds, CancellationToken ct = default) => Task.CompletedTask;

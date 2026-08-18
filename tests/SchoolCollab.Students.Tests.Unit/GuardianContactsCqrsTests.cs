@@ -11,6 +11,7 @@ using SchoolCollab.Students.Core.CQRS.Contacts.Commands.Unsubscribe;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.UpdateContact;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.SetContactOrder;
 using SchoolCollab.Students.Core.CQRS.Contacts.Commands.VerifyContact;
+using SchoolCollab.Students.Core.CQRS.Contacts.Queries.ListContactAuditEntries;
 using SchoolCollab.Students.Core.CQRS.Contacts.Queries.ListContacts;
 using SchoolCollab.Students.Core.CQRS.Contacts.Queries.ListSubscribedContacts;
 using SchoolCollab.Students.Core.CQRS.Guardians.Commands.CreateGuardian;
@@ -25,6 +26,7 @@ using SchoolCollab.Students.Core.CQRS.Guardians.Queries.ListGuardiansByStudent;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
+using SchoolCollab.Students.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Students.Contracts.Events;
 
@@ -51,9 +53,11 @@ public class GuardianContactsCqrsTests
     private static AddContactHandler NewAddContact(StudentsTestScope s) =>
         new(ContactRepo(s), s.Cache, s.Tenants, NullLogger<AddContactHandler>.Instance);
     private static UpdateContactHandler NewUpdateContact(StudentsTestScope s) =>
-        new(ContactRepo(s), s.Cache, NullLogger<UpdateContactHandler>.Instance);
+        new(ContactRepo(s), s.Db, s.Tenants, new ContactAuditor(new SystemActorAccessor("test", "Test Actor")), s.Cache, NullLogger<UpdateContactHandler>.Instance);
     private static DeleteContactHandler NewDeleteContact(StudentsTestScope s) =>
-        new(ContactRepo(s), s.Cache, NullLogger<DeleteContactHandler>.Instance);
+        new(ContactRepo(s), s.Db, s.Tenants, new ContactAuditor(new SystemActorAccessor("test", "Test Actor")), s.Cache, NullLogger<DeleteContactHandler>.Instance);
+    private static ListContactAuditEntriesHandler NewListAudit(StudentsTestScope s) =>
+        new(s.Db);
     private static VerifyContactHandler NewVerifyContact(StudentsTestScope s) =>
         new(ContactRepo(s), s.Cache, NullLogger<VerifyContactHandler>.Instance);
     private static SubscribeHandler NewSubscribe(StudentsTestScope s) =>
@@ -265,7 +269,7 @@ public class GuardianContactsCqrsTests
         var id = await NewAddContact(s).HandleAsync(
             new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "old@example.com", "Old"));
 
-        await NewUpdateContact(s).HandleAsync(new UpdateContact(id, "new@example.com", "New"));
+        await NewUpdateContact(s).HandleAsync(new UpdateContact(id, "new@example.com", "New", "Updated email"));
 
         var c = s.Db.Contacts.IgnoreQueryFilters().Single(x => x.Id == id);
         c.Value.Should().Be("new@example.com");
@@ -280,9 +284,71 @@ public class GuardianContactsCqrsTests
         var id = await NewAddContact(s).HandleAsync(
             new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null));
 
-        await NewDeleteContact(s).HandleAsync(new DeleteContact(id));
+        await NewDeleteContact(s).HandleAsync(new DeleteContact(id, "No longer needed"));
 
         s.Db.Contacts.IgnoreQueryFilters().Single(c => c.Id == id).IsDeleted.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task UpdateContact_WritesAuditEntry_WithReasonAndActor()
+    {
+        using var s = new StudentsTestScope("c-audit-update");
+        var studentId = await SeedStudentAsync(s, "S1");
+        var id = await NewAddContact(s).HandleAsync(
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "old@example.com", "Old"));
+
+        await NewUpdateContact(s).HandleAsync(
+            new UpdateContact(id, "new@example.com", "New", "Parent requested change"));
+
+        var entries = await NewListAudit(s).HandleAsync(
+            new ListContactAuditEntries(null, ContactOwnerType.Student, studentId, 0, 50));
+        entries.Should().ContainSingle();
+        var e = entries[0];
+        e.ChangeKind.Should().Be("Updated");
+        e.PreviousValue.Should().Be("old@example.com");
+        e.NewValue.Should().Be("new@example.com");
+        e.Reason.Should().Be("Parent requested change");
+        e.ActorDisplayName.Should().Be("Test Actor");
+        e.ContactId.Should().Be(id);
+    }
+
+    [TestMethod]
+    public async Task DeleteContact_WritesAuditEntry_WithReason()
+    {
+        using var s = new StudentsTestScope("c-audit-delete");
+        var studentId = await SeedStudentAsync(s, "S1");
+        var id = await NewAddContact(s).HandleAsync(
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null));
+
+        await NewDeleteContact(s).HandleAsync(new DeleteContact(id, "Duplicate entry"));
+
+        var entries = await NewListAudit(s).HandleAsync(
+            new ListContactAuditEntries(null, ContactOwnerType.Student, studentId, 0, 50));
+        entries.Should().ContainSingle();
+        var e = entries[0];
+        e.ChangeKind.Should().Be("Deleted");
+        e.PreviousValue.Should().Be("kid@example.com");
+        e.Reason.Should().Be("Duplicate entry");
+    }
+
+    [TestMethod]
+    public async Task ListContactAuditEntries_FiltersByOwner()
+    {
+        using var s = new StudentsTestScope("c-audit-filter");
+        var studentId = await SeedStudentAsync(s, "S1");
+        var otherStudentId = await SeedStudentAsync(s, "S2");
+        var id = await NewAddContact(s).HandleAsync(
+            new AddContact(ContactOwnerType.Student, studentId, ContactChannel.Email, "kid@example.com", null));
+        var otherId = await NewAddContact(s).HandleAsync(
+            new AddContact(ContactOwnerType.Student, otherStudentId, ContactChannel.Email, "other@example.com", null));
+
+        await NewDeleteContact(s).HandleAsync(new DeleteContact(id, "Duplicate"));
+        await NewDeleteContact(s).HandleAsync(new DeleteContact(otherId, "Duplicate"));
+
+        var forStudent = await NewListAudit(s).HandleAsync(
+            new ListContactAuditEntries(null, ContactOwnerType.Student, studentId, 0, 50));
+        forStudent.Should().ContainSingle();
+        forStudent[0].ContactId.Should().Be(id);
     }
 
     [TestMethod]
@@ -340,7 +406,7 @@ public class GuardianContactsCqrsTests
             { CountryCode = "+233" });
 
         await NewUpdateContact(s).HandleAsync(
-            new UpdateContact(id, "208765432", "Mobile") { CountryCode = "+27" });
+            new UpdateContact(id, "208765432", "Mobile", "Changed to SA number") { CountryCode = "+27" });
 
         var c = s.Db.Contacts.IgnoreQueryFilters().Single(x => x.Id == id);
         c.Value.Should().Be("208765432");
@@ -491,7 +557,7 @@ public class GuardianContactsCqrsTests
         // Soft-delete one of the five. The handler filters !c.IsDeleted, so
         // TotalContactCount must drop to 4 (still > 3 → anchor still shows)
         // and Contacts must still cap at 3.
-        await NewDeleteContact(s).HandleAsync(new DeleteContact(contactIds[0]));
+        await NewDeleteContact(s).HandleAsync(new DeleteContact(contactIds[0], "Duplicate"));
 
         var rows = await new ListGuardiansByStudentHandler(s.Db, s.Cache)
             .HandleAsync(new ListGuardiansByStudent(studentId));

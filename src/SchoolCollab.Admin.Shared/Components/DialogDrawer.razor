@@ -1,0 +1,329 @@
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@using Microsoft.JSInterop
+
+@* Dialog-content drawer. A slide-in panel designed to live INSIDE a
+   <FluentDialog> body (the .fluent-dialog-body grid cell, between the
+   title bar and the actions bar). Unlike <SideDrawer> Embedded mode —
+   which anchors to "the nearest positioned ancestor" and produces
+   arbitrary bounds — this drawer is positioned relative to its
+   containing block (the dialog body) and fills it top-to-bottom
+   without overlapping the title bar or the actions bar.
+
+   Positioning contract: the host must place a position: relative;
+   height: 100% wrapper inside .fluent-dialog-body, and the drawer
+   renders as position: absolute; inset: 0 inside that wrapper. Because
+   .fluent-dialog-body is a 1fr grid row, the wrapper has a definite
+   height, and the drawer fills it exactly.
+
+   Usage:
+       <div class="student-edit-dialog-root">
+           <StudentFormFields ... />
+           <DialogDrawer Open="@(_activeEditSection != None)"
+                         OpenChanged="OnDrawerOpenChangedAsync"
+                         Title="Edit contact"
+                         Side="DialogDrawerSide.Right"
+                         Width="420px"
+                         ShowCancel="true" CancelText="Cancel"
+                         ShowSubmit="true"  SubmitText="Save"
+                         OnSubmitAsync="OnDrawerSubmitAsync">
+               <ChildContent>
+                   ... edit form ...
+               </ChildContent>
+           </DialogDrawer>
+       </div>
+
+   Closes on: × button, backdrop click, Escape key, Cancel click, or after
+   OnSubmitAsync completes successfully. *@
+
+@if (_open)
+{
+    <div class="@BackdropClass" @onclick="RequestClose" role="presentation"></div>
+
+    <aside class="@PanelClass"
+           style="width:@Width; @PanelSideStyle"
+           role="region"
+           aria-labelledby="@_titleId"
+           @onkeydown="OnKeyDown"
+           @onkeydown:stopPropagation
+           tabindex="-1"
+           @ref="_panel">
+
+        <header class="dialog-drawer-header">
+            <h3 class="dialog-drawer-title" id="@_titleId">@Title</h3>
+            <button type="button"
+                    class="dialog-drawer-dismiss"
+                    aria-label="Close drawer"
+                    @onclick="RequestClose">
+                ✕
+            </button>
+        </header>
+
+        <div class="dialog-drawer-body">
+            @ChildContent
+        </div>
+
+        @if (ShowSubmit || ShowCancel)
+        {
+            <footer class="dialog-drawer-footer">
+                @if (ShowCancel)
+                {
+                    <button type="button"
+                            class="dialog-drawer-btn dialog-drawer-btn-cancel"
+                            disabled="@(IsBusy)"
+                            @onclick="RequestClose">
+                        @CancelText
+                    </button>
+                }
+                @if (ShowSubmit)
+                {
+                    <button type="button"
+                            class="dialog-drawer-btn dialog-drawer-btn-submit"
+                            disabled="@(IsBusy)"
+                            @onclick="HandleSubmitAsync">
+                        @if (IsBusy)
+                        {
+                            <span class="dialog-drawer-spinner" aria-hidden="true"></span>
+                        }
+                        @SubmitText
+                    </button>
+                }
+            </footer>
+        }
+    </aside>
+}
+
+@code {
+    /// <summary>Whether the drawer is visible. Two-way bindable via
+    /// <see cref="OpenChanged"/>.</summary>
+    [Parameter]
+    public bool Open { get; set; }
+
+    /// <summary>Fired when the consumer should toggle <see cref="Open"/>.</summary>
+    [Parameter]
+    public EventCallback<bool> OpenChanged { get; set; }
+
+    /// <summary>Header text shown at the top of the drawer.</summary>
+    [Parameter, EditorRequired]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>Which edge of the dialog body the panel anchors to.
+    /// Default: <see cref="DialogDrawerSide.Right"/>.</summary>
+    [Parameter]
+    public DialogDrawerSide Side { get; set; } = DialogDrawerSide.Right;
+
+    /// <summary>Panel width. Any valid CSS length. Default: 420px.</summary>
+    [Parameter]
+    public string Width { get; set; } = "420px";
+
+    /// <summary>Drawer body content.</summary>
+    [Parameter]
+    public RenderFragment? ChildContent { get; set; }
+
+    /// <summary>Show the Submit (primary) button in the footer. Default: false.</summary>
+    [Parameter]
+    public bool ShowSubmit { get; set; }
+
+    /// <summary>Submit button label. Default: "Save".</summary>
+    [Parameter]
+    public string SubmitText { get; set; } = "Save";
+
+    /// <summary>
+    /// Invoked when the Submit button is clicked. While running, both
+    /// footer buttons are disabled and a spinner is shown. If the
+    /// callback returns true the drawer closes automatically; if it
+    /// returns false (or throws) the drawer stays open.
+    /// </summary>
+    [Parameter]
+    public Func<Task<bool>>? OnSubmitAsync { get; set; }
+
+    /// <summary>Show the Cancel (secondary) button in the footer. Default: false.</summary>
+    [Parameter]
+    public bool ShowCancel { get; set; }
+
+    /// <summary>Cancel button label. Default: "Cancel".</summary>
+    [Parameter]
+    public string CancelText { get; set; } = "Cancel";
+
+    /// <summary>Render a dim backdrop over the rest of the dialog body.
+    /// Default true. Set false for a sidebar (split-pane) mode where the
+    /// main form stays interactive behind the drawer.</summary>
+    [Parameter]
+    public bool ShowBackdrop { get; set; } = true;
+
+    /// <summary>Optional external busy flag. When true, the footer buttons
+    /// are disabled and a spinner is shown on Submit. The drawer does not
+    /// own this state — it is supplied so the host can reflect an
+    /// in-flight save without driving the drawer internals.</summary>
+    [Parameter]
+    public bool Busy { get; set; }
+
+    private string BackdropClass => ShowBackdrop
+        ? "dialog-drawer-backdrop"
+        : "dialog-drawer-backdrop dialog-drawer-backdrop--hidden";
+
+    private string PanelClass => Side == DialogDrawerSide.Left
+        ? "dialog-drawer-panel dialog-drawer-panel--left"
+        : "dialog-drawer-panel dialog-drawer-panel--right";
+
+    /// <summary>Inline style that pins the panel to the right or left edge
+    /// of the dialog body. The CSS class carries top/bottom: 0;
+    /// height: auto so the panel always fills the body height; the inline
+    /// style only adds the horizontal edge.</summary>
+    private string PanelSideStyle => Side == DialogDrawerSide.Left
+        ? "left: 0;"
+        : "right: 0;";
+
+    private ElementReference _panel;
+    private bool _open;
+    private bool _submitting;
+
+    /// <summary>Reference to the imported focus-helper JS module. Null
+    /// until <see cref="OnAfterRenderAsync"/> imports it; stays null if
+    /// the import fails (SSR, tests, no JS runtime).</summary>
+    private IJSObjectReference? _jsModule;
+
+    /// <summary>Per-instance id for the title element so the panel can
+    /// use <c>aria-labelledby</c>. Stable for the lifetime of the
+    /// component so screen readers can keep the title association
+    /// across re-renders; random suffix prevents collisions if a page
+    /// hosts multiple drawers.</summary>
+    private readonly string _titleId = $"dialog-drawer-title-{Guid.NewGuid():N}";
+
+    /// <summary>CSS selector of the element that was focused when the
+    /// drawer opened (typically the trigger button). Set via JS interop
+    /// on open and used to restore focus on close. Stored as a selector
+    /// string rather than an <see cref="ElementReference"/> because
+    /// ElementReference ids are scoped to the capturing component and
+    /// cannot be focused from another instance.</summary>
+    private string? _focusReturnSelector;
+
+    /// <summary>True while the footer should be disabled — either
+    /// because the host is in-flight (<see cref="Busy"/>) or because the
+    /// drawer is running its own <see cref="OnSubmitAsync"/>.</summary>
+    private bool IsBusy => Busy || _submitting;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Import the focus helper module once. Best-effort: failures
+        // (SSR, tests, no JS runtime) leave _jsModule null and the focus
+        // capture/restore steps become no-ops. The drawer falls back to
+        // focusing only itself on open.
+        if (firstRender && _jsModule is null)
+        {
+            try
+            {
+                _jsModule = await JS.InvokeAsync<IJSObjectReference>(
+                    "import", "./_content/SchoolCollab.Admin.Shared/js/dialogDrawer.js");
+            }
+            catch
+            {
+                _jsModule = null;
+            }
+        }
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Sync the internal mirror to the parameter value. Re-rendering
+        // is cheap when nothing changed, and this guarantees every
+        // Open=true arrives as an opening action.
+        if (Open == _open) return;
+
+        var wasOpen = _open;
+        _open = Open;
+
+        if (_open)
+        {
+            // Capture the currently focused element BEFORE we move focus
+            // into the drawer, so we can restore it on close. Best-effort:
+            // failures (SSR, module not yet loaded, no active element,
+            // no JS runtime) leave _focusReturnSelector null and skip the
+            // restore step.
+            if (_jsModule is not null)
+            {
+                try
+                {
+                    _focusReturnSelector = await _jsModule.InvokeAsync<string?>(
+                        "captureActiveElementSelector");
+                }
+                catch
+                {
+                    _focusReturnSelector = null;
+                }
+            }
+
+            // Ensure the panel DOM exists before we try to focus it.
+            await InvokeAsync(StateHasChanged);
+            try { await _panel.FocusAsync(); }
+            catch { /* element not yet rendered — non-fatal */ }
+        }
+        else if (wasOpen && _focusReturnSelector is { } selector)
+        {
+            // Drawer is closing — restore focus to the element that
+            // opened it (typically the trigger button). Best-effort:
+            // the element may no longer exist (e.g. re-rendered row),
+            // in which case focus silently stays where it is.
+            if (_jsModule is not null)
+            {
+                try
+                {
+                    await _jsModule.InvokeVoidAsync(
+                        "focusBySelector", selector);
+                }
+                catch { /* element gone — non-fatal */ }
+            }
+            _focusReturnSelector = null;
+        }
+    }
+
+    private async Task RequestClose()
+    {
+        if (IsBusy) return;
+        _open = false;
+        await OpenChanged.InvokeAsync(false);
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape" && !IsBusy)
+        {
+            // Escape closes only the drawer. stopPropagation on the
+            // @onkeydown handler keeps the parent FluentDialog from also
+            // closing (it does not have its own Escape handling for the
+            // student edit dialog, but this is defence-in-depth so the
+            // drawer can be reused inside dialogs that do).
+            await RequestClose();
+        }
+    }
+
+    private async Task HandleSubmitAsync()
+    {
+        if (IsBusy || OnSubmitAsync is null) return;
+        _submitting = true;
+        try
+        {
+            var ok = await OnSubmitAsync.Invoke();
+            if (ok)
+            {
+                _open = false;
+                await OpenChanged.InvokeAsync(false);
+            }
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_jsModule is not null)
+        {
+            try { await _jsModule.DisposeAsync(); }
+            catch { /* already disposed — non-fatal */ }
+            _jsModule = null;
+        }
+        await ValueTask.CompletedTask;
+    }
+}

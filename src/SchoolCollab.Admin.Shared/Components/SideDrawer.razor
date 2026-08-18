@@ -16,12 +16,12 @@
 
 @if (_open)
 {
-    <div class="side-drawer-backdrop" @onclick="RequestClose" role="presentation"></div>
+    <div class="@BackdropClass" @onclick="RequestClose" role="presentation"></div>
 
-    <aside class="side-drawer-panel"
+    <aside class="@PanelClass"
            style="width:@Width"
            role="dialog"
-           aria-modal="true"
+           aria-modal="@(Embedded ? null : "true")"
            aria-label="@Title"
            @onkeydown="OnKeyDown"
            tabindex="-1"
@@ -116,6 +116,25 @@
     /// <summary>Cancel button label. Default: "Cancel".</summary>
     [Parameter]
     public string CancelText { get; set; } = "Cancel";
+
+    /// <summary>
+    /// When true, the drawer is positioned <c>position: absolute</c> so it fills
+    /// its nearest positioned ( <c>position: relative</c> ) containing block instead
+    /// of the viewport. Use when hosting the drawer inside a dialog or card so it
+    /// slides in within the parent bounds (e.g. a contact-edit drawer inside a
+    /// modal dialog rather than over the whole screen). Default false keeps the
+    /// existing full-viewport behaviour used by the AI chat panel.
+    /// </summary>
+    [Parameter]
+    public bool Embedded { get; set; }
+
+    private string BackdropClass => Embedded
+        ? "side-drawer-backdrop side-drawer-backdrop--embedded"
+        : "side-drawer-backdrop";
+
+    private string PanelClass => Embedded
+        ? "side-drawer-panel side-drawer-panel--embedded"
+        : "side-drawer-panel";
 
     private ElementReference _panel;
     private bool _open;

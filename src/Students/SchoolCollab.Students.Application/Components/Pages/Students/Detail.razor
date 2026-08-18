@@ -239,6 +239,57 @@
                                                OnRemove="OnRemoveGuardianAsync"
                                                OnViewAllContacts="OnViewAllContactsAsync" />
 
+                        @* ── Contact history ─────────────────────────────────────
+                           Append-only log of contact edits/deletes against this
+                           student. Loaded from the new /contacts/audit endpoint and
+                           rendered as a compact timeline. Empty state is shown
+                           when no changes have been recorded yet. *@
+                        <div class="section-header">
+                            <h3>Contact history <FluentBadge Appearance="Appearance.Neutral">@_contactHistory.Length</FluentBadge></h3>
+                        </div>
+                        @if (_contactHistoryLoading)
+                        {
+                            <div class="spinner-container"><FluentProgressRing /></div>
+                        }
+                        else if (!string.IsNullOrEmpty(_contactHistoryError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error">@_contactHistoryError</FluentMessageBar>
+                        }
+                        else if (_contactHistory.Length == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Info">
+                                No contact changes recorded yet.
+                            </FluentMessageBar>
+                        }
+                        else
+                        {
+                            <ul class="student-contact-history">
+                                @foreach (var entry in _contactHistory)
+                                {
+                                    <li class="student-contact-history__entry">
+                                        <div class="student-contact-history__meta">
+                                            <span class="student-contact-history__actor">@entry.ActorDisplayName</span>
+                                            <span class="muted">· @entry.OccurredAt.ToLocalTime().ToString("g")</span>
+                                        </div>
+                                        <div class="student-contact-history__change">
+                                            <FluentBadge Appearance="@ChangeKindBadgeAppearance(entry.ChangeKind)">@entry.ChangeKind</FluentBadge>
+                                            <span class="student-contact-history__value-line">
+                                                @FormatHistoryValue(entry.PreviousChannel, entry.PreviousValue, entry.PreviousCountryCode)
+                                                @if (entry.ChangeKind == "Updated")
+                                                {
+                                                    <text> → @FormatHistoryValue(entry.NewChannel, entry.NewValue, entry.NewCountryCode)</text>
+                                                }
+                                            </span>
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(entry.Reason))
+                                        {
+                                            <div class="student-contact-history__reason muted">Reason: @entry.Reason</div>
+                                        }
+                                    </li>
+                                }
+                            </ul>
+                        }
+
                     }
                 </ChildContent>
                 <Fallback>
@@ -292,6 +343,11 @@
     // guardians. Empty when salutations aren't configured for the tenant.
     private Dictionary<Guid, string> _salutations = new();
     private string? _guardianError;
+
+    // ── Contact history state (append-only audit log) ──
+    private SchoolCollab.Students.Core.DTOs.ContactAuditEntryDto[] _contactHistory = [];
+    private bool _contactHistoryLoading;
+    private string? _contactHistoryError;
 
     // ── Activity Groups section state (spec §3.6 FR-28..32) ──
     // Groups the student is an active member of, loaded in parallel with the
@@ -431,6 +487,9 @@
             //    <GuardiansTab>). The list is used by the StudentGuardiansList
             //    below the title row.
             await LoadGuardiansAsync(ct);
+
+            // 3b. Contact change history for this student.
+            await LoadContactHistoryAsync(ct);
 
             // 4. Activity Groups the student is an active member of (spec
             //    §3.6 FR-28). Loaded alongside the guardians list; the section
@@ -779,6 +838,50 @@
 
     private string? ResolveSalutation(Guid? id)
         => id is { } g && _salutations.TryGetValue(g, out var n) ? n : null;
+
+    // ── Contact history ────────────────────────────────────────────────
+
+    private async Task LoadContactHistoryAsync(CancellationToken ct)
+    {
+        _contactHistoryLoading = true;
+        _contactHistoryError = null;
+        try
+        {
+            var entries = await Api.ListContactAuditEntriesAsync(
+                ownerType: ContactOwnerType.Student,
+                ownerId: Id,
+                ct: ct) ?? [];
+            _contactHistory = entries;
+        }
+        catch (OperationCanceledException)
+        {
+            // Expected on navigation away.
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load contact history for student {StudentId}", Id);
+            _contactHistoryError = ex.Message;
+        }
+        finally
+        {
+            _contactHistoryLoading = false;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private static Appearance ChangeKindBadgeAppearance(string changeKind)
+        => changeKind == "Deleted" ? Appearance.Accent : Appearance.Neutral;
+
+    private static string FormatHistoryValue(string? channel, string? value, string? countryCode)
+    {
+        if (string.IsNullOrWhiteSpace(channel) || string.IsNullOrWhiteSpace(value))
+            return "—";
+        var prefix = channel == ContactChannel.SMS.ToString() || channel == ContactChannel.WhatsApp.ToString()
+            ? (string.IsNullOrWhiteSpace(countryCode) ? null : countryCode)
+            : null;
+        return prefix is null ? value : $"{prefix} {value}";
+    }
 
     // ── Activity Groups actions (spec §3.6 FR-28..32) ────────────────────
 

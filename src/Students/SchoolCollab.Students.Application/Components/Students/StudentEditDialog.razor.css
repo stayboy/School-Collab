@@ -8,3 +8,16 @@
     justify-content: center;
     padding: 3rem 0;
 }
+
+/* ── Dialog-content root ──
+   The wrapper inside .fluent-dialog-body that is the positioned ancestor
+   (position: relative; height: 100%) for the shared <DialogDrawer>. The
+   .fluent-dialog-body element is the 1fr grid row of the FluentDialog's
+   internal grid, so it has a definite height; this wrapper fills that
+   height exactly. The DialogDrawer is then position: absolute; inset: 0
+   inside this wrapper, so it fills the dialog body content area between
+   the title bar and the actions bar without overlapping either. */
+.student-edit-dialog-root {
+    position: relative;
+    height: 100%;
+}

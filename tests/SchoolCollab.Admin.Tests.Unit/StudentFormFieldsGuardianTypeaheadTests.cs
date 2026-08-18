@@ -19,19 +19,19 @@ public class StudentFormFieldsGuardianTypeaheadTests
     [TestMethod]
     public void WardLabel_Null_EmDash()
     {
-        StudentFormFields.WardLabel(null).Should().Be("—");
+        GuardianSection.WardLabel(null).Should().Be("—");
     }
 
     [TestMethod]
     public void WardLabel_One_Singular()
     {
-        StudentFormFields.WardLabel(1).Should().Be("+1 ward");
+        GuardianSection.WardLabel(1).Should().Be("+1 ward");
     }
 
     [TestMethod]
     public void WardLabel_Three_Plural()
     {
-        StudentFormFields.WardLabel(3).Should().Be("+3 wards");
+        GuardianSection.WardLabel(3).Should().Be("+3 wards");
     }
 
     [TestMethod]
@@ -39,13 +39,13 @@ public class StudentFormFieldsGuardianTypeaheadTests
     {
         // Zero is plural ("0 wards"), matching the per-ward-count format
         // the landing page uses for unenriched rows.
-        StudentFormFields.WardLabel(0).Should().Be("+0 wards");
+        GuardianSection.WardLabel(0).Should().Be("+0 wards");
     }
 
     [TestMethod]
     public void GuardianSearchRowComparer_SameId_Equal()
     {
-        var a = new StudentFormFields.GuardianSearchRow(
+        var a = new GuardianSection.GuardianSearchRow(
             Id: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             FullName: "Mr. John Smith",
             RelationshipName: null,
@@ -56,7 +56,7 @@ public class StudentFormFieldsGuardianTypeaheadTests
             RelationshipCodedValueId: null,
             MatchedStudentName: null,
             MatchedStudentNumber: null);
-        var b = new StudentFormFields.GuardianSearchRow(
+        var b = new GuardianSection.GuardianSearchRow(
             Id: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             FullName: "DIFFERENT NAME",
             RelationshipName: "DIFFERENT",
@@ -67,62 +67,62 @@ public class StudentFormFieldsGuardianTypeaheadTests
             RelationshipCodedValueId: Guid.NewGuid(),
             MatchedStudentName: "Different",
             MatchedStudentNumber: "X-1");
-        StudentFormFields.GuardianSearchRowComparer.Instance.Equals(a, b).Should().BeTrue(
+        GuardianSection.GuardianSearchRowComparer.Instance.Equals(a, b).Should().BeTrue(
             "two rows with the same Id should compare equal even when other fields differ — this is the §11.2 comparer contract that prevents FluentAutocomplete from dropping the selected row on re-search");
     }
 
     [TestMethod]
     public void GuardianSearchRowComparer_DifferentId_NotEqual()
     {
-        var a = new StudentFormFields.GuardianSearchRow(
+        var a = new GuardianSection.GuardianSearchRow(
             Id: Guid.Parse("11111111-1111-1111-1111-111111111111"),
             FullName: "Alice",
             RelationshipName: null, WardCount: null,
             FirstName: "Alice", LastName: "A",
             TitleCodedValueId: null, RelationshipCodedValueId: null,
             MatchedStudentName: null, MatchedStudentNumber: null);
-        var b = new StudentFormFields.GuardianSearchRow(
+        var b = new GuardianSection.GuardianSearchRow(
             Id: Guid.Parse("22222222-2222-2222-2222-222222222222"),
             FullName: "Alice",
             RelationshipName: null, WardCount: null,
             FirstName: "Alice", LastName: "A",
             TitleCodedValueId: null, RelationshipCodedValueId: null,
             MatchedStudentName: null, MatchedStudentNumber: null);
-        StudentFormFields.GuardianSearchRowComparer.Instance.Equals(a, b).Should().BeFalse();
+        GuardianSection.GuardianSearchRowComparer.Instance.Equals(a, b).Should().BeFalse();
     }
 
     [TestMethod]
     public void GuardianSearchRowComparer_Null_Safe()
     {
-        var a = new StudentFormFields.GuardianSearchRow(
+        var a = new GuardianSection.GuardianSearchRow(
             Id: Guid.NewGuid(), FullName: "x",
             RelationshipName: null, WardCount: null,
             FirstName: "x", LastName: "x",
             TitleCodedValueId: null, RelationshipCodedValueId: null,
             MatchedStudentName: null, MatchedStudentNumber: null);
-        StudentFormFields.GuardianSearchRowComparer.Instance.Equals(null, a).Should().BeFalse();
-        StudentFormFields.GuardianSearchRowComparer.Instance.Equals(a, null).Should().BeFalse();
-        StudentFormFields.GuardianSearchRowComparer.Instance.Equals(null, null).Should().BeTrue();
+        GuardianSection.GuardianSearchRowComparer.Instance.Equals(null, a).Should().BeFalse();
+        GuardianSection.GuardianSearchRowComparer.Instance.Equals(a, null).Should().BeFalse();
+        GuardianSection.GuardianSearchRowComparer.Instance.Equals(null, null).Should().BeTrue();
     }
 
     [TestMethod]
     public void GuardianSearchRowComparer_GetHashCode_MatchesById()
     {
         var id = Guid.NewGuid();
-        var a = new StudentFormFields.GuardianSearchRow(
+        var a = new GuardianSection.GuardianSearchRow(
             Id: id, FullName: "A",
             RelationshipName: null, WardCount: null,
             FirstName: "A", LastName: "A",
             TitleCodedValueId: null, RelationshipCodedValueId: null,
             MatchedStudentName: null, MatchedStudentNumber: null);
-        var b = new StudentFormFields.GuardianSearchRow(
+        var b = new GuardianSection.GuardianSearchRow(
             Id: id, FullName: "B",
             RelationshipName: "x", WardCount: 5,
             FirstName: "B", LastName: "B",
             TitleCodedValueId: null, RelationshipCodedValueId: null,
             MatchedStudentName: null, MatchedStudentNumber: null);
-        StudentFormFields.GuardianSearchRowComparer.Instance.GetHashCode(a)
-            .Should().Be(StudentFormFields.GuardianSearchRowComparer.Instance.GetHashCode(b));
+        GuardianSection.GuardianSearchRowComparer.Instance.GetHashCode(a)
+            .Should().Be(GuardianSection.GuardianSearchRowComparer.Instance.GetHashCode(b));
     }
 
     [TestMethod]
@@ -133,7 +133,7 @@ public class StudentFormFieldsGuardianTypeaheadTests
         // use random v4 Guids, so the sentinel (also a random v4) could
         // collide in theory — but the test pins the EXACT value so a
         // regression that changes the sentinel would fail loudly.
-        var sentinel = StudentFormFields.ExistingGuardianSentinel;
+        var sentinel = GuardianSection.ExistingGuardianSentinel;
         sentinel.Should().NotBe(Guid.Empty);
         sentinel.ToString().Should().Be("e1a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c");
     }
@@ -145,7 +145,7 @@ public class StudentFormFieldsGuardianTypeaheadTests
         // enum only needs those two values — a separate Divider kind was
         // removed when the divider became a visual underline inside the
         // sentinel's option template (no longer a list row).
-        var names = System.Enum.GetNames<StudentFormFields.RelationshipOptionKind>();
+        var names = System.Enum.GetNames<GuardianSection.RelationshipOptionKind>();
         names.Should().Contain("Relationship");
         names.Should().Contain("Sentinel");
         names.Should().NotContain("Divider");
@@ -159,7 +159,7 @@ public class StudentFormFieldsGuardianTypeaheadTests
         var id = Guid.NewGuid();
         var title = Guid.NewGuid();
         var rel = Guid.NewGuid();
-        var row = new StudentFormFields.GuardianSearchRow(
+        var row = new GuardianSection.GuardianSearchRow(
             Id: id,
             FullName: "Mr. John Smith (Father)",
             RelationshipName: "Father",
