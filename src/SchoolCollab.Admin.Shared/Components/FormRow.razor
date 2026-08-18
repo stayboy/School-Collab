@@ -3,7 +3,9 @@
     any form (create / edit / wizard step / dialog) that needs a horizontal
     label + input row.
 
-    THE PATTERN (School-Collab form layout convention, v4.14.2):
+    THE PATTERNS (School-Collab form layout convention, v4.14.2):
+
+    HORIZONTAL (default — <FormRow Orientation="Horizontal">):
 
       ┌─ .form-row (display: flex, align-items: center, gap: 12px) ─────┐
       │ ┌─ .form-row-label (width: 180px, flex-shrink: 0) ──┐ ┌─ input ┐ │
@@ -13,16 +15,37 @@
         all labels: 180px      all input cells start at the SAME x
                                (label width + gap is a constant)
 
-    Why this shape:
-      - The LABEL column is the CONSTANT (fixed 180px on every row), so
-        every label in a form has identical width and reads as a single
-        uniform block down the form.
-      - The INPUT column is the VARIABLE (flex:1; min-width:0), so every
-        input cell takes the remaining width and every input's left edge
-        lands on the same vertical axis — inputs align down the form even
-        when their individual intrinsic widths differ.
-      - align-items: center keeps the label text on the same line as the
-        input control; a wrapping label still centers its first line.
+    VERTICAL (<FormRow Orientation="Vertical">):
+
+      ┌─ .form-row (display: flex, flex-direction: column, gap: 4px) ──┐
+      │ ┌─ .form-row-label (width: 100%) ──────────────────────────────┐ │
+      │ │ "Contact email *" (TOP, full width)                            │ │
+      │ └───────────────────────────────────────────────────────────────┘ │
+      │ ┌─ .form-row-input (width: 100%) ─────────────────────────────┐  │
+      │ │  input cell                                                  │  │
+      │ └─────────────────────────────────────────────────────────────┘  │
+      └──────────────────────────────────────────────────────────────────┘
+
+    Why two orientations:
+      - Horizontal is the canonical layout. The LABEL column is the CONSTANT
+        (fixed 180px on every row), so every label in a form has identical
+        width and reads as a single uniform block down the form. The INPUT
+        column is the VARIABLE (flex:1; min-width:0), so every input cell
+        takes the remaining width and every input's left edge lands on the
+        same vertical axis — inputs align down the form even when their
+        individual intrinsic widths differ.
+      - Vertical is for narrow surfaces (side drawers, mobile, etc.) where
+        the 180px horizontal column would consume too much of the row. The
+        label moves above its input cell, full width, and the input cell
+        drops to a new line. Use explicitly via Orientation="Vertical" —
+        do NOT rely on the responsive `@media (max-width: 720px)` fallback
+        to "happen to" stack the row (that's only for genuine phone widths;
+        a 420px drawer hosted in a desktop browser is below the viewport
+        breakpoint and would unhelpfully inherit the stacked layout too).
+      - align-items: center (default) keeps the label text on the same
+        line as the input control on a horizontal row; a wrapping label
+        still centers its first line. For vertical orientation this is
+        moot (label sits on its own line above).
       - Plain <div> wrappers (not FluentStack) are intentional: they are
         the lightest layout primitive, keep CSS-isolation scope clean
         (the wrapper divs are authored here, so they receive THIS
@@ -37,6 +60,9 @@
                 <FluentDatePicker Id="periodStart" @bind-Value="..." />
                 <FluentDatePicker Id="periodEnd"   @bind-Value="..." />
             </FormRow>
+            <FormRow Label="Email" Orientation="Vertical" Required>
+                <FluentTextField ... />
+            </FormRow>
         </EditForm>
 
     Parameters:
@@ -47,14 +73,20 @@
                     rendered, just not clickable-to-focus).
       - LabelTip    optional, surfaces as a native title= tooltip on the label.
       - AlignTop    optional, top-aligns the row instead of centering. Use
-                    for multi-input rows (e.g. two date pickers stacked in
-                    the input cell) where centering the label against a
-                    tall cell looks off. Default false (center, the modern
-                    default for single-input rows).
+                    for multi-input horizontal rows (e.g. two date pickers
+                    side-by-side) where centering the label against a tall
+                    cell looks off. Default false (center, the modern
+                    default for single-input rows). No effect on Vertical.
+      - Orientation optional, picks Horizontal (label left + input right,
+                    the canonical repo layout) or Vertical (label top +
+                    input below). Default Horizontal. Use Vertical for
+                    narrow containers (side drawers, stacked mobile
+                    layouts) where the 180px horizontal column would
+                    consume too much of the row.
       - ChildContent (required) the input(s) for the row.
 *@
 
-<div class="form-row @(AlignTop ? "form-row--align-top" : null)">
+<div class="form-row form-row--@(Orientation.ToString().ToLowerInvariant()) @(AlignTop ? "form-row--align-top" : null)">
     <div class="form-row-label">
         <label for="@For" title="@LabelTip">@Label @if (Required) { <span class="form-row-required" aria-hidden="true">*</span> }</label>
     </div>
@@ -77,11 +109,22 @@
     [Parameter] public string? LabelTip { get; set; }
 
     /// <summary>
-    /// Top-align the row instead of centering. Use for multi-input rows
-    /// (e.g. two date pickers side-by-side) where centering the label
-    /// against a tall input cell looks off. Default false.
+    /// Top-align the row instead of centering. Use for multi-input horizontal
+    /// rows (e.g. two date pickers side-by-side) where centering the label
+    /// against a tall cell looks off. Default false (center, the modern
+    /// default for single-input rows). No effect when Orientation is Vertical.
     /// </summary>
     [Parameter] public bool AlignTop { get; set; }
+
+    /// <summary>
+    /// Row orientation. <see cref="RowOrientation.Horizontal"/> (default)
+    /// renders the label on the left in the canonical 180px column with
+    /// the input cell to its right. <see cref="RowOrientation.Vertical"/>
+    /// stacks the label on top of the input cell, full width — use for
+    /// narrow surfaces (side drawers, stacked mobile layouts) where the
+    /// 180px horizontal column would consume too much of the row.
+    /// </summary>
+    [Parameter] public RowOrientation Orientation { get; set; } = RowOrientation.Horizontal;
 
     /// <summary>The input(s) for the row. Required.</summary>
     [Parameter, EditorRequired] public RenderFragment ChildContent { get; set; } = default!;

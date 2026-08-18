@@ -129,23 +129,36 @@
             </FormRow>
         </div>
 
-        @* Contacts + Guardians sections. Both sections stay visible at all
-           times. When a child component starts editing it raises IsEditingChanged(true);
-           the parent dims the profile fields and disables the dialog action row
-           so the operator focuses on the embedded SideDrawer, but neither section
-           is hidden. *@
+        @* Contacts + Guardians sections. When SectionsReadonly (the student-edit
+           dialog), each renders as a per-card summary with Edit/Delete + "Add"
+           anchors; clicking Edit/Add raises the host callbacks that open the
+           side drawer (which hosts the same editor in View="Edit"). The host
+           disables the profile fields and the dialog action row via
+           ProfileFieldsDisabled while a drawer is open, and the per-card
+           triggers receive EditDisabled so only one item is edited at a time. *@
         @if (ShowContacts)
         {
             <div class="student-form-fields__section-row">
                 <FluentDivider class="student-form-fields__section-divider" Orientation="Orientation.Horizontal" Style="width:100%" />
                 <FormRow Label="Contacts">
                     <div class="student-contacts">
-                        <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                        OwnerType="ContactOwnerType.Student"
-                                        Contacts="Model.Contacts"
-                                        ContactsChanged="OnDraftContactsChanged"
-                                        IsEditingChanged="OnContactsEditingChanged"
-                                        SectionEditContextChanged="OnContactsEditContextChanged" />
+                        @if (SectionsReadonly)
+                        {
+                            <ContactsEditor View="ContactsEditor.ContactsView.Readonly"
+                                            Mode="ContactsEditor.EditorMode.Buffered"
+                                            OwnerType="ContactOwnerType.Student"
+                                            Contacts="Model.Contacts"
+                                            EditDisabled="AreProfileFieldsDisabled"
+                                            OnEditContact="OnEditContact"
+                                            OnAddContact="OnAddContact" />
+                        }
+                        else
+                        {
+                            <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
+                                            OwnerType="ContactOwnerType.Student"
+                                            Contacts="Model.Contacts"
+                                            ContactsChanged="OnDraftContactsChanged" />
+                        }
                     </div>
                 </FormRow>
             </div>
@@ -156,14 +169,24 @@
                 <FluentDivider class="student-form-fields__section-divider" Orientation="Orientation.Horizontal" Style="width:100%" />
                 <FormRow Label="Guardians">
                     <div class="student-guardians-wrap">
-                        <GuardianSection GuardianLinks="Model.GuardianLinks"
-                                         Mode="Mode"
-                                         StudentId="StudentId"
-                                         LinkedItems="LinkedItems"
-                                         OnManageGuardians="OnManageGuardians"
-                                         OnRemoveGuardian="OnRemoveGuardian"
-                                         IsEditingChanged="OnGuardiansEditingChanged"
-                                         SectionEditContextChanged="OnGuardiansEditContextChanged" />
+                        @if (SectionsReadonly)
+                        {
+                            <GuardianSection View="GuardianSection.GuardianView.Readonly"
+                                             GuardianLinks="Model.GuardianLinks"
+                                             Mode="Mode"
+                                             EditDisabled="AreProfileFieldsDisabled"
+                                             OnEditGuardian="OnEditGuardian"
+                                             OnAddGuardian="OnAddGuardian" />
+                        }
+                        else
+                        {
+                            <GuardianSection GuardianLinks="Model.GuardianLinks"
+                                             Mode="Mode"
+                                             StudentId="StudentId"
+                                             LinkedItems="LinkedItems"
+                                             OnManageGuardians="OnManageGuardians"
+                                             OnRemoveGuardian="OnRemoveGuardian" />
+                        }
                     </div>
                 </FormRow>
             </div>
@@ -342,49 +365,27 @@
     /// <summary>Error message to surface above the action row. Optional.</summary>
     [Parameter] public string? ErrorMessage { get; set; }
 
-    // ── Focused section-edit UX ──────────────────────────────────────────────
-    // When EnableSectionEdit is true the form uses the focused section-edit
-    // UX: the child components (ContactsEditor / GuardianSection) raise their
-    // existing edit/remove affordances and report editing-state changes back
-    // to this form via IsEditingChanged. While a section reports that it is
-    // editing, the OTHER section is hidden, the profile fields are disabled,
-    // and the dialog action row is disabled. The section's own Cancel/Save
-    // buttons remain usable. Opt-in so existing callers (Create.razor,
-    // Edit.razor, the wizard) keep the always-editable form.
+    // Focused section-edit UX (Readonly summaries + shared drawer)
+    // When SectionsReadonly is true the form renders display-only Contacts /
+    // Guardians summaries with a Manage button that asks the host to open the
+    // side drawer (which hosts the same editor in View="Edit"). The host drives
+    // ProfileFieldsDisabled from "a section drawer is open" so the profile
+    // fields and the dialog action row are disabled while editing a section.
 
-    /// <summary>Which section of the student form is in focused edit mode.</summary>
-    public enum StudentEditSection { None, Contacts, Guardians }
+    /// <summary>When true, renders the Contacts / Guardians sections as Readonly
+    /// summaries with per-card Edit/Delete + an "Add" FluentAnchor (student-
+    /// edit-dialog UX). Default false - existing callers (Create.razor,
+    /// Edit.razor, the wizard) keep the full always-editable editors.</summary>
+    [Parameter] public bool SectionsReadonly { get; set; }
 
-    /// <summary>When true, the form uses the focused section-edit UX described
-    /// above. Default false — existing callers render the always-editable form.</summary>
-    [Parameter] public bool EnableSectionEdit { get; set; }
+    /// <summary>External "an edit is in progress" signal. When true, the profile
+    /// fields and the dialog action row are disabled. Set by the host from
+    /// "a section drawer is open" (replaces the old ActiveEditSection path).</summary>
+    [Parameter] public bool ProfileFieldsDisabled { get; set; }
 
-    /// <summary>Which section, if any, is in focused edit mode. Only meaningful
-    /// when <see cref="EnableSectionEdit"/> is true. The parent owns this state
-    /// and binds it two-way via <see cref="ActiveEditSectionChanged"/>.</summary>
-    [Parameter] public StudentEditSection ActiveEditSection { get; set; } = StudentEditSection.None;
-
-    /// <summary>Two-way binding callback for <see cref="ActiveEditSection"/>.
-    /// Fired when a child section starts or stops editing so the parent can
-    /// switch the form in and out of the focused section-edit UX.</summary>
-    [Parameter] public EventCallback<StudentEditSection> ActiveEditSectionChanged { get; set; }
-
-    /// <summary>The edit context (title + content fragment + submit / cancel
-    /// callbacks) published by the active child section when a contact or
-    /// guardian edit begins, or <c>null</c> when the edit ends. The host
-    /// (typically <c>StudentEditDialog</c>) renders this inside the shared
-    /// <c>DialogDrawer</c>.</summary>
-    [Parameter] public SectionEditContext? SectionEditContent { get; set; }
-
-    /// <summary>Two-way binding callback for <see cref="SectionEditContent"/>.
-    /// Fired with the child's published context when an edit begins and
-    /// with <c>null</c> when it ends. The host forwards the context to the
-    /// dialog, which renders it inside the shared <c>DialogDrawer</c>.</summary>
-    [Parameter] public EventCallback<SectionEditContext?> SectionEditContentChanged { get; set; }
-
-    /// <summary>True while a section edit is active — disables the profile fields
+    /// <summary>True while a section edit is active - disables the profile fields
     /// and the dialog action row while the shared <c>DialogDrawer</c> is open.</summary>
-    private bool AreProfileFieldsDisabled => EnableSectionEdit && ActiveEditSection != StudentEditSection.None;
+    private bool AreProfileFieldsDisabled => ProfileFieldsDisabled;
 
     /// <summary>Class applied to every profile FormRow. Adds a disabled modifier
     /// while a section edit is active so the row dims and ignores pointer events.</summary>
@@ -392,26 +393,27 @@
         ? "student-form-fields__profile-row student-form-fields__profile-row--disabled"
         : "student-form-fields__profile-row";
 
-    private async Task OnContactsEditingChanged(bool isEditing)
-        => await ActiveEditSectionChanged.InvokeAsync(isEditing ? StudentEditSection.Contacts : StudentEditSection.None);
+    /// <summary>Fired when the operator clicks a per-card "Edit" button on the
+    /// Readonly contacts summary. The host opens the side drawer hosting
+    /// <ContactsEditor View="Edit" InitialEditKey="..." />. The argument is
+    /// the contact's key (stable across re-renders).</summary>
+    [Parameter] public EventCallback<Guid> OnEditContact { get; set; }
 
-    private async Task OnGuardiansEditingChanged(bool isEditing)
-        => await ActiveEditSectionChanged.InvokeAsync(isEditing ? StudentEditSection.Guardians : StudentEditSection.None);
+    /// <summary>Fired when the operator clicks the "Add contact" anchor on the
+    /// Readonly contacts summary. The host opens the side drawer hosting
+    /// <ContactsEditor View="Edit" IsAdd="true" />.</summary>
+    [Parameter] public EventCallback OnAddContact { get; set; }
 
-    // ── Section edit context publish-up ──
-    // ContactsEditor / GuardianSection push their edit context up here when
-    // they begin / end a Buffered edit. We forward it to the host (the
-    // StudentEditDialog) which renders it inside the shared DialogDrawer.
+    /// <summary>Fired when the operator clicks a per-card "Edit" button on the
+    /// Readonly guardians summary. The host opens the side drawer hosting
+    /// <GuardianSection View="Edit" InitialEditIndex="..." />. The argument is
+    /// the guardian's index in <see cref="GuardianAssignment"/> list.</summary>
+    [Parameter] public EventCallback<int> OnEditGuardian { get; set; }
 
-    /// <summary>Forwards the ContactsEditor's edit context up to the
-    /// host. The dialog renders it inside the shared <c>DialogDrawer</c>.</summary>
-    private Task OnContactsEditContextChanged(SectionEditContext? ctx)
-        => SectionEditContentChanged.InvokeAsync(ctx);
-
-    /// <summary>Forwards the GuardianSection's edit context up to the
-    /// host. The dialog renders it inside the shared <c>DialogDrawer</c>.</summary>
-    private Task OnGuardiansEditContextChanged(SectionEditContext? ctx)
-        => SectionEditContentChanged.InvokeAsync(ctx);
+    /// <summary>Fired when the operator clicks the "Add guardian" anchor on the
+    /// Readonly guardians summary. The host opens the side drawer hosting
+    /// <GuardianSection View="Edit" IsAdd="true" />.</summary>
+    [Parameter] public EventCallback OnAddGuardian { get; set; }
 
     // ── DOB bridge: Model.DateOfBirth is DateOnly? but
     //    FluentDatePicker.Value is DateTime?. Convert on the way in
