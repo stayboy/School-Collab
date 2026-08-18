@@ -63,6 +63,18 @@
     flex: 0 0 auto;
 }
 
+/* Sidebar convention: the close button lives on the side of the header
+   that's CLOSEST to the main form (the panel's inside-facing edge), so
+   it reads as "the sidebar ships from here, close it to return" rather
+   than "the sidebar has its own header chrome". For a right-anchored
+   panel the inside edge is the LEFT edge of the header, so the children
+   render in reverse order (close first, title last). For a left-anchored
+   panel the inside edge is the RIGHT edge, so the children render in
+   the default order (title first, close last). */
+.dialog-drawer-panel--right .dialog-drawer-header {
+    flex-direction: row-reverse;
+}
+
 .dialog-drawer-title {
     margin: 0;
     font-size: 1rem;

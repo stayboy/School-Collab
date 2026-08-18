@@ -2,39 +2,64 @@
    School-Collab form layout convention (FluentUI Blazor v4.14.2).
    See FormRow.razor for the full pattern description.
 
-   The .form-row wrapper is a plain <div> with display:flex, gap:12px,
-   and align-items:center. The label cell (.form-row-label) is a FIXED
-   180px column with flex-shrink:0 so every label in every row has the
-   same width; the input cell (.form-row-input) takes the remaining
-   width (flex:1; min-width:0) so every input cell starts at the same
-   x — all input left edges land on the same vertical axis.
+   Two explicit layouts, chosen by the Orientation parameter on
+   <FormRow> — the markup always renders BOTH a base .form-row class
+   AND a .form-row--horizontal or .form-row--vertical modifier:
 
-   Vertical alignment is centered by default; .form-row--align-top
-   top-aligns for multi-input rows where centering looks off. */
+     • .form-row--horizontal (default) — the canonical label-left +
+       input-right row. LABEL column is a FIXED 180px (flex-shrink:0)
+       so every label in every row has the same width; INPUT column
+       is the VARIABLE (flex:1; min-width:0) so every input cell
+       starts at the same x — all input left edges land on the same
+       vertical axis.
 
-/* ── Row wrapper ── */
+     • .form-row--vertical — label on top, input cell below, both
+       full-width. Explicit opt-in for narrow surfaces (side drawers,
+       stacked mobile layouts) where the 180px column would eat the
+       row. Callers opt in via <FormRow Orientation="Vertical">.
+
+   Prior to v4.14.2 the row auto-stacked via a @media (max-width:
+   720px) breakpoint, which silently kicked in for any narrow
+   viewport — including a 420px side drawer inside a wide desktop
+   browser. Orientation is now the only way to get a vertical row,
+   so the layout is the caller's explicit choice rather than a
+   viewport side-effect.
+
+   Vertical alignment within a row is centered by default;
+   .form-row--align-top top-aligns for multi-input horizontal rows
+   where centering looks off (no effect on Vertical). */
+
+/* ── Row wrapper (shared) ── */
 .form-row {
     display: flex;
     align-items: center;
-    gap: 12px;
     /* No min-height here — the input cell's tallest child defines the
        row height, and the label cell stretches to match (align-items
        center positions the label text within that height). */
+}
+
+/* HORIZONTAL orientation (default). Label-left + input-right
+   canonical layout. gap:12px is the horizontal row's column gap. */
+.form-row--horizontal {
+    flex-direction: row;
+    gap: 12px;
+}
+
+/* VERTICAL orientation (opt-in). Label-on-top + input-below.
+   gap:4px keeps the label visually attached to its own input cell
+   rather than floating into a generic "form spacing" rhythm. */
+.form-row--vertical {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
 }
 
 .form-row--align-top {
     align-items: start;
 }
 
-/* ── Label cell (LEFT column — the CONSTANT) ──
-   width: 180px is the canonical repo-wide label width. It fits the
-   longest label in the admin forms ("Contact email", "Date of birth",
-   "Student number") without wrapping. flex-shrink:0 keeps the column
-   at exactly 180px regardless of label text length, so the label
-   column reads as a single uniform block down the form. */
+/* ── Label cell ── */
 .form-row-label {
-    width: 180px;
-    flex-shrink: 0;
     display: flex;
     align-items: center;
     min-height: 32px;
@@ -48,10 +73,31 @@
     hyphens: auto;
 }
 
-.form-row--align-top .form-row-label {
-    /* Top-align the label text against multi-input cells so the label's
-       first line sits at the top of the row rather than floating in
-       the vertical middle. */
+/* HORIZONTAL — label cell is the FIXED 180px column. width: 180px is
+   the canonical repo-wide label width. It fits the longest label in
+   the admin forms ("Contact email", "Date of birth", "Student
+   number") without wrapping. flex-shrink:0 keeps the column at
+   exactly 180px regardless of label text length, so the label column
+   reads as a single uniform block down the form. */
+.form-row--horizontal .form-row-label {
+    width: 180px;
+    flex-shrink: 0;
+}
+
+/* VERTICAL — label cell is full width and sits above its input cell.
+   No fixed width, no flex-shrink trickery — the column simply
+   matches the row width. */
+.form-row--vertical .form-row-label {
+    width: 100%;
+    flex-shrink: 0;
+    min-height: 0;
+}
+
+/* Top-align the label text against multi-input horizontal cells so
+   the label's first line sits at the top of the row rather than
+   floating in the vertical middle. On Vertical this is moot
+   (label sits on its own line above its input). */
+.form-row--horizontal.form-row--align-top .form-row-label {
     padding-top: 0.4rem;
     align-items: start;
 }
@@ -65,11 +111,7 @@
     margin-left: 2px;
 }
 
-/* ── Input cell (RIGHT column — the VARIABLE) ──
-   flex:1 takes ALL remaining width after the 180px label; min-width:0
-   is the standard flex/grid gotcha fix that lets children shrink below
-   their intrinsic content width (so a long email value can scroll
-   instead of pushing the column wider). */
+/* ── Input cell ── */
 .form-row-input {
     flex: 1;
     min-width: 0;
@@ -77,27 +119,6 @@
     align-items: center;
     gap: 8px;
     /* Allow the input cell to wrap to a new line on very narrow
-       viewports (e.g. <480px) instead of clipping. */
+       containers (e.g. <480px) instead of clipping. */
     flex-wrap: wrap;
-}
-
-/* Narrow-viewport fallback: stack the label above the input cell so the
-   fixed 180px column doesn't eat the screen on phones. Triggers under
-   720px (tablet portrait and below). */
-@media (max-width: 720px) {
-    .form-row {
-        flex-direction: column;
-        align-items: stretch;
-        gap: 4px;
-    }
-
-    .form-row-label {
-        width: 100%;
-        flex-shrink: 0;
-        min-height: 0;
-    }
-
-    .form-row--align-top .form-row-label {
-        padding-top: 0;
-    }
 }

@@ -287,3 +287,37 @@
     padding-left: 0;
     margin-top: 2px;
 }
+
+/* ── Readonly (display-only) presentation ───────────────────────────────
+   Shown on the dialog main content while editing happens in the side
+   drawer. Per-card Edit + Delete buttons are the entry points into the
+   drawer (the Readonly branch renders its own .guardian-card-actions
+   markup); they stay visible here. The Full-view .guardian-add-row and
+   its per-row .guardian-card-actions are not rendered in Readonly mode
+   at all (the if/else-if/else chain gates the markup by View), so no
+   suppression rule is needed — the previous "display: none" rule was
+   stale and was incorrectly hiding the Readonly view's per-card
+   Edit/Delete buttons. */
+
+/* ── Inline per-guardian edit panel ─────────────────────────────────────
+   Rendered inside the Edit view (or the drawer hosting the whole section)
+   as plain Razor markup. Overlays the card list while an edit is in
+   progress. */
+.guardian-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 0.75rem;
+    border: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+    border-radius: 6px;
+    background: var(--neutral-layer-2, #fafafa);
+}
+
+.guardian-edit-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 0.25rem;
+}
+

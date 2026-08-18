@@ -124,3 +124,52 @@
     border-color: var(--accent-fill-rest, #0078d4);
     background: var(--accent-fill-rest-area, #e6f2fa);
 }
+
+/* Readonly (display-only) presentation. The list is just an info summary:
+   no add row, no action buttons, no surface chrome. */
+.contacts-editor--readonly .contacts-editor-loading {
+    justify-content: flex-start;
+}
+
+/* Inline per-row edit form (Buffered). Rendered inside the Edit view (or the
+   drawer that hosts the whole editor) as plain Razor markup. Reuses the
+   add-row flex layout primitives for the channel/code/value/label row. */
+.contacts-inline-edit {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
+    border-radius: 6px;
+    background: var(--neutral-layer-1, #fafafa);
+}
+
+.contacts-inline-edit .contacts-editor-add__identity,
+.contacts-inline-edit .contacts-editor-add__value {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Focused Edit-view form rendered inside the 420px side drawer that the
+   student-edit-dialog hosts. Fields are stacked vertically via <FormRow>
+   (label on top, input below) — FormRow's <720px media query already flips
+   its flex-direction to column, so the 420px drawer always sees the
+   stacked layout. Each FormRow carries the repo-canonical 8px row gap
+   (.contacts-editor's gap:12px applies to the whole editor, but inside
+   the form we want a tighter cadence since the rows are short). */
+.contacts-edit-form {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+/* Action row at the bottom of the form: just the Save / Add button. The
+   drawer's footer Close button is the Cancel affordance, so no inline
+   Cancel here. Right-align to mirror how DialogDrawer lays out its own
+   footer actions. */
+.contacts-edit-form__actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 4px;
+}

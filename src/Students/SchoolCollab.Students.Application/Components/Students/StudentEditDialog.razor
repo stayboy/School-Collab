@@ -55,31 +55,43 @@ else
                        SubmittingLabel="Saving…"
                        Submitting="@_saving"
                        OnCancel="CancelAsync"
-                       EnableSectionEdit="true"
-                       ActiveEditSection="@_activeEditSection"
-                       ActiveEditSectionChanged="OnActiveEditSectionChanged"
-                       SectionEditContent="@_sectionEditContent"
-                       SectionEditContentChanged="OnSectionEditContentChanged" />
+                       SectionsReadonly="true"
+                       ProfileFieldsDisabled="@(_editor != ActiveEditor.None)"
+                       OnEditContact="OpenEditContactAsync"
+                       OnAddContact="OpenAddContactAsync"
+                       OnEditGuardian="OpenEditGuardianAsync"
+                       OnAddGuardian="OpenAddGuardianAsync" />
 
-    @* Shared dialog-content drawer. Hosted by the dialog, not by the
-       sections: the sections publish their edit context up via
-       SectionEditContextChanged, the form forwards it here, and the
-       drawer renders the active section's edit form. Anchors to the
-       right (default). Opens whenever a section is editing (Contacts or
-       Guardians). *@
-    <DialogDrawer Open="@(_activeEditSection != StudentFormFields.StudentEditSection.None && _sectionEditContent is not null)"
+    @* Shared dialog-content drawer. Hosted by the dialog: it slides in over
+       the dialog body whenever a section editor is open, hosting a focused
+       per-item edit form for the selected contact / guardian (View="Edit" with
+       InitialEditKey / InitialEditIndex / IsAdd). Save/Cancel mutate the shared
+       in-memory lists so the Readonly summary behind it stays in sync. *@
+    <DialogDrawer Open="@(_editor != ActiveEditor.None)"
                   OpenChanged="OnDrawerOpenChangedAsync"
-                  Title="@_sectionEditContent?.Title"
+                  Title="@GetDrawerTitle()"
                   Side="DialogDrawerSide.Right"
                   Width="420px"
                   ShowCancel="true"
-                  CancelText="Cancel"
-                  ShowSubmit="true"
-                  SubmitText="Save"
-                  OnSubmitAsync="OnDrawerSubmitAsync">
-        @if (_sectionEditContent is { } ctx)
+                  CancelText="Close">
+        @if (_editor == ActiveEditor.Contacts)
         {
-            @ctx.Content
+            <ContactsEditor View="ContactsEditor.ContactsView.Edit"
+                            Mode="ContactsEditor.EditorMode.Buffered"
+                            OwnerType="ContactOwnerType.Student"
+                            Contacts="_model.Contacts"
+                            IsAdd="@_isAdd"
+                            InitialEditKey="@_editingContactKey"
+                            ContactsChanged="OnDraftContactsChanged" />
+        }
+        else if (_editor == ActiveEditor.Guardians)
+        {
+            <GuardianSection View="GuardianSection.GuardianView.Edit"
+                             GuardianLinks="_model.GuardianLinks"
+                             Mode="StudentFormFieldsMode.Inline"
+                             StudentId="StudentId"
+                             IsAdd="@_isAdd"
+                             InitialEditIndex="@_editingGuardianIndex" />
         }
     </DialogDrawer>
 }
@@ -119,12 +131,23 @@ else
     // that it is editing, the form hides the other section, disables the
     // profile fields, and disables the dialog's Save/Cancel. The sections'
     // own Cancel/Save buttons remain usable.
-    private StudentFormFields.StudentEditSection _activeEditSection = StudentFormFields.StudentEditSection.None;
+    /// <summary>Which section editor, if any, is open in the shared drawer.
+    /// The dialog owns this switch; the sections never report their edit state
+    /// up to the host. While a drawer is open the dialog disables the profile
+    /// fields + action row (via ProfileFieldsDisabled) and the sibling trigger.</summary>
+    private ActiveEditor _editor = ActiveEditor.None;
 
-    /// <summary>The edit context published by the active child section. The
-    /// dialog renders this inside the shared <DialogDrawer>; the section
-    /// owns the edit fields + working copy via the fragment's closure.</summary>
-    private SectionEditContext? _sectionEditContent;
+    private enum ActiveEditor { None, Contacts, Guardians }
+
+    // Focused per-item edit state. The dialog owns the "what's open" pointer;
+    // the section editors (Contacts / Guardians) read it via their InitialEdit*
+    // parameters and re-initialize their working copy on every parameter set.
+    // _isAdd = true → blank focused form (Add); _isAdd = false → focused edit
+    // for the selected existing item. _editingGuardianIndex follows
+    // GuardianSection's "no target" convention of -1.
+    private Guid? _editingContactKey;
+    private int _editingGuardianIndex = -1;
+    private bool _isAdd;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -159,10 +182,10 @@ else
     private async Task OnSaveAsync()
     {
         if (_saving) return;
-        // Safety guard: never persist while a section edit is active. The
+        // Safety guard: never persist while a section drawer is open. The
         // dialog's Save button is disabled during a section edit, but this
         // also covers an Enter-key form submit that bypasses the button.
-        if (_activeEditSection != StudentFormFields.StudentEditSection.None) return;
+        if (_editor != ActiveEditor.None) return;
         _saving = true;
         _error = null;
         try
@@ -197,79 +220,83 @@ else
 
     private Task CancelAsync() => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
 
-    // ── Focused section-edit handler ──
-    /// <summary>Fired when a child section starts or stops editing.
-    /// Simply mirrors the new section state into the dialog field so the
-    /// form hides the other section and disables the profile/actions.</summary>
-    private Task OnActiveEditSectionChanged(StudentFormFields.StudentEditSection section)
+    // --- Section-editor open/close orchestration ---
+
+    /// <summary>Opens the Contacts focused edit form for the given contact in
+    /// the shared drawer. Fired by the per-card "Edit" button on the Readonly
+    /// contacts summary.</summary>
+    private Task OpenEditContactAsync(Guid key)
     {
-        _activeEditSection = section;
+        _editor = ActiveEditor.Contacts;
+        _isAdd = false;
+        _editingContactKey = key;
         return Task.CompletedTask;
     }
 
-    // ── Drawer orchestration ──
-    /// <summary>Forwards the child section's published edit context to the
-    /// local field. If a different section was already editing (e.g. the
-    /// user clicks Edit on a contact while a guardian edit drawer is open),
-    /// the previous context's <c>Cancel</c> is invoked first so that section
-    /// tears down its working copy — otherwise its <c>_editingIndex</c> /
-    /// <c>_edit*</c> state stays half-populated and its pending edits are
-    /// silently lost when the dialog later saves.</summary>
-    private async Task OnSectionEditContentChanged(SectionEditContext? ctx)
+    /// <summary>Opens the Contacts focused add form (blank) in the shared
+    /// drawer. Fired by the "Add contact" FluentAnchor on the Readonly
+    /// contacts summary.</summary>
+    private Task OpenAddContactAsync()
     {
-        // Guard against the section-swap data-loss bug: if a NEW edit
-        // context arrives while a previous one is still set (a different
-        // section began editing without first ending the previous one),
-        // cancel the previous before adopting the new. The previous
-        // section's Cancel clears its internal state and fires
-        // IsEditingChanged(false), which resets _activeEditSection to None;
-        // the new section then sets it (via its own IsEditingChanged(true)).
-        //
-        // A SAME-SECTION re-publish (equal SectionKey) is NOT a swap: the
-        // section is re-publishing an updated fragment so the host re-renders
-        // reactive UI inside it (e.g. ContactsEditor re-publishes when the
-        // channel changes so the country-code field appears). Cancelling on
-        // a same-section re-publish would tear down the in-flight edit, so we
-        // only cancel on a genuine cross-section swap.
-        if (_sectionEditContent is { } previous && ctx is not null && previous.SectionKey != ctx.SectionKey)
-        {
-            _sectionEditContent = null;
-            await previous.Cancel();
-        }
-        _sectionEditContent = ctx;
+        _editor = ActiveEditor.Contacts;
+        _isAdd = true;
+        _editingContactKey = null;
+        return Task.CompletedTask;
     }
 
-    /// <summary>Drawer's OpenChanged handler. Cancel / × / backdrop /
-    /// Escape all arrive here. Resets the active section state and clears
-    /// the published edit context; the dialog remains open.</summary>
-    private async Task OnDrawerOpenChangedAsync(bool open)
+    /// <summary>Opens the Guardians focused edit form for the given guardian in
+    /// the shared drawer. Fired by the per-card "Edit" button on the Readonly
+    /// guardians summary. The argument is the guardian's index in
+    /// <see cref="StudentFormModel.GuardianLinks"/>.</summary>
+    private Task OpenEditGuardianAsync(int index)
     {
-        if (open) return;
-        if (_activeEditSection != StudentFormFields.StudentEditSection.None)
-        {
-            _activeEditSection = StudentFormFields.StudentEditSection.None;
-        }
-        if (_sectionEditContent is not null)
-        {
-            await _sectionEditContent.Cancel();
-            _sectionEditContent = null;
-        }
+        _editor = ActiveEditor.Guardians;
+        _isAdd = false;
+        _editingGuardianIndex = index;
+        return Task.CompletedTask;
     }
 
-    /// <summary>Drawer's Submit handler. Delegates to the section's submit
-    /// callback (which mutates the in-memory model + clears the published
-    /// context). On success the section's callback returns true and the
-    /// drawer auto-closes via the DialogDrawer's own contract; we reset
-    /// the active section state here.</summary>
-    private async Task<bool> OnDrawerSubmitAsync()
+    /// <summary>Opens the Guardians focused add form (blank) in the shared
+    /// drawer. Fired by the "Add guardian" FluentAnchor on the Readonly
+    /// guardians summary.</summary>
+    private Task OpenAddGuardianAsync()
     {
-        if (_sectionEditContent is null) return true;
-        var ok = await _sectionEditContent.Submit();
-        if (ok)
-        {
-            _activeEditSection = StudentFormFields.StudentEditSection.None;
-            _sectionEditContent = null;
-        }
-        return ok;
+        _editor = ActiveEditor.Guardians;
+        _isAdd = true;
+        _editingGuardianIndex = -1;
+        return Task.CompletedTask;
     }
+
+    /// <summary>Drawer title. Reflects which editor is open and whether this is
+    /// an add or edit of an existing item — gives the operator context inside
+    /// the drawer.</summary>
+    private string GetDrawerTitle() => _editor switch
+    {
+        ActiveEditor.Contacts => _isAdd ? "Add contact" : "Edit contact",
+        ActiveEditor.Guardians => _isAdd ? "Add guardian" : "Edit guardian",
+        _ => ""
+    };
+
+    /// <summary>Drawer OpenChanged handler. Cancel / backdrop / Escape arrive
+    /// here. Clears the active editor + focused-edit state so the drawer
+    /// closes; the dialog remains open. Re-renders so the Readonly summary
+    /// behind it reflects the latest in-memory lists and so the per-card
+    /// triggers on the summary re-enable (they're tied to _editor == None via
+    /// ProfileFieldsDisabled / EditDisabled).</summary>
+    private Task OnDrawerOpenChangedAsync(bool open)
+    {
+        if (!open)
+        {
+            _editor = ActiveEditor.None;
+            _isAdd = false;
+            _editingContactKey = null;
+            _editingGuardianIndex = -1;
+        }
+        return InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Re-render bridge for the Buffered ContactsEditor in the drawer.
+    /// The editor mutates Model.Contacts in place; this re-renders the dialog
+    /// so the Readonly contacts summary stays in sync.</summary>
+    private Task OnDraftContactsChanged() => InvokeAsync(StateHasChanged);
 }
