@@ -49,6 +49,15 @@ public class StudentFormFieldsSectionEditTests
     private static string ReadFormFieldsCssSource() => ReadSource(
         "Students/SchoolCollab.Students.Application/Components/Students/StudentFormFields.razor.css");
 
+    private static string ReadDetailSource() => ReadSource(
+        "Students/SchoolCollab.Students.Application/Components/Pages/Students/GradeLevels/Detail.razor");
+
+    private static string ReadDialogServiceExtensionsSource() => ReadSource(
+        "SchoolCollab.Admin.Shared/Components/Dialogs/DialogServiceExtensions.cs");
+
+    private static string ReadGuardianSectionCssSource() => ReadSource(
+        "Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor.css");
+
     // ---- Both editors expose View { Readonly, Edit } ----
 
     [TestMethod]
@@ -358,14 +367,24 @@ public class StudentFormFieldsSectionEditTests
     // detail page; the student-edit dialog only owns the link metadata
     // (relationship / role).
 
+    // ---- GuardianSection Edit view: compact contact manager (no nested dialog) ----
+    // The GuardianSection Edit view is hosted inside the shared DialogDrawer. It
+    // used to nest a full <ContactsEditor> (Live for existing guardians, Buffered
+    // for drafts) gated with EditDisabled="true" so the per-row Edit/Delete could
+    // not open a nested FluentDialog inside the host drawer. That is now replaced
+    // by a compact single-line contact manager (docs/plans/2026-08-18-...-
+    // contact-compact.md §4.2): Draft guardians get full inline add/edit/remove/
+    // reorder; existing guardians get a LiveReadOnly list + reorder only
+    // (add/edit/remove/verify deferred to the guardian detail page). Either way
+    // the Edit view must NOT render a nested <ContactsEditor>.
+
     [TestMethod]
     public void GuardianSection_EditView_NestedContactsEditorIsDisabled()
     {
         var source = ReadGuardianSectionSource();
 
         // Slice to the Edit-view branch (everything from the View=="Edit"
-        // opening to the next `else if`). The Edit branch is the only place
-        // that nests a ContactsEditor inside the focused form.
+        // opening to the next `else if`).
         var editStart = source.IndexOf("else if (View == GuardianView.Edit)", StringComparison.Ordinal);
         editStart.Should().BeGreaterThan(-1, "the Edit view branch exists");
         var editEnd = source.IndexOf("else if (Mode == StudentFormFieldsMode.Linked)", editStart, StringComparison.Ordinal);
@@ -373,26 +392,460 @@ public class StudentFormFieldsSectionEditTests
         var editBody = source.Substring(editStart, editEnd - editStart);
 
         // Normalize whitespace in the slice so assertions are robust against
-        // CRLF/LF drift and indent changes from automated edits.
-        var normalized = System.Text.RegularExpressions.Regex.Replace(editBody, @"\s+", " ");
+        // CRLF/LF drift and indent changes from automated edits. Strip Razor
+        // @* ... *@ comments first so defensive NotContain scans only the
+        // actual markup (the section's comments freely name the legacy
+        // <ContactsEditor> for migration context).
+        var noComments = System.Text.RegularExpressions.Regex.Replace(
+            editBody, @"@\*.*?\*@", " ", System.Text.RegularExpressions.RegexOptions.Singleline);
+        var normalized = System.Text.RegularExpressions.Regex.Replace(noComments, @"\s+", " ");
 
-        // Both branches of the nested ContactsEditor (existing-guardian Live
-        // and draft Buffered) must declare EditDisabled="true" so the per-row
-        // Edit / Delete buttons are off. A bare
-        //   <ContactsEditor OwnerType="ContactOwnerType.Guardian" OwnerId="@gid" />
-        // would re-introduce the nested-dialog breakage.
-        normalized.Should().Contain(
-            "<ContactsEditor OwnerType=\"ContactOwnerType.Guardian\" OwnerId=\"@gid\" EditDisabled=\"true\" />",
-            "the existing-guardian Live ContactsEditor nested in the Edit view must declare EditDisabled=\"true\" so its per-row Edit / Delete cannot open a nested FluentDialog inside the host drawer");
-        normalized.Should().Contain(
-            "<ContactsEditor Mode=\"ContactsEditor.EditorMode.Buffered\" OwnerType=\"ContactOwnerType.Guardian\" Contacts=\"_editContacts\" ContactsChanged=\"OnEditContactsChanged\" EditDisabled=\"true\" />",
-            "the draft-guardian Buffered ContactsEditor nested in the Edit view must declare EditDisabled=\"true\" so its per-row Edit is off");
+        // The Edit view must no longer nest a full <ContactsEditor> (its add-row
+        // + per-row action list was the nested-dialog / cramped-drawer problem).
+        normalized.Should().NotContain("<ContactsEditor",
+            "the Edit view replaces the nested ContactsEditor with the compact manager");
 
-        // Defensive: the existing-guardian Live branch must NOT exist without
-        // EditDisabled. A bare OwnerId="@gid" without the trailing
-        // EditDisabled="true" would re-introduce the bug.
-        normalized.Should().NotContain(
-            "<ContactsEditor OwnerType=\"ContactOwnerType.Guardian\" OwnerId=\"@gid\" />",
-            "the existing-guardian Live ContactsEditor must not be a self-closing tag without EditDisabled=\"true\"");
+        // Both guardian kinds route through the shared compact manager fragment:
+        // drafts get the full inline set, existing guardians get reorder-only.
+        // (The expected strings preserve the single space after `(` introduced
+        // by the .\s+ to " " collapse — the call is multi-line in source.)
+        normalized.Should().Contain(
+            "RenderCompactContactManager( mode: ContactManagerMode.Draft, contactList: _editContacts, showAddAnchor: true)",
+            "a draft guardian's contacts use the Draft (Buffered) compact manager with the Add-contact anchor");
+        normalized.Should().Contain(
+            "RenderCompactContactManager( mode: ContactManagerMode.LiveReadOnly, contactList: _liveContacts, showAddAnchor: false, liveOwnerId: gid)",
+            "an existing guardian's contacts use the LiveReadOnly compact manager (list + reorder only, no add/edit/remove)");
+
+        // Defensive: a re-introduced bare nested ContactsEditor would silently
+        // break the drawer again. Guard against both the Live and Buffered tags.
+        normalized.Should().NotContain("<ContactsEditor OwnerType=\"ContactOwnerType.Guardian\"",
+            "no bare existing-guardian Live ContactsEditor may reappear in the Edit view");
+        normalized.Should().NotContain("<ContactsEditor Mode=\"ContactsEditor.EditorMode.Buffered\"",
+            "no bare draft-guardian Buffered ContactsEditor may reappear in the Edit view");
+    }
+
+    // ---- StudentEditDialog.GetDrawerTitle: guardian name + fallback (§4.4) ----
+    // The drawer title for an existing guardian edit must read "Edit · {name}".
+    // A blank name falls back to "Edit guardian" (defensive). Add guardians
+    // always read "Add guardian" (no identity to show).
+
+    [TestMethod]
+    public void StudentEditDialog_GetDrawerTitle_IncludesGuardianNameAndFallsBack()
+    {
+        var source = ReadEditDialogSource();
+
+        // BuildGuardianTitle helper exists and emits the "Edit · {name}" form.
+        source.Should().Contain("BuildGuardianTitle(",
+            "the dialog delegates the guardian title to a dedicated helper");
+        source.Should().Contain("\"Edit · {name}\"",
+            "the helper builds the title in the form 'Edit · {name}'");
+        source.Should().Contain("\"Edit guardian\"",
+            "the helper falls back to 'Edit guardian' when the name is blank");
+
+        // GetDrawerTitle routes the Guardians branch through BuildGuardianTitle.
+        source.Should().Contain("BuildGuardianTitle(_model.GuardianLinks[_editingGuardianIndex])",
+            "the Guardians branch resolves the title from the guardian being edited");
+
+        // The four title strings the dialog surfaces (Contacts + Guardians × Add/Edit).
+        source.Should().Contain("\"Add contact\"",
+            "the Contacts Add title is 'Add contact'");
+        source.Should().Contain("\"Edit contact\"",
+            "the Contacts Edit title is 'Edit contact'");
+        source.Should().Contain("\"Add guardian\"",
+            "the Guardians Add title is 'Add guardian' (no identity to show)");
+    }
+
+    // ---- DialogServiceExtensions: height is forwarded to DialogParameters.Height (§4.1) ----
+    // The explicit-height open path depends on `BuildShellParameters` setting
+    // `Height` on the DialogParameters it returns, and on
+    // `ShowReadonlyDialogAsync` threading the `height` argument through to it.
+    // Both helpers must default to null so callers that omit height keep the
+    // 480px host default.
+
+    [TestMethod]
+    public void DialogServiceExtensions_BuildShellParameters_ForwardsHeightToDialogParameters()
+    {
+        var source = ReadDialogServiceExtensionsSource();
+
+        // BuildShellParameters accepts a height argument and forwards it to
+        // DialogParameters.Height. Default is null so other read-only dialogs
+        // keep the 480px host default.
+        source.Should().Contain("BuildShellParameters(string title, DialogSize size = DialogSize.Small, string? height = null)",
+            "BuildShellParameters accepts an optional height (default null = 480px host default)");
+        source.Should().Contain("Height = height",
+            "BuildShellParameters forwards height to DialogParameters.Height (FluentUI's --dialog-height)");
+
+        // ShowReadonlyDialogAsync threads the height argument through to
+        // BuildShellParameters. The signature grows the new parameter; the
+        // body passes it on.
+        source.Should().Contain("ShowReadonlyDialogAsync<TComponent>(",
+            "the read-only-dialog helper exists");
+        source.Should().MatchRegex(
+            @"public\s+static\s+async\s+Task<IDialogReference>\s+ShowReadonlyDialogAsync<TComponent>\(\s*this\s+IDialogService\s+dialogService,\s*string\s+title,",
+            "the helper signature starts with the canonical (this IDialogService dialogService, string title)");
+        source.Should().Contain("string? height = null",
+            "the read-only helper accepts an optional height parameter");
+        source.Should().Contain("BuildShellParameters(title, size, height)",
+            "the read-only helper passes height through to BuildShellParameters");
+
+        // The XML doc on height must name --dialog-height so future readers
+        // see the FluentUI CSS-var mapping.
+        source.Should().Contain("--dialog-height",
+            "the XML doc names FluentUI's --dialog-height CSS var so the mapping is explicit");
+    }
+
+    // ---- GradeLevels/Detail: opens StudentEditDialog WITHOUT pinning a fixed height (§4.1) ----
+    // The content-fill approach caps the dialog body via CSS on
+    // .student-edit-dialog-root; the open call must NOT pass a height argument.
+    // Other read-only dialogs on the page also keep the default (no height).
+
+    [TestMethod]
+    public void GradeLevelsDetail_OpensStudentEditDialog_WithoutPinnedHeight()
+    {
+        var source = ReadDetailSource();
+
+        // The StudentEditDialog open call uses the read-only helper but does
+        // NOT pass a height argument (the CSS wrapper now caps the body).
+        source.Should().Contain("ShowReadonlyDialogAsync<StudentEditDialog>",
+            "the page opens StudentEditDialog via the read-only helper");
+        source.Should().Contain("StudentEditDialog.StudentIdKey",
+            "the dialog parameter dictionary uses the StudentIdKey constant");
+
+        // The height argument must be absent for StudentEditDialog. We assert
+        // this by checking that the specific call block does not contain
+        // `height:` between the StudentEditDialog call and its closing `);`.
+        var callStart = source.IndexOf("ShowReadonlyDialogAsync<StudentEditDialog>", StringComparison.Ordinal);
+        callStart.Should().BeGreaterThan(-1, "the StudentEditDialog call exists");
+        var callEnd = source.IndexOf(");", callStart, StringComparison.Ordinal);
+        callEnd.Should().BeGreaterThan(callStart, "the StudentEditDialog call has a closing );");
+        var callBlock = source.Substring(callStart, callEnd - callStart);
+        callBlock.Should().NotContain("height:",
+            "the StudentEditDialog call must not pin a fixed height — the CSS wrapper caps the body");
+
+        // All other read-only dialogs on the page must also NOT pass a height.
+        var lines = source.Split('\n');
+        foreach (var line in lines)
+        {
+            if (line.Contains("ShowReadonlyDialogAsync<") && !line.Contains("StudentEditDialog>"))
+            {
+                line.Should().NotContain("height:",
+                    "non-StudentEditDialog read-only calls must not pass a height (keep the default). Offending line: " + line.Trim());
+            }
+        }
+    }
+
+    // ---- StudentEditDialog.razor.css: content-fill root wrapper (§4.1) ----
+    // The root wrapper must be the height authority (max-height: 72vh;
+    // min-height: 320px; overflow: hidden) so the absolute DialogDrawer is
+    // clamped to the body. The old `height: 100%` rule is gone because the
+    // FluentUI body is `height: auto` and would have resolved it to `auto`,
+    // letting the drawer overshoot.
+
+    [TestMethod]
+    public void StudentEditDialog_RootWrapper_IsContentFillFlexColumn()
+    {
+        var css = ReadSource(
+            "Students/SchoolCollab.Students.Application/Components/Students/StudentEditDialog.razor.css");
+
+        css.Should().Contain(".student-edit-dialog-root {",
+            "the positioned-root CSS rule exists");
+        css.Should().Contain("position: relative;",
+            "the root is the drawer's positioned containing block");
+        css.Should().Contain("display: flex;",
+            "the root is a flex container");
+        css.Should().Contain("flex-direction: column;",
+            "the root stacks its children vertically");
+        css.Should().Contain("max-height: 72vh;",
+            "the root caps the dialog body so it never grows off-screen");
+        css.Should().Contain("min-height: 320px;",
+            "the root has a floor so the bare form is not cramped");
+        css.Should().Contain("overflow: hidden;",
+            "the root clips internal scroll regions to the capped body");
+
+        // The form region inside the root scrolls while the action row stays pinned.
+        css.Should().Contain("form.student-form-fields--wide",
+            "the StudentFormFields wide variant is targeted as the scrollable body");
+        css.Should().Contain(".student-form-fields__content-stack",
+            "the content stack is the scrolling region");
+        css.Should().Contain(".form-actions",
+            "the action row is kept as a non-scrolling footer");
+
+        // The root-cause rule is gone.
+        css.Should().NotContain("height: 100%;",
+            "the old `height: 100%` rule must be removed — it caused the drawer overshoot");
+    }
+
+    // ---- GuardianSection compact manager: single-line selectable list (§4.2) ----
+    // Each contact renders one .guardian-contact-line with a glyph + value +
+    // optional label. No reorder buttons live inside a line (reorder is an
+    // outside toolbar).
+
+    [TestMethod]
+    public void GuardianSection_CompactContactManager_RendersSingleLineSelectableList()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // The compact manager's list surface.
+        source.Should().Contain("guardian-contact-single-lines",
+            "the compact manager renders an unordered list of single contact lines");
+        source.Should().Contain("guardian-contact-line",
+            "each contact renders as a .guardian-contact-line (li)");
+        source.Should().Contain("guardian-contact-line--selected",
+            "the selected line carries the --selected modifier (click-to-select highlight)");
+        source.Should().Contain("SelectContact(key)",
+            "clicking a line calls SelectContact(key) to set _selectedContactKey");
+        source.Should().Contain("aria-selected=\"@(selected ? \"true\" : \"false\")\"",
+            "the selected state is exposed to assistive tech via aria-selected");
+
+        // In-row content: glyph + value + optional label.
+        source.Should().Contain("guardian-contact-glyph",
+            "each line renders a channel glyph");
+        source.Should().Contain("guardian-contact-value",
+            "each line renders the formatted value");
+        source.Should().Contain("guardian-contact-label",
+            "each line renders an optional label (parenthesised)");
+
+        // Defensive: no reorder buttons live inside a contact line. The
+        // outside toolbar uses ChevronUp/ChevronDown — those ids must not
+        // appear inside the <li> markup. Source-assert by scanning the
+        // <li>...</li> block for the @foreach variable.
+        // (Cheaper alternative: assert the line block does not reference
+        // MoveContactUpAsync / MoveContactDownAsync.)
+        var lineBlockStart = source.IndexOf("guardian-contact-line ", StringComparison.Ordinal);
+        lineBlockStart.Should().BeGreaterThan(-1, "the line markup exists");
+        // Find the closing </li> of the first contact line.
+        var lineBlockEnd = source.IndexOf("</li>", lineBlockStart, StringComparison.Ordinal);
+        lineBlockEnd.Should().BeGreaterThan(lineBlockStart, "the first </li> closes the line block");
+        var lineBlock = source.Substring(lineBlockStart, lineBlockEnd - lineBlockStart);
+        lineBlock.Should().NotContain("MoveContactUpAsync",
+            "no reorder-up button is rendered inside a contact line");
+        lineBlock.Should().NotContain("MoveContactDownAsync",
+            "no reorder-down button is rendered inside a contact line");
+        lineBlock.Should().NotContain("ChevronUp",
+            "no reorder-up icon is rendered inside a contact line");
+        lineBlock.Should().NotContain("ChevronDown",
+            "no reorder-down icon is rendered inside a contact line");
+    }
+
+    // ---- GuardianSection compact manager: outside reorder toolbar (§4.2) ----
+    // The reorder toolbar lives OUTSIDE the <ul>, holds two Lightweight
+    // ChevronUp/ChevronDown icon buttons, and is disabled when nothing is
+    // selected or the selected line is at the ends.
+
+    [TestMethod]
+    public void GuardianSection_CompactContactManager_OutsideReorderToolbar()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // The toolbar's class and its two buttons exist.
+        source.Should().Contain("guardian-contact-reorder-bar",
+            "the outside reorder toolbar has its own .guardian-contact-reorder-bar wrapper");
+        source.Should().Contain("IconStart=\"@FluentIcons.ChevronUp\"",
+            "the up button uses the ChevronUp icon");
+        source.Should().Contain("IconStart=\"@FluentIcons.ChevronDown\"",
+            "the down button uses the ChevronDown icon");
+        source.Should().Contain("MoveContactUpAsync(mode, contactList, liveOwnerId)",
+            "the up button calls MoveContactUpAsync with the active mode + list + live owner");
+        source.Should().Contain("MoveContactDownAsync(mode, contactList, liveOwnerId)",
+            "the down button calls MoveContactDownAsync with the active mode + list + live owner");
+
+        // Disabled when nothing selected or at the ends.
+        source.Should().Contain("IsContactFirst(contactList, _selectedContactKey.Value)",
+            "the up button is disabled when the selected line is already first");
+        source.Should().Contain("IsContactLast(contactList, _selectedContactKey.Value)",
+            "the down button is disabled when the selected line is already last");
+
+        // Defensive: the toolbar must live OUTSIDE the <ul>. Source-assert
+        // by checking the .guardian-contact-reorder-bar block appears AFTER
+        // the closing </ul> of the list.
+        var listEnd = source.IndexOf("</ul>", StringComparison.Ordinal);
+        var toolbarStart = source.IndexOf("guardian-contact-reorder-bar", StringComparison.Ordinal);
+        listEnd.Should().BeGreaterThan(-1, "the contact list has a closing </ul>");
+        toolbarStart.Should().BeGreaterThan(listEnd,
+            "the reorder toolbar (outside the list) must appear after the list's closing </ul>");
+    }
+
+    // ---- GuardianSection compact manager: Edit/Add flip the inner switch to ContactFormFields (§4.2) ----
+    // Clicking a row's Edit icon or the "Add contact" anchor sets
+    // _contactEditTarget and renders <ContactFormFields> in the same inner
+    // div (NOT a second DialogDrawer). A small Cancel + Add/Save row
+    // commits back to the list.
+
+    [TestMethod]
+    public void GuardianSection_CompactContactManager_EditAndAddAnchorsFlipInnerSwitch()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // Inner switch renders ContactFormFields (not a nested DialogDrawer).
+        // The slice is scoped to the Edit view (the compact manager lives
+        // here only); comments are stripped so the No-DialogDrawer assertion
+        // doesn't trip on the section's "the host owns <DialogDrawer>" prose.
+        source.Should().Contain("_contactEditTarget is null",
+            "the inner switch renders the list surface when _contactEditTarget is null");
+        source.Should().Contain("<ContactFormFields Model=\"_contactEditModel\"",
+            "the inner switch renders <ContactFormFields> in the same div when _contactEditTarget is set");
+
+        // Edit/Add anchors toggle the switch.
+        source.Should().Contain("StartContactEditAsync(c)",
+            "the per-row Edit button calls StartContactEditAsync(c)");
+        source.Should().Contain("StartContactAddAsync",
+            "the Add contact anchor calls StartContactAddAsync");
+        source.Should().Contain("CommitContactAsync(mode, contactList, liveOwnerId)",
+            "the inner switch's commit button calls CommitContactAsync with the active mode + list + owner");
+        source.Should().Contain("CancelContactEditAsync",
+            "the inner switch's cancel button calls CancelContactEditAsync");
+
+        // The Add contact affordance is a FluentAnchor (hypertext), gated
+        // by `showAddAnchor` (drafts only — spec §4.3).
+        source.Should().Contain("Appearance=\"Appearance.Hypertext\"",
+            "the Add contact affordance is a FluentAnchor with the Hypertext appearance");
+        source.Should().Contain("guardian-contact-add-anchor",
+            "the Add anchor has its own .guardian-contact-add-anchor class");
+
+        // The Edit icon and the controls fire outside the list. The inner
+        // switch is opened via the row's Edit click; selection follows the
+        // row's identity so the highlight persists across cancel.
+        source.Should().Contain("_selectedContactKey = ContactKey(c)",
+            "opening the Edit switch for a row pins the selection to that row's key");
+
+        // No nested DialogDrawer inside the Edit view (strip comments first so
+        // the section's prose <DialogDrawer> reference doesn't trip).
+        var editStart = source.IndexOf("else if (View == GuardianView.Edit)", StringComparison.Ordinal);
+        editStart.Should().BeGreaterThan(-1, "the Edit view branch exists");
+        var editEnd = source.IndexOf("else if (Mode == StudentFormFieldsMode.Linked)", editStart, StringComparison.Ordinal);
+        editEnd.Should().BeGreaterThan(editStart, "the Edit view slice has a defined end");
+        var editBody = source.Substring(editStart, editEnd - editStart);
+        var noComments = System.Text.RegularExpressions.Regex.Replace(
+            editBody, @"@\*.*?\*@", " ", System.Text.RegularExpressions.RegexOptions.Singleline);
+        var normalized = System.Text.RegularExpressions.Regex.Replace(noComments, @"\s+", " ");
+        normalized.Should().NotContain("<DialogDrawer",
+            "no nested DialogDrawer is opened inside the guardian edit view");
+    }
+
+    // ---- GuardianSection compact manager: identity header above the fields (§4.4) ----
+    // The Edit view renders a small identity banner (name + relationship)
+    // above the compact manager so the operator can see which guardian the
+    // drawer is editing, even if the dialog title is truncated.
+
+    [TestMethod]
+    public void GuardianSection_CompactContactManager_IdentityHeader()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // Both Edit branches (IsAdd and edit-existing) render the identity
+        // header above the compact manager.
+        source.Should().Contain("guardian-edit-identity",
+            "the identity header has its own .guardian-edit-identity banner");
+        source.Should().Contain("guardian-edit-identity-name",
+            "the header renders the name in .guardian-edit-identity-name");
+        source.Should().Contain("guardian-edit-identity-rel",
+            "the header renders the optional relationship in .guardian-edit-identity-rel");
+        source.Should().Contain("@editedGuardianDisplayName",
+            "the header is data-bound to editedGuardianDisplayName");
+
+        // The identity header must live OUTSIDE the gray .guardian-edit-form
+        // container so it sits in the white drawer-body area before the darker
+        // field region. We source-assert by locating the first identity block
+        // and the matching form open, then confirming the identity block opens
+        // before the form it belongs to.
+        var identityIdx = source.IndexOf("<div class=\"guardian-edit-identity\">", StringComparison.Ordinal);
+        var formIdx = source.IndexOf("<div class=\"guardian-edit-form\">", StringComparison.Ordinal);
+        identityIdx.Should().BeGreaterThan(-1, "an identity header block exists");
+        formIdx.Should().BeGreaterThan(-1, "a .guardian-edit-form block exists");
+        identityIdx.Should().BeLessThan(formIdx,
+            "the identity header is rendered before (outside) the .guardian-edit-form container");
+
+        // The display name includes the salutation (spec §4.4 item 3) when
+        // the working copy has a TitleCodedValueId that resolves to a
+        // salutation. We assert the helper is called from the property
+        // getter.
+        // Use a regex-tolerant substring: the getter must reference
+        // ResolveSalutation with the TitleCodedValueId.
+        source.Should().Contain("ResolveSalutation(_editModel.TitleCodedValueId)",
+            "the draft display name includes the salutation (spec §4.4 item 3)");
+        source.Should().Contain("ResolveSalutation(g.TitleCodedValueId)",
+            "the existing-guardian display name includes the salutation (spec §4.4 item 3)");
+
+        // The CSS exists for the header (style is required for the visual
+        // acceptance criterion §6 row 10).
+        var css = ReadGuardianSectionCssSource();
+        css.Should().Contain(".guardian-edit-identity",
+            "the identity header has a CSS rule in GuardianSection.razor.css");
+        css.Should().Contain(".guardian-edit-identity-name",
+            "the header name span has a CSS rule");
+        css.Should().Contain(".guardian-edit-identity-rel",
+            "the header relationship span has a CSS rule");
+    }
+
+    // ---- GuardianSection Edit view: no inline Cancel (drawer owns Close) ----
+    // The GuardianSection Edit view is hosted inside the shared DialogDrawer.
+    // The drawer already exposes a Close button (DialogDrawer's ShowCancel="true"
+    // CancelText="Close"), so an inline Cancel button inside the drawer body is
+    // redundant — it duplicates the same affordance and competes for the same
+    // action. Only the primary Save action lives in the body; Cancel comes from
+    // the drawer footer (× / backdrop / Escape). This mirrors the
+    // ContactsEditor Edit-view contract above.
+
+    [TestMethod]
+    public void GuardianSection_EditView_DropsInlineCancel()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // Slice the source to the Edit view branch only, so a Cancel button
+        // rendered in the Full view inline panel doesn't false-pass.
+        var editViewStart = source.IndexOf("else if (View == GuardianView.Edit)", StringComparison.Ordinal);
+        editViewStart.Should().BeGreaterThan(-1, "the Edit view branch exists");
+        var linkedViewStart = source.IndexOf("else if (Mode == StudentFormFieldsMode.Linked)", editViewStart, StringComparison.Ordinal);
+        linkedViewStart.Should().BeGreaterThan(editViewStart, "the Edit view slice has a well-defined end");
+        var editViewBody = source.Substring(editViewStart, linkedViewStart - editViewStart);
+
+        editViewBody.Should().NotContain("CancelEditFormAsync",
+            "the Edit view branch no longer calls CancelEditFormAsync — the drawer owns Close");
+        editViewBody.Should().NotContain(">Cancel<",
+            "the Edit view branch no longer renders an inline Cancel button");
+
+        // The Save button stays in the body, matching the ContactsEditor pattern.
+        editViewBody.Should().Contain(">Save<",
+            "the Edit view branch still renders the primary inline Save button");
+        editViewBody.Should().Contain("SaveAddGuardianAsync",
+            "the Add branch's Save button calls SaveAddGuardianAsync");
+        editViewBody.Should().Contain("SaveEditGuardianAsync",
+            "the Edit branch's Save button calls SaveEditGuardianAsync");
+    }
+
+    // ---- GuardianSection compact manager: CSS covers the new classes (§4.2 / §10.1) ----
+    // The CSS file must style the new compact-manager classes. Without
+    // these, the selection highlight, reorder-bar layout, anchor spacing,
+    // and identity header render unstyled.
+
+    [TestMethod]
+    public void GuardianSection_CompactContactManager_CssStylesCoverNewClasses()
+    {
+        var css = ReadGuardianSectionCssSource();
+
+        // One rule per surface (selection highlight requires the --selected
+        // modifier to be present alongside the base class).
+        css.Should().Contain(".guardian-contact-manager",
+            "the compact manager container has a layout rule");
+        css.Should().Contain(".guardian-contact-single-lines",
+            "the contact list has a layout rule (no bullets, tight gap)");
+        css.Should().Contain(".guardian-contact-line",
+            "each contact line has a layout rule (flex row, cursor pointer)");
+        css.Should().Contain(".guardian-contact-line--selected",
+            "the selected line has a highlight rule (accent background + border)");
+        css.Should().Contain(".guardian-contact-glyph",
+            "the glyph span has a sizing rule");
+        css.Should().Contain(".guardian-contact-value",
+            "the value span has a flex / ellipsis rule");
+        css.Should().Contain(".guardian-contact-label",
+            "the label span has a muted / italic rule");
+        css.Should().Contain(".guardian-contact-actions",
+            "the per-row actions cluster has a layout rule");
+        css.Should().Contain(".guardian-contact-reorder-bar",
+            "the outside reorder toolbar has a layout rule");
+        css.Should().Contain(".guardian-contact-add-anchor",
+            "the Add anchor has a spacing rule");
+        css.Should().Contain(".guardian-contacts-empty",
+            "the empty-state span has a muted / italic rule");
     }
 }

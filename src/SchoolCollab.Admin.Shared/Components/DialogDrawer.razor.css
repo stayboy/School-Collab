@@ -25,7 +25,13 @@
 
 /* Panel: fills the dialog body vertically (top/bottom: 0; height: auto)
    and anchors to the chosen edge via the inline PanelSideStyle. The
-   inline width (from Width parameter) is set on the <aside>. */
+   inline width (from Width parameter) is set on the <aside>.
+
+   A visible left/right border plus a strong cast shadow separates the
+   panel from the dimmed main form so the drawer edge reads as a clear
+   cut boundary. The border is the same neutral divider used by headers
+   and footers; the shadow is large and soft to suggest elevation
+   without fighting the dialog's own shadow. */
 .dialog-drawer-panel {
     position: absolute;
     top: 0;
@@ -33,7 +39,6 @@
     height: auto;
     background: var(--neutral-layer-1, #fff);
     color: var(--neutral-foreground-1, #1f1f1f);
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
     z-index: 41;
     display: flex;
     flex-direction: column;
@@ -42,15 +47,17 @@
     max-width: 100%;
 }
 
-/* Anchor variants. The CSS only carries the box-shadow direction; the
-   horizontal edge is set inline (left:0 / right:0) so it is colocated
-   with the Side parameter. */
+/* Anchor variants. The CSS carries the box-shadow direction and the
+   inside-facing border; the horizontal edge (left/right) is set inline
+   so it is colocated with the Side parameter. */
 .dialog-drawer-panel--right {
-    box-shadow: -8px 0 24px rgba(0, 0, 0, 0.18);
+    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.22);
+    border-left: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
 }
 
 .dialog-drawer-panel--left {
-    box-shadow: 8px 0 24px rgba(0, 0, 0, 0.18);
+    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.22);
+    border-right: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
 }
 
 .dialog-drawer-header {

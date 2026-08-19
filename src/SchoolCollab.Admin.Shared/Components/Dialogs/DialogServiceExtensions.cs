@@ -32,12 +32,24 @@ public static class DialogServiceExtensions
     /// </summary>
     /// <param name="title">Dialog title.</param>
     /// <param name="size">One of the four fixed <see cref="DialogSize"/> widths. Default: <see cref="DialogSize.Small"/> (420px).</param>
-    public static DialogParameters BuildShellParameters(string title, DialogSize size = DialogSize.Small)
+    /// <param name="height">Optional explicit dialog height (CSS value, e.g. <c>"72vh"</c>).
+    /// Forwarded to <see cref="DialogParameters.Height"/> which FluentUI applies as
+    /// <c>--dialog-height</c>, overriding the 480px host default on
+    /// <c>::part(control)</c> (§3.1 of docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md).
+    /// Use this when the dialog body hosts an absolutely-positioned panel (e.g. the shared
+    /// <c>DialogDrawer</c>) that needs more vertical area than the 480px default allows —
+    /// the dialog is a fixed-height box so content height alone does not grow it. Pass
+    /// <c>null</c> (default) to keep the 480px default. The floor for short viewports is
+    /// the caller's responsibility (fold <c>min-height</c> into the value, e.g.
+    /// <c>"max(72vh, 480px)"</c>, since <see cref="DialogParameters"/> has no
+    /// <c>MinHeight</c>).</param>
+    public static DialogParameters BuildShellParameters(string title, DialogSize size = DialogSize.Small, string? height = null)
     {
         return new DialogParameters
         {
             Title = title,
             Width = size.ToCssWidth(),
+            Height = height,
             PrimaryAction = null,
             SecondaryAction = null,
             PreventDismissOnOverlayClick = true,
@@ -108,23 +120,26 @@ public static class DialogServiceExtensions
     /// <param name="size">One of the four fixed <see cref="DialogSize"/>
     /// widths. Default <see cref="DialogSize.Medium"/> (640px) — read-only
     /// dialogs typically carry more body than a 3-field form.</param>
+    /// <param name="height">Optional explicit dialog height (CSS value). See
+    /// <see cref="BuildShellParameters"/> for details.</param>
     /// <returns>The <see cref="IDialogReference"/>. Callers may ignore it
     /// (the dialog dismisses itself) or await <c>dialog.Result</c>.</returns>
     public static async Task<IDialogReference> ShowReadonlyDialogAsync<TComponent>(
         this IDialogService dialogService,
         string title,
         IDictionary<string, object?> parameters,
-        DialogSize size = DialogSize.Medium)
+        DialogSize size = DialogSize.Medium,
+        string? height = null)
         where TComponent : ComponentBase, IDialogContentComponent<DialogParameters>
     {
         // Build a single DialogParameters carrying both the shell chrome
-        // (Title/Width/etc.) and the content parameter entries. The same instance
+        // (Title/Width/Height/etc.) and the content parameter entries. The same instance
         // is passed as both the TData content (IDialogContentComponent.Content)
         // and the DialogParameters argument — FluentUI only sets Content from the
         // TData; indexer entries are NOT spread to [Parameter] properties. The
         // dialog must read its inputs from Content.TryGet<T>(key), not from
         // separate [Parameter]s. See dialog-parameter-binding.md.
-        var dialogParams = BuildShellParameters(title, size);
+        var dialogParams = BuildShellParameters(title, size, height);
         foreach (var kvp in parameters)
         {
             dialogParams[kvp.Key] = kvp.Value;

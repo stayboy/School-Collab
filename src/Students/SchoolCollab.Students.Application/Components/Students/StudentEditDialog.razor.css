@@ -11,13 +11,57 @@
 
 /* ── Dialog-content root ──
    The wrapper inside .fluent-dialog-body that is the positioned ancestor
-   (position: relative; height: 100%) for the shared <DialogDrawer>. The
-   .fluent-dialog-body element is the 1fr grid row of the FluentDialog's
-   internal grid, so it has a definite height; this wrapper fills that
-   height exactly. The DialogDrawer is then position: absolute; inset: 0
-   inside this wrapper, so it fills the dialog body content area between
-   the title bar and the actions bar without overlapping either. */
+   (position: relative) for the shared <DialogDrawer>. It is also the height
+   authority for the dialog body: content fills up to 72vh, with a 320px floor
+   so the bare profile form is never cramped. overflow:hidden keeps the drawer
+   and the form from spilling out of the capped body; internal scroll regions
+   below handle their own overflow.
+
+   The earlier `height: 100%` rule was removed because .fluent-dialog-body is
+   `height: auto` (verified against FluentUI 4.14.2); `height: 100%` therefore
+   resolved to `auto`, leaving the absolute DialogDrawer (inset: 0) with no
+   containing-block height to clamp it. That caused the drawer to overshoot
+   the dialog bottom. This wrapper now supplies a definite height via
+   max-height/min-height so the drawer is constrained. */
 .student-edit-dialog-root {
     position: relative;
-    height: 100%;
+    display: flex;
+    flex-direction: column;
+    max-height: 72vh;
+    min-height: 320px;
+    overflow: hidden;
+}
+
+/* The StudentFormFields EditForm is the scrollable body of the dialog.
+   We make it a flex column so the content stack above can scroll while the
+   action row stays pinned at the bottom of the dialog. The form fills the
+   capped root wrapper; its own overflow is hidden because the *content stack*
+   inside it is the scrolling region. */
+.student-edit-dialog-root ::deep form.student-form-fields--wide {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* The content stack holds all the profile rows + Contacts + Guardians sections.
+   It is the scrollable region: it grows to fill the form body and scrolls when
+   the overall dialog content exceeds the 72vh cap. min-height: 0 is required
+   so flex can shrink it below its content size. */
+.student-edit-dialog-root ::deep .student-form-fields__content-stack {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+}
+
+/* The action row (Submit/Cancel) stays fixed at the bottom of the dialog body
+   and does not scroll with the form content. */
+.student-edit-dialog-root ::deep .form-actions {
+    flex: 0 0 auto;
+}
+
+/* Error message sits above the action row; it should also not scroll. */
+.student-edit-dialog-root ::deep .student-form-error {
+    flex: 0 0 auto;
 }

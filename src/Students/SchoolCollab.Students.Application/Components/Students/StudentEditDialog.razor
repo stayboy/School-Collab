@@ -273,9 +273,24 @@ else
     private string GetDrawerTitle() => _editor switch
     {
         ActiveEditor.Contacts => _isAdd ? "Add contact" : "Edit contact",
-        ActiveEditor.Guardians => _isAdd ? "Add guardian" : "Edit guardian",
+        ActiveEditor.Guardians => _isAdd
+            ? "Add guardian"
+            : (_editingGuardianIndex >= 0 && _editingGuardianIndex < _model.GuardianLinks.Count
+                ? BuildGuardianTitle(_model.GuardianLinks[_editingGuardianIndex])
+                : "Edit guardian"),
         _ => ""
     };
+
+    /// <summary>Build the drawer title for a guardian edit. Shows
+    /// "Edit · {FirstName} {LastName}" so the operator knows which guardian
+    /// the drawer is about without reading the dimmed card behind. Falls back
+    /// to "Edit guardian" when the name is blank (defensive — a real guardian
+    /// link always has a name, but the host may not have loaded yet).</summary>
+    private static string BuildGuardianTitle(GuardianAssignment g)
+    {
+        var name = $"{g.FirstName} {g.LastName}".Trim();
+        return string.IsNullOrWhiteSpace(name) ? "Edit guardian" : $"Edit · {name}";
+    }
 
     /// <summary>Drawer OpenChanged handler. Cancel / backdrop / Escape arrive
     /// here. Clears the active editor + focused-edit state so the drawer

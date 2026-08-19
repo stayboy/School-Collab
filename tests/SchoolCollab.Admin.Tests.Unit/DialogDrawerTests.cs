@@ -156,6 +156,39 @@ public class DialogDrawerTests
     }
 
     [TestMethod]
+    public void DialogDrawer_Css_PanelHasClearCutShadowAndBorder()
+    {
+        var css = ReadSource(
+            "SchoolCollab.Admin.Shared/Components/DialogDrawer.razor.css");
+
+        // The panel must be visually separated from the dimmed main form.
+        // A strong cast shadow plus an inside-facing border gives the edge
+        // a clear cut boundary and prevents it from visually bleeding into
+        // the dialog content behind it.
+        css.Should().Contain(".dialog-drawer-panel--right",
+            "the right-anchored panel has a variant rule");
+        css.Should().Contain(".dialog-drawer-panel--left",
+            "the left-anchored panel has a variant rule");
+
+        // Right panel: shadow on the left edge, border on the left.
+        var rightBlock = css.Substring(
+            css.IndexOf(".dialog-drawer-panel--right", StringComparison.Ordinal),
+            css.IndexOf(".dialog-drawer-panel--left", StringComparison.Ordinal) - css.IndexOf(".dialog-drawer-panel--right", StringComparison.Ordinal));
+        rightBlock.Should().Contain("box-shadow:",
+            "the right-anchored panel casts a shadow");
+        rightBlock.Should().Contain("border-left:",
+            "the right-anchored panel has a left border defining the edge");
+
+        // Left panel: shadow on the right edge, border on the right.
+        var leftBlock = css.Substring(
+            css.IndexOf(".dialog-drawer-panel--left", StringComparison.Ordinal));
+        leftBlock.Should().Contain("box-shadow:",
+            "the left-anchored panel casts a shadow");
+        leftBlock.Should().Contain("border-right:",
+            "the left-anchored panel has a right border defining the edge");
+    }
+
+    [TestMethod]
     public void DialogDrawer_Escape_ClosesDrawer()
     {
         var source = ReadSource(

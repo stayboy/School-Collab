@@ -32,6 +32,9 @@
     row itself. *@
 @using SchoolCollab.Students.Core.DTOs
 @using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Admin.Shared.Constants
+@using SchoolCollab.Students.Core.Contracts
 @implements IAsyncDisposable
 
 <div class="student-guardians @(Mode == StudentFormFieldsMode.Linked ? "student-form-guardians--linked" : null) @(View == GuardianView.Readonly ? "student-guardians--readonly" : null)">
@@ -111,22 +114,32 @@
         @if (IsAdd)
         {
             @* Blank add form: full field set (title / names / relationship /
-               role / contacts). Save appends a new guardian. *@
+               role / contacts). Save appends a new guardian.
+
+               The drawer itself supplies the Close/Cancel affordance (×,
+               backdrop, Escape, footer Close), following the same contract as
+               the ContactsEditor Edit view. Only the primary action (Save)
+               lives inside the body.
+
+               Contacts: compact single-line manager with selection +
+               outside ↑↓ reorder + inner <ContactFormFields> add/edit
+               switch. Draft-only (Buffered on _editContacts) so add/edit/
+               remove/reorder all work inline; the drawer is too narrow for
+               the full <ContactsEditor> add-row + per-row action list.
+               See docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md §4.2. *@
+            <div class="guardian-edit-identity">
+                <span class="guardian-edit-identity-name">@editedGuardianDisplayName</span>
+            </div>
             <div class="guardian-edit-form">
                 <GuardianEditFields Model="_editModel"
                                     ShowIdentityFields="true" />
                 <div class="guardian-edit-contacts">
-                    <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                    OwnerType="ContactOwnerType.Guardian"
-                                    Contacts="_editContacts"
-                                    ContactsChanged="OnEditContactsChanged"
-                                    EditDisabled="true" />
+                    @RenderCompactContactManager(
+                        mode: ContactManagerMode.Draft,
+                        contactList: _editContacts,
+                        showAddAnchor: true)
                 </div>
                 <div class="guardian-edit-actions">
-                    <FluentButton Appearance="Appearance.Lightweight"
-                                  OnClick="CancelEditFormAsync">
-                        Cancel
-                    </FluentButton>
                     <FluentButton Appearance="Appearance.Accent"
                                   OnClick="SaveAddGuardianAsync">
                         Save
@@ -142,6 +155,13 @@
             @if (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count)
             {
                 var editedGuardian = GuardianLinks[_editingIndex];
+                <div class="guardian-edit-identity">
+                    <span class="guardian-edit-identity-name">@editedGuardianDisplayName</span>
+                    @if (ResolveRelName(editedGuardian.RelationshipCodedValueId) is { } relName)
+                    {
+                        <span class="guardian-edit-identity-rel">(@relName)</span>
+                    }
+                </div>
                 <div class="guardian-edit-form">
                     @* Title / name fields are only editable for drafts
                        (ExistingGuardianId is null). For existing guardians they
@@ -152,41 +172,31 @@
                     <GuardianEditFields Model="_editModel"
                                         ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)" />
                     <div class="guardian-edit-contacts">
-                        @* Contacts: Live for existing guardians, Buffered for
-                           drafts. The nested editor has no shared side drawer
-                           of its own inside this panel — its per-row Edit /
-                           Delete would open a nested FluentDialog (or its own
-                           drawer) which competes with the host drawer's
-                           backdrop and z-index. Mirror the Buffered editor's
-                           EditDisabled="true" so the per-row Edit / Delete
-                           buttons are off; the user still sees the contacts
-                           list, can read the values, and can manage contacts
-                           via the guardian's own detail page (the add-row +
-                           verify / move / subscribe stay enabled so the Live
-                           editor remains useful for triage). Add/Remove are
-                           also disabled because they would persist via the
-                           guardian's own load — that side-effect is
-                           surprising from inside the focused editing form. *@
+                        @* Compact single-line contact manager. Draft (no
+                           ExistingGuardianId) -> Buffered on _editContacts
+                           with full add/edit/remove/reorder. Existing ->
+                           Live list (loaded via IContactsClient) with
+                           reorder only (add/edit/remove/verify deferred to
+                           the guardian detail page to keep the drawer free
+                           of nested reason modals).
+                           docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md §4.2 *@
                         @if (editedGuardian.ExistingGuardianId is { } gid)
                         {
-                            <ContactsEditor OwnerType="ContactOwnerType.Guardian"
-                                            OwnerId="@gid"
-                                            EditDisabled="true" />
+                            @RenderCompactContactManager(
+                                mode: ContactManagerMode.LiveReadOnly,
+                                contactList: _liveContacts,
+                                showAddAnchor: false,
+                                liveOwnerId: gid)
                         }
                         else
                         {
-                            <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
-                                            OwnerType="ContactOwnerType.Guardian"
-                                            Contacts="_editContacts"
-                                            ContactsChanged="OnEditContactsChanged"
-                                            EditDisabled="true" />
+                            @RenderCompactContactManager(
+                                mode: ContactManagerMode.Draft,
+                                contactList: _editContacts,
+                                showAddAnchor: true)
                         }
                     </div>
                     <div class="guardian-edit-actions">
-                        <FluentButton Appearance="Appearance.Lightweight"
-                                      OnClick="CancelEditFormAsync">
-                            Cancel
-                        </FluentButton>
                         <FluentButton Appearance="Appearance.Accent"
                                       OnClick="SaveEditGuardianAsync">
                             Save
@@ -513,6 +523,7 @@
 
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
+    [Inject] private SchoolCollab.Students.Core.Contracts.IContactsClient ContactsApi { get; set; } = default!;
     [Inject] private ILogger<GuardianSection> Logger { get; set; } = default!;
 
     private bool _loadingGuardians;
@@ -576,6 +587,7 @@
             // instance drops any leftover drafts from a previous add/edit.
             _editModel = new GuardianEditFieldsModel();
             _editContacts = new List<ContactModel>();
+            ResetCompactContactManager();
         }
         else if (InitialEditIndex >= 0 && InitialEditIndex < GuardianLinks.Count)
         {
@@ -590,10 +602,29 @@
             _editModel.RelationshipCodedValueId = a.RelationshipCodedValueId;
             _editModel.Role = a.Role;
             _editContacts = (a.Contacts ?? []).ToList();
+            ResetCompactContactManager();
+            if (a.ExistingGuardianId is { } liveGid)
+            {
+                // Existing guardian: load the FULL contact list (the
+                // GuardianLinks[i].Contacts top-3 summary is display-only).
+                await LoadLiveContactsAsync(liveGid);
+            }
             if (_editModel.RelationshipCodedValueId is { } relId)
                 await EnsureRelNameAsync(relId);
         }
         await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Reset the compact contact manager's transient state when the
+    /// host switches between guardian edits or opens a fresh add form.</summary>
+    private void ResetCompactContactManager()
+    {
+        _selectedContactKey = null;
+        _contactEditTarget = null;
+        _contactEditModel = new ContactFormFieldsModel();
+        _liveContacts = new List<ContactModel>();
+        _countryCodeOptions = null;
+        _contactMutating = false;
     }
 
     // ── Guardian edit state ──
@@ -625,11 +656,510 @@
     // in place; on Save it's written back to the GuardianAssignment.Contacts).
     private List<ContactModel> _editContacts = new();
 
+    // ── Compact contact manager (drawer edit view) ─────────────────────
+    // docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md §4.2.
+    // The drawer is too narrow for the full <ContactsEditor> add-row +
+    // per-row action list, so the Edit view renders a compact single-line
+    // manager instead: a selectable contact list + an outside ↑/↓ reorder
+    // toolbar + an inner <ContactFormFields> add/edit sub-panel (toggled by
+    // _contactEditTarget). For draft guardians the working list is
+    // _editContacts (Buffered, full add/edit/remove/reorder). For existing
+    // guardians we load the FULL contact list via IContactsClient into
+    // _liveContacts (the GuardianLinks[i].Contacts top-3 summary is display-
+    // only and lacks the ids reorder needs); add/edit/remove/verify are
+    // deferred to the guardian detail page to keep the drawer free of
+    // nested reason modals.
+    private List<ContactModel> _liveContacts = new();
+    private CodedValueDto[]? _countryCodeOptions;
+    // Currently selected contact line key (TempId for draft, real Id for live).
+    private Guid? _selectedContactKey;
+    // Inner sub-panel state: null = list surface; set = add or edit form.
+    private record ContactEditTarget(bool IsAdd, ContactModel? Contact);
+    private ContactEditTarget? _contactEditTarget;
+    // Working-copy model for the inner <ContactFormFields> sub-panel.
+    private ContactFormFieldsModel _contactEditModel = new();
+    // True while a Live load or reorder API call is in flight (disables
+    // reorder buttons to avoid double-clicks).
+    private bool _contactMutating;
+
+    /// <summary>Modes for the compact contact manager rendered inside the
+    /// drawer Edit view.</summary>
+    private enum ContactManagerMode
+    {
+        /// <summary>Draft guardian (Buffered _editContacts): full
+        /// add / edit / remove / reorder inline.</summary>
+        Draft,
+        /// <summary>Existing guardian (Live _liveContacts): list + reorder
+        /// only (add / edit / remove / verify deferred to the page).</summary>
+        LiveReadOnly,
+    }
+
+    /// <summary>The guardian currently being edited in the drawer (the one at
+    /// <see cref="_editingIndex"/>) — used by the identity header and the
+    /// compact manager. Null when <see cref="IsAdd"/>.</summary>
+    private GuardianAssignment? EditedGuardian =>
+        (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count)
+            ? GuardianLinks[_editingIndex]
+            : null;
+
+    /// <summary>Display name for the edited guardian (used in the drawer
+    /// identity header). For <see cref="IsAdd"/>, shows a "New guardian"
+    /// placeholder from the working-copy <c>_editModel</c> so the header
+    /// is not empty while the user types. The salutation spelling matches
+    /// the guardian cards (spec §4.4 item 3: <c>salutation + First + Last</c>)
+    /// — we have <see cref="ResolveSalutation"/> here so the body header can
+    /// use it. The drawer title (in <c>StudentEditDialog.BuildGuardianTitle</c>)
+    /// still omits salutation: that component has no salutation lookup loaded
+    /// and adding one is out of scope (§7.4 judgment call).</summary>
+    private string editedGuardianDisplayName
+    {
+        get
+        {
+            if (IsAdd)
+            {
+                var draftName = $"{_editModel.FirstName} {_editModel.LastName}".Trim();
+                if (string.IsNullOrWhiteSpace(draftName)) return "New guardian";
+                var draftSal = ResolveSalutation(_editModel.TitleCodedValueId);
+                return string.IsNullOrWhiteSpace(draftSal) ? draftName : $"{draftSal} {draftName}";
+            }
+            var g = EditedGuardian;
+            if (g is null) return string.Empty;
+            var name = $"{g.FirstName} {g.LastName}".Trim();
+            if (string.IsNullOrWhiteSpace(name)) return string.Empty;
+            var sal = ResolveSalutation(g.TitleCodedValueId);
+            return string.IsNullOrWhiteSpace(sal) ? name : $"{sal} {name}";
+        }
+    }
+
     // ── Linked-mode helpers (page-side) ──
     // In Linked mode the component is a pure presenter: the page owns the link
     // load + API calls and passes LinkedItems down. The component surfaces a
     // count + a Manage button + a read-only grid + a per-row delete that fires
     // OnRemoveGuardian.
+
+    // ── Compact contact manager (drawer edit view) ────────────────────
+    // Shared RenderFragment used by both drawer Edit-view branches (IsAdd and
+    // edit-existing) so the markup is not duplicated. State (_contactEditTarget,
+    // _selectedContactKey, _contactEditModel) lives on the host (this section);
+    // the fragment just renders the current state and fires callbacks back
+    // into the handlers below. See docs/plans/2026-08-18-...-contact-compact.md §4.2.
+
+    /// <summary>Render the compact contact manager inside the drawer edit view.
+    /// One fragment shared by IsAdd (Draft mode) and edit-existing (Draft for
+    /// drafts, LiveReadOnly for existing) so the markup lives in exactly one
+    /// place.</summary>
+    private RenderFragment RenderCompactContactManager(
+        ContactManagerMode mode,
+        IList<ContactModel> contactList,
+        bool showAddAnchor,
+        Guid? liveOwnerId = null) =>
+        @<div class="guardian-contact-manager">
+            @if (_contactEditTarget is null)
+            {
+                @* LIST surface *@
+                @if (contactList.Count == 0)
+                {
+                    <span class="guardian-contacts-empty">— no contacts —</span>
+                }
+                else
+                {
+                    <ul class="guardian-contact-single-lines">
+                        @foreach (var c in contactList.OrderBy(x => x.Order).ThenBy(x => x.TempId))
+                        {
+                            var key = ContactKey(c);
+                            var selected = _selectedContactKey == key;
+                            var canEdit = mode == ContactManagerMode.Draft;
+                            var canRemove = mode == ContactManagerMode.Draft;
+                            <li class="guardian-contact-line @(selected ? "guardian-contact-line--selected" : null)"
+                                @onclick="() => SelectContact(key)"
+                                tabindex="0"
+                                aria-selected="@(selected ? "true" : "false")"
+                                @onkeydown="@(e => OnContactLineKeyDownAsync(e, key))">
+                                <span class="guardian-contact-glyph" title="@c.Channel.ToString()">@ChannelGlyph(c.Channel)</span>
+                                <span class="guardian-contact-value">@FormatContactValue(c)</span>
+                                @if (!string.IsNullOrWhiteSpace(c.Label))
+                                {
+                                    <span class="guardian-contact-label">(@c.Label)</span>
+                                }
+                                <span class="guardian-contact-actions">
+                                    @if (canEdit)
+                                    {
+                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                      Title="Edit contact"
+                                                      IconStart="@FluentIcons.Edit"
+                                                      OnClick="@(() => StartContactEditAsync(c))" />
+                                    }
+                                    @if (canRemove)
+                                    {
+                                        <FluentButton Appearance="Appearance.Lightweight"
+                                                      Title="Remove contact"
+                                                      IconStart="@FluentIcons.Delete"
+                                                      OnClick="@(() => RemoveDraftContactAsync(c))" />
+                                    }
+                                </span>
+                            </li>
+                        }
+                    </ul>
+                }
+
+                @* Reorder toolbar — OUTSIDE the list, acts on the selected line. *@
+                <div class="guardian-contact-reorder-bar">
+                    <FluentButton Appearance="Appearance.Lightweight"
+                                  Title="Move up (higher priority)"
+                                  IconStart="@FluentIcons.ChevronUp"
+                                  Disabled="@(_selectedContactKey is null
+                                              || _contactMutating
+                                              || IsContactFirst(contactList, _selectedContactKey.Value))"
+                                  OnClick="@(() => MoveContactUpAsync(mode, contactList, liveOwnerId))" />
+                    <FluentButton Appearance="Appearance.Lightweight"
+                                  Title="Move down (lower priority)"
+                                  IconStart="@FluentIcons.ChevronDown"
+                                  Disabled="@(_selectedContactKey is null
+                                              || _contactMutating
+                                              || IsContactLast(contactList, _selectedContactKey.Value))"
+                                  OnClick="@(() => MoveContactDownAsync(mode, contactList, liveOwnerId))" />
+                </div>
+
+                @if (showAddAnchor)
+                {
+                    <FluentAnchor Href="#"
+                                  Appearance="Appearance.Hypertext"
+                                  OnClick="StartContactAddAsync"
+                                  class="guardian-contact-add-anchor">
+                        Add contact
+                    </FluentAnchor>
+                }
+            }
+            else
+            {
+                @* Focused single-contact add / edit sub-panel (inline) *@
+                <ContactFormFields Model="_contactEditModel"
+                                   ChannelChanged="OnGuardianContactChannelChanged"
+                                   ValueLabel="@ContactValueLabel"
+                                   ValuePlaceholder="@ContactValuePlaceholder"
+                                   OptionText="@FormatCountryCodeOption" />
+                <div class="guardian-contact-actions">
+                    <FluentButton Appearance="Appearance.Lightweight"
+                                  OnClick="CancelContactEditAsync">
+                        Cancel
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Accent"
+                                  OnClick="@(() => CommitContactAsync(mode, contactList, liveOwnerId))">
+                        @(_contactEditTarget.IsAdd ? "Add" : "Save")
+                    </FluentButton>
+                </div>
+            }
+        </div>;
+
+    /// <summary>Stable key for a contact line: the real persisted id when
+    /// present (Live), otherwise the client-side TempId (Draft). Used to
+    /// track selection and to look a contact up in the working list.</summary>
+    private static Guid ContactKey(ContactModel c) => c.PersistedId ?? c.TempId;
+
+    private void SelectContact(Guid key)
+    {
+        _selectedContactKey = key;
+    }
+
+    private bool IsContactFirst(IList<ContactModel> contactList, Guid key)
+    {
+        var ordered = contactList.OrderBy(x => x.Order).ThenBy(x => x.TempId).ToList();
+        return ordered.Count > 0 && ContactKey(ordered[0]) == key;
+    }
+
+    private bool IsContactLast(IList<ContactModel> contactList, Guid key)
+    {
+        var ordered = contactList.OrderBy(x => x.Order).ThenBy(x => x.TempId).ToList();
+        return ordered.Count > 0 && ContactKey(ordered[^1]) == key;
+    }
+
+    private async Task OnContactLineKeyDownAsync(KeyboardEventArgs e, Guid key)
+    {
+        if (e.Key == "Enter" || e.Key == " ")
+        {
+            // Toggle selection (Enter/Space on a focused <li> with tabindex=0).
+            _selectedContactKey = _selectedContactKey == key ? null : key;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task MoveContactUpAsync(ContactManagerMode mode, IList<ContactModel> contactList, Guid? liveOwnerId)
+    {
+        if (_selectedContactKey is not { } key) return;
+        var ordered = contactList.OrderBy(x => x.Order).ThenBy(x => x.TempId).ToList();
+        var idx = ordered.FindIndex(c => ContactKey(c) == key);
+        if (idx <= 0) return;
+        (ordered[idx - 1], ordered[idx]) = (ordered[idx], ordered[idx - 1]);
+        RestampContactOrders(ordered);
+        if (mode == ContactManagerMode.Draft)
+        {
+            OnEditContactsChanged();
+            // Selection stays with the moved item (it is now at idx-1); the
+            // reference identity is unchanged so the highlight follows it.
+            await InvokeAsync(StateHasChanged);
+        }
+        else
+        {
+            await PersistLiveReorderAsync(contactList, liveOwnerId);
+        }
+    }
+
+    private async Task MoveContactDownAsync(ContactManagerMode mode, IList<ContactModel> contactList, Guid? liveOwnerId)
+    {
+        if (_selectedContactKey is not { } key) return;
+        var ordered = contactList.OrderBy(x => x.Order).ThenBy(x => x.TempId).ToList();
+        var idx = ordered.FindIndex(c => ContactKey(c) == key);
+        if (idx < 0 || idx >= ordered.Count - 1) return;
+        (ordered[idx + 1], ordered[idx]) = (ordered[idx], ordered[idx + 1]);
+        RestampContactOrders(ordered);
+        if (mode == ContactManagerMode.Draft)
+        {
+            OnEditContactsChanged();
+            await InvokeAsync(StateHasChanged);
+        }
+        else
+        {
+            await PersistLiveReorderAsync(contactList, liveOwnerId);
+        }
+    }
+
+    /// <summary>Restamp <see cref="ContactModel.Order"/> on the given ordered
+    /// list so the lowest-order contact stays Order=0 (the preferred/top
+    /// contact per spec §4.9).</summary>
+    private static void RestampContactOrders(IList<ContactModel> orderedList)
+    {
+        for (var i = 0; i < orderedList.Count; i++)
+        {
+            orderedList[i].Order = i;
+        }
+    }
+
+    /// <summary>Persist the Live reordering via IContactsClient.ReorderContactsAsync
+    /// (same contract <see cref="ContactsEditor"/> uses — §7 locked decision).
+    /// On failure, refetch the list so the UI reflects server truth.</summary>
+    private async Task PersistLiveReorderAsync(IList<ContactModel> contactList, Guid? liveOwnerId)
+    {
+        if (liveOwnerId is not { } gid) return;
+        _contactMutating = true;
+        try
+        {
+            var orderedIds = contactList
+                .OrderBy(x => x.Order).ThenBy(x => x.TempId)
+                .Select(x => x.PersistedId ?? Guid.Empty)
+                .Where(g => g != Guid.Empty)
+                .ToList();
+            await ContactsApi.ReorderContactsAsync(
+                ContactOwnerType.Guardian, gid, orderedIds, CancellationToken.None);
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to reorder guardian contacts for {OwnerId}", gid);
+            _guardianError = ex.Message;
+            // Refetch so the UI shows server truth instead of a stale optimistic order.
+            await LoadLiveContactsAsync(gid);
+        }
+        finally
+        {
+            _contactMutating = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void StartContactAddAsync()
+    {
+        _contactEditTarget = new ContactEditTarget(IsAdd: true, Contact: null);
+        _contactEditModel = new ContactFormFieldsModel();
+        _selectedContactKey = null;
+    }
+
+    private void StartContactEditAsync(ContactModel c)
+    {
+        _contactEditTarget = new ContactEditTarget(IsAdd: false, Contact: c);
+        _contactEditModel = new ContactFormFieldsModel
+        {
+            Channel = c.Channel,
+            Value = c.Value,
+            Label = c.Label ?? string.Empty,
+            CountryCodeId = ResolveCountryCodeId(c.CountryCode),
+        };
+        _selectedContactKey = ContactKey(c);
+    }
+
+    private void CancelContactEditAsync()
+    {
+        _contactEditTarget = null;
+        _contactEditModel = new ContactFormFieldsModel();
+        // Keep _selectedContactKey so the highlight persists across cancel.
+    }
+
+    private async Task CommitContactAsync(ContactManagerMode mode, IList<ContactModel> contactList, Guid? liveOwnerId)
+    {
+        if (_contactEditTarget is null) return;
+        if (string.IsNullOrWhiteSpace(_contactEditModel.Value))
+        {
+            _guardianError = "Contact value is required.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        _guardianError = null;
+
+        var countryCodeName = ResolveCountryCodeName(_contactEditModel.CountryCodeId);
+
+        if (mode == ContactManagerMode.Draft)
+        {
+            if (_contactEditTarget.IsAdd)
+            {
+                contactList.Add(new ContactModel
+                {
+                    Channel = _contactEditModel.Channel,
+                    Value = _contactEditModel.Value.Trim(),
+                    Label = string.IsNullOrWhiteSpace(_contactEditModel.Label) ? null : _contactEditModel.Label.Trim(),
+                    CountryCode = countryCodeName,
+                    Order = contactList.Count,
+                });
+            }
+            else if (_contactEditTarget.Contact is { } orig)
+            {
+                orig.Channel = _contactEditModel.Channel;
+                orig.Value = _contactEditModel.Value.Trim();
+                orig.Label = string.IsNullOrWhiteSpace(_contactEditModel.Label) ? null : _contactEditModel.Label.Trim();
+                orig.CountryCode = countryCodeName;
+            }
+            OnEditContactsChanged();
+        }
+        else
+        {
+            // Live mode for existing guardians: add/edit are deferred to the
+            // guardian detail page (§4.2). The inner sub-panel is only shown
+            // for Draft guardians today, so this branch is unreachable in the
+            // current renderer; kept for forward-compat in case Live add/edit
+            // is ever wired up.
+            await InvokeAsync(StateHasChanged);
+        }
+
+        _contactEditTarget = null;
+        _contactEditModel = new ContactFormFieldsModel();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RemoveDraftContactAsync(ContactModel c)
+    {
+        // Only Draft mode exposes the Remove icon (per §4.2 table). Guard
+        // defensively so a future Live wiring cannot silently drop via the API.
+        var contactList = (IList<ContactModel>)_editContacts;
+        if (c.PersistedId is not null)
+        {
+            _guardianError = "Removing a saved guardian contact is not supported in this drawer. Use the guardian detail page.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        contactList.Remove(c);
+        if (_selectedContactKey == ContactKey(c)) _selectedContactKey = null;
+        OnEditContactsChanged();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task OnGuardianContactChannelChanged()
+    {
+        // Mirror the ContactsEditor behavior: when entering SMS / WhatsApp,
+        // load country calling codes on demand and seed a sensible default
+        // (the first option, since the user has not chosen a country yet);
+        // when leaving them, clear any stale country-code selection.
+        if (_contactEditModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            await LoadCountryCodesAsync();
+        }
+        else
+        {
+            _contactEditModel.CountryCodeId = null;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoadCountryCodesAsync()
+    {
+        if (_countryCodeOptions is not null) return;
+        try
+        {
+            _countryCodeOptions = await CodedValuesApi.GetChildrenByParentCodeAsync(
+                CodedValueParent.CountryCallingCodes.ToCode(), CancellationToken.None) ?? [];
+            if (_contactEditModel.CountryCodeId is null)
+            {
+                _contactEditModel.CountryCodeId = _countryCodeOptions.FirstOrDefault()?.Id;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load country calling codes");
+            _guardianError = "Could not load country codes.";
+        }
+    }
+
+    /// <summary>Load the full contact list for an existing guardian into
+    /// <see cref="_liveContacts"/> (projected to <see cref="ContactModel"/>
+    /// so the compact manager + reorder work uniformly). Triggered when the
+    /// drawer edit view initializes for an existing guardian.</summary>
+    private async Task LoadLiveContactsAsync(Guid guardianId)
+    {
+        try
+        {
+            var dtos = await ContactsApi.ListContactsAsync(
+                ContactOwnerType.Guardian, guardianId, CancellationToken.None) ?? [];
+            _liveContacts = dtos
+                .OrderBy(d => d.DisplayOrder).ThenBy(d => d.Id)
+                .Select(d => new ContactModel
+                {
+                    PersistedId = d.Id,
+                    Channel = d.Channel,
+                    Value = d.Value,
+                    Label = d.Label,
+                    CountryCode = d.CountryCode,
+                    Order = d.DisplayOrder,
+                })
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load contacts for guardian {GuardianId}", guardianId);
+            _guardianError = ex.Message;
+            _liveContacts = new List<ContactModel>();
+        }
+    }
+
+    private string ContactValueLabel => _contactEditModel.Channel switch
+    {
+        ContactChannel.SMS => "Phone number",
+        ContactChannel.WhatsApp => "WhatsApp number",
+        _ => "Email address",
+    };
+
+    private string ContactValuePlaceholder => _contactEditModel.Channel switch
+    {
+        ContactChannel.SMS => "Phone number…",
+        ContactChannel.WhatsApp => "WhatsApp number…",
+        _ => "Email address…",
+    };
+
+    private string FormatCountryCodeOption(CodedValueDto o) => $"{o.Name}";
+
+    private Guid? ResolveCountryCodeId(string? countryCodeName)
+    {
+        if (string.IsNullOrWhiteSpace(countryCodeName)) return null;
+        // _countryCodeOptions may be null when editing a non-SMS/non-WhatsApp
+        // contact; load lazily so the dropdown shows the right options next
+        // time it opens.
+        _ = LoadCountryCodesAsync();
+        return _countryCodeOptions?.FirstOrDefault(x => x.Name == countryCodeName)?.Id;
+    }
+
+    private string? ResolveCountryCodeName(Guid? id)
+    {
+        if (id is null || _countryCodeOptions is null) return null;
+        return _countryCodeOptions.FirstOrDefault(x => x.Id == id)?.Name;
+    }
+
+    // End of compact contact manager helpers.
 
     /// <summary>The current guardian count surfaced in the Linked-mode header.
     /// In <see cref="StudentFormFieldsMode.Linked"/> mode the count is
@@ -691,6 +1221,11 @@
         _editModel.FirstName = a.FirstName;
         _editModel.LastName = a.LastName;
         _editContacts = (a.Contacts ?? []).ToList();
+        ResetCompactContactManager();
+        if (a.ExistingGuardianId is { } liveGid)
+        {
+            await LoadLiveContactsAsync(liveGid);
+        }
         if (_editModel.RelationshipCodedValueId is { } relId)
             await EnsureRelNameAsync(relId);
         await InvokeAsync(StateHasChanged);
@@ -707,29 +1242,18 @@
         await InvokeAsync(StateHasChanged);
     }
 
-    /// <summary>Cancel the focused per-guardian edit form hosted in the side
-    /// drawer (<see cref="GuardianView.Edit"/>). Clears the working copy and
-    /// any transient search state. Used by both the add and edit forms in the
-    /// Edit view so the host can close the drawer without persisting.</summary>
-    private Task CancelEditFormAsync()
-    {
-        _editingIndex = -1;
-        ClearTypeaheadState();
-        return InvokeAsync(StateHasChanged);
-    }
-
     /// <summary>Save the focused per-guardian add form. Validates the required
     /// fields, appends a new draft to <see cref="GuardianLinks"/>, and switches
     /// the section into the edit view for that newly-added guardian. Mirrors
-    /// <see cref="AddInlineGuardianAsync"/> but exposes status to the host
-    /// (used by the side drawer's Save button).</summary>
-    public async Task<bool> SaveAddGuardianAsync()
+    /// <see cref="AddInlineGuardianAsync"/> but is used by the side drawer's
+    /// inline Save button (the drawer footer owns Close/Cancel).</summary>
+    public async Task SaveAddGuardianAsync()
     {
         if (string.IsNullOrWhiteSpace(_editModel.FirstName) || string.IsNullOrWhiteSpace(_editModel.LastName))
         {
             _guardianError = "First and last name are required.";
             await InvokeAsync(StateHasChanged);
-            return false;
+            return;
         }
         _guardianError = null;
         _adding = true;
@@ -759,14 +1283,14 @@
                     await EnsureRelNameAsync(relId);
             }
             await InvokeAsync(StateHasChanged);
-            return true;
+            return;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to add new guardian from edit drawer");
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
-            return false;
+            return;
         }
         finally
         {
@@ -779,15 +1303,14 @@
     /// Replaces the immutable record via a <c>with</c> expression, preserving the
     /// guardian's identity (id / name / title), its contact summary, and its
     /// emergency-contact flag. No API call — the change is drafted and persisted
-    /// atomically with the rest of the student on Save. Returns true on success;
-    /// false when an error is shown so the inline panel stays open.</summary>
-    public async Task<bool> SaveEditGuardianAsync()
+    /// atomically with the rest of the student on Save.</summary>
+    public async Task SaveEditGuardianAsync()
     {
         if (_editingIndex < 0 || _editingIndex >= GuardianLinks.Count)
         {
             _editingIndex = -1;
             await InvokeAsync(StateHasChanged);
-            return true;
+            return;
         }
         _guardianError = null;
         try
@@ -807,14 +1330,14 @@
                 await EnsureRelNameAsync(relId);
             _editingIndex = -1;
             await InvokeAsync(StateHasChanged);
-            return true;
+            return;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to edit guardian at index {Index}", _editingIndex);
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
-            return false;
+            return;
         }
     }
 
