@@ -132,7 +132,8 @@
             </div>
             <div class="guardian-edit-form">
                 <GuardianEditFields Model="_editModel"
-                                    ShowIdentityFields="true" />
+                                    ShowIdentityFields="true"
+                                    RelationshipChanged="OnGuardianRelationshipChanged" />
                 <div class="guardian-edit-contacts">
                     @RenderCompactContactManager(
                         mode: ContactManagerMode.Draft,
@@ -157,7 +158,7 @@
                 var editedGuardian = GuardianLinks[_editingIndex];
                 <div class="guardian-edit-identity">
                     <span class="guardian-edit-identity-name">@editedGuardianDisplayName</span>
-                    @if (ResolveRelName(editedGuardian.RelationshipCodedValueId) is { } relName)
+                    @if (ResolveRelName(_editModel.RelationshipCodedValueId) is { } relName)
                     {
                         <span class="guardian-edit-identity-rel">(@relName)</span>
                     }
@@ -170,7 +171,8 @@
                        Relationship/Role is always shown (it persists through the
                        student save). *@
                     <GuardianEditFields Model="_editModel"
-                                        ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)" />
+                                        ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)"
+                                        RelationshipChanged="OnGuardianRelationshipChanged" />
                     <div class="guardian-edit-contacts">
                         @* Compact single-line contact manager. Draft (no
                            ExistingGuardianId) -> Buffered on _editContacts
@@ -185,7 +187,7 @@
                             @RenderCompactContactManager(
                                 mode: ContactManagerMode.LiveReadOnly,
                                 contactList: _liveContacts,
-                                showAddAnchor: false,
+                                showAddAnchor: true,
                                 liveOwnerId: gid)
                         }
                         else
@@ -410,7 +412,8 @@
                        Relationship/Role is always shown (it persists through the
                        student save). *@
                     <GuardianEditFields Model="_editModel"
-                                        ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)" />
+                                        ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)"
+                                        RelationshipChanged="OnGuardianRelationshipChanged" />
                     <div class="guardian-edit-contacts">
                         @* Contacts: Live for existing guardians, Buffered for
                            drafts. The nested Buffered editor has no drawer of
@@ -768,7 +771,6 @@
                         {
                             var key = ContactKey(c);
                             var selected = _selectedContactKey == key;
-                            var canEdit = mode == ContactManagerMode.Draft;
                             var canRemove = mode == ContactManagerMode.Draft;
                             <li class="guardian-contact-line @(selected ? "guardian-contact-line--selected" : null)"
                                 @onclick="() => SelectContact(key)"
@@ -782,13 +784,6 @@
                                     <span class="guardian-contact-label">(@c.Label)</span>
                                 }
                                 <span class="guardian-contact-actions">
-                                    @if (canEdit)
-                                    {
-                                        <FluentButton Appearance="Appearance.Lightweight"
-                                                      Title="Edit contact"
-                                                      IconStart="@FluentIcons.Edit"
-                                                      OnClick="@(() => StartContactEditAsync(c))" />
-                                    }
                                     @if (canRemove)
                                     {
                                         <FluentButton Appearance="Appearance.Lightweight"
@@ -804,6 +799,11 @@
 
                 @* Reorder toolbar — OUTSIDE the list, acts on the selected line. *@
                 <div class="guardian-contact-reorder-bar">
+                    <FluentButton Appearance="Appearance.Lightweight"
+                                  Title="Edit contact"
+                                  IconStart="@FluentIcons.Edit"
+                                  Disabled="@(_selectedContactKey is null || _contactMutating)"
+                                  OnClick="@(() => StartContactEditAsync(contactList.FirstOrDefault(c => ContactKey(c) == _selectedContactKey)!))" />
                     <FluentButton Appearance="Appearance.Lightweight"
                                   Title="Move up (higher priority)"
                                   IconStart="@FluentIcons.ChevronUp"
@@ -1076,6 +1076,13 @@
         }
         await InvokeAsync(StateHasChanged);
     }
+
+    /// <summary>Fired by <see cref="GuardianEditFields.RelationshipChanged" />
+    /// after the relationship dropdown selection changes (R2). The drawer's
+    /// identity header binds to <c>_editModel.RelationshipCodedValueId</c>, so
+    /// we re-render to reflect the newly chosen relationship inline.</summary>
+    private Task OnGuardianRelationshipChanged()
+        => InvokeAsync(StateHasChanged);
 
     private async Task LoadCountryCodesAsync()
     {

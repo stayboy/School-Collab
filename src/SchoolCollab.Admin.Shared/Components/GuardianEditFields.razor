@@ -49,12 +49,14 @@
 <FormRow Label="Relationship/Role" Required Orientation="RowOrientation.Vertical">
     <CodedValueDropdown Parent="CodedValueParent.Relationships"
                         @bind-SelectedId="Model.RelationshipCodedValueId"
+                        @bind-SelectedId:after="NotifyRelationshipChanged"
                         Placeholder="Relationship"
                         Width="FieldWidth.W3" />
-    <DropdownForEnum TEnum="GuardianRole"
-                     @bind-SelectedValue="Model.Role"
-                     Placeholder="Role"
-                     Width="FieldWidth.W2" />
+    <div class="guardian-role-checkbox">
+        <FluentCheckbox @bind-Value="Model.IsCC"
+                        Label="CC"
+                        HelpText="carbon-copy / not the primary" />
+    </div>
 </FormRow>
 
 @code {
@@ -71,4 +73,12 @@
     /// persist through the student save and would mislead the user into
     /// editing them.</summary>
     [Parameter] public bool ShowIdentityFields { get; set; } = true;
+
+    /// <summary>Raised after the relationship dropdown selection changes, so
+    /// the host (GuardianSection) can re-render the drawer's identity header
+    /// to reflect the newly chosen relationship (R2). Parameterless — mirrors
+    /// <see cref="ContactFormFields.ChannelChanged"/>.</summary>
+    [Parameter] public EventCallback RelationshipChanged { get; set; }
+
+    private Task NotifyRelationshipChanged() => RelationshipChanged.InvokeAsync();
 }

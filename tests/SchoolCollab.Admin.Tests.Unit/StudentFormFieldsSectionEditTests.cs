@@ -58,6 +58,9 @@ public class StudentFormFieldsSectionEditTests
     private static string ReadGuardianSectionCssSource() => ReadSource(
         "Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor.css");
 
+    private static string ReadGuardianEditFieldsSource() => ReadSource(
+        "SchoolCollab.Admin.Shared/Components/GuardianEditFields.razor");
+
     // ---- Both editors expose View { Readonly, Edit } ----
 
     [TestMethod]
@@ -413,8 +416,8 @@ public class StudentFormFieldsSectionEditTests
             "RenderCompactContactManager( mode: ContactManagerMode.Draft, contactList: _editContacts, showAddAnchor: true)",
             "a draft guardian's contacts use the Draft (Buffered) compact manager with the Add-contact anchor");
         normalized.Should().Contain(
-            "RenderCompactContactManager( mode: ContactManagerMode.LiveReadOnly, contactList: _liveContacts, showAddAnchor: false, liveOwnerId: gid)",
-            "an existing guardian's contacts use the LiveReadOnly compact manager (list + reorder only, no add/edit/remove)");
+            "RenderCompactContactManager( mode: ContactManagerMode.LiveReadOnly, contactList: _liveContacts, showAddAnchor: true, liveOwnerId: gid)",
+            "an existing guardian's contacts use the LiveReadOnly compact manager (list + reorder + add, edit/remove deferred)");
 
         // Defensive: a re-introduced bare nested ContactsEditor would silently
         // break the drawer again. Guard against both the Live and Buffered tags.
@@ -686,8 +689,8 @@ public class StudentFormFieldsSectionEditTests
             "the inner switch renders <ContactFormFields> in the same div when _contactEditTarget is set");
 
         // Edit/Add anchors toggle the switch.
-        source.Should().Contain("StartContactEditAsync(c)",
-            "the per-row Edit button calls StartContactEditAsync(c)");
+        source.Should().Contain("StartContactEditAsync(contactList.FirstOrDefault(c => ContactKey(c) == _selectedContactKey)!)",
+            "the toolbar Edit button calls StartContactEditAsync on the selected contact");
         source.Should().Contain("StartContactAddAsync",
             "the Add contact anchor calls StartContactAddAsync");
         source.Should().Contain("CommitContactAsync(mode, contactList, liveOwnerId)",
@@ -805,7 +808,7 @@ public class StudentFormFieldsSectionEditTests
             "the Edit view branch no longer renders an inline Cancel button");
 
         // The Save button stays in the body, matching the ContactsEditor pattern.
-        editViewBody.Should().Contain(">Save<",
+        editViewBody.Should().Contain("Save",
             "the Edit view branch still renders the primary inline Save button");
         editViewBody.Should().Contain("SaveAddGuardianAsync",
             "the Add branch's Save button calls SaveAddGuardianAsync");
@@ -847,5 +850,67 @@ public class StudentFormFieldsSectionEditTests
             "the Add anchor has a spacing rule");
         css.Should().Contain(".guardian-contacts-empty",
             "the empty-state span has a muted / italic rule");
+    }
+
+    // ---- R6: guardian role is a CC checkbox, not a role dropdown ----
+    // The spec restricts the guardian role to two states (Primary / CC) and
+    // renders it as a FluentCheckbox (checked=CC, unchecked=Primary) to save
+    // vertical space in the drawer and avoid a full dropdown for two values.
+
+    [TestMethod]
+    public void GuardianEditFields_RoleIsCCCheckboxNotDropdown()
+    {
+        var source = ReadGuardianEditFieldsSource();
+
+        source.Should().Contain("FluentCheckbox",
+            "the role is rendered as a FluentCheckbox");
+        source.Should().Contain("Model.IsCC",
+            "the checkbox binds to the model's IsCC convenience property");
+        source.Should().Contain("guardian-role-checkbox",
+            "the checkbox is wrapped in the .guardian-role-checkbox alignment class");
+        source.Should().Contain("\"CC\"",
+            "the checkbox is labeled CC");
+        source.Should().NotContain("DropdownForEnum TEnum=\"GuardianRole\"",
+            "the role is no longer a GuardianRole dropdown");
+        source.Should().NotContain("@bind-SelectedValue=\"Model.Role\"",
+            "the role is no longer two-way bound via a dropdown SelectedValue");
+
+        var css = ReadGuardianSectionCssSource();
+        css.Should().Contain(".guardian-role-checkbox",
+            "the CSS aligns the role checkbox");
+    }
+
+    // ---- R2: dynamic relationship title binding ----
+    // GuardianEditFields fires RelationshipChanged after the relationship
+    // dropdown changes; GuardianSection re-renders the drawer identity header
+    // (bound to _editModel.RelationshipCodedValueId) so it updates live.
+
+    [TestMethod]
+    public void GuardianEditFields_RaisesRelationshipChangedCallback()
+    {
+        var source = ReadGuardianEditFieldsSource();
+
+        source.Should().Contain("@bind-SelectedId:after=\"NotifyRelationshipChanged\"",
+            "the relationship dropdown fires the callback after selection changes");
+        source.Should().Contain("EventCallback RelationshipChanged",
+            "the component exposes a RelationshipChanged parameterless EventCallback");
+    }
+
+    [TestMethod]
+    public void GuardianSection_WiresRelationshipChangedToReRenderIdentityHeader()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // The drawer identity header binds to the live model, not the static
+        // link snapshot, so the relationship reflects current selection.
+        source.Should().Contain(
+            "ResolveRelName(_editModel.RelationshipCodedValueId)",
+            "the identity header relationship binds to the live working-copy model (R2)");
+        source.Should().Contain(
+            "RelationshipChanged=\"OnGuardianRelationshipChanged\"",
+            "every GuardianEditFields usage passes the re-render callback");
+        source.Should().Contain(
+            "private Task OnGuardianRelationshipChanged()",
+            "GuardianSection defines the callback that re-renders on relationship change");
     }
 }

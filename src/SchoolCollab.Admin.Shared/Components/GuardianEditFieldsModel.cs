@@ -25,7 +25,16 @@ public sealed class GuardianEditFieldsModel
     /// <summary>The link relationship coded-value id.</summary>
     public Guid? RelationshipCodedValueId { get; set; }
 
-    /// <summary>The guardian's role on the student (Primary / Secondary /
-    /// Emergency). Defaults to <see cref="GuardianRole.Primary"/>.</summary>
+    /// <summary>The guardian's role on the student (Primary / CC). Defaults
+    /// to <see cref="GuardianRole.Primary"/>.</summary>
     public GuardianRole Role { get; set; } = GuardianRole.Primary;
+
+    /// <summary>Convenience property for <c>FluentCheckbox</c> binding.
+    /// Checked = <see cref="GuardianRole.CC"/>, unchecked = <see
+    /// cref="GuardianRole.Primary"/> (default polarity, reversible).</summary>
+    public bool IsCC
+    {
+        get => Role == GuardianRole.CC;
+        set => Role = value ? GuardianRole.CC : GuardianRole.Primary;
+    }
 }
