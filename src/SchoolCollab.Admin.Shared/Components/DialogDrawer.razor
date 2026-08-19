@@ -166,13 +166,15 @@
         ? "dialog-drawer-panel dialog-drawer-panel--left"
         : "dialog-drawer-panel dialog-drawer-panel--right";
 
-    /// <summary>Inline style that pins the panel to the right or left edge
-    /// of the dialog body. The CSS class carries top/bottom: 0;
-    /// height: auto so the panel always fills the body height; the inline
-    /// style only adds the horizontal edge.</summary>
+    /// <summary>Inline style that anchors the panel to the right or left edge
+    /// of the dialog body, inset by a small margin so the panel reads as a
+    /// cut-out card floating over the form — its full border and cast shadow
+    /// are separated from the dialog edges instead of being flush against
+    /// them. The CSS class carries top/bottom and the vertical shrink; the
+    /// inline style only adds the horizontal edge + margin.</summary>
     private string PanelSideStyle => Side == DialogDrawerSide.Left
-        ? "left: 0;"
-        : "right: 0;";
+        ? "left: 8px;"
+        : "right: 8px;";
 
     private ElementReference _panel;
     private bool _open;

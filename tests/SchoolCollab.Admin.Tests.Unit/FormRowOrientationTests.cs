@@ -180,16 +180,17 @@ public class FormRowOrientationTests
     public void ContactsEditor_EditViewPassesVerticalOrientationToEveryFormRow()
     {
         // The Add and Edit forms in the focused Edit view share ONE field
-        // group (ContactFormFields) — Channel / Country code / Value / Label.
-        // The Vertical orientation for the narrow 420px drawer lives on those
-        // four FormRows in ContactFormFields.razor rather than being duplicated
-        // inline in the Add/Edit branches (so the two can never drift apart).
+        // group (ContactFormFields) — Channel (+country code, combined under
+        // the same label) / Value / Label. The Vertical orientation for the
+        // narrow 420px drawer lives on those FormRows in ContactFormFields.razor
+        // rather than being duplicated inline in the Add/Edit branches (so the
+        // two can never drift apart).
         var fields = ReadContactFormFieldsSource();
 
         var formRowMatches = System.Text.RegularExpressions.Regex.Matches(
             fields, @"<FormRow\s+[^>]*>", System.Text.RegularExpressions.RegexOptions.Singleline);
-        formRowMatches.Count.Should().BeGreaterThanOrEqualTo(4,
-            "ContactFormFields renders the 4 field rows (Channel + Country code + Value + Label)");
+        formRowMatches.Count.Should().BeGreaterThanOrEqualTo(3,
+            "ContactFormFields renders the 3 field rows (Channel (+country code) + Value + Label)");
 
         foreach (System.Text.RegularExpressions.Match m in formRowMatches)
         {

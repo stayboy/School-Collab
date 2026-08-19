@@ -131,21 +131,27 @@
                 <span class="guardian-edit-identity-name">@editedGuardianDisplayName</span>
             </div>
             <div class="guardian-edit-form">
-                <GuardianEditFields Model="_editModel"
-                                    ShowIdentityFields="true"
-                                    RelationshipChanged="OnGuardianRelationshipChanged" />
+                @if (!InContactSubScreen)
+                {
+                    <GuardianEditFields Model="_editModel"
+                                        ShowIdentityFields="true"
+                                        RelationshipChanged="OnGuardianRelationshipChanged" />
+                }
                 <div class="guardian-edit-contacts">
                     @RenderCompactContactManager(
                         mode: ContactManagerMode.Draft,
                         contactList: _editContacts,
                         showAddAnchor: true)
                 </div>
-                <div class="guardian-edit-actions">
-                    <FluentButton Appearance="Appearance.Accent"
-                                  OnClick="SaveAddGuardianAsync">
-                        Save
-                    </FluentButton>
-                </div>
+                @if (!InContactSubScreen)
+                {
+                    <div class="guardian-edit-actions">
+                        <FluentButton Appearance="Appearance.Accent"
+                                      OnClick="SaveAddGuardianAsync">
+                            Save
+                        </FluentButton>
+                    </div>
+                }
             </div>
         }
         else
@@ -170,9 +176,12 @@
                        operation), so they're hidden via ShowIdentityFields=false.
                        Relationship/Role is always shown (it persists through the
                        student save). *@
-                    <GuardianEditFields Model="_editModel"
-                                        ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)"
-                                        RelationshipChanged="OnGuardianRelationshipChanged" />
+                    @if (!InContactSubScreen)
+                    {
+                        <GuardianEditFields Model="_editModel"
+                                            ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)"
+                                            RelationshipChanged="OnGuardianRelationshipChanged" />
+                    }
                     <div class="guardian-edit-contacts">
                         @* Compact single-line contact manager. Draft (no
                            ExistingGuardianId) -> Buffered on _editContacts
@@ -198,12 +207,15 @@
                                 showAddAnchor: true)
                         }
                     </div>
-                    <div class="guardian-edit-actions">
-                        <FluentButton Appearance="Appearance.Accent"
-                                      OnClick="SaveEditGuardianAsync">
-                            Save
-                        </FluentButton>
-                    </div>
+                    @if (!InContactSubScreen)
+                    {
+                        <div class="guardian-edit-actions">
+                            <FluentButton Appearance="Appearance.Accent"
+                                          OnClick="SaveEditGuardianAsync">
+                                Save
+                            </FluentButton>
+                        </div>
+                    }
                 </div>
             }
         }
@@ -524,6 +536,29 @@
     /// the GuardianId for the API call.</summary>
     [Parameter] public EventCallback<StudentGuardianViewDto> OnRemoveGuardian { get; set; }
 
+    /// <summary>Reports which compact-contact sub-screen is active so the host
+    /// (<c>StudentEditDialog</c>) can drive the drawer chrome title
+    /// ("Edit Guardian Contact" etc.). The sub-screen has no in-body heading
+    /// of its own, so the chrome title is the only place the mode is named.
+    /// Fired whenever the active sub-screen changes (open / cancel / commit).</summary>
+    [Parameter] public EventCallback<GuardianContactSubScreen> OnContactSubScreenChanged { get; set; }
+
+    /// <summary>The contact sub-screen currently open in the drawer Edit view.
+    /// The host reads this (via <see cref="OnContactSubScreenChanged"/>) to pick
+    /// the drawer title. Nested in <c>GuardianSection</c> so the host can
+    /// reference it as <c>GuardianSection.GuardianContactSubScreen</c>.</summary>
+    public enum GuardianContactSubScreen
+    {
+        /// <summary>No contact sub-screen — the list surface is showing.</summary>
+        None,
+        /// <summary>"Add contact" sub-screen is open.</summary>
+        Add,
+        /// <summary>"Edit contact" sub-screen is open.</summary>
+        Edit,
+        /// <summary>Remove-confirm sub-screen is open.</summary>
+        Remove,
+    }
+
     [Inject] private StudentsApiClient Api { get; set; } = default!;
     [Inject] private CodedValuesApiClient CodedValuesApi { get; set; } = default!;
     [Inject] private SchoolCollab.Students.Core.Contracts.IContactsClient ContactsApi { get; set; } = default!;
@@ -624,6 +659,8 @@
     {
         _selectedContactKey = null;
         _contactEditTarget = null;
+        _removeContactTarget = null;
+        _contactReason = null;
         _contactEditModel = new ContactFormFieldsModel();
         _liveContacts = new List<ContactModel>();
         _countryCodeOptions = null;
@@ -684,6 +721,39 @@
     // True while a Live load or reorder API call is in flight (disables
     // reorder buttons to avoid double-clicks).
     private bool _contactMutating;
+    // Reason captured inline in the contact sub-screen for a Live (existing-
+    // guardian) contact edit/remove (D1). Never a nested modal.
+    private string? _contactReason;
+    // Set when the contact manager shows the remove-confirm sub-screen for a
+    // Live contact; null otherwise. Draft removes stay a direct per-row delete.
+    private ContactModel? _removeContactTarget;
+
+    /// <summary>True while a contact sub-screen (add / edit / remove-confirm)
+    /// is active. The drawer body then shows ONLY the sub-screen and hides the
+    /// identity header, the relationship/role rows, and the guardian Save
+    /// (R5, spec §6.2).</summary>
+    private bool InContactSubScreen => _contactEditTarget is not null || _removeContactTarget is not null;
+
+    /// <summary>The contact sub-screen currently active, derived from
+    /// <see cref="_removeContactTarget"/> / <see cref="_contactEditTarget"/>.
+    /// Reported to the host via <see cref="OnContactSubScreenChanged"/> so the
+    /// drawer chrome title tracks the sub-screen.</summary>
+    private GuardianContactSubScreen CurrentContactSubScreen
+    {
+        get
+        {
+            if (_removeContactTarget is not null) return GuardianContactSubScreen.Remove;
+            if (_contactEditTarget is not null)
+                return _contactEditTarget.IsAdd ? GuardianContactSubScreen.Add : GuardianContactSubScreen.Edit;
+            return GuardianContactSubScreen.None;
+        }
+    }
+
+    /// <summary>Push the current contact sub-screen to the host so it can
+    /// update the drawer chrome title. Called by every handler that opens or
+    /// closes a contact sub-screen.</summary>
+    private async Task NotifyContactSubScreenChanged() =>
+        await OnContactSubScreenChanged.InvokeAsync(CurrentContactSubScreen);
 
     /// <summary>Modes for the compact contact manager rendered inside the
     /// drawer Edit view.</summary>
@@ -757,7 +827,7 @@
         bool showAddAnchor,
         Guid? liveOwnerId = null) =>
         @<div class="guardian-contact-manager">
-            @if (_contactEditTarget is null)
+            @if (!InContactSubScreen)
             {
                 @* LIST surface *@
                 @if (contactList.Count == 0)
@@ -771,7 +841,7 @@
                         {
                             var key = ContactKey(c);
                             var selected = _selectedContactKey == key;
-                            var canRemove = mode == ContactManagerMode.Draft;
+                            var isLive = mode == ContactManagerMode.LiveReadOnly;
                             <li class="guardian-contact-line @(selected ? "guardian-contact-line--selected" : null)"
                                 @onclick="() => SelectContact(key)"
                                 tabindex="0"
@@ -784,13 +854,10 @@
                                     <span class="guardian-contact-label">(@c.Label)</span>
                                 }
                                 <span class="guardian-contact-actions">
-                                    @if (canRemove)
-                                    {
-                                        <FluentButton Appearance="Appearance.Lightweight"
-                                                      Title="Remove contact"
-                                                      IconStart="@FluentIcons.Delete"
-                                                      OnClick="@(() => RemoveDraftContactAsync(c))" />
-                                    }
+                                    <FluentButton Appearance="Appearance.Lightweight"
+                                                  Title="Remove contact"
+                                                  IconStart="@FluentIcons.Delete"
+                                                  OnClick="@(() => RemoveContactAsync(c, isLive))" />
                                 </span>
                             </li>
                         }
@@ -832,22 +899,57 @@
             }
             else
             {
-                @* Focused single-contact add / edit sub-panel (inline) *@
-                <ContactFormFields Model="_contactEditModel"
-                                   ChannelChanged="OnGuardianContactChannelChanged"
-                                   ValueLabel="@ContactValueLabel"
-                                   ValuePlaceholder="@ContactValuePlaceholder"
-                                   OptionText="@FormatCountryCodeOption" />
-                <div class="guardian-contact-actions">
-                    <FluentButton Appearance="Appearance.Lightweight"
-                                  OnClick="CancelContactEditAsync">
-                        Cancel
-                    </FluentButton>
-                    <FluentButton Appearance="Appearance.Accent"
-                                  OnClick="@(() => CommitContactAsync(mode, contactList, liveOwnerId))">
-                        @(_contactEditTarget.IsAdd ? "Add" : "Save")
-                    </FluentButton>
-                </div>
+                @* Contact sub-screen: remove-confirm, or add / edit. *@
+                if (_removeContactTarget is not null)
+                {
+                    <div class="guardian-contact-subscreen">
+                        <div class="guardian-contact-subscreen-summary">@FormatContactValue(_removeContactTarget)</div>
+                        @if (liveOwnerId is not null)
+                        {
+                            <FluentTextField class="guardian-contact-reason"
+                                             @bind-Value="_contactReason"
+                                             Label="Reason"
+                                             Placeholder="Why are you removing this contact?" />
+                        }
+                        <div class="guardian-contact-actions">
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          OnClick="CancelContactEditAsync">
+                                Cancel
+                            </FluentButton>
+                            <FluentButton Appearance="Appearance.Accent"
+                                          OnClick="@(() => CommitContactRemoveAsync(mode, liveOwnerId))">
+                                Remove
+                            </FluentButton>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div class="guardian-contact-subscreen">
+                        <ContactFormFields Model="_contactEditModel"
+                                           ChannelChanged="OnGuardianContactChannelChanged"
+                                           ValueLabel="@ContactValueLabel"
+                                           ValuePlaceholder="@ContactValuePlaceholder"
+                                           OptionText="@FormatCountryCodeOption" />
+                        @if (!_contactEditTarget.IsAdd && liveOwnerId is not null)
+                        {
+                            <FluentTextField class="guardian-contact-reason"
+                                             @bind-Value="_contactReason"
+                                             Label="Reason"
+                                             Placeholder="Why are you changing this contact?" />
+                        }
+                        <div class="guardian-contact-actions">
+                            <FluentButton Appearance="Appearance.Lightweight"
+                                          OnClick="CancelContactEditAsync">
+                                Cancel
+                            </FluentButton>
+                            <FluentButton Appearance="Appearance.Accent"
+                                          OnClick="@(() => CommitContactAsync(mode, contactList, liveOwnerId))">
+                                @(_contactEditTarget.IsAdd ? "Add" : "Save")
+                            </FluentButton>
+                        </div>
+                    </div>
+                }
             }
         </div>;
 
@@ -966,16 +1068,21 @@
         }
     }
 
-    private void StartContactAddAsync()
+    private async Task StartContactAddAsync()
     {
         _contactEditTarget = new ContactEditTarget(IsAdd: true, Contact: null);
+        _removeContactTarget = null;
+        _contactReason = null;
         _contactEditModel = new ContactFormFieldsModel();
         _selectedContactKey = null;
+        await NotifyContactSubScreenChanged();
     }
 
-    private void StartContactEditAsync(ContactModel c)
+    private async Task StartContactEditAsync(ContactModel c)
     {
         _contactEditTarget = new ContactEditTarget(IsAdd: false, Contact: c);
+        _removeContactTarget = null;
+        _contactReason = null;
         _contactEditModel = new ContactFormFieldsModel
         {
             Channel = c.Channel,
@@ -984,13 +1091,17 @@
             CountryCodeId = ResolveCountryCodeId(c.CountryCode),
         };
         _selectedContactKey = ContactKey(c);
+        await NotifyContactSubScreenChanged();
     }
 
-    private void CancelContactEditAsync()
+    private async Task CancelContactEditAsync()
     {
         _contactEditTarget = null;
+        _removeContactTarget = null;
+        _contactReason = null;
         _contactEditModel = new ContactFormFieldsModel();
         // Keep _selectedContactKey so the highlight persists across cancel.
+        await NotifyContactSubScreenChanged();
     }
 
     private async Task CommitContactAsync(ContactManagerMode mode, IList<ContactModel> contactList, Guid? liveOwnerId)
@@ -1030,30 +1141,127 @@
         }
         else
         {
-            // Live mode for existing guardians: add/edit are deferred to the
-            // guardian detail page (§4.2). The inner sub-panel is only shown
-            // for Draft guardians today, so this branch is unreachable in the
-            // current renderer; kept for forward-compat in case Live add/edit
-            // is ever wired up.
-            await InvokeAsync(StateHasChanged);
+            // Live (existing guardian): add / edit go straight to IContactsClient.
+            // Add needs no reason; edit requires the inline reason (D1).
+            if (liveOwnerId is not { } gid) return;
+            if (!_contactEditTarget.IsAdd && string.IsNullOrWhiteSpace(_contactReason))
+            {
+                _guardianError = "A reason is required to change a contact.";
+                await InvokeAsync(StateHasChanged);
+                return;
+            }
+            _contactMutating = true;
+            try
+            {
+                if (_contactEditTarget.IsAdd)
+                {
+                    await ContactsApi.AddContactAsync(new AddContactRequest(
+                        ContactOwnerType.Guardian, gid, _contactEditModel.Channel,
+                        _contactEditModel.Value.Trim(),
+                        string.IsNullOrWhiteSpace(_contactEditModel.Label) ? null : _contactEditModel.Label.Trim())
+                    {
+                        CountryCode = countryCodeName,
+                        DisplayOrder = contactList.Count,
+                    }, CancellationToken.None);
+                }
+                else if (_contactEditTarget.Contact?.PersistedId is { } cid)
+                {
+                    await ContactsApi.UpdateContactAsync(cid, new UpdateContactRequest(
+                        _contactEditModel.Value.Trim(),
+                        string.IsNullOrWhiteSpace(_contactEditModel.Label) ? null : _contactEditModel.Label.Trim(),
+                        _contactReason!)
+                    {
+                        CountryCode = countryCodeName,
+                    }, CancellationToken.None);
+                }
+                await LoadLiveContactsAsync(gid);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Failed to save guardian contact for {OwnerId}", gid);
+                _guardianError = ex.Message;
+            }
+            finally
+            {
+                _contactMutating = false;
+            }
         }
 
         _contactEditTarget = null;
+        _contactReason = null;
         _contactEditModel = new ContactFormFieldsModel();
+        await NotifyContactSubScreenChanged();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Delete affordance on a contact row. Draft removes are a direct
+    /// buffered delete (no reason, no sub-screen); Live removes open the
+    /// remove-confirm sub-screen with an inline reason (D1).</summary>
+    private async Task RemoveContactAsync(ContactModel c, bool isLive)
+    {
+        if (!isLive)
+        {
+            _ = RemoveDraftContactAsync(c);
+            return;
+        }
+        _removeContactTarget = c;
+        _contactEditTarget = null;
+        _contactReason = null;
+        _selectedContactKey = ContactKey(c);
+        await NotifyContactSubScreenChanged();
+    }
+
+    /// <summary>Confirm the remove-confirm sub-screen: persist a Live delete
+    /// via IContactsClient (inline reason required) or a Draft delete straight
+    /// from the buffered list.</summary>
+    private async Task CommitContactRemoveAsync(ContactManagerMode mode, Guid? liveOwnerId)
+    {
+        if (_removeContactTarget is not { } target) return;
+
+        if (mode == ContactManagerMode.Draft)
+        {
+            ((IList<ContactModel>)_editContacts).Remove(target);
+            if (_selectedContactKey == ContactKey(target)) _selectedContactKey = null;
+            _removeContactTarget = null;
+            OnEditContactsChanged();
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(_contactReason))
+        {
+            _guardianError = "A reason is required to remove a contact.";
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        _guardianError = null;
+        if (target.PersistedId is not { } cid || liveOwnerId is not { } gid) return;
+        _contactMutating = true;
+        try
+        {
+            await ContactsApi.DeleteContactAsync(cid, _contactReason!, CancellationToken.None);
+            await LoadLiveContactsAsync(gid);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete guardian contact {ContactId}", cid);
+            _guardianError = ex.Message;
+        }
+        finally
+        {
+            _contactMutating = false;
+        }
+        _removeContactTarget = null;
+        _contactReason = null;
+        await NotifyContactSubScreenChanged();
         await InvokeAsync(StateHasChanged);
     }
 
     private async Task RemoveDraftContactAsync(ContactModel c)
     {
-        // Only Draft mode exposes the Remove icon (per §4.2 table). Guard
-        // defensively so a future Live wiring cannot silently drop via the API.
+        // Draft-only buffered remove (no reason). Live removes route through
+        // CommitContactRemoveAsync instead.
         var contactList = (IList<ContactModel>)_editContacts;
-        if (c.PersistedId is not null)
-        {
-            _guardianError = "Removing a saved guardian contact is not supported in this drawer. Use the guardian detail page.";
-            await InvokeAsync(StateHasChanged);
-            return;
-        }
         contactList.Remove(c);
         if (_selectedContactKey == ContactKey(c)) _selectedContactKey = null;
         OnEditContactsChanged();

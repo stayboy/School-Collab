@@ -23,20 +23,20 @@
     display: none;
 }
 
-/* Panel: fills the dialog body vertically (top/bottom: 0; height: auto)
-   and anchors to the chosen edge via the inline PanelSideStyle. The
-   inline width (from Width parameter) is set on the <aside>.
-
-   A visible left/right border plus a strong cast shadow separates the
-   panel from the dimmed main form so the drawer edge reads as a clear
-   cut boundary. The border is the same neutral divider used by headers
-   and footers; the shadow is large and soft to suggest elevation
-   without fighting the dialog's own shadow. */
+/* Panel: floats over the dimmed main form as a cut-out card. It is inset a
+   small uniform margin from the dialog body edges (top/bottom here, the
+   horizontal edge inline) so the full border + cast shadow are visible on
+   ALL sides instead of being flush against the body edge. Border-box widths
+   the inline Width inside the 1px border so the drawer footprint never grows.
+   The border is the same neutral divider used by headers/footers and the
+   shadow pairs a tight edge contact-shadow with a broad soft ambient one to
+   suggest real elevation. */
 .dialog-drawer-panel {
     position: absolute;
-    top: 0;
-    bottom: 0;
+    top: 8px;
+    bottom: 8px;
     height: auto;
+    box-sizing: border-box;
     background: var(--neutral-layer-1, #fff);
     color: var(--neutral-foreground-1, #1f1f1f);
     z-index: 41;
@@ -45,19 +45,18 @@
     animation: dialog-drawer-slide-in 180ms ease-out;
     outline: none;
     max-width: 100%;
+    border: 1px solid var(--neutral-stroke-divider-rest, #d0d0d0);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.14), 0 20px 48px rgba(0, 0, 0, 0.22);
 }
 
-/* Anchor variants. The CSS carries the box-shadow direction and the
-   inside-facing border; the horizontal edge (left/right) is set inline
-   so it is colocated with the Side parameter. */
+/* Anchor variants. The horizontal edge + margin are set inline (colocated
+   with the Side parameter); the classes remain so the header orphan-order
+   (close button toward the form) and the slide-in direction can key off the
+   side. Border + shadow are uniform on both sides. */
 .dialog-drawer-panel--right {
-    box-shadow: -12px 0 32px rgba(0, 0, 0, 0.22);
-    border-left: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
 }
 
 .dialog-drawer-panel--left {
-    box-shadow: 12px 0 32px rgba(0, 0, 0, 0.22);
-    border-right: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
 }
 
 .dialog-drawer-header {

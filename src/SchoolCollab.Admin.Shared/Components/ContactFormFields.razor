@@ -4,11 +4,14 @@
 @* Shared four-field contact form (Channel + Country code + Value + Label)
    used by BOTH the Add form and the Edit form inside ContactsEditor's
    focused Edit view (the side drawer). Before this component existed, the
-   two branches duplicated the same four <FormRow>s with different bindings
+   the two branches duplicated the same <FormRow>s with different bindings
    and the channel was bound with @bind-Value (which DropdownForEnum
    ignores). Consolidating into one component keeps the fields, the
-   channel-gated country-code row, and the canonical widths (W3 channel /
-   W5 country code, per the FieldWidth ladder) in a single definition.
+   channel-gated country-code selector, and the canonical width (W5 country
+   code, per the FieldWidth ladder) in a single definition. The channel
+   selector and the country-code selector (shown for SMS / WhatsApp) share
+   one "Channel" label; both short selectors sit side-by-side on a single
+   line so the contact form stays compact in the 420px drawer.
 
    The host owns the working copy as a single <see cref="ContactFormFieldsModel"/>
    reference: inputs two-way bind to its properties (e.g. <c>@bind-Value="Model.Value"</c>),
@@ -27,20 +30,20 @@
                         OptionText="@FormatCountryCodeOption" /> *@
 
 <FormRow Label="Channel" Orientation="RowOrientation.Vertical">
-    <DropdownForEnum TEnum="ContactChannel"
-                     @bind-SelectedValue="Model.Channel"
-                     @bind-SelectedValue:after="NotifyChannelChanged" />
+    <div class="contact-form-channel">
+        <DropdownForEnum TEnum="ContactChannel"
+                         @bind-SelectedValue="Model.Channel"
+                         @bind-SelectedValue:after="NotifyChannelChanged" />
+        @if (Model.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                @bind-SelectedId="Model.CountryCodeId"
+                                Placeholder="Code"
+                                Width="FieldWidth.W5"
+                                OptionText="@OptionText" />
+        }
+    </div>
 </FormRow>
-@if (Model.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
-{
-    <FormRow Label="Country code" Orientation="RowOrientation.Vertical">
-        <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                            @bind-SelectedId="Model.CountryCodeId"
-                            Placeholder="Code"
-                            Width="FieldWidth.W5"
-                            OptionText="@OptionText" />
-    </FormRow>
-}
 <FormRow Label="@ValueLabel" Required Orientation="RowOrientation.Vertical">
     <FluentTextField @bind-Value="Model.Value"
                      Placeholder="@ValuePlaceholder"

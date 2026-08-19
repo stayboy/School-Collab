@@ -1,0 +1,21 @@
+/* ContactFormFields scoped styles. The channel selector and (for SMS /
+   WhatsApp) the country calling-code selector share one labeled row under
+   the "Channel" label. Both are short selectors (an enum choice and a
+   2-4 digit calling code), so they sit side-by-side on a single line to keep
+   the contact form compact inside the 420px drawer — rather than each taking
+   its own full-width row (which the separate "Country code" label used to).
+   The wrapper is authored here so the scoped rule matches; the dropdown
+   components render their own internals untouched. */
+.contact-form-channel {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+}
+
+/* The channel select auto-sizes to its label, the country code keeps its
+   canonical W5 width; neither should wrap or force the drawer wider. */
+.contact-form-channel > :first-child {
+    flex: 0 1 auto;
+    min-width: 0;
+}

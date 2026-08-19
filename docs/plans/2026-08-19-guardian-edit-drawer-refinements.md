@@ -2,12 +2,31 @@
 
 **Date:** 2026-08-19
 **Branch (target):** `feature/contact-guardian-form-fields-consolidation` (follow-up to `docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md`)
-**Status:** Partial implementation — R1 (identity spacing), R2 (dynamic
-relationship binding), R3 (Delete inline / Edit in toolbar), R4 (Add contact
-for all guardians), and R6 (role as CC checkbox) are **implemented** and
-tested. R5 (contact sub-screens hiding relationship+role) and the D1–D4
-sub-screen / inline-reason / drawer-title wiring remain **spec only**
-(see §9/§10).
+**Status:** Implemented and tested (R1–R6 + D1/D3/D4 + follow-up refinements). R1
+(identity spacing), R2 (dynamic relationship binding), R3 (Delete inline / Edit in
+reorder toolbar), R4 (Add contact for all guardians), R5 (contact sub-screens hide
+relationship+role), and R6 (role as CC checkbox) are done. D1 (inline reason for Live
+edit/remove) and R5's Live add/edit/remove wiring are done via **direct
+`IContactsClient` calls** (see §9 D2 note — the buffered approach was
+rejected as architecturally unsafe). **Follow-up refinement** (§12) later
+**reversed the D3 "body-only" decision**: the contact sub-screen now has **no**
+in-body heading (vertical space reclaimed) and the drawer chrome title is
+**chrome-driven** ("Edit Guardian Contact" etc., reported up via
+`OnContactSubScreenChanged`). The guardian chrome stays "Edit Guardian" and the
+body identity header (name + salutation) stays visible above a sub-screen. D4
+(name-only chrome + salutation body header) unchanged.
+
+**Height follow-up (post-§12):** the dialog now *refreshes its height when a
+guardian contact sub-screen (Add / Edit / Remove) opens* so the drawer body
+(contact form + inline reason) fits without a scrollbar. `StudentEditDialog`
+applies `student-edit-dialog-root--guardian-contact` on the dialog-content root
+whenever the reported contact sub-screen is non-`None` — raising the root
+`min-height` to 480px (still capped at 72vh) — and collapses back to the default
+320px floor on return to the guardian list. The class keys off the same reported
+sub-screen state as the chrome title, so it toggles on the same re-render. The
+3D cutout border/shadow on the drawer edge (`DialogDrawer.razor.css`) and the
+combined Channel + country-code row under one "Channel" label
+(`ContactFormFields`) are also landed here.
 
 This spec refines the `GuardianSection` **Edit view** hosted in the shared
 `DialogDrawer` inside `StudentEditDialog`. It captures five requested UX
@@ -301,36 +320,46 @@ sub-screen removes relationship/role to give the contact form more room.
 ## 9. Open decisions / open questions (confirm before implementing)
 
 - [x] **D1** Reason **inline** in the contact sub-screen — **confirmed** (§7).
-- [x] **D2** Live guardian add: **buffered** (staged in `_editContacts`, written at student save). Matches draft behavior.
-- [x] **D3** Drawer title in a contact sub-screen: **body-only** (not chrome). §6.3.
+- [x] **D2** Live guardian add: **direct `IContactsClient.AddContactAsync`** — the buffered
+  approach was rejected during implementation because, for an existing guardian,
+  `_editContacts` holds only the top-3 summary (not the full list in `_liveContacts`), so
+  buffering a new contact there and writing `Contacts = _editContacts` on student save
+  would truncate the guardian's real contact list. Live add/edit/remove now go straight to
+  `IContactsClient` (consistent with the existing Live reorder path), with an inline reason
+  for edit/remove (D1).
+- [~] **D3** Drawer title in a contact sub-screen: originally **body-only** (not chrome);
+  **revised (§12)** to **chrome-driven** — the sub-screen's in-body heading is removed and
+  the chrome title ("Edit Guardian Contact" etc.) names the mode via
+  `OnContactSubScreenChanged`. The guardian body identity header stays visible.
 - [x] **D4** Chrome title: **name only, no salutation** (current). Body identity header: **salutation + name + relationship**.
-- [ ] **D5** Role checkbox polarity: **"CC" checked / Primary unchecked** (default) vs the inverse ("Primary" checkbox) — §6.4.
+- [x] **D5** Role checkbox polarity: **"CC" checked / Primary unchecked** (default) — §6.4.
 
 ---
 
 ## 10. Acceptance criteria
 
-- [ ] The drawer edit view renders a **compact** top identity label (R1) —
+- [x] The drawer edit view renders a **compact** top identity label (R1) —
   vertical padding/margin reduced, no oversized empty band.
-- [ ] Changing the **Relationship** dropdown re-renders the identity header
+- [x] Changing the **Relationship** dropdown re-renders the identity header
   relationship text (R2), including on the add screen once a relationship is
   picked.
-- [ ] Each contact row keeps its **inline Delete**; there is **no inline Edit**
+- [x] Each contact row keeps its **inline Delete**; there is **no inline Edit**
   on the row (R3).
-- [ ] The **toolbar** shows **Edit, ↑, ↓**; **Edit** is disabled until a row is
+- [x] The **toolbar** shows **Edit, ↑, ↓**; **Edit** is disabled until a row is
   selected and operates on the selected row (R3).
-- [ ] **Add contact** is available for all guardians (R4), including when the
+- [x] **Add contact** is available for all guardians (R4), including when the
   list is empty.
-- [ ] **Add / Edit / remove** contact switches the drawer body to a dedicated
+- [x] **Add / Edit / remove** contact switches the drawer body to a dedicated
   **"Add contact" / "Edit contact" / "Remove contact"** section that **hides**
   the relationship + role rows (R5).
-- [ ] **Edit/remove for existing guardians shows an inline reason** field and
+- [x] **Edit/remove for existing guardians shows an inline reason** field and
   blocks commit until it is filled (R3, D1); **add** needs no reason.
-- [ ] The **role** field is a **checkbox** with exactly two states — Primary /
+- [x] The **role** field is a **checkbox** with exactly two states — Primary /
   CC — default **CC checked / Primary unchecked**, no longer a dropdown (R6, D5).
-- [ ] Admin (413) + Students (221) unit suites pass; new source-assertion tests
-  added for the drawer-mode switch, the toolbar Edit button, the absent
-  relationship row in add-contact mode, and the live relationship binding.
+- [x] Admin (421) + Students (221) unit suites pass; new source-assertion tests
+  added for the drawer sub-screen switch, the toolbar Edit button, the absent
+  relationship row in add-contact mode, the inline reason, and the live
+  relationship binding.
 
 ---
 

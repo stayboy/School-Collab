@@ -355,6 +355,30 @@
     margin-top: 0.25rem;
 }
 
+/* ── Contact sub-screen (R5 + D1): add / edit / remove-confirm ──────
+   Replaces the identity + relationship/role + list surface while a contact
+   sub-screen is open (InContactSubScreen). Title + summary lead; the reason
+   field and actions follow. The form itself recovers the vertical space once
+   occupied by the relationship/role rows. */
+.guardian-contact-subscreen {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.guardian-contact-subscreen-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--neutral-foreground-rest, #242424);
+}
+.guardian-contact-subscreen-summary {
+    font-size: 0.9rem;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+}
+.guardian-contact-reason {
+    width: 100%;
+}
+
 /* ── Compact contact manager (drawer Edit view) ─────────────────────
    Single-line selectable contact list + outside reorder toolbar +
    an inner "Add contact" FluentAnchor. Replaces the nested full

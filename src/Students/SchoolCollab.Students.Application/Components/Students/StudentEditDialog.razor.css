@@ -32,6 +32,16 @@
     overflow: hidden;
 }
 
+/* While a guardian contact sub-screen (Add / Edit / Remove) is active the drawer
+   body needs a taller floor so the contact form + inline reason fit without a
+   scrollbar. Raising min-height (still capped at 72vh) makes the content-filled
+   dialog grow with the sub-screen and re-collapse when the operator returns to
+   the guardian list. The class is applied by StudentEditDialog.RootModifierClasses
+   on the same re-render that updates the chrome title. */
+.student-edit-dialog-root--guardian-contact {
+    min-height: 480px;
+}
+
 /* The StudentFormFields EditForm is the scrollable body of the dialog.
    We make it a flex column so the content stack above can scroll while the
    action row stays pinned at the bottom of the dialog. The form fills the

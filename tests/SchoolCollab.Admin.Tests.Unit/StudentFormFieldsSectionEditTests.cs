@@ -245,14 +245,15 @@ public class StudentFormFieldsSectionEditTests
         source.Should().NotContain("OnManageGuardians=\"OpenGuardiansEditorAsync\"",
             "the old section-level Manage guardians path is gone");
 
-        source.Should().Contain("class=\"student-edit-dialog-root\"", "the dialog content is wrapped in the positioned root");
+        source.Should().Contain("class=\"student-edit-dialog-root @RootModifierClasses\"",
+            "the dialog content is wrapped in the positioned root (with the conditional height modifier)");
 
         // Drawer title reflects which section is open and whether it's Add or Edit.
         source.Should().Contain("Title=\"@GetDrawerTitle()\"",
             "the drawer title is computed from the active editor + Add/Edit mode");
         source.Should().Contain("Edit contact", "the title is 'Edit contact' when editing an existing contact");
         source.Should().Contain("Add contact", "the title is 'Add contact' when adding a new contact");
-        source.Should().Contain("Edit guardian", "the title is 'Edit guardian' when editing an existing guardian");
+        source.Should().Contain("Edit Guardian", "the title is 'Edit Guardian' when editing an existing guardian");
         source.Should().Contain("Add guardian", "the title is 'Add guardian' when adding a new guardian");
 
         css.Should().Contain(".student-edit-dialog-root {", "the positioned-root CSS rule exists");
@@ -305,17 +306,24 @@ public class StudentFormFieldsSectionEditTests
         source.Should().Contain("<ContactFormFields",
             "the Add and Edit branches render the shared ContactFormFields field group");
 
-        // Channel / Country code (conditional) / Value / Label are the four
-        // rows in the shared group, each a Vertical FormRow.
+        // Channel / Value / Label are the three rows in the shared group, each
+        // a Vertical FormRow. The channel FormRow also holds the country-code
+        // selector (a CodedValueDropdown, shown for SMS / WhatsApp) so the two
+        // short selectors share one "Channel" label.
         var fields = ReadContactFormFieldsSource();
         fields.Should().Contain("<FormRow Label=\"Channel\" Orientation=\"RowOrientation.Vertical\">",
             "the channel field is rendered as a vertical FormRow (explicit Orientation for the narrow drawer)");
-        fields.Should().Contain("<FormRow Label=\"Country code\" Orientation=\"RowOrientation.Vertical\">",
-            "the country-code field is rendered as a vertical FormRow when the channel requires one");
         fields.Should().Contain("<FormRow Label=\"@ValueLabel\" Required Orientation=\"RowOrientation.Vertical\">",
             "the value field is rendered as a vertical FormRow with channel-aware label and Required");
         fields.Should().Contain("<FormRow Label=\"Label\" Orientation=\"RowOrientation.Vertical\">",
             "the optional label field is rendered as a vertical FormRow");
+
+        // The country-code selector now lives INSIDE the Channel FormRow
+        // (combined under the "Channel" label), not in its own row.
+        fields.Should().Contain("Width=\"FieldWidth.W5\"",
+            "the country-code selector keeps its canonical W5 width");
+        fields.Should().Contain("@if (Model.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)",
+            "the country-code selector stays channel-gated (SMS / WhatsApp only)");
 
         // Channel-aware label/placeholder properties stay on the editor; the
         // shared group is parameterised with them.
@@ -427,35 +435,47 @@ public class StudentFormFieldsSectionEditTests
             "no bare draft-guardian Buffered ContactsEditor may reappear in the Edit view");
     }
 
-    // ---- StudentEditDialog.GetDrawerTitle: guardian name + fallback (§4.4) ----
-    // The drawer title for an existing guardian edit must read "Edit · {name}".
-    // A blank name falls back to "Edit guardian" (defensive). Add guardians
-    // always read "Add guardian" (no identity to show).
+    // ---- StudentEditDialog.GetDrawerTitle: static "Edit Guardian" chrome (§4.4) ----
+    // The chrome (toolbar) title for an existing-guardian edit is the static
+    // "Edit Guardian" — the operator names the guardian in the body identity
+    // header (name + salutation), not the toolbar. Add guardians read
+    // "Add guardian". When a contact sub-screen is open the chrome names the
+    // mode: "Add/Edit/Remove Guardian Contact". No BuildGuardianTitle helper
+    // remains (the controller no longer prepares "Edit · {name}").
 
     [TestMethod]
-    public void StudentEditDialog_GetDrawerTitle_IncludesGuardianNameAndFallsBack()
+    public void StudentEditDialog_GetDrawerTitle_ChromeIsStaticEditGuardian()
     {
         var source = ReadEditDialogSource();
 
-        // BuildGuardianTitle helper exists and emits the "Edit · {name}" form.
-        source.Should().Contain("BuildGuardianTitle(",
-            "the dialog delegates the guardian title to a dedicated helper");
-        source.Should().Contain("\"Edit · {name}\"",
-            "the helper builds the title in the form 'Edit · {name}'");
-        source.Should().Contain("\"Edit guardian\"",
-            "the helper falls back to 'Edit guardian' when the name is blank");
+        // The static title helper no longer exists — the chrome is a fixed
+        // string, not a per-guardian name projection.
+        source.Should().NotContain("BuildGuardianTitle",
+            "no per-guardian title helper remains (body owns the name)");
+        source.Should().NotContain("Edit · ",
+            "the chrome no longer prefixes the guardian name");
 
-        // GetDrawerTitle routes the Guardians branch through BuildGuardianTitle.
-        source.Should().Contain("BuildGuardianTitle(_model.GuardianLinks[_editingGuardianIndex])",
-            "the Guardians branch resolves the title from the guardian being edited");
+        // The base Guardians branch (no contact sub-screen) is the static
+        // string; the Add branch stays 'Add guardian'. The sub-screen titles
+        // replace the base title while a contact sub-screen is open.
+        source.Should().Contain("_ => _isAdd ? \"Add guardian\" : \"Edit Guardian\"",
+            "the base Guardians title is static (no index/name lookup)");
+        source.Should().Contain("\"Add Guardian Contact\"",
+            "the chrome names the add-contact sub-screen");
+        source.Should().Contain("\"Edit Guardian Contact\"",
+            "the chrome names the edit-contact sub-screen");
+        source.Should().Contain("\"Remove Guardian Contact\"",
+            "the chrome names the remove-confirm sub-screen");
 
-        // The four title strings the dialog surfaces (Contacts + Guardians × Add/Edit).
+        // The four base title strings the dialog surfaces (Contacts + Guardians × Add/Edit).
         source.Should().Contain("\"Add contact\"",
             "the Contacts Add title is 'Add contact'");
         source.Should().Contain("\"Edit contact\"",
             "the Contacts Edit title is 'Edit contact'");
         source.Should().Contain("\"Add guardian\"",
-            "the Guardians Add title is 'Add guardian' (no identity to show)");
+            "the Guardians Add title is 'Add guardian'");
+        source.Should().Contain("\"Edit Guardian\"",
+            "the Guardians Edit title is 'Edit Guardian'");
     }
 
     // ---- DialogServiceExtensions: height is forwarded to DialogParameters.Height (§4.1) ----
@@ -912,5 +932,171 @@ public class StudentFormFieldsSectionEditTests
         source.Should().Contain(
             "private Task OnGuardianRelationshipChanged()",
             "GuardianSection defines the callback that re-renders on relationship change");
+    }
+
+    // ---- R5: contact sub-screen hides identity + relationship/role (spec §6.2) ----
+    // When the operator is adding / editing a contact, the drawer body shows
+    // ONLY the contact sub-screen: the identity header, the relationship+role
+    // GuardianEditFields rows, and the guardian Save button all hide so the
+    // contact form gets the full vertical space.
+
+    [TestMethod]
+    public void GuardianSection_ContactSubScreenKeepsIdentityHidesRelationshipRole()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // The identity banner is NOT gated: it stays visible during a contact
+        // sub-screen so the operator still sees the guardian name + salutation
+        // while adding/editing a contact. The relationship/role rows and the
+        // guardian Save are what hide.
+        source.Should().Contain(
+            "InContactSubScreen",
+            "the Edit view gates content behind the contact sub-screen guard");
+        source.Should().Contain(
+            "@if (!InContactSubScreen)",
+            "the relationship/role + Save actions render only when no sub-screen is open");
+
+        // Identity banner stays unconditionally visible on the Edit/Add surfaces.
+        source.Should().Contain(
+            "guardian-edit-identity",
+            "the identity banner exists for the list surface");
+        source.Should().Contain(
+            "guardian-edit-identity-name",
+            "the identity banner renders the guardian name");
+
+        // The relationship/role field group and the guardian Save action each
+        // hide inside a !InContactSubScreen guard.
+        source.Should().Contain(
+            "<GuardianEditFields Model=\"_editModel\"",
+            "the relationship/role field group is rendered on the list surface");
+        source.Should().Contain(
+            "guardian-edit-actions",
+            "the guardian Save action still exists on the list surface");
+
+        // The inner contact sub-screen (ContactFormFields) is what fills the
+        // body while _contactEditTarget is set.
+        source.Should().Contain(
+            "<ContactFormFields Model=\"_contactEditModel\"",
+            "the contact sub-screen renders ContactFormFields");
+    }
+
+    // ---- D1: inline reason for Live edit / remove (spec §6.2, §7) ----
+    // Existing-guardian (Live) contact edit and remove require an inline
+    // reason field in the contact sub-screen; add needs none. The commit
+    // handlers must call IContactsClient with that reason.
+
+    [TestMethod]
+    public void GuardianSection_ContactSubScreen_RemoveConfirmHasInlineReason()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // Remove contact" now names the chrome (drawer) title via
+        // OnContactSubScreenChanged, not an in-body heading (the sub-screen
+        // reclaims vertical space). The sub-screen still renders the summary
+        // + inline reason + commit path.
+        source.Should().NotContain("guardian-contact-subscreen-title",
+            "the remove-confirm sub-screen has no in-body heading");
+        source.Should().Contain("guardian-contact-subscreen",
+            "the remove-confirm sub-screen uses the shared sub-screen wrapper");
+        source.Should().Contain("guardian-contact-reason",
+            "the sub-screen renders an inline reason field");
+        source.Should().Contain("CommitContactRemoveAsync",
+            "the remove-confirm commit handler exists");
+        source.Should().Contain("DeleteContactAsync(cid, _contactReason!",
+            "Live remove calls IContactsClient.DeleteContactAsync with the inline reason");
+    }
+
+    [TestMethod]
+    public void GuardianSection_LiveEditRequiresReasonAndCallsUpdateContactAsync()
+    {
+        var source = ReadGuardianSectionSource();
+
+        source.Should().Contain("A reason is required to change a contact.",
+            "Live edit blocks commit on a blank reason");
+        source.Should().Contain("UpdateContactAsync(cid, new UpdateContactRequest(",
+            "Live edit calls IContactsClient.UpdateContactAsync");
+        source.Should().Contain("AddContactAsync(new AddContactRequest(",
+            "Live add calls IContactsClient.AddContactAsync (no reason needed)");
+        source.Should().Contain("LoadLiveContactsAsync(gid)",
+            "Live commits reload the contact list to reflect server truth");
+    }
+
+    // ---- D3/D4: contact sub-screen titles are chrome-driven (spec §6.3 / §9) ----
+    // The sub-screen has NO in-body heading (it reclaims vertical space); the
+    // drawer chrome title (StudentEditDialog.GetDrawerTitle) names the mode
+    // instead when a contact sub-screen is open: GuardianSection reports the
+    // active sub-screen up via OnContactSubScreenChanged and the chrome shows
+    // "Add/Edit/Remove Guardian Contact". The guardian body identity header
+    // stays visible above the sub-screen.
+
+    [TestMethod]
+    public void GuardianSection_ContactSubScreenTitlesAreChromeDriven()
+    {
+        var section = ReadGuardianSectionSource();
+        var dialog = ReadEditDialogSource();
+
+        // GUARDIAN_SECTION: the sub-screen has NO in-body title heading; it
+        // reports the active mode up so the host can drive the chrome.
+        section.Should().NotContain("guardian-contact-subscreen-title",
+            "the sub-screen has no in-body heading (collapses the top space)");
+        section.Should().Contain("NotifyContactSubScreenChanged",
+            "the section reports the sub-screen mode up to the host");
+        section.Should().Contain("OnContactSubScreenChanged",
+            "the section surfaces a host-facing callback for the sub-screen mode");
+        section.Should().Contain("GuardianContactSubScreen",
+            "the section exposes a sub-screen mode enum");
+
+        // HOST (StudentEditDialog): GetDrawerTitle resolves the guardians
+        // branch through the reported sub-screen mode.
+        dialog.Should().Contain("_guardianContactSubScreen switch",
+            "the drawer title keys off the reported sub-screen mode");
+        dialog.Should().Contain("\"Add Guardian Contact\"",
+            "chrome shows 'Add Guardian Contact' when add is active");
+        dialog.Should().Contain("\"Edit Guardian Contact\"",
+            "chrome shows 'Edit Guardian Contact' when edit is active");
+        dialog.Should().Contain("\"Remove Guardian Contact\"",
+            "chrome shows 'Remove Guardian Contact' when remove is active");
+        dialog.Should().Contain("OnContactSubScreenChanged=\"OnGuardianContactSubScreenChanged\"",
+            "the dialog wires the section's sub-screen callback");
+    }
+
+    // ---- Follow-up: refresh the dialog height when a guardian contact sub-screen
+    // opens so the drawer body (contact form + inline reason) fits without a
+    // scrollbar. The root wrapper keeps its 320px default floor (so a bare
+    // surface is not cramped) but raises it while a contact sub-screen is active;
+    // the content-filled dialog box then grows to fit and re-collapses on return
+    // to the guardian list. The class is driven by the same reported sub-screen
+    // state as the chrome title, so it toggles on the same re-render.
+
+    [TestMethod]
+    public void StudentEditDialog_GuardianContactSubScreen_RaisesRootMinHeight()
+    {
+        var dialog = ReadEditDialogSource();
+        var css = ReadSource(
+            "Students/SchoolCollab.Students.Application/Components/Students/StudentEditDialog.razor.css");
+
+        // MARKUP: the root wrapper applies the modifier class via the helper.
+        dialog.Should().Contain("student-edit-dialog-root @RootModifierClasses",
+            "the root wrapper binds the conditional modifier class");
+
+        // HELPER: the class is applied only while a guardian contact sub-screen is
+        // active (Add / Edit / Remove), not for the guardian list or other editors.
+        dialog.Should().Contain("private string RootModifierClasses =>",
+            "the root modifier class helper exists");
+        dialog.Should().Contain("_guardianContactSubScreen != GuardianSection.GuardianContactSubScreen.None",
+            "the class keys off a non-None guardian contact sub-screen");
+        dialog.Should().Contain("student-edit-dialog-root--guardian-contact",
+            "the helper emits the guardian-contact modifier class");
+
+        // CSS: the modifier raises the root's min-height above the default floor,
+        // but the default 320px floor and the 72vh cap are both retained.
+        css.Should().Contain(".student-edit-dialog-root--guardian-contact {",
+            "the guardian-contact modifier CSS rule exists");
+        css.Should().Contain("min-height: 320px;",
+            "the default 320px floor is retained");
+        css.Should().Contain("min-height: 480px;",
+            "the guardian-contact rule raises the floor so the contact form fits without a scrollbar");
+        css.Should().Contain("max-height: 72vh;",
+            "the 72vh cap is retained so the dialog never grows off-screen");
     }
 }
