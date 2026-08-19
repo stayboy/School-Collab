@@ -40,6 +40,9 @@ public class StudentFormFieldsSectionEditTests
     private static string ReadContactsEditorSource() => ReadSource(
         "SchoolCollab.Admin.Shared/Components/ContactsEditor.razor");
 
+    private static string ReadContactFormFieldsSource() => ReadSource(
+        "SchoolCollab.Admin.Shared/Components/ContactFormFields.razor");
+
     private static string ReadGuardianSectionSource() => ReadSource(
         "Students/SchoolCollab.Students.Application/Components/Students/GuardianSection.razor");
 
@@ -282,23 +285,28 @@ public class StudentFormFieldsSectionEditTests
         // ShowCancel="true" CancelText="Close"), so the inline Cancel button
         // is redundant. The fields below are stacked vertically using the
         // shared <FormRow> primitive (label top, input below) so the narrow
-        // drawer breathes.
+        // drawer breathes. The Add and Edit branches share ONE field group
+        // (ContactFormFields) — so the vertical FormRow rows live in
+        // ContactFormFields.razor rather than being duplicated inline.
         source.Should().Contain("class=\"contacts-edit-form\"",
             "the Edit view wraps its fields in a dedicated edit-form container");
+        source.Should().Contain("<ContactFormFields",
+            "the Add and Edit branches render the shared ContactFormFields field group");
 
-        // Both the Add branch and the Edit branch render their fields as
-        // FormRow rows. Channel / Country code (conditional) / Value / Label
-        // are the four expected rows in each branch.
-        source.Should().Contain("<FormRow Label=\"Channel\" Orientation=\"RowOrientation.Vertical\">",
+        // Channel / Country code (conditional) / Value / Label are the four
+        // rows in the shared group, each a Vertical FormRow.
+        var fields = ReadContactFormFieldsSource();
+        fields.Should().Contain("<FormRow Label=\"Channel\" Orientation=\"RowOrientation.Vertical\">",
             "the channel field is rendered as a vertical FormRow (explicit Orientation for the narrow drawer)");
-        source.Should().Contain("<FormRow Label=\"Country code\" Orientation=\"RowOrientation.Vertical\">",
+        fields.Should().Contain("<FormRow Label=\"Country code\" Orientation=\"RowOrientation.Vertical\">",
             "the country-code field is rendered as a vertical FormRow when the channel requires one");
-        source.Should().Contain("<FormRow Label=\"@ValueLabel\" Required Orientation=\"RowOrientation.Vertical\">",
+        fields.Should().Contain("<FormRow Label=\"@ValueLabel\" Required Orientation=\"RowOrientation.Vertical\">",
             "the value field is rendered as a vertical FormRow with channel-aware label and Required");
-        source.Should().Contain("<FormRow Label=\"@EditValueLabel\" Required Orientation=\"RowOrientation.Vertical\">",
-            "the value field (edit branch) is rendered as a vertical FormRow with channel-aware label and Required");
-        source.Should().Contain("<FormRow Label=\"Label\" Orientation=\"RowOrientation.Vertical\">",
+        fields.Should().Contain("<FormRow Label=\"Label\" Orientation=\"RowOrientation.Vertical\">",
             "the optional label field is rendered as a vertical FormRow");
+
+        // Channel-aware label/placeholder properties stay on the editor; the
+        // shared group is parameterised with them.
         source.Should().Contain("private string ValueLabel",
             "the Add branch has a channel-aware label property");
         source.Should().Contain("private string EditValueLabel",

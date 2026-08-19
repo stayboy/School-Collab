@@ -298,7 +298,7 @@ public class ContactsEditorTests : BunitContext
         valueInput.Change("user@example.com");
 
         // Click the Add button. The fluent-button contains the "Add" text.
-        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        var addButton = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Add contact");
         addButton.Click();
 
         // Assert: the form is not cleared after the failure.
@@ -312,17 +312,23 @@ public class ContactsEditorTests : BunitContext
 
     private void SetChannel(IRenderedComponent<ContactsEditor> cut, ContactChannel channel)
     {
-        var field = typeof(ContactsEditor).GetField("_newChannel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field?.SetValue(cut.Instance, channel);
+        // The Add form's working copy is now a single ContactFormFieldsModel;
+        // mutate its Channel property via reflection so the country-code
+        // gating can be exercised deterministically without driving the
+        // DropdownForEnum UI (which bUnit's reflection-based Render() does
+        // not propagate to child component parameter updates).
+        var field = typeof(ContactsEditor).GetField("_newContactModel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var model = (ContactFormFieldsModel)field!.GetValue(cut.Instance)!;
+        model.Channel = channel;
         cut.Render();
     }
 
     private void SetCountryCodeSelection(IRenderedComponent<ContactsEditor> cut, Guid countryCodeId, CodedValueDto[] options)
     {
         var optionsField = typeof(ContactsEditor).GetField("_countryCodeOptions", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        var idField = typeof(ContactsEditor).GetField("_newCountryCodeId", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var modelField = typeof(ContactsEditor).GetField("_newContactModel", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
         optionsField?.SetValue(cut.Instance, options);
-        idField?.SetValue(cut.Instance, countryCodeId);
+        ((ContactFormFieldsModel)modelField!.GetValue(cut.Instance)!).CountryCodeId = countryCodeId;
         cut.Render();
     }
 
@@ -389,7 +395,7 @@ public class ContactsEditorTests : BunitContext
         var valueInput = cut.Find("fluent-text-field.contacts-value");
         valueInput.Change("201234567");
 
-        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        var addButton = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Add contact");
         addButton.Click();
 
         cut.WaitForAssertion(() =>
@@ -491,7 +497,7 @@ public class ContactsEditorTests : BunitContext
         var valueInput = cut.Find("fluent-text-field.contacts-value");
         valueInput.Change("parent@example.com");
 
-        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        var addButton = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Add contact");
         addButton.Click();
 
         cut.WaitForAssertion(() =>
@@ -565,7 +571,7 @@ public class ContactsEditorTests : BunitContext
         // while an Add is in flight or the value field is empty, never
         // because of EditDisabled. Type a value to prove it's actionable.
         cut.Find("fluent-text-field.contacts-value").Change("new@x.com");
-        var addButton = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Add"));
+        var addButton = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Add contact");
         addButton.HasAttribute("disabled").Should().BeFalse(
             "the Add row stays usable when EditDisabled=true");
     }
@@ -729,9 +735,9 @@ public class ContactsEditorTests : BunitContext
 
         // Mutate the working-copy field via reflection (validates the working
         // copy, when committed via the inline Save, mutates the list).
-        var editValueField = typeof(ContactsEditor).GetField("_editValue",
+        var editModelField = typeof(ContactsEditor).GetField("_editContactModel",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        editValueField.SetValue(cut.Instance, "new@x.com");
+        ((ContactFormFieldsModel)editModelField.GetValue(cut.Instance)!).Value = "new@x.com";
 
         var save = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Save"));
         save.Click();
@@ -793,9 +799,9 @@ public class ContactsEditorTests : BunitContext
 
         // Simulate switching the channel to SMS, then run the inline channel
         // handler (which loads country codes on demand).
-        var editChannelField = typeof(ContactsEditor).GetField("_editChannel",
+        var editModelField = typeof(ContactsEditor).GetField("_editContactModel",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
-        editChannelField.SetValue(cut.Instance, ContactChannel.SMS);
+        ((ContactFormFieldsModel)editModelField.GetValue(cut.Instance)!).Channel = ContactChannel.SMS;
         var onChannel = typeof(ContactsEditor).GetMethod("OnInlineEditChannelChanged",
             System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
         await (Task)onChannel.Invoke(cut.Instance, null)!;
@@ -805,5 +811,101 @@ public class ContactsEditorTests : BunitContext
         // country-code picker (a second <fluent-select>).
         cut.FindAll(".contacts-inline-edit fluent-select").Should().HaveCount(2,
             "switching to SMS reveals the channel-gated country-code picker");
+    }
+
+    // ─── Focused Edit view (the shared drawer form) ─────────────────────
+    // ContactsView.Edit hosts a per-item add-or-edit form in the student-edit-
+    // dialog's side drawer. The Add and Edit branches now share ONE field
+    // group (<ContactFormFields>) so the channel/country/value/label rows can
+    // never drift apart. These tests pin the merged behavior — notably that
+    // selecting a phone channel reveals the country-code dropdown in BOTH
+    // branches (a regression for the old Add form, which bound its channel
+    // dropdown with @bind-Value that DropdownForEnum ignores, so SMS/WhatsApp
+    // was never detected and the picker never appeared).
+
+    private IRenderedComponent<ContactsEditor> RenderEditView(
+        List<ContactModel>? contacts = null,
+        bool isAdd = false,
+        Guid? initialEditKey = null)
+    {
+        contacts ??= new List<ContactModel>();
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        Services.AddSingleton<IContactsClient>(new FakeContactsClient());
+        Services.AddSingleton(new CodedValuesApiClient(http));
+        Services.AddSingleton(NullLogger<ContactsEditor>.Instance);
+        return Render<ContactsEditor>(parameters => parameters
+            .Add(p => p.Mode, ContactsEditor.EditorMode.Buffered)
+            .Add(p => p.OwnerType, ContactOwnerType.Guardian)
+            .Add(p => p.View, ContactsEditor.ContactsView.Edit)
+            .Add(p => p.Contacts, contacts)
+            .Add(p => p.ShowSubscription, false)
+            .Add(p => p.IsAdd, isAdd)
+            .Add(p => p.InitialEditKey, initialEditKey));
+    }
+
+    /// <summary>Renders the merged <see cref="ContactFormFields"/> field group
+    /// (the component shared by the Add and Edit forms in the focused Edit
+    /// view) with a fixed channel, so channel-gating of the country-code row
+    /// is tested directly and deterministically.</summary>
+    private IRenderedComponent<ContactFormFields> RenderContactFormFields(ContactChannel channel)
+    {
+        var handler = new MockHttpMessageHandler(HttpStatusCode.OK, CountryCodesJson);
+        var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        Services.AddSingleton(new CodedValuesApiClient(http));
+        Services.AddSingleton(NullLogger<CodedValueDropdown>.Instance);
+        Services.AddSingleton(NullLogger<ContactFormFields>.Instance);
+        // The merged field group is parameterised by a single Model. Seed the
+        // channel on the model so the gating of the country-code row is
+        // exercised directly and deterministically.
+        var model = new ContactFormFieldsModel { Channel = channel };
+        return Render<ContactFormFields>(parameters => parameters.Add(p => p.Model, model));
+    }
+
+    [TestMethod]
+    public void EditView_AddForm_DefaultEmail_HidesCountryCodeDropdown()
+    {
+        var cut = RenderEditView(isAdd: true);
+
+        // Email is the default channel -> no country-code picker.
+        cut.FindAll("fluent-select.coded-value-dropdown").Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void ContactFormFields_EmailChannel_HidesCountryCodeDropdown()
+    {
+        var cut = RenderContactFormFields(ContactChannel.Email);
+
+        cut.FindAll("fluent-select.coded-value-dropdown").Should().BeEmpty(
+            "an Email channel renders no country-code picker");
+    }
+
+    [TestMethod]
+    public void ContactFormFields_SmsChannel_RevealsCountryCodeDropdown()
+    {
+        var cut = RenderContactFormFields(ContactChannel.SMS);
+
+        // The shared field group gates the country-code row on a phone channel.
+        // (Regression: the old Edit-view Add form bound its channel dropdown
+        // with @bind-Value that DropdownForEnum ignores, so SMS/WhatsApp was
+        // never detected and the picker never appeared.)
+        cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle(
+            "SMS must reveal the country-code picker in the shared field group");
+    }
+
+    [TestMethod]
+    public void EditView_EditForm_SmsContact_PreSelectsCountryCodeDropdown()
+    {
+        var contacts = new List<ContactModel>
+        {
+            new() { Channel = ContactChannel.SMS, Value = "5551234", CountryCode = "+233", Order = 0 }
+        };
+        var cut = RenderEditView(contacts, initialEditKey: contacts[0].TempId);
+
+        // The edit form initializes from an SMS contact, so the country-code
+        // picker is present in the shared Edit form.
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-select.coded-value-dropdown").Should().ContainSingle(
+                "an SMS contact being edited must reveal the country-code picker"));
     }
 }

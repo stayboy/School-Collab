@@ -96,7 +96,7 @@
                 </FluentCard>
             }
         </div>
-        <FluentAnchor Href="#" OnClick="@(() => OnAddGuardian.InvokeAsync())" class="guardian-add-anchor">
+        <FluentAnchor Href="#" Appearance="Appearance.Hypertext" OnClick="@(() => OnAddGuardian.InvokeAsync())" class="guardian-add-anchor">
             Add guardian
         </FluentAnchor>
         @if (!string.IsNullOrEmpty(_guardianError))
@@ -113,34 +113,8 @@
             @* Blank add form: full field set (title / names / relationship /
                role / contacts). Save appends a new guardian. *@
             <div class="guardian-edit-form">
-                <FormRow Label="Title">
-                    <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                        @bind-SelectedId="_editTitleId"
-                                        Placeholder="Optional"
-                                        Width="FieldWidth.W3" />
-                </FormRow>
-                <FormRow Label="First name" Required>
-                    <FluentTextField @bind-Value="_editFirstName"
-                                     Required
-                                     Placeholder="First name"
-                                     class="w-5" />
-                </FormRow>
-                <FormRow Label="Last name" Required>
-                    <FluentTextField @bind-Value="_editLastName"
-                                     Required
-                                     Placeholder="Last name"
-                                     class="w-5" />
-                </FormRow>
-                <FormRow Label="Relationship/Role" Required>
-                    <CodedValueDropdown Parent="CodedValueParent.Relationships"
-                                        @bind-SelectedId="_editRelationshipId"
-                                        Placeholder="Relationship"
-                                        Width="FieldWidth.W4" />
-                    <DropdownForEnum TEnum="GuardianRole"
-                                     @bind-SelectedValue="_editRole"
-                                     Placeholder="Role"
-                                     Width="FieldWidth.W3" />
-                </FormRow>
+                <GuardianEditFields Model="_editModel"
+                                    ShowIdentityFields="true" />
                 <div class="guardian-edit-contacts">
                     <ContactsEditor Mode="ContactsEditor.EditorMode.Buffered"
                                     OwnerType="ContactOwnerType.Guardian"
@@ -172,39 +146,11 @@
                     @* Title / name fields are only editable for drafts
                        (ExistingGuardianId is null). For existing guardians they
                        don't persist through the student save (guardian-surface
-                       operation), so they're hidden. *@
-                    @if (editedGuardian.ExistingGuardianId is null)
-                    {
-                        <FormRow Label="Title">
-                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                                @bind-SelectedId="_editTitleId"
-                                                Placeholder="Optional"
-                                                Width="FieldWidth.W3" />
-                        </FormRow>
-                        <FormRow Label="First name" Required>
-                            <FluentTextField @bind-Value="_editFirstName"
-                                             Required
-                                             Placeholder="First name"
-                                             class="w-5" />
-                        </FormRow>
-                        <FormRow Label="Last name" Required>
-                            <FluentTextField @bind-Value="_editLastName"
-                                             Required
-                                             Placeholder="Last name"
-                                             class="w-5" />
-                        </FormRow>
-                    }
-                    <FormRow Label="Relationship/Role" Required>
-                        <CodedValueDropdown Parent="CodedValueParent.Relationships"
-                                            @bind-SelectedId="_editRelationshipId"
-                                            Placeholder="Relationship"
-                                            Width="FieldWidth.W4" />
-                        <DropdownForEnum TEnum="GuardianRole"
-                                         @bind-SelectedValue="_editRole"
-                                         Placeholder="Role"
-                                         Width="FieldWidth.W3"
-                                         />
-                    </FormRow>
+                       operation), so they're hidden via ShowIdentityFields=false.
+                       Relationship/Role is always shown (it persists through the
+                       student save). *@
+                    <GuardianEditFields Model="_editModel"
+                                        ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)" />
                     <div class="guardian-edit-contacts">
                         @* Contacts: Live for existing guardians, Buffered for
                            drafts. The nested editor has no shared side drawer
@@ -450,39 +396,11 @@
                     @* Title / name fields are only editable for drafts
                        (ExistingGuardianId is null). For existing guardians they
                        don't persist through the student save (guardian-surface
-                       operation), so they're hidden. *@
-                    @if (editedGuardian.ExistingGuardianId is null)
-                    {
-                        <FormRow Label="Title">
-                            <CodedValueDropdown Parent="CodedValueParent.Salutations"
-                                                @bind-SelectedId="_editTitleId"
-                                                Placeholder="Optional"
-                                                Width="FieldWidth.W3" />
-                        </FormRow>
-                        <FormRow Label="First name" Required>
-                            <FluentTextField @bind-Value="_editFirstName"
-                                             Required
-                                             Placeholder="First name"
-                                             class="w-5" />
-                        </FormRow>
-                        <FormRow Label="Last name" Required>
-                            <FluentTextField @bind-Value="_editLastName"
-                                             Required
-                                             Placeholder="Last name"
-                                             class="w-5" />
-                        </FormRow>
-                    }
-                    <FormRow Label="Relationship/Role" Required>
-                        <CodedValueDropdown Parent="CodedValueParent.Relationships"
-                                            @bind-SelectedId="_editRelationshipId"
-                                            Placeholder="Relationship"
-                                            Width="FieldWidth.W4" />
-                        <DropdownForEnum TEnum="GuardianRole"
-                                         @bind-SelectedValue="_editRole"
-                                         Placeholder="Role"
-                                         Width="FieldWidth.W3"
-                                         />
-                    </FormRow>
+                       operation), so they're hidden via ShowIdentityFields=false.
+                       Relationship/Role is always shown (it persists through the
+                       student save). *@
+                    <GuardianEditFields Model="_editModel"
+                                        ShowIdentityFields="@(editedGuardian.ExistingGuardianId is null)" />
                     <div class="guardian-edit-contacts">
                         @* Contacts: Live for existing guardians, Buffered for
                            drafts. The nested Buffered editor has no drawer of
@@ -654,11 +572,9 @@
         if (IsAdd)
         {
             _editingIndex = -1;
-            _editTitleId = null;
-            _editFirstName = null;
-            _editLastName = null;
-            _editRelationshipId = null;
-            _editRole = GuardianRole.Primary;
+            // Reset the working-copy model to a blank add form. A new
+            // instance drops any leftover drafts from a previous add/edit.
+            _editModel = new GuardianEditFieldsModel();
             _editContacts = new List<ContactModel>();
         }
         else if (InitialEditIndex >= 0 && InitialEditIndex < GuardianLinks.Count)
@@ -668,13 +584,13 @@
             if (_editingIndex == InitialEditIndex) return;
             _editingIndex = InitialEditIndex;
             var a = GuardianLinks[InitialEditIndex];
-            _editTitleId = a.TitleCodedValueId;
-            _editFirstName = a.FirstName;
-            _editLastName = a.LastName;
-            _editRelationshipId = a.RelationshipCodedValueId;
-            _editRole = a.Role;
+            _editModel.TitleCodedValueId = a.TitleCodedValueId;
+            _editModel.FirstName = a.FirstName;
+            _editModel.LastName = a.LastName;
+            _editModel.RelationshipCodedValueId = a.RelationshipCodedValueId;
+            _editModel.Role = a.Role;
             _editContacts = (a.Contacts ?? []).ToList();
-            if (_editRelationshipId is { } relId)
+            if (_editModel.RelationshipCodedValueId is { } relId)
                 await EnsureRelNameAsync(relId);
         }
         await InvokeAsync(StateHasChanged);
@@ -700,11 +616,11 @@
     // link-metadata fields (relationship / role) and expanded draft fields
     // (title / name for drafts, contacts for all).
     private int _editingIndex = -1;
-    private Guid? _editRelationshipId;
-    private GuardianRole _editRole = GuardianRole.Primary;
-    private Guid? _editTitleId;
-    private string? _editFirstName;
-    private string? _editLastName;
+    // Single working-copy model for the per-guardian edit form's metadata
+    // fields (Title / FirstName / LastName / RelationshipId / Role). Bound
+    // to <GuardianEditFields Model="_editModel" .../> so the form's
+    // two-way bindings land on this one object instead of five primitives.
+    private GuardianEditFieldsModel _editModel = new();
     // Buffered contacts list for draft guardians (ContactsEditor mutates this
     // in place; on Save it's written back to the GuardianAssignment.Contacts).
     private List<ContactModel> _editContacts = new();
@@ -769,13 +685,13 @@
         if (index < 0 || index >= GuardianLinks.Count) return;
         var a = GuardianLinks[index];
         _editingIndex = index;
-        _editRelationshipId = a.RelationshipCodedValueId;
-        _editRole = a.Role;
-        _editTitleId = a.TitleCodedValueId;
-        _editFirstName = a.FirstName;
-        _editLastName = a.LastName;
+        _editModel.RelationshipCodedValueId = a.RelationshipCodedValueId;
+        _editModel.Role = a.Role;
+        _editModel.TitleCodedValueId = a.TitleCodedValueId;
+        _editModel.FirstName = a.FirstName;
+        _editModel.LastName = a.LastName;
         _editContacts = (a.Contacts ?? []).ToList();
-        if (_editRelationshipId is { } relId)
+        if (_editModel.RelationshipCodedValueId is { } relId)
             await EnsureRelNameAsync(relId);
         await InvokeAsync(StateHasChanged);
     }
@@ -809,7 +725,7 @@
     /// (used by the side drawer's Save button).</summary>
     public async Task<bool> SaveAddGuardianAsync()
     {
-        if (string.IsNullOrWhiteSpace(_editFirstName) || string.IsNullOrWhiteSpace(_editLastName))
+        if (string.IsNullOrWhiteSpace(_editModel.FirstName) || string.IsNullOrWhiteSpace(_editModel.LastName))
         {
             _guardianError = "First and last name are required.";
             await InvokeAsync(StateHasChanged);
@@ -821,25 +737,25 @@
         {
             var assignment = new GuardianAssignment(
                 ExistingGuardianId: null,
-                _editFirstName!.Trim(),
-                _editLastName!.Trim(),
-                _editRelationshipId,
+                _editModel.FirstName!.Trim(),
+                _editModel.LastName!.Trim(),
+                _editModel.RelationshipCodedValueId,
                 ContactChannel: null,
                 ContactValue: null,
-                TitleCodedValueId: _editTitleId,
+                TitleCodedValueId: _editModel.TitleCodedValueId,
                 CountryCode: null);
             await AddDraftAsync(assignment);
             _editingIndex = GuardianLinks.Count - 1;
             if (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count)
             {
                 var a = GuardianLinks[_editingIndex];
-                _editTitleId = a.TitleCodedValueId;
-                _editFirstName = a.FirstName;
-                _editLastName = a.LastName;
-                _editRelationshipId = a.RelationshipCodedValueId;
-                _editRole = a.Role;
+                _editModel.TitleCodedValueId = a.TitleCodedValueId;
+                _editModel.FirstName = a.FirstName;
+                _editModel.LastName = a.LastName;
+                _editModel.RelationshipCodedValueId = a.RelationshipCodedValueId;
+                _editModel.Role = a.Role;
                 _editContacts = (a.Contacts ?? []).ToList();
-                if (_editRelationshipId is { } relId)
+                if (_editModel.RelationshipCodedValueId is { } relId)
                     await EnsureRelNameAsync(relId);
             }
             await InvokeAsync(StateHasChanged);
@@ -879,15 +795,15 @@
             var original = GuardianLinks[_editingIndex];
             var updated = original with
             {
-                RelationshipCodedValueId = _editRelationshipId,
-                Role = _editRole,
-                TitleCodedValueId = _editTitleId,
-                FirstName = _editFirstName ?? original.FirstName,
-                LastName = _editLastName ?? original.LastName,
+                RelationshipCodedValueId = _editModel.RelationshipCodedValueId,
+                Role = _editModel.Role,
+                TitleCodedValueId = _editModel.TitleCodedValueId,
+                FirstName = _editModel.FirstName ?? original.FirstName,
+                LastName = _editModel.LastName ?? original.LastName,
                 Contacts = _editContacts.Count == 0 ? original.Contacts : _editContacts,
             };
             GuardianLinks[_editingIndex] = updated;
-            if (_editRelationshipId is { } relId)
+            if (_editModel.RelationshipCodedValueId is { } relId)
                 await EnsureRelNameAsync(relId);
             _editingIndex = -1;
             await InvokeAsync(StateHasChanged);
@@ -1012,13 +928,13 @@
             if (_editingIndex >= 0 && _editingIndex < GuardianLinks.Count)
             {
                 var a = GuardianLinks[_editingIndex];
-                _editTitleId = a.TitleCodedValueId;
-                _editFirstName = a.FirstName;
-                _editLastName = a.LastName;
-                _editRelationshipId = a.RelationshipCodedValueId;
-                _editRole = a.Role;
+                _editModel.TitleCodedValueId = a.TitleCodedValueId;
+                _editModel.FirstName = a.FirstName;
+                _editModel.LastName = a.LastName;
+                _editModel.RelationshipCodedValueId = a.RelationshipCodedValueId;
+                _editModel.Role = a.Role;
                 _editContacts = (a.Contacts ?? []).ToList();
-                if (_editRelationshipId is { } relId)
+                if (_editModel.RelationshipCodedValueId is { } relId)
                     await EnsureRelNameAsync(relId);
                 // The inline edit panel renders in the Edit view (no publish-up).
             }

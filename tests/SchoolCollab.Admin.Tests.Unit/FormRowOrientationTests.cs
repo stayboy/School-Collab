@@ -62,6 +62,9 @@ public class FormRowOrientationTests
     private static string ReadContactsEditorSource() => ReadSource(
         "SchoolCollab.Admin.Shared/Components/ContactsEditor.razor");
 
+    private static string ReadContactFormFieldsSource() => ReadSource(
+        "SchoolCollab.Admin.Shared/Components/ContactFormFields.razor");
+
     // ---- Enum exists with Horizontal + Vertical ----
 
     [TestMethod]
@@ -171,39 +174,34 @@ public class FormRowOrientationTests
             "FormRow.razor.css has no live @media rules Orientation is the only path to a vertical row");
     }
 
-    // ---- Caller consistency: ContactsEditor Edit view passes Vertical ----
+    // ---- Caller consistency: the shared Edit-view field group is Vertical ----
 
     [TestMethod]
     public void ContactsEditor_EditViewPassesVerticalOrientationToEveryFormRow()
     {
-        var source = ReadContactsEditorSource();
+        // The Add and Edit forms in the focused Edit view share ONE field
+        // group (ContactFormFields) — Channel / Country code / Value / Label.
+        // The Vertical orientation for the narrow 420px drawer lives on those
+        // four FormRows in ContactFormFields.razor rather than being duplicated
+        // inline in the Add/Edit branches (so the two can never drift apart).
+        var fields = ReadContactFormFieldsSource();
 
-        // Slice to the Edit-view body so a Vertical call elsewhere (e.g. a
-        // future Full-view usage) doesnt false-pass.
-        var editStart = source.IndexOf("else if (View == ContactsView.Edit)", StringComparison.Ordinal);
-        editStart.Should().BeGreaterThan(-1, "the Edit view branch exists in ContactsEditor.razor");
-        // End of slice = next 'else' at column 0 (the Full-view branch opener).
-        // Fallback to a more permissive match if the indentation varies.
-        var editEnd = source.IndexOf("\n    else\n    {\n", editStart, StringComparison.Ordinal);
-        if (editEnd < 0) editEnd = source.IndexOf("\n    else\r\n    {\r\n", editStart, StringComparison.Ordinal);
-        editEnd.Should().BeGreaterThan(editStart, "the Edit view slice has a well-defined end");
-
-        var editBody = source.Substring(editStart, editEnd - editStart);
-
-        // Every <FormRow> in the Edit view body must declare Vertical so
-        // the narrow 420px drawer uses label-on-top + input-below for
-        // every field (Channel, optional Country code, Value, Label
-        // duplicated for Add branch + Edit branch).
         var formRowMatches = System.Text.RegularExpressions.Regex.Matches(
-            editBody, @"<FormRow\b[^>]*>", System.Text.RegularExpressions.RegexOptions.Singleline);
-        formRowMatches.Count.Should().BeGreaterThanOrEqualTo(8,
-            "the Edit view renders at least 8 FormRows (Channel + Country code + Value + Label x {Add, Edit})");
+            fields, @"<FormRow\s+[^>]*>", System.Text.RegularExpressions.RegexOptions.Singleline);
+        formRowMatches.Count.Should().BeGreaterThanOrEqualTo(4,
+            "ContactFormFields renders the 4 field rows (Channel + Country code + Value + Label)");
 
         foreach (System.Text.RegularExpressions.Match m in formRowMatches)
         {
             m.Value.Should().Contain("Orientation=\"RowOrientation.Vertical\"",
-                $"every <FormRow> in the Edit view opts into Vertical (saw: {m.Value})");
+                $"every <FormRow> in the shared field group opts into Vertical (saw: {m.Value})");
         }
+
+        // The Edit view wires BOTH branches through that shared component
+        // rather than duplicating the rows inline.
+        var editor = ReadContactsEditorSource();
+        editor.Should().Contain("<ContactFormFields",
+            "the Edit view renders the shared ContactFormFields field group in the Add and Edit branches");
     }
 
     // ---- Caller non-regression: no other source silently flips to Vertical ----
@@ -254,69 +252,41 @@ public class FormRowOrientationTests
     public void ContactsEditor_EditViewUsesCanonicalFieldWidthsNotFill()
     {
         // Channel and Country code are SHORT values (an enum choice and a
-        // 2-4 digit calling code). The Edit branch uses the canonical narrow
-        // widths from the FieldWidth ladder:
-        //   Channel       -> W1 (80px)  -- "Channel enum, tiny fields"
-        //   Country code  -> W2 (120px) -- "Country calling code"
-        // The Add branch uses W3 (Channel) and W5 (Country code) — those
-        // are deliberately wider than the Edit branch because the Add form
-        // is the empty form a user lands on first (the "Add contact" anchor
-        // from the Readonly summary), so we want Channel / Country code to
-        // read at a glance as fields with real content space, not the tiniest
-        // possible controls. The Fill width (W9 / w-9) is still reserved for
-        // free-text fields (Value, Label) that genuinely need the full input
-        // cell. Giving Channel / Country code W9 would make them stretch to
-        // fill the 420px drawer cell, which is both visually wrong and
-        // misleading about the data type — so this test rejects W9 on those
-        // narrow fields and locks in the deliberate W1/W2 vs W3/W5 split.
-        var raw = ReadContactsEditorSource();
+        // 2-4 digit calling code). Both the Add and Edit forms share the
+        // ContactFormFields group, which uses W3 (Channel, 160px) and W5
+        // (Country code, 240px) — deliberately wider than the tiniest ladder
+        // step so the fields read as real content space. The Fill width (W9 /
+        // w-9) stays reserved for free-text Value / Label that genuinely need
+        // the full input cell; giving Channel / Country code W9 would stretch
+        // them to fill the 420px drawer cell, which is visually wrong and
+        // misleading about the data type.
+        var raw = ReadContactFormFieldsSource();
         // Normalize line endings + collapse runs of whitespace so the
         // assertion is robust against CRLF vs LF, indent changes, and
         // trailing-space drift in the source file.
-        var source = System.Text.RegularExpressions.Regex.Replace(
-            raw, @"\s+", " ");
+        var source = System.Text.RegularExpressions.Regex.Replace(raw, @"\s+", " ");
 
-        // --- Add branch (W3 / W5) ---
-        // Channel FormRow -> Width="FieldWidth.W3".
+        // Channel dropdown binds to the Model (no inline Width — the
+        // vertical FormRow stacks label-on-top and the dropdown fills the
+        // input cell at its intrinsic width).
         source.Should().Contain(
-            "<FormRow Label=\"Channel\" Orientation=\"RowOrientation.Vertical\"> " +
-            "<DropdownForEnum TEnum=\"ContactChannel\" @bind-Value=\"_newChannel\" " +
-            "@bind-Value:after=\"OnChannelChanged\" Width=\"FieldWidth.W3\" />",
-            "the Add-branch Channel dropdown uses FieldWidth.W3 — the empty form a user lands on first, wider than the Edit branch's W1");
+            "<DropdownForEnum TEnum=\"ContactChannel\" @bind-SelectedValue=\"Model.Channel\" @bind-SelectedValue:after=\"NotifyChannelChanged\" />",
+            "the shared field group's Channel dropdown binds to Model.Channel");
 
         // Country code -> Width="FieldWidth.W5".
         source.Should().Contain(
-            "Width=\"FieldWidth.W5\" OptionText=\"@FormatCountryCodeOption\"",
-            "the Add-branch Country code dropdown uses FieldWidth.W5 — wider than the Edit branch's W2 since this is the empty form");
-
-        // --- Edit branch (W1 / W2) ---
-        source.Should().Contain(
-            "@bind-SelectedValue=\"_editChannel\" " +
-            "@bind-SelectedValue:after=\"OnInlineEditChannelChanged\" " +
-            "Width=\"FieldWidth.W1\"",
-            "the Edit-branch Channel dropdown uses FieldWidth.W1");
-
-        // Both branches declare W2/W5 + OptionText for country code. The
-        // Add branch above already covers W5; require a SECOND match (W2)
-        // to prove the Edit branch also has it.
-        System.Text.RegularExpressions.Regex.Matches(
-            source, @"Width=""FieldWidth\.W2"" OptionText=""@FormatCountryCodeOption"""
-        ).Count.Should().Be(1,
-            "the Edit branch of the country code dropdown uses FieldWidth.W2 (120px)");
-
-        // Defensive: neither branch should have a W9 on Country code.
-        // We check the WHOLE source so a future third branch (e.g. Full
-        // view) can't silently regress either.
-        raw.Should().NotContain("Width=\"FieldWidth.W9\"\n",
-            "no ContactsEditor row declares FieldWidth.W9 on its own line — Channel / Country code are W1/W2 (Edit) or W3/W5 (Add) and free-text fields use the w-9 CSS class");
+            "Width=\"FieldWidth.W5\" OptionText=\"@OptionText\"",
+            "the shared field group's Country code dropdown uses FieldWidth.W5");
 
         // Value + Label rows still fill (w-9 CSS class), so users get a
         // roomy free-text input on the Value and the optional Label.
         source.Should().Contain("Placeholder=\"@ValuePlaceholder\" Required class=\"w-9\"",
-            "the Value field (Add branch) fills its cell via the w-9 CSS class");
+            "the Value field fills its cell via the w-9 CSS class");
         source.Should().Contain("Placeholder=\"Label (optional)\" class=\"w-9\"",
-            "the Label field (Add branch) fills its cell via the w-9 CSS class");
-        source.Should().Contain("Placeholder=\"@EditValuePlaceholder\" Required class=\"w-9\"",
-            "the Value field (Edit branch) fills its cell via the w-9 CSS class");
+            "the Label field fills its cell via the w-9 CSS class");
+
+        // Defensive: neither narrow field should get W9 in the shared group.
+        raw.Should().NotContain("Width=\"FieldWidth.W9\"\n",
+            "ContactFormFields never declares FieldWidth.W9 for Channel / Country code — free-text fields use the w-9 CSS class");
     }
 }
