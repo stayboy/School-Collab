@@ -321,3 +321,167 @@
     margin-top: 0.25rem;
 }
 
+/* ── Guardian identity header (drawer Edit view) ─────────────────────
+   Sits ABOVE the .guardian-edit-form, in the white drawer-body area, so
+   the operator sees which guardian is being edited before the gray field
+   region. It is not inside .guardian-edit-form (which has a neutral-layer-2
+   background) so it keeps the drawer body's white background. The name is
+   the anchor; the relationship is muted and optional — mirrors the
+   guardian-card / -card-rel visual language of the readonly list. */
+.guardian-edit-identity {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    padding: 0.15rem 0.25rem;
+    margin-bottom: 0.4rem;
+}
+.guardian-edit-identity-name {
+    font-weight: 600;
+    font-size: 0.95rem;
+    line-height: 1.2;
+}
+.guardian-edit-identity-rel {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+    font-size: 0.85em;
+    line-height: 1.2;
+}
+
+/* ── Role checkbox alignment (R6) ── */
+.guardian-role-checkbox {
+    display: flex;
+    align-items: center;
+    margin-top: 0.25rem;
+}
+
+/* ── Contact sub-screen (R5 + D1): add / edit / remove-confirm ──────
+   Replaces the identity + relationship/role + list surface while a contact
+   sub-screen is open (InContactSubScreen). Title + summary lead; the reason
+   field and actions follow. The form itself recovers the vertical space once
+   occupied by the relationship/role rows. */
+.guardian-contact-subscreen {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.guardian-contact-subscreen-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--neutral-foreground-rest, #242424);
+}
+.guardian-contact-subscreen-summary {
+    font-size: 0.9rem;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+}
+.guardian-contact-reason {
+    width: 100%;
+}
+
+/* ── Compact contact manager (drawer Edit view) ─────────────────────
+   Single-line selectable contact list + outside reorder toolbar +
+   an inner "Add contact" FluentAnchor. Replaces the nested full
+   <ContactsEditor> that previously lived here. See
+   docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md §4.2. */
+.guardian-contact-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.guardian-contacts-empty {
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-style: italic;
+    padding: 0.25rem 0;
+}
+
+/* Contact list — a tight stack of selectable rows. No bullets (the
+   semantic <ul>/<li> is for screen readers; the space it would
+   otherwise consume is reclaimed by the drawer). */
+.guardian-contact-single-lines {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* Each line is a flex row: glyph | value | label | actions. The whole
+   row is clickable (set as a button by role="button" + tabindex on
+   the <li>). `cursor: pointer` signals the affordance; the
+   `--selected` modifier paints the selected background. */
+.guardian-contact-line {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: 0.5rem;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    cursor: pointer;
+    outline: none;
+    background: transparent;
+    transition: background-color 80ms ease, border-color 80ms ease;
+}
+.guardian-contact-line:hover {
+    background: var(--neutral-layer-2, #fafafa);
+}
+.guardian-contact-line:focus-visible {
+    border-color: var(--accent-fill-rest, #0078d4);
+}
+.guardian-contact-line--selected {
+    background: var(--accent-fill-rest-area, #e6f2fa);
+    border-color: var(--accent-fill-rest, #0078d4);
+}
+
+.guardian-contact-glyph {
+    flex: 0 0 auto;
+    font-size: 0.95rem;
+    line-height: 1;
+    min-width: 1.25rem;
+    text-align: center;
+}
+.guardian-contact-value {
+    flex: 1 1 auto;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-size: 0.9rem;
+}
+.guardian-contact-label {
+    flex: 0 0 auto;
+    color: var(--neutral-foreground-hint, #6b6b6b);
+    font-size: 0.85em;
+    font-style: italic;
+}
+.guardian-contact-actions {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    margin-left: auto;
+}
+
+/* Reorder toolbar — sits OUTSIDE the list, acts on the selected
+   line. Two icon-only buttons left-aligned; functionally identical
+   to the row's Edit/Remove pattern. Disabled state is provided by
+   FluentUI's <FluentButton Disabled>; the CSS only needs the layout. */
+.guardian-contact-reorder-bar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding-left: 8px;
+}
+
+/* Add affordance — the draft-only "Add contact" FluentAnchor. Block
+   (not inline) so it sits on its own line below the reorder toolbar;
+   the hypertext appearance is provided by FluentUI's
+   Appearance.Hypertext. */
+.guardian-contact-add-anchor {
+    margin-top: 0.25rem;
+    align-self: flex-start;
+}
+

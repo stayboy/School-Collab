@@ -104,10 +104,10 @@ public class DialogDrawerTests
             "the right-anchored panel has a right-anchored class");
         source.Should().Contain("dialog-drawer-panel--left",
             "the left-anchored panel has a left-anchored class");
-        source.Should().Contain("right: 0;",
-            "the right-anchored panel pins to right:0 via inline style");
-        source.Should().Contain("left: 0;",
-            "the left-anchored panel pins to left:0 via inline style");
+        source.Should().Contain("right: 8px;",
+            "the right-anchored panel pins to right and is inset 8px from the body edge");
+        source.Should().Contain("left: 8px;",
+            "the left-anchored panel pins to left and is inset 8px from the body edge");
     }
 
     [TestMethod]
@@ -153,6 +153,52 @@ public class DialogDrawerTests
             "the backdrop is positioned absolutely too");
         css.Should().NotContain("position: fixed;",
             "the drawer must NOT use fixed positioning — it must stay inside the dialog body");
+    }
+
+    [TestMethod]
+    public void DialogDrawer_Css_PanelHasAllRoundCutBorderAndShadow()
+    {
+        var css = ReadSource(
+            "SchoolCollab.Admin.Shared/Components/DialogDrawer.razor.css");
+
+        // The panel is inset a small uniform margin from the dialog body edges
+        // so it reads as a cut-out card floating over the form — the full
+        // (all-round) border and layered cast shadow are visible on every side
+        // instead of being flush against the body edge.
+        var panelBlock = css.Substring(
+            css.IndexOf(".dialog-drawer-panel {", StringComparison.Ordinal),
+            css.IndexOf(".dialog-drawer-panel--right", StringComparison.Ordinal)
+                - css.IndexOf(".dialog-drawer-panel {", StringComparison.Ordinal));
+
+        // Vertical inset so the top/bottom border isn't flush against the body.
+        panelBlock.Should().Contain("top: 8px;",
+            "the panel is inset from the top of the body");
+        panelBlock.Should().Contain("bottom: 8px;",
+            "the panel is inset from the bottom of the body");
+
+        // One uniform border runs all the way around all four sides.
+        panelBlock.Should().Contain("border: 1px solid",
+            "the panel has a single uniform border around all sides, not edge-only");
+
+        // Border-box keeps the inline Width inside the border so the drawer
+        // footprint never grows; a layered shadow lifts the panel off the form.
+        panelBlock.Should().Contain("box-sizing: border-box;",
+            "the Width includes the border so the drawer footprint stays exact");
+        panelBlock.Should().Contain("box-shadow:",
+            "the panel casts a layered elevation shadow");
+
+        // Both anchor variants remain (they key header orphan-order + slide-in).
+        css.Should().Contain(".dialog-drawer-panel--right",
+            "the right-anchored panel variant rule exists");
+        css.Should().Contain(".dialog-drawer-panel--left",
+            "the left-anchored panel variant rule exists");
+
+        // The horizontal inset is applied inline via the Side style.
+        var source = ReadSource("SchoolCollab.Admin.Shared/Components/DialogDrawer.razor");
+        source.Should().Contain("\"left: 8px;\"",
+            "a left-anchored panel is inset from the left body edge");
+        source.Should().Contain("\"right: 8px;\"",
+            "a right-anchored panel is inset from the right body edge");
     }
 
     [TestMethod]

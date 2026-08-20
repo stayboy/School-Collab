@@ -173,3 +173,47 @@
     justify-content: flex-end;
     padding-top: 4px;
 }
+
+/* Labeled add-contact layout (Full view add row). Two stacked rows: a top
+   row carrying channel + (conditional) country code + label, and a bottom
+   row with the contact value input growing to fill the available space plus
+   an icon-only Add button sitting inline at the end. Putting the Add next
+   to the value (rather than in a separate header strip) keeps the add
+   affordance physically close to the data it commits, and keeps the row
+   count down on the nested ContactsEditor rendered inside the guardian's
+   side drawer. Overrides the base .contacts-editor-add row-flex defaults
+   with column flex so the two rows stack vertically. */
+.contacts-editor-add--labeled {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: 8px;
+}
+
+/* Bottom row: value input grows to fill, icon button stays at intrinsic
+   size. Top row has fixed-width controls so it wraps naturally on narrow
+   viewports (e.g. inside the side drawer). */
+.contacts-editor-add__row--bottom {
+    align-items: stretch;
+}
+
+/* Value input in the bottom row grows to fill the row's remaining space
+   while the Add icon button sits at intrinsic size at the end. */
+.contacts-editor-add__row--bottom .contacts-value {
+    flex: 1 1 auto;
+}
+
+/* Add icon button in the bottom row. Intrinsic width (no flex:1 — that
+   would push the value input off-screen). Title="Add contact" supplies
+   the tooltip + accessible name. */
+.contacts-editor-add__submit {
+    flex: 0 0 auto;
+}
+
+.contacts-editor-add__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}

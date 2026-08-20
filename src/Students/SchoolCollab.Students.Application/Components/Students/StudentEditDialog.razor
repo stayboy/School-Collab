@@ -19,7 +19,7 @@
    relative; height: 100%) for the shared <DialogDrawer>, which fills the
    dialog body content area exactly — between the title bar (above) and
    the actions bar (below). *@
-<div class="student-edit-dialog-root">
+<div class="student-edit-dialog-root @RootModifierClasses">
 @if (!_loaded)
 {
     @* The student profile is still loading. We gate the whole form on
@@ -58,7 +58,7 @@ else
                        SectionsReadonly="true"
                        ProfileFieldsDisabled="@(_editor != ActiveEditor.None)"
                        OnEditContact="OpenEditContactAsync"
-                       OnAddContact="OpenAddContactAsync"
+                       OnAddContact="OpenAddContactFormAsync"
                        OnEditGuardian="OpenEditGuardianAsync"
                        OnAddGuardian="OpenAddGuardianAsync" />
 
@@ -91,7 +91,8 @@ else
                              Mode="StudentFormFieldsMode.Inline"
                              StudentId="StudentId"
                              IsAdd="@_isAdd"
-                             InitialEditIndex="@_editingGuardianIndex" />
+                             InitialEditIndex="@_editingGuardianIndex"
+                             OnContactSubScreenChanged="OnGuardianContactSubScreenChanged" />
         }
     </DialogDrawer>
 }
@@ -236,7 +237,7 @@ else
     /// <summary>Opens the Contacts focused add form (blank) in the shared
     /// drawer. Fired by the "Add contact" FluentAnchor on the Readonly
     /// contacts summary.</summary>
-    private Task OpenAddContactAsync()
+    private Task OpenAddContactFormAsync()
     {
         _editor = ActiveEditor.Contacts;
         _isAdd = true;
@@ -267,15 +268,55 @@ else
         return Task.CompletedTask;
     }
 
-    /// <summary>Drawer title. Reflects which editor is open and whether this is
-    /// an add or edit of an existing item — gives the operator context inside
-    /// the drawer.</summary>
+    /// <summary>Drawer title. Reflects which editor is open, whether this is
+    /// an add or edit of an existing item, and — for the guardians editor —
+    /// which contact sub-screen is active. The sub-screen has no in-body
+    /// heading (it reclaims vertical space), so the chrome title names the
+    /// mode: "Add Guardian Contact" / "Edit Guardian Contact" /
+    /// "Remove Guardian Contact" while a contact sub-screen is open, otherwise
+    /// the base guardian title.</summary>
     private string GetDrawerTitle() => _editor switch
     {
         ActiveEditor.Contacts => _isAdd ? "Add contact" : "Edit contact",
-        ActiveEditor.Guardians => _isAdd ? "Add guardian" : "Edit guardian",
+        ActiveEditor.Guardians => _guardianContactSubScreen switch
+        {
+            GuardianSection.GuardianContactSubScreen.Add => "Add Guardian Contact",
+            GuardianSection.GuardianContactSubScreen.Edit => "Edit Guardian Contact",
+            GuardianSection.GuardianContactSubScreen.Remove => "Remove Guardian Contact",
+            _ => _isAdd ? "Add guardian" : "Edit Guardian",
+        },
         _ => ""
     };
+
+    /// <summary>The guardian contact sub-screen the drawer is currently showing
+    /// (None = the guardian list surface). Reported up by <c>GuardianSection</c>
+    /// so the chrome title can name the sub-screen. Defaults to None so the
+    /// drawer opens with the base guardian title.</summary>
+    private GuardianSection.GuardianContactSubScreen _guardianContactSubScreen =
+        GuardianSection.GuardianContactSubScreen.None;
+
+    /// <summary>Extra CSS modifier classes for the dialog-content root wrapper.
+    /// While a guardian contact sub-screen (Add / Edit / Remove) is open the
+    /// drawer body needs more vertical room for the contact form + inline reason
+    /// than the default 320px floor provides, so we raise the root's min-height
+    /// to avoid a scrollbar in the drawer (the content-filled dialog box then
+    /// grows to fit and re-collapses on return to the guardian list). Driven by
+    /// the same reported sub-screen state that keys the chrome title, and toggles
+    /// on the same re-render.</summary>
+    private string RootModifierClasses =>
+        _editor == ActiveEditor.Guardians
+        && _guardianContactSubScreen != GuardianSection.GuardianContactSubScreen.None
+            ? "student-edit-dialog-root--guardian-contact"
+            : string.Empty;
+
+    /// <summary>Receives the guardian contact sub-screen mode when it changes
+    /// so the drawer title can reflect Add / Edit / Remove. Re-renders so the
+    /// <c>DialogDrawer</c> <c>Title</c> binding re-evaluates.</summary>
+    private Task OnGuardianContactSubScreenChanged(GuardianSection.GuardianContactSubScreen mode)
+    {
+        _guardianContactSubScreen = mode;
+        return InvokeAsync(StateHasChanged);
+    }
 
     /// <summary>Drawer OpenChanged handler. Cancel / backdrop / Escape arrive
     /// here. Clears the active editor + focused-edit state so the drawer
@@ -291,6 +332,7 @@ else
             _isAdd = false;
             _editingContactKey = null;
             _editingGuardianIndex = -1;
+            _guardianContactSubScreen = GuardianSection.GuardianContactSubScreen.None;
         }
         return InvokeAsync(StateHasChanged);
     }

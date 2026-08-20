@@ -87,99 +87,57 @@
                 }
             </ul>
         }
-        <FluentAnchor Href="#" OnClick="@(() => OnAddContact.InvokeAsync())" class="contacts-add-anchor">
+        <FluentAnchor Href="#" Appearance="Appearance.Hypertext" OnClick="@(() => OnAddContact.InvokeAsync())" class="contacts-add-anchor">
             Add contact
         </FluentAnchor>
     }
     else if (View == ContactsView.Edit)
     {
-        @* Focused per-item edit form hosted in the side drawer. Initialized
-           from InitialEditKey / IsAdd; the host drawer owns Close / backdrop /
+        @* Focused per-item form hosted in the side drawer. Initialized from
+           InitialEditKey / IsAdd; the host drawer owns Close / backdrop /
            Escape so we don't render an inline Cancel — that's redundant chrome
-           inside a side drawer. Fields are stacked vertically with FormRow
-           (label on top, input below) so the narrow 420px drawer breathes. *@
+           inside a side drawer. The Add and Edit branches share ONE field
+           group (ContactFormFields) — channel + country code + value + label
+           — so the two can never drift apart; only the commit button differs
+           (Add appends, Save commits the working copy). Fields are stacked
+           vertically with FormRow (label on top, input below) so the narrow
+           420px drawer breathes. *@
         <div class="contacts-edit-form">
             @if (IsAdd)
             {
-                <FormRow Label="Channel" Orientation="RowOrientation.Vertical">
-                    <DropdownForEnum TEnum="ContactChannel"
-                                     @bind-Value="_newChannel"
-                                     @bind-Value:after="OnChannelChanged"
-                                     Width="FieldWidth.W3" />
-                </FormRow>
-                @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
-                {
-                    <FormRow Label="Country code" Orientation="RowOrientation.Vertical">
-                        <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                            @bind-SelectedId="_newCountryCodeId"
-                                            Placeholder="Code"
-                                            Width="FieldWidth.W5"
-                                            OptionText="@FormatCountryCodeOption" />
-                    </FormRow>
-                }
-                <FormRow Label="@ValueLabel" Required Orientation="RowOrientation.Vertical">
-                    <FluentTextField @bind-Value="_newValue"
-                                      Placeholder="@ValuePlaceholder"
-                                      Required
-                                      class="w-9" />
-                </FormRow>
-                <FormRow Label="Label" Orientation="RowOrientation.Vertical">
-                    <FluentTextField @bind-Value="_newLabel"
-                                      Placeholder="Label (optional)"
-                                      class="w-9" />
-                </FormRow>
+                <ContactFormFields Model="_newContactModel"
+                                   ChannelChanged="OnChannelChanged"
+                                   ValueLabel="@ValueLabel"
+                                   ValuePlaceholder="@ValuePlaceholder"
+                                   OptionText="@FormatCountryCodeOption" />
                 <div class="contacts-edit-form__actions">
                     <FluentButton Appearance="Appearance.Accent"
                                   IconStart="@FluentIcons.Add"
                                   OnClick="AddAsync"
-                                  Disabled="@(_adding || string.IsNullOrWhiteSpace(_newValue) || EditDisabled)">
+                                  Disabled="@(_adding || string.IsNullOrWhiteSpace(_newContactModel.Value) || EditDisabled)">
                         @(_adding ? "Adding…" : "Add")
                     </FluentButton>
                 </div>
             }
-            else
+            else if (_editingContactKey is not null)
             {
-                @* Focused per-item edit form. Same vertical FormRow layout as
-                   the Add branch. Initialized from InitialEditKey; Save commits
-                   the working copy (see SaveInlineEditAsync). The host drawer's
-                   Close button is the Cancel affordance. *@
-                @if (_editingContactKey is not null)
-                {
-                    <FormRow Label="Channel" Orientation="RowOrientation.Vertical">
-                        <DropdownForEnum TEnum="ContactChannel"
-                                         @bind-SelectedValue="_editChannel"
-                                         @bind-SelectedValue:after="OnInlineEditChannelChanged"
-                                         Width="FieldWidth.W1" />
-                    </FormRow>
-                    @if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
-                    {
-                        <FormRow Label="Country code" Orientation="RowOrientation.Vertical">
-                            <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                                @bind-SelectedId="_editCountryCodeId"
-                                                Placeholder="Code"
-                                                Width="FieldWidth.W2"
-                                                OptionText="@FormatCountryCodeOption" />
-                        </FormRow>
-                    }
-                    <FormRow Label="@EditValueLabel" Required Orientation="RowOrientation.Vertical">
-                        <FluentTextField @bind-Value="_editValue"
-                                          Placeholder="@EditValuePlaceholder"
-                                          Required
-                                          class="w-9" />
-                    </FormRow>
-                    <FormRow Label="Label" Orientation="RowOrientation.Vertical">
-                        <FluentTextField @bind-Value="_editLabel"
-                                          Placeholder="Label (optional)"
-                                          class="w-9" />
-                    </FormRow>
-                    <div class="contacts-edit-form__actions">
-                        <FluentButton Appearance="Appearance.Accent"
-                                      OnClick="SaveInlineEditAsync"
-                                      Disabled="@EditDisabled">
-                            Save
-                        </FluentButton>
-                    </div>
-                }
+                @* Focused per-item edit form. Same shared ContactFormFields as
+                   the Add branch, bound to the _edit* working copy. Initialized
+                   from InitialEditKey; Save commits the working copy (see
+                   SaveInlineEditAsync). The host drawer's Close button is the
+                   Cancel affordance. *@
+                <ContactFormFields Model="_editContactModel"
+                                   ChannelChanged="OnInlineEditChannelChanged"
+                                   ValueLabel="@EditValueLabel"
+                                   ValuePlaceholder="@EditValuePlaceholder"
+                                   OptionText="@FormatCountryCodeOption" />
+                <div class="contacts-edit-form__actions">
+                    <FluentButton Appearance="Appearance.Accent"
+                                  OnClick="SaveInlineEditAsync"
+                                  Disabled="@EditDisabled">
+                        Save
+                    </FluentButton>
+                </div>
             }
         </div>
     }
@@ -193,35 +151,42 @@
         }
         else
         {
-        <div class="contacts-editor-add">
-            <div class="contacts-editor-add__identity">
+        @* Labeled add-contact layout (spec: "Add contact" caption header +
+           channel/country/label row; the contact value + Add icon button sit
+           inline in the value row so the Add affordance lives next to the
+           data it commits). The Add button is icon-only (Title="Add contact"
+           supplies the tooltip + accessible name) so it doesn't push the
+           value input off-screen. Country code stays with the channel group
+           (it's channel-gated). *@
+        <div class="contacts-editor-add contacts-editor-add--labeled">
+            <div class="contacts-editor-add__row contacts-editor-add__row--top">
                 <DropdownForEnum TEnum="ContactChannel"
-                                  @bind-SelectedValue="_newChannel"
-                                  @bind-SelectedValue:after="OnChannelChanged"
-                                  Placeholder="Channel"
-                                  Width="FieldWidth.W2" />
-                @if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+                                 @bind-SelectedValue="_newContactModel.Channel"
+                                 @bind-SelectedValue:after="OnChannelChanged"
+                                 Placeholder="Channel"
+                                 Width="FieldWidth.W2" />
+                @if (_newContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
                 {
                     <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                        @bind-SelectedId="_newCountryCodeId"
+                                        @bind-SelectedId="_newContactModel.CountryCodeId"
                                         Placeholder="Code"
                                         Width="FieldWidth.W3"
                                         OptionText="@FormatCountryCodeOption" />
                 }
+                <FluentTextField @bind-Value="_newContactModel.Label"
+                                 Placeholder="Label (optional)"
+                                 class="contacts-label" />
             </div>
-            <div class="contacts-editor-add__value">
-                <FluentTextField @bind-Value="_newValue"
-                                  Placeholder="@ValuePlaceholder"
-                                  class="contacts-value" />
-                <FluentTextField @bind-Value="_newLabel"
-                                  Placeholder="Label (optional)"
-                                  class="contacts-label" />
+            <div class="contacts-editor-add__row contacts-editor-add__row--bottom">
+                <FluentTextField @bind-Value="_newContactModel.Value"
+                                 Placeholder="@ValuePlaceholder"
+                                 class="contacts-value" />
                 <FluentButton Appearance="Appearance.Accent"
                               IconStart="@FluentIcons.Add"
+                              Title="Add contact"
                               OnClick="AddAsync"
-                              Disabled="@(_adding || string.IsNullOrWhiteSpace(_newValue))">
-                    @(_adding ? "Adding…" : "Add")
-                </FluentButton>
+                              Disabled="@(_adding || string.IsNullOrWhiteSpace(_newContactModel.Value))"
+                              class="contacts-editor-add__submit" />
             </div>
         </div>
 
@@ -322,24 +287,24 @@
         <div class="contacts-inline-edit">
             <div class="contacts-editor-add__identity">
                 <DropdownForEnum TEnum="ContactChannel"
-                                  @bind-SelectedValue="_editChannel"
+                                  @bind-SelectedValue="_editContactModel.Channel"
                                   @bind-SelectedValue:after="OnInlineEditChannelChanged"
                                   Placeholder="Channel"
                                   Width="FieldWidth.W2" />
-                @if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+                @if (_editContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
                 {
                     <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
-                                        @bind-SelectedId="_editCountryCodeId"
+                                        @bind-SelectedId="_editContactModel.CountryCodeId"
                                         Placeholder="Code"
                                         Width="FieldWidth.W3"
                                         OptionText="@FormatCountryCodeOption" />
                 }
             </div>
             <div class="contacts-editor-add__value">
-                <FluentTextField @bind-Value="_editValue"
+                <FluentTextField @bind-Value="_editContactModel.Value"
                                   Placeholder="@EditValuePlaceholder"
                                   class="contacts-value" />
-                <FluentTextField @bind-Value="_editLabel"
+                <FluentTextField @bind-Value="_editContactModel.Label"
                                   Placeholder="Label (optional)"
                                   class="contacts-label" />
                 <FluentButton Appearance="Appearance.Accent"
@@ -452,32 +417,35 @@
     private CancellationToken LoadToken => _loadCts?.Token ?? CancellationToken.None;
     private CancellationToken MutationToken => _mutationCts?.Token ?? CancellationToken.None;
 
-    // Shared add-row form state.
-    private ContactChannel _newChannel = ContactChannel.Email;
-    private Guid? _newCountryCodeId;
-    private CodedValueDto[]? _countryCodeOptions;
-    private string _newValue = string.Empty;
-    private string _newLabel = string.Empty;
+    // Working-copy models for the two contact forms (Add + Edit). Each form
+    // binds a single ContactFormFieldsModel via <ContactFormFields Model="..."/>
+    // rather than four two-way primitives, so the host mutates
+    // _newContactModel.* / _editContactModel.* instead of individual
+    // _newContactModel.* / _editContactModel.* fields.
+    private ContactFormFieldsModel _newContactModel = new();
+    private ContactFormFieldsModel _editContactModel = new();
 
-    // Edit state. Buffered mode publishes the edit form up to the host
-    // (StudentFormFields → StudentEditDialog) which renders it inside the
-    // shared DialogDrawer. The fragment captures _editChannel / _editValue /
-    // _editLabel / _editCountryCodeId via closure so the host is just chrome;
-    // the editor remains the owner of the working copy.
+    // The contact key currently being edited in the focused Edit view
+    // (its Buffered TempId for ContactModel, its Guid for ContactDto).
+    // Null = no edit in flight. Preserved on re-render with the same
+    // parameter set so the user's in-progress edits survive a parent
+    // re-render (InitializeEditViewAsync skips re-population when the
+    // index didn't change).
     private Guid? _editingContactKey;
-    private ContactChannel _editChannel = ContactChannel.Email;
-    private Guid? _editCountryCodeId;
-    private string _editValue = string.Empty;
-    private string _editLabel = string.Empty;
 
-    private string ValuePlaceholder => _newChannel switch
+    // Shared country calling-code options cache (loaded lazily on first
+    // phone-channel selection, reused across both forms). Not part of the
+    // working-copy model — it's a host-level UI cache.
+    private CodedValueDto[]? _countryCodeOptions;
+
+    private string ValuePlaceholder => _newContactModel.Channel switch
     {
         ContactChannel.SMS => "Phone number…",
         ContactChannel.WhatsApp => "WhatsApp number…",
         _ => "Email address…"
     };
 
-    private string EditValuePlaceholder => _editChannel switch
+    private string EditValuePlaceholder => _editContactModel.Channel switch
     {
         ContactChannel.SMS => "Phone number…",
         ContactChannel.WhatsApp => "WhatsApp number…",
@@ -487,7 +455,7 @@
     /// <summary>Channel-aware label text for the value field on the Add form
     /// (used as <c>&lt;FormRow Label="..."&gt;</c>). Mirrors the placeholder
     /// so the label and placeholder use the same wording per channel.</summary>
-    private string ValueLabel => _newChannel switch
+    private string ValueLabel => _newContactModel.Channel switch
     {
         ContactChannel.SMS => "Phone number",
         ContactChannel.WhatsApp => "WhatsApp number",
@@ -496,7 +464,7 @@
 
     /// <summary>Channel-aware label text for the value field on the focused
     /// Edit form. See <see cref="ValueLabel"/>.</summary>
-    private string EditValueLabel => _editChannel switch
+    private string EditValueLabel => _editContactModel.Channel switch
     {
         ContactChannel.SMS => "Phone number",
         ContactChannel.WhatsApp => "WhatsApp number",
@@ -565,16 +533,16 @@
         }
 
         _editingContactKey = row.Key;
-        _editChannel = row.Channel;
-        _editValue = row.Value;
-        _editLabel = row.Label ?? string.Empty;
+        _editContactModel.Channel = row.Channel;
+        _editContactModel.Value = row.Value;
+        _editContactModel.Label = row.Label ?? string.Empty;
 
-        if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        if (_editContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
         {
             await LoadCountryCodesAsync();
         }
 
-        _editCountryCodeId = row.CountryCode is { } code && _countryCodeOptions is not null
+        _editContactModel.CountryCodeId = row.CountryCode is { } code && _countryCodeOptions is not null
             ? _countryCodeOptions.FirstOrDefault(x => x.Name == code)?.Id
             : null;
 
@@ -675,13 +643,13 @@
     // ─── Shared add-row helpers ────────────────────────────────────────
     private async Task OnChannelChanged()
     {
-        if (_newChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        if (_newContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
         {
             await LoadCountryCodesAsync();
         }
         else
         {
-            _newCountryCodeId = null;
+            _newContactModel.CountryCodeId = null;
         }
     }
 
@@ -694,7 +662,7 @@
             _countryCodeOptions = await CodedValuesApi.GetChildrenByParentCodeAsync(
                 CodedValueParent.CountryCallingCodes.ToCode(), token) ?? [];
 
-            _newCountryCodeId ??= _countryCodeOptions
+            _newContactModel.CountryCodeId ??= _countryCodeOptions
                 .FirstOrDefault(x => x.Code.Equals("CNCODES_GHA", StringComparison.OrdinalIgnoreCase))?.Id
                 ?? _countryCodeOptions.FirstOrDefault()?.Id;
         }
@@ -708,17 +676,17 @@
 
     private string? ResolveCountryCode()
     {
-        if (_newCountryCodeId is null || _countryCodeOptions is null) return null;
-        var selected = _countryCodeOptions.FirstOrDefault(x => x.Id == _newCountryCodeId);
+        if (_newContactModel.CountryCodeId is null || _countryCodeOptions is null) return null;
+        var selected = _countryCodeOptions.FirstOrDefault(x => x.Id == _newContactModel.CountryCodeId);
         return selected?.Name;
     }
 
     // ─── Add ───────────────────────────────────────────────────────────
     private async Task AddAsync()
     {
-        if (string.IsNullOrWhiteSpace(_newValue)) return;
+        if (string.IsNullOrWhiteSpace(_newContactModel.Value)) return;
 
-        var countryCode = _newChannel is ContactChannel.SMS or ContactChannel.WhatsApp
+        var countryCode = _newContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp
             ? ResolveCountryCode()
             : null;
 
@@ -727,9 +695,9 @@
             var list = Contacts ??= new List<ContactModel>();
             list.Add(new ContactModel
             {
-                Channel = _newChannel,
-                Value = _newValue.Trim(),
-                Label = string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim(),
+                Channel = _newContactModel.Channel,
+                Value = _newContactModel.Value.Trim(),
+                Label = string.IsNullOrWhiteSpace(_newContactModel.Label) ? null : _newContactModel.Label.Trim(),
                 CountryCode = countryCode,
                 // Append at the tail (Order = current count). The first
                 // added contact is Order 0 = preferred.
@@ -746,8 +714,8 @@
         try
         {
             await Api.AddContactAsync(new AddContactRequest(
-                OwnerType, OwnerId, _newChannel, _newValue.Trim(),
-                string.IsNullOrWhiteSpace(_newLabel) ? null : _newLabel.Trim())
+                OwnerType, OwnerId, _newContactModel.Channel, _newContactModel.Value.Trim(),
+                string.IsNullOrWhiteSpace(_newContactModel.Label) ? null : _newContactModel.Label.Trim())
                 { CountryCode = countryCode, DisplayOrder = _contacts.Count }, MutationToken);
             ResetAddForm();
             await LoadAsync();
@@ -768,10 +736,7 @@
 
     private void ResetAddForm()
     {
-        _newValue = string.Empty;
-        _newLabel = string.Empty;
-        _newChannel = ContactChannel.Email;
-        _newCountryCodeId = null;
+        _newContactModel = new ContactFormFieldsModel();
     }
 
     // ─── Edit / Remove ─────────────────────────────────────────
@@ -791,16 +756,16 @@
     private async Task StartInlineEditAsync(ContactRow row)
     {
         _editingContactKey = row.Key;
-        _editChannel = row.Channel;
-        _editValue = row.Value;
-        _editLabel = row.Label ?? string.Empty;
+        _editContactModel.Channel = row.Channel;
+        _editContactModel.Value = row.Value;
+        _editContactModel.Label = row.Label ?? string.Empty;
 
-        if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        if (_editContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
         {
             await LoadCountryCodesAsync();
         }
 
-        _editCountryCodeId = row.CountryCode is { } code && _countryCodeOptions is not null
+        _editContactModel.CountryCodeId = row.CountryCode is { } code && _countryCodeOptions is not null
             ? _countryCodeOptions.FirstOrDefault(x => x.Name == code)?.Id
             : null;
 
@@ -817,13 +782,13 @@
     /// form is plain Razor markup and re-renders reactively.</summary>
     private async Task OnInlineEditChannelChanged()
     {
-        if (_editChannel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        if (_editContactModel.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
         {
             if (_countryCodeOptions is null) await LoadCountryCodesAsync();
         }
         else
         {
-            _editCountryCodeId = null;
+            _editContactModel.CountryCodeId = null;
         }
     }
 
@@ -875,7 +840,7 @@
         if (_editingContactKey is null) return;
 
         var key = _editingContactKey.Value;
-        var countryCode = _editCountryCodeId is { } id && _countryCodeOptions is not null
+        var countryCode = _editContactModel.CountryCodeId is { } id && _countryCodeOptions is not null
             ? _countryCodeOptions.FirstOrDefault(x => x.Id == id)?.Name
             : null;
 
@@ -887,9 +852,9 @@
                 var target = list.FirstOrDefault(x => x.TempId == key);
                 if (target is not null)
                 {
-                    target.Channel = _editChannel;
-                    target.Value = _editValue.Trim();
-                    target.Label = string.IsNullOrWhiteSpace(_editLabel) ? null : _editLabel.Trim();
+                    target.Channel = _editContactModel.Channel;
+                    target.Value = _editContactModel.Value.Trim();
+                    target.Label = string.IsNullOrWhiteSpace(_editContactModel.Label) ? null : _editContactModel.Label.Trim();
                     target.CountryCode = countryCode;
                     await NotifyChangedAsync();
                 }
@@ -918,10 +883,7 @@
     private async Task EndInlineEditAsync()
     {
         _editingContactKey = null;
-        _editChannel = ContactChannel.Email;
-        _editValue = string.Empty;
-        _editLabel = string.Empty;
-        _editCountryCodeId = null;
+        _editContactModel = new ContactFormFieldsModel();
         await InvokeAsync(StateHasChanged);
     }
 

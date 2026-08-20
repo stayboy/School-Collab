@@ -1,0 +1,92 @@
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Admin.Shared.Constants
+
+@* Shared four-field contact form (Channel + Country code + Value + Label)
+   used by BOTH the Add form and the Edit form inside ContactsEditor's
+   focused Edit view (the side drawer). Before this component existed, the
+   the two branches duplicated the same <FormRow>s with different bindings
+   and the channel was bound with @bind-Value (which DropdownForEnum
+   ignores). Consolidating into one component keeps the fields, the
+   channel-gated country-code selector, and the canonical width (W5 country
+   code, per the FieldWidth ladder) in a single definition. The channel
+   selector and the country-code selector (shown for SMS / WhatsApp) share
+   one "Channel" label; both short selectors sit side-by-side on a single
+   line so the contact form stays compact in the 420px drawer.
+
+   The host owns the working copy as a single <see cref="ContactFormFieldsModel"/>
+   reference: inputs two-way bind to its properties (e.g. <c>@bind-Value="Model.Value"</c>),
+   so the host binds the whole field group with one <c>Model</c> parameter
+   instead of four two-way primitives. The channel-change side-effect
+   (loading country codes on demand / clearing a stale code) stays with
+   the host: this component fires <see cref="ChannelChanged"/> after the
+   channel mutates so the host can react (load <c>_countryCodeOptions</c>
+   for SMS/WhatsApp, clear <c>Model.CountryCodeId</c> otherwise).
+
+   Usage (host, Edit view):
+     <ContactFormFields Model="_newContactModel"
+                        ChannelChanged="OnChannelChanged"
+                        ValueLabel="@ValueLabel"
+                        ValuePlaceholder="@ValuePlaceholder"
+                        OptionText="@FormatCountryCodeOption" /> *@
+
+<FormRow Label="Channel" Orientation="RowOrientation.Vertical">
+    <div class="contact-form-channel">
+        <DropdownForEnum TEnum="ContactChannel"
+                         @bind-SelectedValue="Model.Channel"
+                         @bind-SelectedValue:after="NotifyChannelChanged" />
+        @if (Model.Channel is ContactChannel.SMS or ContactChannel.WhatsApp)
+        {
+            <CodedValueDropdown Parent="CodedValueParent.CountryCallingCodes"
+                                @bind-SelectedId="Model.CountryCodeId"
+                                Placeholder="Code"
+                                Width="FieldWidth.W5"
+                                OptionText="@OptionText" />
+        }
+    </div>
+</FormRow>
+<FormRow Label="@ValueLabel" Required Orientation="RowOrientation.Vertical">
+    <FluentTextField @bind-Value="Model.Value"
+                     Placeholder="@ValuePlaceholder"
+                     Required
+                     class="w-9" />
+</FormRow>
+<FormRow Label="Label" Orientation="RowOrientation.Vertical">
+    <FluentTextField @bind-Value="Model.Label"
+                     Placeholder="Label (optional)"
+                     class="w-9" />
+</FormRow>
+
+@code {
+    /// <summary>The working-copy model bound to the four field rows. The
+    /// host instantiates one <see cref="ContactFormFieldsModel"/> per
+    /// contact (one for the Add form's <c>_newContactModel</c>, one for
+    /// the Edit form's <c>_editContactModel</c>) and mutates its
+    /// properties via the two-way bindings above; on Save the host reads
+    /// the accumulated values from the same instance.</summary>
+    [Parameter, EditorRequired] public ContactFormFieldsModel Model { get; set; } = default!;
+
+    /// <summary>Fires after the inner channel dropdown mutates
+    /// <see cref="ContactFormFieldsModel.Channel"/>. The host reacts by
+    /// loading country calling codes (for SMS/WhatsApp) or clearing a
+    /// stale country-code selection (otherwise). Parameterless because
+    /// the binder has already written the new value to
+    /// <see cref="Model"/>.<see cref="ContactFormFieldsModel.Channel"/>
+    /// by the time the callback runs.</summary>
+    [Parameter] public EventCallback ChannelChanged { get; set; }
+
+    /// <summary>Label text for the value field, channel-aware (e.g. "Phone
+    /// number" for SMS).</summary>
+    [Parameter] public string ValueLabel { get; set; } = string.Empty;
+
+    /// <summary>Placeholder for the value field, channel-aware (e.g. "Phone
+    /// number…" for SMS).</summary>
+    [Parameter] public string ValuePlaceholder { get; set; } = string.Empty;
+
+    /// <summary>Formatter for country-code dropdown options (e.g. "+233 (Ghana)").
+    /// Supplied by the host so the display logic stays in one place.</summary>
+    [Parameter] public Func<CodedValueDto, string>? OptionText { get; set; }
+
+    /// <summary>Forwards the inner <c>DropdownForEnum</c> channel change to
+    /// the host's <see cref="ChannelChanged"/> callback.</summary>
+    private Task NotifyChannelChanged() => ChannelChanged.InvokeAsync();
+}
