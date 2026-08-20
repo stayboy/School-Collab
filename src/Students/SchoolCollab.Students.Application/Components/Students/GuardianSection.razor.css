@@ -418,15 +418,17 @@
     flex-wrap: nowrap;
     gap: 0.5rem;
     padding: 4px 8px;
-    border: 1px solid transparent;
+    /* A visible neutral fill + border (not transparent) so each contact line
+       reads as a raised item distinct from the drawer body behind it. */
+    border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
     border-radius: 4px;
     cursor: pointer;
     outline: none;
-    background: transparent;
+    background: var(--neutral-fill-rest, #f0f0f0);
     transition: background-color 80ms ease, border-color 80ms ease;
 }
 .guardian-contact-line:hover {
-    background: var(--neutral-layer-2, #fafafa);
+    background: var(--neutral-fill-secondary-rest, #e4e4e4);
 }
 .guardian-contact-line:focus-visible {
     border-color: var(--accent-fill-rest, #0078d4);
@@ -483,5 +485,13 @@
 .guardian-contact-add-anchor {
     margin-top: 0.25rem;
     align-self: flex-start;
+}
+
+/* The Remove/action icons inside a contact line should sit FLAT on the line
+   surface (the fill above), not on their own detached background cell. Force
+   the Fluent lightweight button host transparent so the icon shares the line
+   background instead of reading as a differently-coloured chip. */
+.guardian-contact-actions fluent-button {
+    background: transparent !important;
 }
 

@@ -23,18 +23,18 @@
     display: none;
 }
 
-/* Panel: floats over the dimmed main form as a cut-out card. It is inset a
-   small uniform margin from the dialog body edges (top/bottom here, the
-   horizontal edge inline) so the full border + cast shadow are visible on
-   ALL sides instead of being flush against the body edge. Border-box widths
+/* Panel: floats over the dimmed main form as a cut-out card. It is inset by
+   a THIN uniform separation (top/bottom here, the horizontal edge inline) so
+   only a slim 2px separation line reads between the drawer and the dialog
+   body edges — the full border + cast shadow stay visible. Border-box widths
    the inline Width inside the 1px border so the drawer footprint never grows.
    The border is the same neutral divider used by headers/footers and the
    shadow pairs a tight edge contact-shadow with a broad soft ambient one to
    suggest real elevation. */
 .dialog-drawer-panel {
     position: absolute;
-    top: 8px;
-    bottom: 8px;
+    top: 2px;
+    bottom: 2px;
     height: auto;
     box-sizing: border-box;
     background: var(--neutral-layer-1, #fff);

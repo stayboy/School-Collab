@@ -143,15 +143,6 @@
                         contactList: _editContacts,
                         showAddAnchor: true)
                 </div>
-                @if (!InContactSubScreen)
-                {
-                    <div class="guardian-edit-actions">
-                        <FluentButton Appearance="Appearance.Accent"
-                                      OnClick="SaveAddGuardianAsync">
-                            Save
-                        </FluentButton>
-                    </div>
-                }
             </div>
         }
         else
@@ -207,15 +198,6 @@
                                 showAddAnchor: true)
                         }
                     </div>
-                    @if (!InContactSubScreen)
-                    {
-                        <div class="guardian-edit-actions">
-                            <FluentButton Appearance="Appearance.Accent"
-                                          OnClick="SaveEditGuardianAsync">
-                                Save
-                            </FluentButton>
-                        </div>
-                    }
                 </div>
             }
         }
@@ -1462,13 +1444,13 @@
     /// the section into the edit view for that newly-added guardian. Mirrors
     /// <see cref="AddInlineGuardianAsync"/> but is used by the side drawer's
     /// inline Save button (the drawer footer owns Close/Cancel).</summary>
-    public async Task SaveAddGuardianAsync()
+    public async Task<bool> SaveAddGuardianAsync()
     {
         if (string.IsNullOrWhiteSpace(_editModel.FirstName) || string.IsNullOrWhiteSpace(_editModel.LastName))
         {
             _guardianError = "First and last name are required.";
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
         _guardianError = null;
         _adding = true;
@@ -1498,14 +1480,14 @@
                     await EnsureRelNameAsync(relId);
             }
             await InvokeAsync(StateHasChanged);
-            return;
+            return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to add new guardian from edit drawer");
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
         finally
         {
@@ -1519,13 +1501,13 @@
     /// guardian's identity (id / name / title), its contact summary, and its
     /// emergency-contact flag. No API call — the change is drafted and persisted
     /// atomically with the rest of the student on Save.</summary>
-    public async Task SaveEditGuardianAsync()
+    public async Task<bool> SaveEditGuardianAsync()
     {
         if (_editingIndex < 0 || _editingIndex >= GuardianLinks.Count)
         {
             _editingIndex = -1;
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
         _guardianError = null;
         try
@@ -1545,14 +1527,14 @@
                 await EnsureRelNameAsync(relId);
             _editingIndex = -1;
             await InvokeAsync(StateHasChanged);
-            return;
+            return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to edit guardian at index {Index}", _editingIndex);
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
     }
 

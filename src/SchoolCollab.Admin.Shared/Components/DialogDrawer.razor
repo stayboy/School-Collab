@@ -167,14 +167,14 @@
         : "dialog-drawer-panel dialog-drawer-panel--right";
 
     /// <summary>Inline style that anchors the panel to the right or left edge
-    /// of the dialog body, inset by a small margin so the panel reads as a
-    /// cut-out card floating over the form — its full border and cast shadow
-    /// are separated from the dialog edges instead of being flush against
-    /// them. The CSS class carries top/bottom and the vertical shrink; the
-    /// inline style only adds the horizontal edge + margin.</summary>
+    /// of the dialog body with a THIN 2px horizontal separation (matching the
+    /// 2px top/bottom inset in DialogDrawer.razor.css) so the drawer's edge
+    /// reads as a slim cut line against the body instead of floating far from
+    /// it. The CSS class carries top/bottom and the vertical shrink; the
+    /// inline style only adds the horizontal edge + separation.</summary>
     private string PanelSideStyle => Side == DialogDrawerSide.Left
-        ? "left: 8px;"
-        : "right: 8px;";
+        ? "left: 2px;"
+        : "right: 2px;";
 
     private ElementReference _panel;
     private bool _open;

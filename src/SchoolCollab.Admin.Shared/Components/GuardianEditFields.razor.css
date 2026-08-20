@@ -1,0 +1,9 @@
+/* Combined "Name" row (First + Last on the same row under the label "Name",
+   mirroring GuardianFormFields / StudentFormFields). Each FluentTextField
+   claims half the FormRow input cell (flex: 1 1 0) and can shrink
+   (min-width: 0) inside the narrow 420px drawer without overflowing. */
+.guardian-name-field {
+    flex: 1 1 0;
+    min-width: 0;
+    max-width: 100%;
+}

@@ -359,11 +359,22 @@ public class StudentFormFieldsSectionEditTests
         editViewBody.Should().NotContain(">Cancel<",
             "the Edit view branch no longer renders an inline Cancel button");
 
-        // The action row is a small flex row that right-aligns the Add / Save
-        // button. Its existence proves we render the action surface we
-        // expect.
-        source.Should().Contain("contacts-edit-form__actions",
-            "the Add / Save button lives in a dedicated actions row");
+        // The Add / Save button now lives in the shared DialogDrawer's footer
+        // (next to Close), NOT in the drawer body. The Edit view therefore must
+        // NOT render an inline action row or an inline Add / Save button; the
+        // host drawer calls the editor's public submit entry points instead.
+        editViewBody.Should().NotContain("contacts-edit-form__actions",
+            "the Edit view no longer renders the inline actions row — Save moved to the drawer footer");
+        editViewBody.Should().NotContain("OnClick=\"AddAsync\"",
+            "the Add branch no longer renders an inline Add button");
+        editViewBody.Should().NotContain("SaveInlineEditAsync",
+            "the Edit branch no longer renders an inline Save button");
+
+        // Public commit entry points that the drawer footer dispatches to.
+        source.Should().Contain("public async Task<bool> SubmitAddAsync()",
+            "the drawer footer dispatches Add via SubmitAddAsync");
+        source.Should().Contain("public async Task<bool> SubmitInlineEditAsync()",
+            "the drawer footer dispatches Save via SubmitInlineEditAsync");
     }
 
     // ---- GuardianSection Edit view: nested contacts editor cannot open its own dialog ----
@@ -827,13 +838,20 @@ public class StudentFormFieldsSectionEditTests
         editViewBody.Should().NotContain(">Cancel<",
             "the Edit view branch no longer renders an inline Cancel button");
 
-        // The Save button stays in the body, matching the ContactsEditor pattern.
-        editViewBody.Should().Contain("Save",
-            "the Edit view branch still renders the primary inline Save button");
-        editViewBody.Should().Contain("SaveAddGuardianAsync",
-            "the Add branch's Save button calls SaveAddGuardianAsync");
-        editViewBody.Should().Contain("SaveEditGuardianAsync",
-            "the Edit branch's Save button calls SaveEditGuardianAsync");
+        // The guardian Save now lives in the shared DialogDrawer's footer (next
+        // to Close), NOT in the drawer body. The Edit view therefore must NOT
+        // render an inline Save button; the host drawer dispatches to the
+        // public commit methods instead.
+        editViewBody.Should().NotContain("OnClick=\"SaveAddGuardianAsync\"",
+            "the Add branch no longer renders an inline Save button — the drawer footer owns it");
+        editViewBody.Should().NotContain("OnClick=\"SaveEditGuardianAsync\"",
+            "the Edit branch no longer renders an inline Save button — the drawer footer owns it");
+
+        // The commit methods are public so the drawer footer can dispatch to them.
+        source.Should().Contain("public async Task<bool> SaveAddGuardianAsync()",
+            "SaveAddGuardianAsync is public for the drawer footer dispatch");
+        source.Should().Contain("public async Task<bool> SaveEditGuardianAsync()",
+            "SaveEditGuardianAsync is public for the drawer footer dispatch");
     }
 
     // ---- GuardianSection compact manager: CSS covers the new classes (§4.2 / §10.1) ----
