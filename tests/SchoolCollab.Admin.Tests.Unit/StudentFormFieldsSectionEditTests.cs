@@ -233,7 +233,7 @@ public class StudentFormFieldsSectionEditTests
         // Host translates per-card triggers into drawer state — no section-level Manage buttons.
         source.Should().Contain("OnEditContact=\"OpenEditContactAsync\"",
             "per-card contact Edit raises the dialog's drawer opener");
-        source.Should().Contain("OnAddContact=\"OpenAddContactAsync\"",
+        source.Should().Contain("OnAddContact=\"OpenAddContactFormAsync\"",
             "the Add contact anchor raises the dialog's drawer opener");
         source.Should().Contain("OnEditGuardian=\"OpenEditGuardianAsync\"",
             "per-card guardian Edit raises the dialog's drawer opener");

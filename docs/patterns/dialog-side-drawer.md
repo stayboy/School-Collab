@@ -108,7 +108,7 @@ and `OnSubmitAsync` on the drawer, but that is not the default repo pattern.
 <div class="my-dialog-root">
     <StudentFormFields ...
         OnEditContact="OpenEditContactAsync"
-        OnAddContact="OpenAddContactAsync" />
+        OnAddContact="OpenAddContactFormAsync" />
 
     <DialogDrawer Open="@(_editor != ActiveEditor.None)"
                   OpenChanged="OnDrawerOpenChangedAsync"
@@ -154,7 +154,7 @@ private void OpenEditContactAsync(Guid key)
     _editor = ActiveEditor.Contacts;
 }
 
-private void OpenAddContactAsync()
+private void OpenAddContactFormAsync()
 {
     _isAdd = true;
     _editingKey = null;

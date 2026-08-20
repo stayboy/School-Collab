@@ -58,7 +58,7 @@ else
                        SectionsReadonly="true"
                        ProfileFieldsDisabled="@(_editor != ActiveEditor.None)"
                        OnEditContact="OpenEditContactAsync"
-                       OnAddContact="OpenAddContactAsync"
+                       OnAddContact="OpenAddContactFormAsync"
                        OnEditGuardian="OpenEditGuardianAsync"
                        OnAddGuardian="OpenAddGuardianAsync" />
 
@@ -237,7 +237,7 @@ else
     /// <summary>Opens the Contacts focused add form (blank) in the shared
     /// drawer. Fired by the "Add contact" FluentAnchor on the Readonly
     /// contacts summary.</summary>
-    private Task OpenAddContactAsync()
+    private Task OpenAddContactFormAsync()
     {
         _editor = ActiveEditor.Contacts;
         _isAdd = true;
