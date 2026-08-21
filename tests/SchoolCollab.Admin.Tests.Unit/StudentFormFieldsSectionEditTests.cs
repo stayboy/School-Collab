@@ -779,15 +779,17 @@ public class StudentFormFieldsSectionEditTests
 
         // The identity header must live OUTSIDE the gray .guardian-edit-form
         // container so it sits in the white drawer-body area before the darker
-        // field region. We source-assert by locating the first identity block
-        // and the matching form open, then confirming the identity block opens
-        // before the form it belongs to.
-        var identityIdx = source.IndexOf("<div class=\"guardian-edit-identity\">", StringComparison.Ordinal);
+        // field region. On the Add surface the identity now uses the
+        // .guardian-drawer-add-title row (which also carries the far-right
+        // existing-guardian toggle); the edit-existing surface keeps the plain
+        // .guardian-edit-identity banner. We source-assert the Add title row
+        // opens before the Add form container it belongs to.
+        var identityIdx = source.IndexOf("<div class=\"guardian-drawer-add-title\">", StringComparison.Ordinal);
         var formIdx = source.IndexOf("<div class=\"guardian-edit-form\">", StringComparison.Ordinal);
-        identityIdx.Should().BeGreaterThan(-1, "an identity header block exists");
+        identityIdx.Should().BeGreaterThan(-1, "an identity header block exists (Add title row)");
         formIdx.Should().BeGreaterThan(-1, "a .guardian-edit-form block exists");
         identityIdx.Should().BeLessThan(formIdx,
-            "the identity header is rendered before (outside) the .guardian-edit-form container");
+            "the Add identity title row is rendered before (outside) the .guardian-edit-form container");
 
         // The display name includes the salutation (spec §4.4 item 3) when
         // the working copy has a TitleCodedValueId that resolves to a
@@ -1116,5 +1118,106 @@ public class StudentFormFieldsSectionEditTests
             "the guardian-contact rule raises the floor so the contact form fits without a scrollbar");
         css.Should().Contain("max-height: 72vh;",
             "the 72vh cap is retained so the dialog never grows off-screen");
+    }
+
+    // ---- Drawer Add-branch: existing-guardian screen switch ----
+    // docs/plans/2026-08-20-guardian-drawer-existing-guardian-selection.md.
+    // The drawer Add branch offers a body-mode switch between the blank
+    // new-guardian form and an existing-guardian selection surface: a far-right
+    // Hypertext anchor toggles _drawerAddMode; the existing surface reuses the
+    // typeahead + Contact|Student radio + relationship dropdown + role/CC.
+
+    [TestMethod]
+    public void GuardianSection_AddBranch_RendersTitleRowsAnchorToggle()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // The Add branch title row carries the "New guardian" identity on the
+        // left and the far-right Hypertext toggle anchor.
+        source.Should().Contain("guardian-drawer-add-title",
+            "the Add branch wraps the identity in a dedicated title row");
+        source.Should().Contain("Appearance=\"Appearance.Hypertext\"",
+            "the toggle is a native hypertext anchor");
+        source.Should().Contain("class=\"guardian-drawer-add-toggle\"",
+            "the anchor is positioned far-right via the toggle class");
+        source.Should().Contain("Select existing guardian",
+            "the anchor label invites switching to the existing-guardian surface");
+        source.Should().Contain("OnClick=\"ToggleDrawerAddModeAsync\"",
+            "the anchor flips the drawer Add mode");
+        source.Should().Contain("DrawerAddMode.NewGuardian",
+            "the add mode enum is referenced in the Add branch");
+        source.Should().Contain("ToggleDrawerAddModeAsync()",
+            "the toggle handler is implemented");
+    }
+
+    [TestMethod]
+    public void GuardianSection_Add_ExistingSelectionReusesTypeaheadAndRole()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // The existing-guardian surface reuses the typeahead + radio search
+        // machinery already proven in the Full mode.
+        source.Should().Contain("guardian-drawer-existing",
+            "the existing-selection screen renders its container");
+        source.Should().Contain("<FluentAutocomplete TOption=\"GuardianSearchRow\"",
+            "the selection screen reuses the guardian typeahead");
+        source.Should().Contain("SelectedOptionChanged=\"OnTypeaheadSelectedAsync\"",
+            "a typeahead pick resolves via the shared handler");
+        source.Should().Contain("OnTypeaheadSearchAsync",
+            "the typeahead search uses the shared handler");
+        source.Should().Contain("FluentRadioGroup",
+            "the selection screen keeps the Contact | Student search radio");
+        source.Should().Contain("class=\"guardian-role-checkbox\"",
+            "the CC checkbox is wrapped in the alignment class");
+        source.Should().Contain("@bind-Value=\"_pickedIsCC\"",
+            "the CC checkbox binds the role-capture field");
+    }
+
+    [TestMethod]
+    public void GuardianSection_SaveAddGuardian_BranchesOnDrawerAddMode_StaysOpen()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // Save dispatches to the existing-link path when the existing surface is
+        // active; that path drafts with ExistingGuardianId + role and STAYS open.
+        source.Should().Contain("private async Task<bool> SaveExistingGuardianLinkAsync()",
+            "the existing-link commit method exists");
+        source.Should().Contain("_drawerAddMode == DrawerAddMode.ExistingGuardian",
+            "SaveAddGuardianAsync branches on the existing mode");
+        source.Should().Contain("ExistingGuardianId: _existingGuardianId",
+            "the link drafts the picked existing guardian");
+        source.Should().Contain("_pickedIsCC ? GuardianRole.CC : GuardianRole.Primary",
+            "the link records role (CC) alongside relationship");
+        source.Should().Contain("ClearDrawerExistingSelectionState()",
+            "after linking, only the per-link selection clears");
+        source.Should().Contain("return false;",
+            "the existing branch keeps the drawer open (post-link stay)");
+    }
+
+    [TestMethod]
+    public void GuardianSection_DrawerAddMode_ResetsOnFreshAdd()
+    {
+        var source = ReadGuardianSectionSource();
+
+        // Reset the mode in InitializeEditViewAsync's IsAdd branch so a fresh
+        // drawer-add starts on the new-guardian surface.
+        source.Should().Contain("_drawerAddMode = DrawerAddMode.NewGuardian;",
+            "a fresh Add resets the drawer mode to NewGuardian");
+        source.Should().Contain("ClearDrawerExistingSelectionState()",
+            "toggling clears the per-link selection state");
+    }
+
+    [TestMethod]
+    public void GuardianEditFields_VerticalFormRowsWithCombinedName()
+    {
+        var source = ReadGuardianEditFieldsSource();
+
+        source.Should().Contain("<FormRow Label=\"Title\" Orientation=\"RowOrientation.Vertical\"",
+            "the Title row stacks vertically for the narrow drawer (plan §3.1.2)");
+        source.Should().Contain("Label=\"Name\" Required Orientation=\"RowOrientation.Vertical\"",
+            "the Name row stacks vertically");
+        // The combined Name row still carries First + Last side-by-side inputs.
+        source.Should().Contain("class=\"guardian-name-field\"",
+            "both Name inputs share the split-cell class");
     }
 }

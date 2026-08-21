@@ -495,3 +495,34 @@
     background: transparent !important;
 }
 
+
+/* ── Drawer existing-guardian selection ─────────────────────────────────────
+   Styles for the existing-guardian sub-screen that appears inside the
+   drawer's Add branch when the "Select existing guardian" anchor is clicked.
+   This is overlaid in-place above the new-guardian identity form. */
+.guardian-drawer-add-title {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.25rem;
+    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+}
+
+.guardian-drawer-add-toggle {
+    margin-left: auto;
+    font-size: 0.85rem;
+    color: var(--primary-interactive-hover, #0078d4);
+}
+
+.guardian-drawer-existing {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--neutral-stroke-divider, #e0e0e0);
+}
+
+/* Reuse existing typeahead and search-mode styles from .guardian-typeahead,
+   .guardian-search-mode below; no duplication needed. */

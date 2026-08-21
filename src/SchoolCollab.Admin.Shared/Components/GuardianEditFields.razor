@@ -27,13 +27,13 @@
 
 @if (ShowIdentityFields)
 {
-    <FormRow Label="Title">
+    <FormRow Label="Title" Orientation="RowOrientation.Vertical">
         <CodedValueDropdown Parent="CodedValueParent.Salutations"
                             @bind-SelectedId="Model.TitleCodedValueId"
                             Placeholder="Optional"
                             Width="FieldWidth.W3" />
     </FormRow>
-    <FormRow Label="Name" Required For="guardianEditFirstName">
+    <FormRow Label="Name" Required Orientation="RowOrientation.Vertical" For="guardianEditFirstName">
         <FluentTextField Id="guardianEditFirstName"
                          @bind-Value="Model.FirstName"
                          Required Placeholder="First name"
