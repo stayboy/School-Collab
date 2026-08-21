@@ -104,10 +104,10 @@ public class DialogDrawerTests
             "the right-anchored panel has a right-anchored class");
         source.Should().Contain("dialog-drawer-panel--left",
             "the left-anchored panel has a left-anchored class");
-        source.Should().Contain("right: 8px;",
-            "the right-anchored panel pins to right and is inset 8px from the body edge");
-        source.Should().Contain("left: 8px;",
-            "the left-anchored panel pins to left and is inset 8px from the body edge");
+        source.Should().Contain("right: 2px;",
+            "the right-anchored panel pins to right and is inset 2px from the body edge");
+        source.Should().Contain("left: 2px;",
+            "the left-anchored panel pins to left and is inset 2px from the body edge");
     }
 
     [TestMethod]
@@ -171,9 +171,9 @@ public class DialogDrawerTests
                 - css.IndexOf(".dialog-drawer-panel {", StringComparison.Ordinal));
 
         // Vertical inset so the top/bottom border isn't flush against the body.
-        panelBlock.Should().Contain("top: 8px;",
+        panelBlock.Should().Contain("top: 2px;",
             "the panel is inset from the top of the body");
-        panelBlock.Should().Contain("bottom: 8px;",
+        panelBlock.Should().Contain("bottom: 2px;",
             "the panel is inset from the bottom of the body");
 
         // One uniform border runs all the way around all four sides.
@@ -195,9 +195,9 @@ public class DialogDrawerTests
 
         // The horizontal inset is applied inline via the Side style.
         var source = ReadSource("SchoolCollab.Admin.Shared/Components/DialogDrawer.razor");
-        source.Should().Contain("\"left: 8px;\"",
+        source.Should().Contain("\"left: 2px;\"",
             "a left-anchored panel is inset from the left body edge");
-        source.Should().Contain("\"right: 8px;\"",
+        source.Should().Contain("\"right: 2px;\"",
             "a right-anchored panel is inset from the right body edge");
     }
 

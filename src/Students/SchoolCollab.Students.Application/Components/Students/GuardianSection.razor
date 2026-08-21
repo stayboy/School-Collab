@@ -127,32 +127,72 @@
                remove/reorder all work inline; the drawer is too narrow for
                the full <ContactsEditor> add-row + per-row action list.
                See docs/plans/2026-08-18-dialog-min-height-and-guardian-contact-compact.md §4.2. *@
-            <div class="guardian-edit-identity">
-                <span class="guardian-edit-identity-name">@editedGuardianDisplayName</span>
+            <div class="guardian-drawer-add-title">
+                <span class="guardian-edit-identity-name">
+                    @(_drawerAddMode == DrawerAddMode.ExistingGuardian ? "Select existing guardian" : editedGuardianDisplayName)
+                </span>
+                <FluentAnchor Href="#"
+                              Appearance="Appearance.Hypertext"
+                              OnClick="ToggleDrawerAddModeAsync"
+                              class="guardian-drawer-add-toggle">
+                    @(_drawerAddMode == DrawerAddMode.NewGuardian ? "Select existing guardian" : "Add New guardian")
+                </FluentAnchor>
             </div>
-            <div class="guardian-edit-form">
-                @if (!InContactSubScreen)
-                {
-                    <GuardianEditFields Model="_editModel"
-                                        ShowIdentityFields="true"
-                                        RelationshipChanged="OnGuardianRelationshipChanged" />
-                }
-                <div class="guardian-edit-contacts">
-                    @RenderCompactContactManager(
-                        mode: ContactManagerMode.Draft,
-                        contactList: _editContacts,
-                        showAddAnchor: true)
-                </div>
-                @if (!InContactSubScreen)
-                {
-                    <div class="guardian-edit-actions">
-                        <FluentButton Appearance="Appearance.Accent"
-                                      OnClick="SaveAddGuardianAsync">
-                            Save
-                        </FluentButton>
+
+            @if (_drawerAddMode == DrawerAddMode.ExistingGuardian)
+            {
+                @* Existing-guardian selection surface. Reuses the proven typeahead
+                   search machinery from the full-mode inline "Add Existing Guardian"
+                   row (Contact | Student radio, guardian-typeahead, RowTemplate) plus
+                   a relationship dropdown and the CC role capture. Footer Save
+                   dispatches to SaveAddGuardianAsync, which links the chosen guardian
+                   and stays on this surface (docs/plans/2026-08-20-guardian-drawer-existing-guardian-selection.md §2/§3). *@
+                <div class="guardian-drawer-existing">
+                    <FluentAutocomplete TOption="GuardianSearchRow"
+                                        @ref="_typeahead"
+                                        Multiple="false"
+                                        MaximumOptionsSearch="30"
+                                        ImmediateDelay="300"
+                                        ShowProgressIndicator="true"
+                                        AutoComplete="off"
+                                        Placeholder="Search by guardian or student name…"
+                                        OptionText="(r => r.FullName)"
+                                        OptionComparer="GuardianSearchRowComparer.Instance"
+                                        OptionTemplate="RowTemplate"
+                                        OnOptionsSearch="OnTypeaheadSearchAsync"
+                                        SelectedOptionChanged="OnTypeaheadSelectedAsync"
+                                        class="guardian-typeahead" />
+                    <FluentRadioGroup @bind-Value="_searchMode" class="guardian-search-mode">
+                        <FluentRadio Value="@SearchMode.Contact">Contact</FluentRadio>
+                        <FluentRadio Value="@SearchMode.Student">Student</FluentRadio>
+                    </FluentRadioGroup>
+                    <CodedValueDropdown Parent="CodedValueParent.Relationships"
+                                        @bind-SelectedId="_pickedRelationshipId"
+                                        Placeholder="Relationship" />
+                    <div class="guardian-role-checkbox">
+                        <FluentCheckbox @bind-Value="_pickedIsCC"
+                                        Label="CC"
+                                        HelpText="carbon-copy / not the primary" />
                     </div>
-                }
-            </div>
+                </div>
+            }
+            else
+            {
+                <div class="guardian-edit-form">
+                    @if (!InContactSubScreen)
+                    {
+                        <GuardianEditFields Model="_editModel"
+                                            ShowIdentityFields="true"
+                                            RelationshipChanged="OnGuardianRelationshipChanged" />
+                    }
+                    <div class="guardian-edit-contacts">
+                        @RenderCompactContactManager(
+                            mode: ContactManagerMode.Draft,
+                            contactList: _editContacts,
+                            showAddAnchor: true)
+                    </div>
+                </div>
+            }
         }
         else
         {
@@ -207,15 +247,6 @@
                                 showAddAnchor: true)
                         }
                     </div>
-                    @if (!InContactSubScreen)
-                    {
-                        <div class="guardian-edit-actions">
-                            <FluentButton Appearance="Appearance.Accent"
-                                          OnClick="SaveEditGuardianAsync">
-                                Save
-                            </FluentButton>
-                        </div>
-                    }
                 </div>
             }
         }
@@ -626,6 +657,10 @@
             _editModel = new GuardianEditFieldsModel();
             _editContacts = new List<ContactModel>();
             ResetCompactContactManager();
+            // A fresh drawer-add starts on the new-guardian surface. The
+            // existing-guardian mode is entered via the title-row toggle and
+            // never re-applied across add sessions.
+            _drawerAddMode = DrawerAddMode.NewGuardian;
         }
         else if (InitialEditIndex >= 0 && InitialEditIndex < GuardianLinks.Count)
         {
@@ -1462,13 +1497,21 @@
     /// the section into the edit view for that newly-added guardian. Mirrors
     /// <see cref="AddInlineGuardianAsync"/> but is used by the side drawer's
     /// inline Save button (the drawer footer owns Close/Cancel).</summary>
-    public async Task SaveAddGuardianAsync()
+    public async Task<bool> SaveAddGuardianAsync()
     {
+        // The drawer Add branch also offers an existing-guardian selection
+        // surface (plan §2/§3). When active, Save links the chosen existing
+        // guardian instead of creating a new one.
+        if (_drawerAddMode == DrawerAddMode.ExistingGuardian)
+        {
+            return await SaveExistingGuardianLinkAsync();
+        }
+
         if (string.IsNullOrWhiteSpace(_editModel.FirstName) || string.IsNullOrWhiteSpace(_editModel.LastName))
         {
             _guardianError = "First and last name are required.";
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
         _guardianError = null;
         _adding = true;
@@ -1498,19 +1541,97 @@
                     await EnsureRelNameAsync(relId);
             }
             await InvokeAsync(StateHasChanged);
-            return;
+            return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to add new guardian from edit drawer");
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
         finally
         {
             _adding = false;
         }
+    }
+
+    /// <summary>Commit the current existing-guardian selection: draft the link
+    /// (<see cref="GuardianAssignment.ExistingGuardianId"/> + relationship +
+    /// role) to <see cref="GuardianLinks"/>. Returns <c>false</c> so the drawer
+    /// stays open — the confirmed post-link navigation is to remain on the
+    /// selection surface to link more (plan §2 / §8), not close.</summary>
+    private async Task<bool> SaveExistingGuardianLinkAsync()
+    {
+        if (_existingGuardianId is null)
+        {
+            _guardianError = "Search and select an existing guardian to link.";
+            await InvokeAsync(StateHasChanged);
+            return false;
+        }
+        _guardianError = null;
+        _adding = true;
+        try
+        {
+            var assignment = new GuardianAssignment(
+                ExistingGuardianId: _existingGuardianId,
+                _newFirstName ?? string.Empty,
+                _newLastName ?? string.Empty,
+                _pickedRelationshipId,
+                ContactChannel: null,
+                ContactValue: null,
+                TitleCodedValueId: _pickedTitleId,
+                CountryCode: null,
+                Role: _pickedIsCC ? GuardianRole.CC : GuardianRole.Primary);
+            await AddDraftAsync(assignment);   // guards duplicate ExistingGuardianId
+            // Confirmed post-link navigation = STAY (§8): clear only the
+            // per-link selection and keep this surface + the drawer open so the
+            // operator can link more. (The drawer auto-closes only when the
+            // commit returns true.)
+            ClearDrawerExistingSelectionState();
+            await InvokeAsync(StateHasChanged);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to link an existing guardian from the drawer");
+            _guardianError = ex.Message;
+            await InvokeAsync(StateHasChanged);
+            return false;
+        }
+        finally
+        {
+            _adding = false;
+        }
+    }
+
+    /// <summary>Flips the drawer's Add body between the new-guardian form and
+    /// the existing-guardian selection surface (the far-right Hypertext title
+    /// anchor). Also resets any in-progress selection so a toggle never carries
+    /// a stale pick across surfaces.</summary>
+    private async Task ToggleDrawerAddModeAsync()
+    {
+        _drawerAddMode = _drawerAddMode == DrawerAddMode.NewGuardian
+            ? DrawerAddMode.ExistingGuardian
+            : DrawerAddMode.NewGuardian;
+        ClearDrawerExistingSelectionState();
+        await InvokeAsync(StateHasChanged);
+    }
+
+    /// <summary>Resets the existing-guardian selection's transient state — the
+    /// picked id, relationship + title prefills, the CC checkbox, the current
+    /// draft-first/last names, and the typeahead's debounce CTS. Used when
+    /// toggling away from the selection surface and after a successful link
+    /// (post-link "stay").</summary>
+    private void ClearDrawerExistingSelectionState()
+    {
+        _existingGuardianId = null;
+        _pickedRelationshipId = null;
+        _pickedTitleId = null;
+        _pickedIsCC = false;
+        _newFirstName = null;
+        _newLastName = null;
+        ClearTypeaheadState();
     }
 
     /// <summary>Apply the edited link metadata (relationship / role) back to the
@@ -1519,13 +1640,13 @@
     /// guardian's identity (id / name / title), its contact summary, and its
     /// emergency-contact flag. No API call — the change is drafted and persisted
     /// atomically with the rest of the student on Save.</summary>
-    public async Task SaveEditGuardianAsync()
+    public async Task<bool> SaveEditGuardianAsync()
     {
         if (_editingIndex < 0 || _editingIndex >= GuardianLinks.Count)
         {
             _editingIndex = -1;
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
         _guardianError = null;
         try
@@ -1545,14 +1666,14 @@
                 await EnsureRelNameAsync(relId);
             _editingIndex = -1;
             await InvokeAsync(StateHasChanged);
-            return;
+            return true;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Failed to edit guardian at index {Index}", _editingIndex);
             _guardianError = ex.Message;
             await InvokeAsync(StateHasChanged);
-            return;
+            return false;
         }
     }
 
@@ -1802,6 +1923,20 @@
     /// <summary>The salutation title id the typeahead picked up for the chosen
     /// existing guardian, used to prefill the model on a pick.</summary>
     private Guid? _pickedTitleId;
+
+    /// <summary>Which surface the drawer's Add branch shows: the blank
+    /// new-guardian form or the existing-guardian selection. Only relevant when
+    /// <see cref="IsAdd"/> &amp;&amp; <see cref="View"/> ==
+    /// <see cref="GuardianView.Edit"/>. Drives the Add title row + body and the
+    /// <c>SaveAddGuardianAsync</c> branch.</summary>
+    private enum DrawerAddMode { NewGuardian, ExistingGuardian }
+    private DrawerAddMode _drawerAddMode = DrawerAddMode.NewGuardian;
+
+    /// <summary>Whether a newly-chosen existing guardian is a carbon copy (CC)
+    /// rather than the student's Primary guardian. Bound to the CC checkbox on
+    /// the existing-guardian selection surface and drafted as the assignment's
+    /// <see cref="GuardianAssignment.Role"/> on Save.</summary>
+    private bool _pickedIsCC;
 
     /// <summary>Debounce CTS for the typeahead's search handler. Cancel-and-
     /// restart on each keystroke for the ~300 ms debounce window.

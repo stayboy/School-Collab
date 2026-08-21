@@ -73,10 +73,14 @@ else
                   Side="DialogDrawerSide.Right"
                   Width="420px"
                   ShowCancel="true"
-                  CancelText="Close">
+                  CancelText="Close"
+                  ShowSubmit="@ShowDrawerSubmit"
+                  SubmitText="@GetDrawerSubmitText()"
+                  OnSubmitAsync="OnDrawerSubmitAsync">
         @if (_editor == ActiveEditor.Contacts)
         {
-            <ContactsEditor View="ContactsEditor.ContactsView.Edit"
+            <ContactsEditor @ref="_contactsEditor"
+                            View="ContactsEditor.ContactsView.Edit"
                             Mode="ContactsEditor.EditorMode.Buffered"
                             OwnerType="ContactOwnerType.Student"
                             Contacts="_model.Contacts"
@@ -86,7 +90,8 @@ else
         }
         else if (_editor == ActiveEditor.Guardians)
         {
-            <GuardianSection View="GuardianSection.GuardianView.Edit"
+            <GuardianSection @ref="_guardianSection"
+                             View="GuardianSection.GuardianView.Edit"
                              GuardianLinks="_model.GuardianLinks"
                              Mode="StudentFormFieldsMode.Inline"
                              StudentId="StudentId"
@@ -149,6 +154,57 @@ else
     private Guid? _editingContactKey;
     private int _editingGuardianIndex = -1;
     private bool _isAdd;
+
+    // Refs to the section editors hosted in the drawer, so the drawer footer's
+    // Submit button can dispatch to their public commit entry points. Null while
+    // the drawer is closed (the elements aren't rendered).
+    private ContactsEditor? _contactsEditor;
+    private GuardianSection? _guardianSection;
+
+    /// <summary>Footer Save is shown next to Close whenever the drawer is editing
+    /// a student contact, or editing a guardian while ON the guardian surface
+    /// (a guardian contact sub-screen owns its own inline commit, so the guardian
+    /// Save is hidden then — matching the pre-footer body-only behaviour).</summary>
+    private bool ShowDrawerSubmit =>
+        _editor == ActiveEditor.Contacts
+        || (_editor == ActiveEditor.Guardians
+            && _guardianContactSubScreen == GuardianSection.GuardianContactSubScreen.None);
+
+    /// <summary>Footer Submit label: "Add" for a new contact, "Save" otherwise.</summary>
+    private string GetDrawerSubmitText() => _editor switch
+    {
+        ActiveEditor.Contacts => _isAdd ? "Add" : "Save",
+        _ => "Save",
+    };
+
+    /// <summary>Footer Submit handler. Dispatches to the active section editor's
+    /// public commit entry point; returns <c>true</c> so <c>DialogDrawer</c>
+    /// auto-closes, <c>false</c> to keep it open (e.g. a missing contact value).</summary>
+    private async Task<bool> OnDrawerSubmitAsync()
+    {
+        if (_editor == ActiveEditor.Contacts)
+        {
+            if (_contactsEditor is null) return false;
+            return _isAdd
+                ? await _contactsEditor.SubmitAddAsync()
+                : await _contactsEditor.SubmitInlineEditAsync();
+        }
+
+        if (_editor == ActiveEditor.Guardians)
+        {
+            if (_guardianSection is null
+                || _guardianContactSubScreen != GuardianSection.GuardianContactSubScreen.None)
+            {
+                return false;
+            }
+
+            return _isAdd
+                ? await _guardianSection.SaveAddGuardianAsync()
+                : await _guardianSection.SaveEditGuardianAsync();
+        }
+
+        return false;
+    }
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 

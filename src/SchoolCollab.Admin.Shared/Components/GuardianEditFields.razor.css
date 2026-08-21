@@ -1,0 +1,18 @@
+/* The outer FormRow's input cell (`flex-wrap: wrap`) would wrap two direct
+   field children onto separate lines in a narrow drawer.  We wrap the two
+   fields in a flex-row wrapper so the wrapper is the input cell's single
+   child (no wrap), and the two fields split the wrapper width equally. */
+.guardian-name-row {
+    display: flex;
+    flex-wrap: nowrap;
+    flex: 1 1 0;
+    min-width: 0;
+    gap: 8px;
+}
+
+/* Each FluentTextField claims half the wider .guardian-name-row
+   (flex: 1 1 0) and can shrink without overflowing. */
+.guardian-name-field {
+    flex: 1 1 0;
+    min-width: 0;
+}

@@ -110,14 +110,6 @@
                                    ValueLabel="@ValueLabel"
                                    ValuePlaceholder="@ValuePlaceholder"
                                    OptionText="@FormatCountryCodeOption" />
-                <div class="contacts-edit-form__actions">
-                    <FluentButton Appearance="Appearance.Accent"
-                                  IconStart="@FluentIcons.Add"
-                                  OnClick="AddAsync"
-                                  Disabled="@(_adding || string.IsNullOrWhiteSpace(_newContactModel.Value) || EditDisabled)">
-                        @(_adding ? "Adding…" : "Add")
-                    </FluentButton>
-                </div>
             }
             else if (_editingContactKey is not null)
             {
@@ -131,13 +123,6 @@
                                    ValueLabel="@EditValueLabel"
                                    ValuePlaceholder="@EditValuePlaceholder"
                                    OptionText="@FormatCountryCodeOption" />
-                <div class="contacts-edit-form__actions">
-                    <FluentButton Appearance="Appearance.Accent"
-                                  OnClick="SaveInlineEditAsync"
-                                  Disabled="@EditDisabled">
-                        Save
-                    </FluentButton>
-                </div>
             }
         </div>
     }
@@ -737,6 +722,21 @@
     private void ResetAddForm()
     {
         _newContactModel = new ContactFormFieldsModel();
+    }
+
+    /// <summary>Public entry point invoked by the shared <c>DialogDrawer</c>'s
+    /// Submit button when the drawer is ADDING a contact (student edit dialog).
+    /// Appends the working copy to the in-memory list (Buffered) / creates the
+    /// contact (Live) via <see cref="AddAsync"/> and returns <c>true</c> so the
+    /// drawer auto-closes. Returns <c>false</c> — keeping the drawer open — when
+    /// no value has been entered, an add is already in flight, or the editor is
+    /// disabled.</summary>
+    public async Task<bool> SubmitAddAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newContactModel.Value) || _adding || EditDisabled)
+            return false;
+        await AddAsync();
+        return true;
     }
 
     // ─── Edit / Remove ─────────────────────────────────────────

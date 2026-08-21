@@ -4,13 +4,13 @@
 @* Shared guardian metadata field group used by BOTH the Add form and the
    Edit form inside GuardianSection's focused Edit view (the side drawer).
    Before this component existed the two branches duplicated the same
-   Title / First name / Last name / Relationship+Role FormRows with
+   Title / Name (First + Last) / Relationship+Role FormRows with
    identical bindings and identical widths — a drift risk (the inline-add
    branch and the draft-edit branch were byte-for-byte the same, and the
    pre-existing Full-mode branch carried a different W4/W3 width for
    relationship/role). Consolidating into one component locks the field
-   set and the canonical widths (Title W3, name fields w-5, relationship
-   W3 + role W2) in a single definition.
+   set and the canonical widths (Title W3, Name row splits the input cell,
+   relationship W3 + role W2) in a single definition.
 
    The host owns the working copy as a single <see cref="GuardianEditFieldsModel"/>
    reference: inputs two-way bind to its properties (e.g. <c>@bind-Value="Model.FirstName"</c>),
@@ -27,23 +27,23 @@
 
 @if (ShowIdentityFields)
 {
-    <FormRow Label="Title">
+    <FormRow Label="Title" Orientation="RowOrientation.Vertical">
         <CodedValueDropdown Parent="CodedValueParent.Salutations"
                             @bind-SelectedId="Model.TitleCodedValueId"
                             Placeholder="Optional"
                             Width="FieldWidth.W3" />
     </FormRow>
-    <FormRow Label="First name" Required>
-        <FluentTextField @bind-Value="Model.FirstName"
-                         Required
-                         Placeholder="First name"
-                         class="w-5" />
-    </FormRow>
-    <FormRow Label="Last name" Required>
-        <FluentTextField @bind-Value="Model.LastName"
-                         Required
-                         Placeholder="Last name"
-                         class="w-5" />
+    <FormRow Label="Name" Required Orientation="RowOrientation.Vertical" For="guardianEditFirstName">
+        <div class="guardian-name-row">
+            <FluentTextField Id="guardianEditFirstName"
+                             @bind-Value="Model.FirstName"
+                             Required Placeholder="First name"
+                             class="guardian-name-field" />
+            <FluentTextField Id="guardianEditLastName"
+                             @bind-Value="Model.LastName"
+                             Required Placeholder="Last name"
+                             class="guardian-name-field" />
+        </div>
     </FormRow>
 }
 <FormRow Label="Relationship/Role" Required Orientation="RowOrientation.Vertical">

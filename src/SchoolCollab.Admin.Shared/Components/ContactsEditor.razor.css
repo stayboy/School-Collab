@@ -83,7 +83,10 @@
     padding: 8px 10px;
     border: 1px solid var(--neutral-stroke-divider-rest, #e0e0e0);
     border-radius: 6px;
-    background: var(--neutral-layer-1, #fafafa);
+    /* A neutral fill (not the near-white neutral-layer-1) so the row reads as
+       a raised surface distinct from the white card/page behind it. */
+    background: var(--neutral-fill-rest, #f0f0f0);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.02);
 }
 
 .contact-channel {
@@ -216,4 +219,12 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+}
+
+/* The per-row Edit / Remove action icons sit FLAT on the .contact-item surface.
+   Force the Fluent lightweight button host transparent so the icon shares the
+   item's background (the neutral fill above) instead of appearing on its own
+   differently-coloured cell. */
+.contact-actions fluent-button {
+    background: transparent !important;
 }
