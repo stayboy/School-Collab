@@ -34,14 +34,16 @@
                             Width="FieldWidth.W3" />
     </FormRow>
     <FormRow Label="Name" Required Orientation="RowOrientation.Vertical" For="guardianEditFirstName">
-        <FluentTextField Id="guardianEditFirstName"
-                         @bind-Value="Model.FirstName"
-                         Required Placeholder="First name"
-                         class="guardian-name-field" />
-        <FluentTextField Id="guardianEditLastName"
-                         @bind-Value="Model.LastName"
-                         Required Placeholder="Last name"
-                         class="guardian-name-field" />
+        <div class="guardian-name-row">
+            <FluentTextField Id="guardianEditFirstName"
+                             @bind-Value="Model.FirstName"
+                             Required Placeholder="First name"
+                             class="guardian-name-field" />
+            <FluentTextField Id="guardianEditLastName"
+                             @bind-Value="Model.LastName"
+                             Required Placeholder="Last name"
+                             class="guardian-name-field" />
+        </div>
     </FormRow>
 }
 <FormRow Label="Relationship/Role" Required Orientation="RowOrientation.Vertical">
