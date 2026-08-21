@@ -217,10 +217,10 @@ public class StudentFormFieldsSectionEditTests
 
         source.Should().Contain("<DialogDrawer", "the dialog renders a single DialogDrawer");
         source.Should().Contain("Side=\"DialogDrawerSide.Right\"", "the drawer anchors right");
-        source.Should().Contain("<ContactsEditor View=\"ContactsEditor.ContactsView.Edit\"",
-            "the focused per-item contacts editor is hosted directly in the drawer");
-        source.Should().Contain("<GuardianSection View=\"GuardianSection.GuardianView.Edit\"",
-            "the focused per-item guardians editor is hosted directly in the drawer");
+        source.Should().Contain("View=\"ContactsEditor.ContactsView.Edit\"",
+            "the focused per-item contacts editor is hosted directly in the drawer (Edit view)");
+        source.Should().Contain("View=\"GuardianSection.GuardianView.Edit\"",
+            "the focused per-item guardians editor is hosted directly in the drawer (Edit view)");
 
         // Drawer parameters carry the focused-edit target into the section editors.
         source.Should().Contain("InitialEditKey=\"@_editingContactKey\"",
@@ -353,6 +353,12 @@ public class StudentFormFieldsSectionEditTests
         fullViewStart.Should().BeGreaterThan(editViewStart,
             "the Edit view slice has a well-defined end (the next 'else' opens the Full view)");
         var editViewBody = source.Substring(editViewStart, fullViewStart - editViewStart);
+        // Strip razor doc-comments from the slice so a comment that merely
+        // names a code-behind method (e.g. "see SaveInlineEditAsync") doesn't
+        // false-fail the "no inline button" checks below. Mirrors the
+        // comment-stripping used by the no-nested-dialog assertion.
+        editViewBody = System.Text.RegularExpressions.Regex.Replace(
+            editViewBody, @"@\*.*?\*@", " ", System.Text.RegularExpressions.RegexOptions.Singleline);
 
         editViewBody.Should().NotContain("CancelInlineEditAsync",
             "the Edit view branch no longer calls CancelInlineEditAsync — the drawer owns Close");
