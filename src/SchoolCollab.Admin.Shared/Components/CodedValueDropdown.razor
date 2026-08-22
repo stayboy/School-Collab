@@ -183,7 +183,7 @@
     private CodedValueDto[]? _items;
     private CodedValueDto? _selectedOption;
     private string? _error;
-    private string? _loadedParentCode;
+    private string? _loadedLoadKey;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -224,11 +224,23 @@
     /// filter is set the parent code is still part of the key so a parent
     /// change with a stable filter still reloads.
     /// </summary>
-    private string LoadKey => string.IsNullOrEmpty(ParentCode)
-        ? string.Empty
-        : AttributeFilter is { } f
-            ? $"{ParentCode}|{f.Key}={f.Value}"
-            : ParentCode;
+    private string LoadKey => ComputeLoadKey(ParentCode, AttributeFilter);
+
+    /// <summary>Shared key computation so the comparison in
+    /// <see cref="OnParametersSetAsync"/> and the value recorded by
+    /// <see cref="LoadAsync"/> can never diverge. NOTE: both sides MUST
+    /// include the <see cref="AttributeFilter"/> — recording only the parent
+    /// code made the equality permanently false for filtered dropdowns (the
+    /// stream picker), so every render took the reload branch instead of
+    /// <see cref="SyncSelection"/>, clearing items mid-flight and causing
+    /// FluentSelect to fire a spurious SelectedOptionChanged(null) that wiped
+    /// the user's selection.</summary>
+    private static string ComputeLoadKey(string parentCode, (string Key, string Value)? attributeFilter)
+        => string.IsNullOrEmpty(parentCode)
+            ? string.Empty
+            : attributeFilter is { } f
+                ? $"{parentCode}|{f.Key}={f.Value}"
+                : parentCode;
 
     protected override async Task OnInitializedAsync()
     {
@@ -253,7 +265,7 @@
             return;
         }
 
-        if (LoadKey != _loadedParentCode)
+        if (LoadKey != _loadedLoadKey)
         {
             await LoadAsync(ParentCode);
         }
@@ -334,6 +346,18 @@
         return item is not null;
     }
 
+    /// <summary>Resolves the internal selection from the consumer's
+    /// <see cref="SelectedId"/> against the CURRENT items. Null-safe: returns
+    /// null while items are unloaded. Shared by both load phases in
+    /// <see cref="LoadAsync"/> so every render carries a selection that is
+    /// guaranteed to be contained in <see cref="_items"/>.</summary>
+    private CodedValueDto? ResolveSelection()
+        => _items is null
+            ? null
+            : SelectedId.HasValue
+                ? _items.FirstOrDefault(x => x.Id == SelectedId)
+                : (ShowEmptyOption ? _items.FirstOrDefault(x => x.Id == Guid.Empty) : null);
+
     private async Task LoadAsync(string parentCode)
     {
         _loadCts?.Cancel();
@@ -344,10 +368,11 @@
         _items = null;
         _error = null;
         _selectedOption = null;
-        // Mark the parent we are now loading so a subsequent re-render with the
-        // same (or default) Parent does not reload, and an errored load is not
-        // retried on every re-render.
-        _loadedParentCode = parentCode;
+        // Record the FULL load key (parent + attribute filter), not just the
+        // parent code — OnParametersSetAsync compares against the same
+        // computation, so recording a subset made filtered dropdowns (the
+        // stream picker) reload on EVERY render and wipe the selection.
+        _loadedLoadKey = ComputeLoadKey(parentCode, AttributeFilter);
 
         try
         {
@@ -384,14 +409,31 @@
             // the student Edit page, where the tenant's GENDER coded values load
             // after the form renders) never shows the pre-selected value even
             // though Model.GenderCodedValueId is correctly set.
+            //
+            // IMPORTANT: resolve the new selection BEFORE the phase-1 render.
+            // If that render reaches FluentSelect with a SelectedOption that is
+            // not contained in the (new) Items while its internal Value is still
+            // non-null from a previous selection, ListComponentBase.SetParametersAsync
+            // takes its "selected option not in items" reset path and raises a
+            // SPURIOUS SelectedOptionChanged(null) — which flowed through the
+            // binder and wiped the consumer's bound field (the stream picker on
+            // EnrollStudentDialog lost its picked stream on every reload).
             _items = items;
+            _selectedOption = ResolveSelection();
             await InvokeAsync(StateHasChanged);
             await Task.Delay(1);
 
             if (_disposed || ct.IsCancellationRequested) return;
-            _selectedOption = SelectedId.HasValue
-                ? _items.FirstOrDefault(x => x.Id == SelectedId)
-                : (ShowEmptyOption ? _items.FirstOrDefault(x => x.Id == Guid.Empty) : null);
+            // Phase-2 (#1533 workaround): after the tick, force one more render
+            // when a selection is being applied so the now-registered web
+            // component picks up aria-selected/current-value. Resolving again is
+            // idempotent; the explicit render is only needed when a concrete
+            // option is selected (a null selection has nothing to re-apply).
+            _selectedOption = ResolveSelection();
+            if (_selectedOption is not null)
+            {
+                await InvokeAsync(StateHasChanged);
+            }
         }
         catch (OperationCanceledException)
         {

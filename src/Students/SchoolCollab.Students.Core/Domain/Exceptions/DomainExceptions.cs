@@ -22,6 +22,19 @@ public sealed class GradeLevelNotFoundException : Exception
         => GradeLevelId = id;
 }
 
+/// <summary>Enrollment rejected because the target grade level is blocked
+/// from enrollment (<see cref="Domain.GradeLevel.IsBlockedFromEnrollment"/>).
+/// The block is managed on the grade-levels landing page; the enrollment
+/// dialog surfaces this message verbatim.</summary>
+public sealed class GradeLevelEnrollmentBlockedException : Exception
+{
+    public Guid GradeLevelId { get; }
+
+    public GradeLevelEnrollmentBlockedException(Guid gradeLevelId)
+        : base($"Grade level '{gradeLevelId}' is blocked from enrollment. Unblock it on the grade-levels page before enrolling.")
+        => GradeLevelId = gradeLevelId;
+}
+
 public sealed class TopicNotFoundException : Exception
 {
     public Guid TopicId { get; }

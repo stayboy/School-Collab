@@ -333,7 +333,7 @@ public record UpdatePeriodRequest(
 public record EnrollStudentRequest(
     Guid StudentId,
     Guid PeriodId,
-    Guid GradeLevelId,
+    Guid GradeCodedValueId,
     Guid? StreamCodedValueId,
     DateOnly? EnrolledOn);
 
