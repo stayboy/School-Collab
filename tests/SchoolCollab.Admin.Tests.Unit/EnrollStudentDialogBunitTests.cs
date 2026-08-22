@@ -5,7 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Admin.Shared.Components;
 using SchoolCollab.Admin.Shared.Components.Dialogs;
+using SchoolCollab.Admin.Shared.Constants;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Students.Application.Components.Students;
@@ -56,6 +58,15 @@ public class EnrollStudentDialogBunitTests : BunitContext
     private static readonly Guid PeriodId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid GradeLevelId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static readonly Guid GradeCodedValueId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+    // Real dev-database GUIDs (schoolcollab_settings.coded_values): the
+    // GRADE_5 coded value and the three GRSTREAMS children whose gradeLevel
+    // attribute references it.
+    internal static readonly Guid Grade5CodedValueId = Guid.Parse("ab50d479-9615-4dce-8fbc-1a163595411c");
+    internal static readonly Guid GradeLevelId5 = Guid.Parse("55555555-5555-5555-5555-555555555555");
+    internal static readonly Guid Stream5AId = Guid.Parse("5e369893-3895-4dad-99ea-51a08979d5d6");
+    internal static readonly Guid Stream5BId = Guid.Parse("ce87c23f-e275-4790-a2f9-7fb90f6fffa4");
+    internal static readonly Guid Stream5CId = Guid.Parse("d3dfd9c1-7f40-475e-991e-1c1676488729");
     private const string EnrollErrorBody = "Cannot enrol students: no active period is open for this tenant. Open a period before enrolling.";
 
     private IDialogService DialogService => Services.GetRequiredService<IDialogService>();
@@ -116,6 +127,18 @@ public class EnrollStudentDialogBunitTests : BunitContext
         public bool EnrollFails;           // POST /students/enrollments → 400 + body
         public string ErrorBody = EnrollErrorBody;
         public int EnrollPostCount;        // tracks how many POSTs were attempted
+        public string? LastEnrollBody;     // raw JSON of the last enroll POST
+
+        /// <summary>When true, the served grade lists ALSO include a
+        /// "Grade 5" entry (coded value <see cref="Grade5CodedValueId"/>)
+        /// and the GRSTREAMS by-parent lookup returns the three real
+        /// Grade 5 stream rows when filtered by that coded value.</summary>
+        public bool IncludeGrade5;
+
+        /// <summary>How many GRSTREAMS by-parent lookups reached the
+        /// handler — used by the no-grade guard test to assert that NO
+        /// stream lookup is issued before a grade is selected.</summary>
+        public int StreamLookupCount;
 
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
             => Task.FromResult(Respond(request));
@@ -144,15 +167,42 @@ public class EnrollStudentDialogBunitTests : BunitContext
                 return Json(HttpStatusCode.OK, periods);
             }
 
+            // GET /students/grade-levels/{id} — the suggested-grade lookup
+            // (the dialog resolves Model.SuggestedGradeLevelId to its coded
+            // value with a single-item fetch).
+            if (path.StartsWith("/students/grade-levels/", StringComparison.OrdinalIgnoreCase)
+                && HttpMethod.Get.Equals(request.Method))
+            {
+                var idSegment = path["/students/grade-levels/".Length..];
+                if (IncludeGrade5 && idSegment == GradeLevelId5.ToString())
+                {
+                    return Json(HttpStatusCode.OK, new GradeLevelDto(GradeLevelId5, Grade5CodedValueId, 5,
+                        "Grade 5", 5, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+                }
+                if (idSegment == GradeLevelId.ToString())
+                {
+                    return Json(HttpStatusCode.OK, new GradeLevelDto(GradeLevelId, GradeCodedValueId, 7,
+                        "Grade 7", 7, 0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+                }
+                return new HttpResponseMessage(HttpStatusCode.NotFound)
+                { Content = new StringContent("unknown grade level") };
+            }
+
             // GET /students/grade-levels — the grade-resolution list.
             if (path.Contains("/students/grade-levels", StringComparison.OrdinalIgnoreCase)
                 && HttpMethod.Get.Equals(request.Method))
             {
-                return Json(HttpStatusCode.OK, new GradeLevelDto[]
+                var grades = new List<GradeLevelDto>
                 {
                     new(GradeLevelId, GradeCodedValueId, 7, "Grade 7", 7, 0, 0,
                         DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
-                });
+                };
+                if (IncludeGrade5)
+                {
+                    grades.Add(new GradeLevelDto(GradeLevelId5, Grade5CodedValueId, 5, "Grade 5", 5,
+                        0, 0, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+                }
+                return Json(HttpStatusCode.OK, grades);
             }
 
             // GET /api/coded-values/by-parent?parentCode=GRADE — the CodedValueDropdown load.
@@ -160,12 +210,52 @@ public class EnrollStudentDialogBunitTests : BunitContext
                 && HttpMethod.Get.Equals(request.Method)
                 && query.Contains("parentCode=GRADE", StringComparison.OrdinalIgnoreCase))
             {
-                return Json(HttpStatusCode.OK, new CodedValueDto[]
+                var values = new List<CodedValueDto>
                 {
                     new(GradeCodedValueId, "GRADE_7", "Grade 7", null,
                         Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), "GRADE",
                         false, 7, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
                         [], [], 0, false, null, false)
+                };
+                if (IncludeGrade5)
+                {
+                    values.Add(new CodedValueDto(Grade5CodedValueId, "GRADE_5", "Grade 5", null,
+                        Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), "GRADE",
+                        false, 5, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                        [], [], 0, false, null, false));
+                }
+                return Json(HttpStatusCode.OK, values);
+            }
+
+            // GET /api/coded-values/by-parent?parentCode=GRSTREAMS[&attributeKey=gradeLevel&attributeValue=…]
+            // — the stream picker's load. With IncludeGrade5, the filtered
+            // lookup for the Grade 5 coded value returns the three real
+            // Grade 5 streams; every other shape returns an empty list.
+            if (path.StartsWith("/api/coded-values/by-parent", StringComparison.OrdinalIgnoreCase)
+                && HttpMethod.Get.Equals(request.Method)
+                && query.Contains("parentCode=GRSTREAMS", StringComparison.OrdinalIgnoreCase))
+            {
+                Interlocked.Increment(ref StreamLookupCount);
+                var matchesGrade5 = IncludeGrade5
+                    && query.Contains($"attributeValue={Grade5CodedValueId}", StringComparison.OrdinalIgnoreCase);
+                if (!matchesGrade5)
+                {
+                    return Json(HttpStatusCode.OK, Array.Empty<CodedValueDto>());
+                }
+                return Json(HttpStatusCode.OK, new CodedValueDto[]
+                {
+                    new(Stream5AId, "GRSTREAMS_5A", "Grade 5 — A", null,
+                        Guid.Parse("ffff0000-0000-0000-0000-000000000000"), "GRSTREAMS",
+                        false, 1, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                        [], [], 0, false, null, false),
+                    new(Stream5BId, "GRSTREAMS_5B", "Grade 5 — B", null,
+                        Guid.Parse("ffff0000-0000-0000-0000-000000000000"), "GRSTREAMS",
+                        false, 2, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                        [], [], 0, false, null, false),
+                    new(Stream5CId, "GRSTREAMS_5C", "Grade 5 — C", null,
+                        Guid.Parse("ffff0000-0000-0000-0000-000000000000"), "GRSTREAMS",
+                        false, 3, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                        [], [], 0, false, null, false),
                 });
             }
 
@@ -174,6 +264,9 @@ public class EnrollStudentDialogBunitTests : BunitContext
                 && HttpMethod.Post.Equals(request.Method))
             {
                 EnrollPostCount++;
+                LastEnrollBody = request.Content is null
+                    ? null
+                    : request.Content.ReadAsStringAsync().GetAwaiter().GetResult();
                 if (EnrollFails)
                 {
                     return new HttpResponseMessage(HttpStatusCode.BadRequest)
@@ -517,5 +610,141 @@ public class EnrollStudentDialogBunitTests : BunitContext
             cut.Markup.Should().Contain("Create a new grade level for this tenant",
                 "the + button's Title attribute is present so the user sees the tooltip");
         });
+    }
+
+    // ── Grade 5 → stream GUIDs (dev-data regression) ──────────────────
+
+    /// <summary>
+    /// When the grade level is set to Grade 5, the stream picker must load
+    /// the three Grade 5 streams (real dev-database GUIDs) with non-null ids:
+    /// GRSTREAMS_5A / 5B / 5C, whose gradeLevel attribute references the
+    /// GRADE_5 coded value. Exercises the full chain: suggested grade →
+    /// <c>_formModel.LoadFrom</c> → <c>GradeCodedValueIdForFilter</c> →
+    /// stream picker's attribute-filtered by-parent call → items bound to
+    /// the <see cref="CodedValueDropdown"/>.
+    /// </summary>
+    [TestMethod]
+    public async Task Grade5Selected_StreamPickerLoads_NonNullStreamGuids()
+    {
+        var (handler, _) = RegisterServices(flagOn: false);
+        handler.IncludeGrade5 = true;
+
+        // Setting the grade level to Grade 5 = opening the dialog with the
+        // Grade 5 grade level as the suggested/selected grade (the dialog's
+        // own selection path: OnInitializedAsync → _formModel.LoadFrom).
+        var (cut, _) = OpenDialog(new EnrollStudentModel(StudentId, SuggestedGradeLevelId: GradeLevelId5));
+
+        // The stream CodedValueDropdown must end up with exactly the three
+        // Grade 5 streams, every one carrying a non-null Guid.
+        cut.WaitForState(() =>
+        {
+            var stream = cut.FindComponents<CodedValueDropdown>()
+                .FirstOrDefault(d => d.Instance.Parent == CodedValueParent.Streams);
+            // 3 real streams + the "No stream" clear-to-null sentinel.
+            return stream is not null && stream.Instance.Items.Count == 4;
+        }, timeout: TimeSpan.FromSeconds(5));
+
+        var streamDropdown = cut.FindComponents<CodedValueDropdown>()
+            .First(d => d.Instance.Parent == CodedValueParent.Streams);
+        var items = streamDropdown.Instance.Items.ToList();
+
+        // Clear-to-null affordance: ShowEmptyOption prepends the sentinel
+        // "No stream" entry (Guid.Empty), which the dropdown maps to a null
+        // SelectedId when picked — so the user can un-pick a stream.
+        var emptyOption = items.SingleOrDefault(i => i.Id == Guid.Empty);
+        emptyOption.Should().NotBeNull("ShowEmptyOption must prepend the 'No stream' clear option");
+        emptyOption!.Name.Should().Be("No stream");
+
+        // The remaining items are exactly the three Grade 5 streams, every one
+        // carrying a usable id — never null, never Guid.Empty.
+        var ids = items.Where(i => i.Id != Guid.Empty).Select(i => i.Id).ToList();
+        ids.Should().NotContainNulls();
+        ids.Should().OnlyContain(id => id != Guid.Empty, "no stream item may carry an empty (sentinel) id");
+        ids.Should().BeEquivalentTo(new[] { Stream5AId, Stream5BId, Stream5CId });
+
+        // ── Selection round-trip: picking a real stream binds its id back ──
+        streamDropdown.Instance.SelectedIdChanged.HasDelegate.Should().BeTrue(
+            "@bind-SelectedId must wire the SelectedIdChanged callback");
+        var selectCallback = streamDropdown.Instance.SelectedIdChanged;
+        var instanceBefore = streamDropdown.Instance;
+        await cut.InvokeAsync(() => selectCallback.InvokeAsync(Stream5AId));
+        var instanceAfter = cut.FindComponents<CodedValueDropdown>()
+            .First(d => d.Instance.Parent == CodedValueParent.Streams).Instance;
+        ReferenceEquals(instanceBefore, instanceAfter).Should().BeTrue(
+            "the stream dropdown must NOT remount during a selection — a remount orphans the binder write");
+        // Full-tree render: pushes the (binder-updated) form model back down.
+        cut.Render();
+
+        // The binder must have written the picked id onto the form model and
+        // handed it back to the dropdown as its SelectedId parameter.
+        cut.FindComponents<EnrollStudentDialog>().Count.Should().Be(1,
+            "exactly one dialog instance must exist in the tree");
+
+        // Submit and inspect the wire payload — the ground truth for what the
+        // form model held after the pick.
+        // ── Selection: picking a stream through the REAL event path binds its id ──
+        // Drive FluentSelect.SelectedOptionChanged (what the web component
+        // raises on a user pick) -> OnSelectedOptionChanged -> binder, then
+        // read the dialog's private _formModel via reflection (ground truth).
+        var streamDropdowns = cut.FindComponents<CodedValueDropdown>()
+            .Where(d => d.Instance.Parent == CodedValueParent.Streams).ToList();
+        streamDropdowns.Count.Should().Be(1, "exactly one stream picker must exist");
+        var fluentSelect = streamDropdowns[0].FindComponent<
+            Microsoft.FluentUI.AspNetCore.Components.FluentSelect<SchoolCollab.Admin.Shared.Services.CodedValueDto>>();
+        var pickedItem = streamDropdowns[0].Instance.Items.First(i => i.Id == Stream5AId);
+        await cut.InvokeAsync(() => fluentSelect.Instance.SelectedOptionChanged.InvokeAsync(pickedItem));
+
+        var dialogInstance = cut.FindComponent<EnrollStudentDialog>().Instance;
+        var fmField = typeof(EnrollStudentDialog).GetField("_formModel",
+            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+        var formModel = fmField!.GetValue(dialogInstance);
+        var boundStream = (Guid?)formModel!.GetType().GetProperty("StreamCodedValueId")!.GetValue(formModel);
+        boundStream.Should().Be(Stream5AId,
+            "selecting a stream must bind the stream's non-empty id onto the form model (not null / Guid.Empty)");
+
+        // The 'No stream' sentinel is present so the user can clear back to null
+        // (ShowEmptyOption); its Guid.Empty -> null mapping is covered by the
+        // item-composition assertions above.
+        var hasSentinel = streamDropdowns[0].Instance.Items.Any(i => i.Id == Guid.Empty);
+        hasSentinel.Should().BeTrue("the 'No stream' clear-to-null option must be offered");
+
+        // Submit via the EditForm (bUnit's form submit fires OnValidSubmit).
+        cut.Find("form").Submit();
+        handler.LastEnrollBody.Should().NotBeNull("the enroll POST must have fired");
+        handler.LastEnrollBody.Should().Contain(Stream5AId.ToString(),
+            $"the submitted enrollment must carry the picked stream id; body was: {handler.LastEnrollBody}");
+
+    }
+
+    /// <summary>
+    /// GUARD: with NO grade selected, the stream picker must not render at
+    /// all (read-only placeholder instead) and must NOT issue any GRSTREAMS
+    /// lookup — stream values are only ever loaded against a concrete,
+    /// non-empty grade coded value.
+    /// </summary>
+    [TestMethod]
+    public async Task NoGradeSelected_StreamPickerNotRendered_AndNoStreamLookupIssued()
+    {
+        var (handler, _) = RegisterServices(flagOn: false);
+        handler.IncludeGrade5 = true; // streams WOULD be served if a lookup leaked out
+
+        var (cut, _) = OpenDialog(NewEnrollment());
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Find("form").Should().NotBeNull();
+
+            // The placeholder shows; no stream CodedValueDropdown exists.
+            cut.Markup.Should().Contain("Select a grade first",
+                "the stream row shows a read-only placeholder until a grade is picked");
+            cut.FindComponents<CodedValueDropdown>()
+                .Should().NotContain(d => d.Instance.Parent == CodedValueParent.Streams,
+                    "the stream picker must not render without a selected grade");
+        });
+
+        // Give any (buggy) async load a chance to fire, then assert none did.
+        await Task.Delay(300);
+        handler.StreamLookupCount.Should().Be(0,
+            "no GRSTREAMS lookup may be issued when no grade is selected");
     }
 }

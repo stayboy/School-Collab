@@ -45,7 +45,7 @@ public static class EnrollmentRoutes
             try
             {
                 var id = await handler.HandleAsync(
-                    new EnrollStudent(req.StudentId, req.PeriodId, req.GradeLevelId, req.StreamCodedValueId, req.EnrolledOn), ct);
+                    new EnrollStudent(req.StudentId, req.PeriodId, req.GradeCodedValueId, req.StreamCodedValueId, req.EnrolledOn), ct);
                 return Results.Created($"/enrollments/{id}", new { id });
             }
             catch (StudentNotFoundException)
@@ -124,6 +124,6 @@ public static class EnrollmentRoutes
     }
 }
 
-internal record EnrollStudentRequest(Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? StreamCodedValueId, DateOnly? EnrolledOn);
+internal record EnrollStudentRequest(Guid StudentId, Guid PeriodId, Guid GradeCodedValueId, Guid? StreamCodedValueId, DateOnly? EnrolledOn);
 internal record TransferStudentRequest(Guid NewGradeLevelId, Guid? NewStreamCodedValueId, DateOnly? TransferDate, string Reason);
 internal record WithdrawStudentRequest(DateOnly? ExitDate, string? Reason = null);

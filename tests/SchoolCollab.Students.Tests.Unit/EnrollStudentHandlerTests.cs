@@ -145,7 +145,8 @@ public class EnrollStudentHandlerTests
                 new AgeRangeSpecification(),
                 new GenderRestrictionSpecification(),
                 new SingleActiveEnrollmentSpecification()
-            }));
+            }),
+            s.Tenants);
     }
 
     // ── FR-A3: active-period enforcement ────────────────────────────────────
@@ -159,7 +160,7 @@ public class EnrollStudentHandlerTests
         var h = await NewHandler(s, periods, publisher);
 
         var gradeLevel = s.Db.GradeLevels.Single();
-        var act = () => h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.Id, null, null));
+        var act = () => h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, null));
 
         var ex = (await act.Should().ThrowAsync<PeriodNotOpenException>())
             .Which.Message;
@@ -180,7 +181,7 @@ public class EnrollStudentHandlerTests
 
         var otherPeriod = Guid.Parse("44444444-4444-4444-4444-444444444444");
         var gradeLevel = s.Db.GradeLevels.Single();
-        var act = () => h.HandleAsync(new EnrollStudent(StudentId, otherPeriod, gradeLevel.Id, null, null));
+        var act = () => h.HandleAsync(new EnrollStudent(StudentId, otherPeriod, gradeLevel.CodedValueId, null, null));
 
         var ex = (await act.Should().ThrowAsync<PeriodNotOpenException>())
             .Which.Message;
@@ -203,7 +204,7 @@ public class EnrollStudentHandlerTests
 
         var enrolledOn = new DateOnly(2025, 9, 15);
         var gradeLevel = s.Db.GradeLevels.Single();
-        var id = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.Id, null, enrolledOn));
+        var id = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, enrolledOn));
 
         id.Should().NotBeEmpty("the handler returns the new enrollment's id");
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
@@ -241,7 +242,7 @@ public class EnrollStudentHandlerTests
         var h = await NewHandler(s, periods, publisher);
 
         var gradeLevel = s.Db.GradeLevels.Single();
-        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.Id, null, null));
+        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, null));
 
         var row = await s.Db.StudentEnrollments.SingleAsync();
         row.EnrolledOn.Should().Be(DateOnly.FromDateTime(DateTime.UtcNow),
@@ -269,8 +270,8 @@ public class EnrollStudentHandlerTests
         var h = await NewHandler(s, periods, publisher);
 
         var gradeLevel = s.Db.GradeLevels.Single();
-        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 15)));
-        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 16)));
+        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 15)));
+        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 16)));
 
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(2,
             "the handler persists a second enrollment for the same student+period — no handler-level duplicate guard");
@@ -295,7 +296,7 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2020, 1, 15), GenderMale); // 5 yrs, below min 6
 
-        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
 
         (await act.Should().ThrowAsync<StudentAgeViolationException>())
             .Which.Message.Should().Contain("is 5 years old").And.Contain("requires age within");
@@ -314,7 +315,7 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2014, 1, 15), GenderMale); // 11 yrs, above max 8
 
-        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
 
         (await act.Should().ThrowAsync<StudentAgeViolationException>())
             .Which.Message.Should().Contain("is 11 years old").And.Contain("requires age within");
@@ -333,7 +334,7 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale); // 7 yrs, within [6,8]
 
-        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
 
         id.Should().NotBeEmpty();
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
@@ -351,7 +352,7 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderFemale);
 
-        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
 
         (await act.Should().ThrowAsync<StudentGenderViolationException>())
             .Which.Message.Should().Contain("does not match the allowed gender");
@@ -370,7 +371,7 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderFemale);
 
-        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
 
         id.Should().NotBeEmpty();
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
@@ -389,11 +390,11 @@ public class EnrollStudentHandlerTests
         var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale);
 
         // First enrollment succeeds (no existing active enrollment)
-        await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1);
 
         // Second enrollment for the same student → blocked by single-active rule
-        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 2)));
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 2)));
 
         (await act.Should().ThrowAsync<MultipleActiveEnrollmentsException>())
             .Which.Message.Should().Contain("already has");
@@ -414,7 +415,7 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2020, 1, 15), GenderMale); // 5 yrs, below min
 
-        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
 
         id.Should().NotBeEmpty();
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
@@ -433,7 +434,7 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2010, 1, 15), GenderFemale);
 
-        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.Id, null, new DateOnly(2025, 9, 1)));
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
 
         id.Should().NotBeEmpty();
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
@@ -505,5 +506,53 @@ public class EnrollStudentHandlerTests
             db.GradeLevels.Update(gradeLevel);
             await db.SaveChangesAsync(ct);
         }
+    }
+
+    // ── Option B: server-side CodedValueId → GradeLevelId join ─────────────
+
+    [TestMethod]
+    public async Task BlockedGradeLevel_ThrowsGradeLevelEnrollmentBlockedException()
+    {
+        using var s = new StudentsTestScope("enroll-blocked-grade");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        gradeLevel.Update(gradeLevel.Level, gradeLevel.Name, gradeLevel.DisplayOrder,
+            gradeLevel.MinAge, gradeLevel.MaxAge, gradeLevel.AllowedGenderCodedValueId,
+            isBlockedFromEnrollment: true);
+        s.Db.SaveChanges();
+
+        var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale);
+        var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, null));
+
+        (await act.Should().ThrowAsync<GradeLevelEnrollmentBlockedException>())
+            .Which.Message.Should().Contain("blocked from enrollment",
+                "the client no longer filters blocked grades — the server is the enforcement point");
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0);
+        publisher.Enqueued.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public async Task UnknownCodedValueId_MaterializesGradeLevel_AndEnrolls()
+    {
+        using var s = new StudentsTestScope("enroll-materialize");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher);
+
+        var unknownCodedValueId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale);
+
+        // No GradeLevel row exists for this coded value; the handler
+        // materializes one from the coded value (the stub API returns a
+        // matching row) and enrolls against it.
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, unknownCodedValueId, null, null));
+
+        id.Should().NotBeEmpty();
+        var row = await s.Db.StudentEnrollments.SingleAsync();
+        var materialized = await s.Db.GradeLevels.SingleAsync(g => g.CodedValueId == unknownCodedValueId);
+        row.GradeLevelId.Should().Be(materialized.Id);
     }
 }

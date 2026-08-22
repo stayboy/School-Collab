@@ -148,31 +148,15 @@ public class EnrollStudentDialogFeatureFlagTests
         // (governance), ANDed together. The new-enrollment check is the
         // INNER gate (an `@if (IsNewEnrollment)` block INSIDE the
         // <FeatureFlagGate>'s <ChildContent>, wrapping the + button). The
-        // <FeatureFlagGate> is the OUTER gate (wrapping the whole flag-ON
-        // grade-picker branch). The two gates cover different concerns:
-        // IsNewEnrollment is UX correctness (re-enrollments shouldn't
-        // offer grade setup mid-flow); the feature flag is governance
-        // (only tenants opted in to inline grade setup see the + button).
-        // Either gate being false hides the button. For a re-enrollment
-        // the button is hidden even if the tenant has opted in to the
-        // flag — the `@if (IsNewEnrollment)` short-circuits before the
-        // button renders.
+        // <FeatureFlagGate> is the OUTER gate. Either gate being false
+        // hides the button.
         var src = Load(DialogPath);
-        // The <FeatureFlagGate> + <ChildContent> + <Fallback> structure
-        // must exist (the two-dropdown design).
         var gateIdx = src.IndexOf($"<FeatureFlagGate Key=\"@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog\"", StringComparison.Ordinal);
-        var childContentIdx = src.IndexOf("<ChildContent>", gateIdx, StringComparison.Ordinal);
-        var fallbackIdx = src.IndexOf("<Fallback>", gateIdx, StringComparison.Ordinal);
         gateIdx.Should().BeGreaterThan(0,
-            "the dialog MUST have a <FeatureFlagGate Key=\"FEATURE:EnableGradeLevelSetupOnEnrollDialog\"> wrapping the flag-ON grade-picker branch");
+            "the dialog MUST have a <FeatureFlagGate Key=\"FEATURE:EnableGradeLevelSetupOnEnrollDialog\"> wrapping the inline-setup buttons");
+        var childContentIdx = src.IndexOf("<ChildContent>", gateIdx, StringComparison.Ordinal);
         childContentIdx.Should().BeGreaterThan(gateIdx,
-            "the <FeatureFlagGate> MUST have a <ChildContent> for the flag-ON branch (CodedValueDropdown + + button + Override button)");
-        fallbackIdx.Should().BeGreaterThan(childContentIdx,
-            "the <FeatureFlagGate> MUST have a <Fallback> AFTER <ChildContent> for the flag-OFF branch (generic <DropdownComponent TItem=\"GradeLevelDto\"> of _gradeLevels)");
-        // The @if (IsNewEnrollment) must be INSIDE the gate's ChildContent,
-        // wrapping the + button. We assert via substring presence + a
-        // positional check: the @if appears after the ChildContent opens
-        // and before the </ChildContent> closes.
+            "the <FeatureFlagGate> MUST have a <ChildContent> for the inline-setup buttons (+ and Override)");
         var ifIdx = src.IndexOf("@if (IsNewEnrollment)", childContentIdx, StringComparison.Ordinal);
         ifIdx.Should().BeGreaterThan(0,
             "the dialog MUST have an `@if (IsNewEnrollment)` block INSIDE the gate's <ChildContent> so the + button is hidden for re-enrollments even when the tenant has opted in to the flag");
@@ -180,39 +164,31 @@ public class EnrollStudentDialogFeatureFlagTests
         childContentCloseIdx.Should().BeGreaterThan(ifIdx,
             "the `@if (IsNewEnrollment)` MUST be closed by </ChildContent> — it lives inside the gate's ChildContent branch");
     }
-
     [TestMethod]
-    public void EnrollDialog_Gate_Wraps_The_Whole_FlagOn_GradePicker_Branch()
+    public void EnrollDialog_Gate_Wraps_Only_The_Setup_Buttons_Picker_Stays_Shared()
     {
-        // Pin the markup shape for the two-dropdown design: the
-        // <FeatureFlagGate> wraps the WHOLE flag-ON grade-picker branch
-        // (CodedValueDropdown + "+" button + "Override name" button), NOT
-        // just the + button. A regression that wrapped only the + button
-        // would leave the CodedValueDropdown visible when the flag is off
-        // (a UX regression: flag-OFF tenants would see the full GRADE list
-        // and get "not set up as a grade level" errors on submit). The
-        // <FeatureFlagGate> is the single switch between the flag-ON
-        // CodedValueDropdown branch and the flag-OFF <FluentSelect> branch.
+        // Pin the single-picker design: ONE shared <CodedValueDropdown> over
+        // the GRADE coded values serves BOTH feature-flag paths (the submit
+        // travels as the CodedValueId; the CodedValueId -> GradeLevelId join,
+        // auto-materialize, and blocked enforcement are server-side in
+        // EnrollStudentHandler). The <FeatureFlagGate> wraps ONLY the
+        // inline-setup buttons ("+" and "Override name") — they carry global
+        // side-effects and are governance-gated. A regression that moved the
+        // picker inside the gate would hide the grade field entirely for
+        // flag-OFF tenants.
         var src = Load(DialogPath);
+        var dropdownIdx = src.IndexOf("Parent=\"CodedValueParent.Grades\"", StringComparison.Ordinal);
+        dropdownIdx.Should().BeGreaterThan(0, "the shared grade CodedValueDropdown must exist");
         var gateOpenIdx = src.IndexOf($"<FeatureFlagGate Key=\"@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog\"", StringComparison.Ordinal);
-        gateOpenIdx.Should().BeGreaterThan(0, "the FeatureFlagGate opening tag must exist on the dialog");
-        // Inside the gate's ChildContent, the CodedValueDropdown must appear
-        // BEFORE the first <FluentButton> (the gate's ChildContent opens
-        // with the dropdown, then the buttons). This proves the dropdown
-        // is inside the gate, not outside it.
-        var childContentIdx = src.IndexOf("<ChildContent>", gateOpenIdx, StringComparison.Ordinal);
-        var dropdownIdx = src.IndexOf("CodedValueDropdown", childContentIdx, StringComparison.Ordinal);
-        var firstButtonIdx = src.IndexOf("<FluentButton", childContentIdx, StringComparison.Ordinal);
-        dropdownIdx.Should().BeGreaterThan(childContentIdx,
-            "the CodedValueDropdown MUST be inside the gate's <ChildContent> — the gate is the switch between flag-ON (CodedValueDropdown) and flag-OFF (<FluentSelect>) branches");
-        firstButtonIdx.Should().BeGreaterThan(dropdownIdx,
-            "the + button MUST come after the CodedValueDropdown inside the gate's <ChildContent> — the gate wraps the whole flag-ON grade-picker branch, not just the buttons");
-        // The gate must close AFTER both the dropdown and the buttons.
-        var gateCloseIdx = src.IndexOf("</FeatureFlagGate>", firstButtonIdx, StringComparison.Ordinal);
-        gateCloseIdx.Should().BeGreaterThan(firstButtonIdx, "the </FeatureFlagGate> closing tag must come after the + button");
+        gateOpenIdx.Should().BeGreaterThan(dropdownIdx,
+            "the shared grade picker MUST render BEFORE (outside) the <FeatureFlagGate> — it is visible regardless of the flag");
+        // No second grade picker: the flag-OFF DropdownComponent branch is gone.
+        src.Should().NotContain("DropdownComponent TItem=\"GradeLevelDto\"",
+            "the two-dropdown design is gone — one shared CodedValueDropdown serves both flag paths");
+        src.Should().NotContain("<Fallback>",
+            "the gate has no <Fallback> branch — with only buttons inside, flag-OFF renders nothing extra");
     }
-
-    [TestMethod]
+[TestMethod]
     public void FeatureFlag_Is_Registered_In_AppSettings_With_Default_On()
     {
         // The flag must be in appsettings.json with a default of "true"
@@ -333,76 +309,47 @@ public class EnrollStudentDialogFeatureFlagTests
     }
 
     [TestMethod]
-    public void EnrollDialog_AlwaysAutoMaterializesGradeLevel_WhenCodedValueHasNoGradeLevelRow()
+    public void EnrollDialog_Delegates_GradeResolution_And_Materialize_To_The_Server()
     {
-        // SubmitAsync MUST auto-materialize a GradeLevel whenever the user has
-        // picked a coded value that has no matching GradeLevel row. This is
-        // only reachable in the flag-ON path (the flag-OFF branch is a raw
-        // <FluentSelect> of the already-materialized _gradeLevels list, so
-        // every item there IS a GradeLevelDto by construction — no
-        // auto-materialize needed, no auto-materialize possible). The submit
-        // NEVER shows a "not set up as a grade level" error — the principle
-        // of least surprise is that a valid pick leads to a successful
-        // enrollment.
+        // The dialog no longer resolves CodedValueId -> GradeLevelId nor
+        // auto-materializes missing rows client-side: the submit travels as
+        // the GRADE coded value id and EnrollStudentHandler does the join
+        // (materializing a GradeLevel from the coded value when missing, and
+        // rejecting blocked grades). The dialog-side GetOrCreateGradeLevelAsync
+        // call and the _gradeLevels resolution list are gone.
         var src = Load(DialogPath);
-
-        // The auto-materialize calls GetOrCreateGradeLevelAsync.
-        src.Should().Contain("GetOrCreateGradeLevelAsync",
-            "the dialog MUST auto-materialize a GradeLevel via GetOrCreateGradeLevelAsync whenever the picked coded value has no matching GradeLevel row — the submit never errors with 'not set up as a grade level'");
-        // The "not set up as a grade level" error MUST be GONE. The original
-        // design had a !_gradeSetupEnabled error branch; the two-dropdown
-        // design replaces it with a structural guarantee (the flag-OFF
-        // dropdown only contains items that have a GradeLevel row by
-        // construction, and the flag-ON path auto-materializes).
-        src.Should().NotContain("Enable the grade-level setup feature flag",
-            "the dialog MUST NOT show the 'enable the grade-level setup feature flag' error on submit — the two-dropdown design makes the impossible state unreachable via the UI in the first place");
+        src.Should().NotContain("GetOrCreateGradeLevelAsync",
+            "the dialog MUST NOT materialize GradeLevels client-side any more — the join + materialize is server-side in EnrollStudentHandler");
+        src.Should().NotContain("ListGradeLevelsAsync",
+            "the dialog MUST NOT load the grade-level list any more — both picker paths feed off the CodedValueDropdown's own GRADE coded values");
+        // The server handler is the enforcement point.
+        var handlerSrc = Load("src/Students/SchoolCollab.Students.Core/CQRS/Enrollments/Commands/EnrollStudent/EnrollStudentHandler.cs");
+        handlerSrc.Should().Contain("GetByCodedValueIdAsync",
+            "EnrollStudentHandler MUST resolve the enrollment's GradeLevel by the submitted CodedValueId");
+        handlerSrc.Should().Contain("GradeLevelEnrollmentBlockedException",
+            "EnrollStudentHandler MUST reject enrollments into grades blocked from enrollment (the client no longer filters them)");
     }
-
     [TestMethod]
-    public void EnrollDialog_Has_TwoGradeDropdowns_GatedByFeatureFlag()
+    public void EnrollDialog_Has_Single_Grade_Picker_Independent_Of_FeatureFlag()
     {
-        // The dialog has TWO different grade pickers, chosen by the
-        // FEATURE:EnableGradeLevelSetupOnEnrollDialog flag via a single
-        // <FeatureFlagGate> with a <Fallback>:
-        //   - Flag ON (gate renders <ChildContent>): a <CodedValueDropdown>
-        //     showing all GRADE coded values (with per-tenant override names)
-        //     PLUS the "+" inline-create-grade button PLUS the "Override name"
-        //     button (all inside the gate's ChildContent, governed by the flag).
-        //     The submit auto-materializes a GradeLevel for coded values that
-        //     don't yet have one.
-        //   - Flag OFF (gate renders <Fallback>): a raw <FluentSelect
-        //     TOption="GradeLevelDto"> of the already-loaded _gradeLevels list.
-        //     Every item IS a GradeLevelDto, so the submit uses the picked id
-        //     directly with no resolution + no auto-materialize. No coded-value
-        //     API call (avoids the double-loading that a filter-on-CodedValueDropdown
-        //     approach would have). The "+" and "Override" buttons are NOT
-        //     rendered in this branch.
-        // The <FeatureFlagGate> owns the flag entirely — the dialog does NOT
-        // inject IFeatureFlagService itself.
+        // The dialog has ONE grade picker: a <CodedValueDropdown> over the
+        // GRADE coded values (with per-tenant override names), rendered
+        // regardless of the FEATURE:EnableGradeLevelSetupOnEnrollDialog flag.
+        // The flag gates only the inline-setup buttons. The dialog does NOT
+        // inject IFeatureFlagService — the gate owns the flag.
         var src = Load(DialogPath);
-
-        // The gate uses a <Fallback> (not just a ChildContent + default banner).
-        src.Should().Contain("<Fallback>",
-            "the FeatureFlagGate MUST have a <Fallback> so the flag-OFF branch can render a different grade picker (a generic <DropdownComponent TItem=\"GradeLevelDto\"> of _gradeLevels) instead of a banner");
-        // The flag-ON branch uses CodedValueDropdown for the grade picker.
-        src.Should().Contain("CodedValueDropdown",
-            "the flag-ON branch MUST use <CodedValueDropdown Parent=\"CodedValueParent.Grades\"> so the user picks from the GRADE coded-value list (with per-tenant override names)");
         src.Should().Contain("CodedValueParent.Grades",
-            "the <CodedValueDropdown> MUST key off CodedValueParent.Grades so it loads the GRADE coded values, not some other category");
-        // The flag-OFF branch uses the generic <DropdownComponent TItem="GradeLevelDto">.
-        src.Should().Contain("DropdownComponent TItem=\"GradeLevelDto\"",
-            "the flag-OFF <Fallback> branch MUST use a generic <DropdownComponent TItem=\"GradeLevelDto\"> of the already-loaded _gradeLevels list — this avoids the double-loading that a filter-on-CodedValueDropdown approach would have; <DropdownComponent> is the simple, parent-owns-data sibling of <CodedValueDropdown>");
-        // The dialog does NOT inject IFeatureFlagService — the gate owns the flag.
+            "the shared grade picker MUST key off CodedValueParent.Grades so it loads the GRADE coded values, not some other category");
+        src.Should().Contain("_gradeCodedValueDropdown",
+            "the dialog MUST hold a reference to the grade <CodedValueDropdown> (via @ref) so the + button can call RefreshAsync() after creating a new grade");
         src.Should().NotContain("@inject IFeatureFlagService",
-            "the dialog MUST NOT inject IFeatureFlagService — the <FeatureFlagGate> injects the flag service itself; injecting it in the dialog too would be a redundant resolution path");
-        // The dialog does NOT keep a _gradeSetupEnabled or _gradeFilter field.
+            "the dialog MUST NOT inject IFeatureFlagService — the <FeatureFlagGate> injects the flag service itself");
         src.Should().NotContain("_gradeSetupEnabled",
-            "the dialog MUST NOT keep a _gradeSetupEnabled field — the <FeatureFlagGate> owns the flag, the dialog has no need to read it in code");
+            "the dialog MUST NOT keep a _gradeSetupEnabled field — the <FeatureFlagGate> owns the flag");
         src.Should().NotContain("_gradeFilter =",
-            "the dialog MUST NOT compute a _gradeFilter field — the two-dropdown design replaces the filter-on-single-dropdown design; the flag-OFF branch is a separate <FluentSelect>, not a filter on the CodedValueDropdown");
+            "the dialog MUST NOT compute a _gradeFilter field — the picker shows all GRADE coded values; blocked-grade enforcement is server-side");
     }
-
-    [TestMethod]
+[TestMethod]
     public void EnrollDialog_Has_OverrideNameButton_GatedByFlagAndSelectedGrade()
     {
         // The "Override name" button (renames the selected grade per-tenant,
@@ -419,8 +366,8 @@ public class EnrollStudentDialogFeatureFlagTests
             "the override handler MUST open CodedValueDialog via CodedValueFormModel.ForOverride (Override mode)");
         src.Should().Contain("enroll-grade-override",
             "the Override name button MUST carry the .enroll-grade-override class so it can be styled + tested");
-        src.Should().Contain("_selectedGradeCodedValueId is not null",
-            "the Override button MUST be gated by a selected grade (_selectedGradeCodedValueId is not null) — it renames the SELECTED grade, so it only shows once one is picked");
+        src.Should().Contain("_formModel.GradeCodedValueId is not null",
+            "the Override button MUST be gated by a selected grade (_formModel.GradeCodedValueId is not null) — it renames the SELECTED grade, so it only shows once one is picked");
         // The override button uses the same Edit icon the GradeLevelWizard uses
         // for its "Override the default name" action, for cross-page consistency.
         src.Should().Contain("FluentIcons.Edit",
@@ -454,65 +401,18 @@ public class EnrollStudentDialogFeatureFlagTests
     [TestMethod]
     public void EnrollDialog_Grade_Select_Has_No_Disabled_Or_Placeholder_When_Empty()
     {
-        // The flag-ON <CodedValueDropdown> handles the empty-list state
+        // The single shared <CodedValueDropdown> handles the empty-list state
         // internally (it shows "No options available" via its own
         // EffectivePlaceholder and disables itself when _error is set or
-        // _items is null — NOT when the list is empty). The flag-OFF raw
-        // <FluentSelect> IS disabled when _gradeLevels is empty AND shows
-        // a static "Select a grade" placeholder — that's the correct UX
-        // for a dropdown of pre-existing GradeLevels (nothing to pick, so
-        // it's disabled, with a placeholder that doesn't pretend there's
-        // a setup action available — the setup action is the flag-ON
-        // branch's + button, which isn't shown here).
-        //
-        // The previous test asserted that the grade dropdown has no
-        // `Disabled="@(_gradeLevels.Length == 0)"` and no
-        // `Placeholder="@(_gradeLevels.Length == 0"` — that was correct
-        // for the single-CodedValueDropdown design. The two-dropdown
-        // design intentionally has those on the flag-OFF <FluentSelect>
-        // (disabled-when-empty is the right UX for a list of pre-existing
-        // GradeLevels; the "No options available" placeholder would be
-        // misleading because the setup action isn't available in this
-        // branch). The flag-ON CodedValueDropdown still does NOT have
-        // those attributes (it handles empty state via its own internal
-        // EffectivePlaceholder / IsDisabled logic).
+        // _items is null — NOT when the list is empty). The dialog does not
+        // add a Disabled-when-empty or dynamic placeholder on top.
         var src = Load(DialogPath);
-        // The flag-OFF <DropdownComponent> MUST be disabled when the grade
-        // list is empty (nothing to pick) and MUST have a "Select a grade"
-        // placeholder.
-        src.Should().Contain("Disabled=\"@(_gradeLevels.Length == 0)\"",
-            "the flag-OFF grade <DropdownComponent> MUST be disabled when _gradeLevels is empty — there's nothing to pick, and a disabled state is the correct UX (the setup action is in the flag-ON branch, not here)");
+        src.Should().NotContain("Disabled=\"@(_gradeLevels.Length == 0)\"",
+            "the grade picker MUST NOT use Disabled=\"@(_gradeLevels.Length == 0)\" — _gradeLevels is gone and the CodedValueDropdown handles empty state internally via its own IsDisabled / EffectivePlaceholder logic");
         src.Should().Contain("Placeholder=\"Select a grade\"",
-            "the flag-OFF grade <DropdownComponent> MUST have a static \"Select a grade\" placeholder (not the misleading \"No options available\" — the setup action isn't available in this branch)");
-        // The flag-ON CodedValueDropdown MUST NOT have the same disabled
-        // / empty-list-placeholder attributes (it handles empty state
-        // internally via EffectivePlaceholder / IsDisabled).
-        // Find the actual <ChildContent> / <Fallback> markup tags (not the
-        // mentions in the doc comment above the gate). The doc comment
-        // mentions both tags in prose, so a naive IndexOf would hit those
-        // first and produce a negative substring length. Search for the
-        // tags preceded by a newline + indentation (the actual markup).
-        var childContentIdx = src.IndexOf("\n                            <ChildContent>", StringComparison.Ordinal);
-        var fallbackIdx = src.IndexOf("\n                            <Fallback>", StringComparison.Ordinal);
-        childContentIdx.Should().BeGreaterThan(0, "the <ChildContent> markup tag must exist inside the gate");
-        fallbackIdx.Should().BeGreaterThan(childContentIdx, "the <Fallback> markup tag must come after <ChildContent>");
-        var flagOnBranch = src.Substring(childContentIdx, fallbackIdx - childContentIdx);
-        flagOnBranch.Should().NotContain("Disabled=\"@(_gradeLevels.Length == 0)\"",
-            "the flag-ON CodedValueDropdown MUST NOT use Disabled=\"@(_gradeLevels.Length == 0)\" — it handles empty state internally via its own IsDisabled / EffectivePlaceholder logic");
-        flagOnBranch.Should().NotContain("Placeholder=\"@(_gradeLevels.Length == 0",
-            "the flag-ON CodedValueDropdown MUST NOT use a dynamic empty-list placeholder — its own EffectivePlaceholder handles the empty case");
+            "the grade picker keeps a static \"Select a grade\" placeholder (the CodedValueDropdown swaps in its own text while loading/empty/error)");
     }
-
-    // ── New-enrollment check (the validation for "set up gradelevel in
-    // the enrollment dialog") ──────
-    //
-    // The IsNewEnrollment computed property is the validation that
-    // "setting up a grade level inside the enrollment dialog" is
-    // appropriate for the current scenario. The + button is gated by
-    // IsNewEnrollment (and the feature flag), so the property must
-    // exist and must be driven by Model.SuggestedGradeLevelId.
-
-    [TestMethod]
+[TestMethod]
     public void EnrollDialog_Has_IsNewEnrollment_Computed_Property()
     {
         // The dialog must compute IsNewEnrollment from the model so
@@ -530,47 +430,26 @@ public class EnrollStudentDialogFeatureFlagTests
     [TestMethod]
     public void EnrollDialog_Inline_Grade_Setup_Allows_Per_Tenant_Name_Override()
     {
-        // The inline-create-grade flow (OnAddNewGradeAsync) must pass
-        // the user-entered Name through to GetOrCreateGradeLevelAsync
-        // so the tenant can override the default name. The CodedValueDialog
-        // in Create mode collects Code, Name, DisplayOrder, Description
-        // — the Name field is the per-tenant override name. The
-        // collected Name must be threaded through to the
-        // GradeLevelDto materialization so the tenant's choice is
-        // persisted and reflected in the dropdown refresh.
+        // The inline-create-grade flow (OnAddNewGradeAsync) creates the GRADE
+        // coded value via CodedValueDialog (whose Name field is the per-tenant
+        // override name), refreshes the CodedValueDropdown so the tenant-
+        // resolved name shows immediately, and pre-selects the new coded
+        // value. The GradeLevel row materializes server-side at enroll time
+        // (EnrollStudentHandler resolves by CodedValueId).
         var src = Load(DialogPath);
-        // Look for the GetOrCreateGradeLevelAsync call site in the
-        // OnAddNewGradeAsync handler. It must pass cvResult.Name as
-        // one of the positional args (the per-tenant name).
-        src.Should().Contain("GetOrCreateGradeLevelAsync",
-            "the OnAddNewGradeAsync handler MUST call GetOrCreateGradeLevelAsync to materialize a GradeLevelDto from the freshly created CodedValueDto");
-        src.Should().Contain("cvResult.Name",
-            "the OnAddNewGradeAsync handler MUST pass cvResult.Name to GetOrCreateGradeLevelAsync so the per-tenant override name is persisted on the new GradeLevel row");
-        // The handler must also refresh the dropdown list from the
-        // server (rather than appending in place) so the resolved
-        // tenant name is reflected immediately.
-        src.Should().Contain("ListGradeLevelsAsync()",
-            "the OnAddNewGradeAsync handler MUST refresh the grade list from the server (ListGradeLevelsAsync) so the resolved per-tenant name is reflected in the dropdown immediately");
-        // The handler must refresh the CodedValueDropdown via its
-        // RefreshAsync method (rather than reloading the page) so the
-        // newly created GRADE coded value appears in the dropdown.
+        // The handler must refresh the CodedValueDropdown via its RefreshAsync
+        // method (rather than reloading the page) so the newly created GRADE
+        // coded value appears in the dropdown.
         src.Should().Contain("RefreshAsync()",
             "the OnAddNewGradeAsync handler MUST call CodedValueDropdown.RefreshAsync() to reload the dropdown after a successful create so the new entry appears without a page reload");
+        // The new coded value is pre-selected so the user can click Enroll.
+        src.Should().Contain("_formModel.GradeCodedValueId = cvResult.Id",
+            "the OnAddNewGradeAsync handler MUST pre-select the freshly created coded value so the user can immediately click Enroll");
+        // No client-side GradeLevel materialization any more.
+        src.Should().NotContain("GetOrCreateGradeLevelRequest",
+            "the OnAddNewGradeAsync handler MUST NOT materialize a GradeLevel row client-side — that happens server-side at enroll time");
     }
-
-    // ── Period is always the current global period (no user-pickable
-    // dropdown) ──────
-    //
-    // The period is derived client-side from ListPeriodsAsync filtered
-    // by Status == "Active" and submitted as the active period's id.
-    // The server's EnrollStudentHandler also enforces this via
-    // IActivePeriodProvider.GetActivePeriodAsync() and rejects any
-    // enrollment whose PeriodId does not match. There is no
-    // period <FluentSelect> because there is no choice to make.
-    // A regression that re-introduces the period dropdown would
-    // let the user pick a value the server is going to reject.
-
-    [TestMethod]
+[TestMethod]
     public void EnrollDialog_Does_Not_Have_A_Period_FluentSelect()
     {
         // The dialog must not have a <FluentSelect TOption="PeriodDto">
@@ -657,72 +536,60 @@ public class EnrollStudentDialogFeatureFlagTests
     // GradeLevelDto.Name mirror and ignored any tenant override.
 
     [TestMethod]
-    public void EnrollDialog_Grade_Uses_CodedValueDropdown_In_FlagOn_Branch_And_FluentSelect_In_FlagOff()
+    public void EnrollDialog_Grade_Uses_Shared_CodedValueDropdown_For_Both_Flag_Paths()
     {
-        // The dialog has TWO grade pickers, chosen by the flag via a
-        // <FeatureFlagGate> with a <Fallback>:
-        //   - Flag ON (<ChildContent>): <CodedValueDropdown
-        //     Parent="CodedValueParent.Grades">. The CodedValueDropdown
-        //     loads the tenant-resolved CodedValue list (with per-tenant
-        //     override names) from the Settings service. The submit
-        //     auto-materializes a GradeLevel for coded values that don't
-        //     yet have one. The dialog holds a @ref so the "+" button
-        //     can call RefreshAsync() after creating a new grade.
-        //   - Flag OFF (<Fallback>): generic <DropdownComponent TItem="GradeLevelDto">
-        //     of the already-loaded _gradeLevels list. Every item here IS
-        //     a GradeLevelDto (the per-tenant override name is already
-        //     baked into GradeLevelDto.Name because GetOrCreateGradeLevelAsync
-        //     writes the coded value's per-tenant Name through to the
-        //     GradeLevel row), so the submit uses the picked id directly
-        //     with no resolution + no auto-materialize. No coded-value API
-        //     call (avoids the double-loading that a filter-on-
-        //     CodedValueDropdown approach would have).
+        // ONE grade picker for both flag paths: a <CodedValueDropdown
+        // Parent="CodedValueParent.Grades">. The CodedValueDropdown loads the
+        // tenant-resolved CodedValue list (with per-tenant override names)
+        // from the Settings service. The submit travels as the picked
+        // CodedValueId; the CodedValueId -> GradeLevelId join happens
+        // server-side. The dialog holds a @ref so the "+" button can call
+        // RefreshAsync() after creating a new grade.
         var src = Load(DialogPath);
-        // The flag-ON branch uses CodedValueDropdown.
         src.Should().Contain("CodedValueDropdown",
-            "the flag-ON grade picker MUST be a <CodedValueDropdown> so the user picks from the GRADE coded-value list (with per-tenant override names)");
+            "the grade picker MUST be a <CodedValueDropdown> so the user picks from the GRADE coded-value list (with per-tenant override names)");
         src.Should().Contain("CodedValueParent.Grades",
             "the <CodedValueDropdown> MUST key off CodedValueParent.Grades so it loads the GRADE coded values, not some other category");
-        // The flag-OFF branch uses the generic <DropdownComponent TItem="GradeLevelDto">.
-        src.Should().Contain("DropdownComponent TItem=\"GradeLevelDto\"",
-            "the flag-OFF grade picker MUST be a generic <DropdownComponent TItem=\"GradeLevelDto\"> so the parent owns the data lifecycle (no internal load) — the flag-ON CodedValueDropdown branch handles its own coded-value load, but the flag-OFF branch is just a render of the already-loaded _gradeLevels list");
-        // The CodedValueDropdown must be refreshable from the + button
-        // (it has a @ref we can call RefreshAsync on).
+        src.Should().NotContain("DropdownComponent TItem=\"GradeLevelDto\"",
+            "the flag-OFF DropdownComponent branch is gone — one shared picker serves both paths");
         src.Should().Contain("_gradeCodedValueDropdown",
             "the dialog MUST hold a reference to the grade <CodedValueDropdown> (via @ref) so the + button can call RefreshAsync() after creating a new grade");
     }
-
     [TestMethod]
-    public void EnrollDialog_Resolves_CodedValueId_To_GradeLevelDto_For_Submit()
+    public void EnrollDialog_Submits_CodedValueId_Server_Resolves_GradeLevel()
     {
-        // The dialog's submit uses a <GradeLevelDto.Id> (not a
-        // CodedValueId) because the server's EnrollStudentAsync
-        // takes a GradeLevelId. The CodedValueId the user picks in
-        // the dropdown must be translated to a GradeLevelDto via
-        // the loaded _gradeLevels list (matched on CodedValueId).
-        // A regression that submits the CodedValueId directly would
-        // hit a server-side validation error.
+        // The dialog's submit sends the picked CodedValueId; the server's
+        // EnrollStudentHandler joins it to the GradeLevel row (materializing
+        // one when missing) and enforces blocked-from-enrollment. The
+        // client-side _gradeLevels resolution list is gone.
         var src = Load(DialogPath);
-        src.Should().Contain("_selectedGradeCodedValueId",
-            "the dialog MUST hold the picked CodedValueId in a _selectedGradeCodedValueId field bound two-way to <CodedValueDropdown>");
-        src.Should().Contain("OnGradeCodedValueChanged",
-            "the dialog MUST have an OnGradeCodedValueChanged handler (the <CodedValueDropdown>'s @bind-SelectedId:after target) that resolves the CodedValueId to a GradeLevelDto");
-        // The :after binding must wire the handler to the dropdown.
-        src.Should().Contain("@bind-SelectedId:after=\"OnGradeCodedValueChanged\"",
-            "the <CodedValueDropdown>'s @bind-SelectedId:after MUST be OnGradeCodedValueChanged so the binder updates the field AND the resolver runs");
-        // The resolver walks _gradeLevels matching on CodedValueId.
-        src.Should().Contain("g.CodedValueId == _selectedGradeCodedValueId",
-            "the resolver MUST look up the GradeLevelDto by CodedValueId match against the loaded _gradeLevels list");
+        src.Should().Contain("_formModel.GradeCodedValueId",
+            "the dialog MUST hold the picked CodedValueId on the form model (_formModel.GradeCodedValueId) bound two-way to <CodedValueDropdown> (dto-form-model-mapping.md)");
+        src.Should().Contain("@bind-SelectedId=\"_formModel.GradeCodedValueId\"",
+            "the grade <CodedValueDropdown> MUST two-way bind the form model field directly (no separate :after handler — the binder owns the write)");
+        src.Should().Contain("@bind-SelectedId=\"_formModel.StreamCodedValueId\"",
+            "the stream <CodedValueDropdown> MUST two-way bind the form model field directly");
+        // Stale-stream clearing on a grade change no longer lives in the
+        // dialog (OnGradeCodedValueChanged was removed): the shared
+        // CodedValueDropdown re-resolves its selection against the NEW
+        // attribute-filtered items on every reload and clears an invalidated
+        // selection exactly once (see StreamDropdownDoubleFireDiagnosticTests).
+        // Pin that contract where it now lives.
+        var dropdownSrc = Load("src/SchoolCollab.Admin.Shared/Components/CodedValueDropdown.razor");
+        dropdownSrc.Should().Contain("ComputeLoadKey(parentCode, AttributeFilter)",
+            "the dropdown's load key MUST include the attribute filter so filtered pickers (the stream row) do not reload on every render");
+        dropdownSrc.Should().Contain("ResolveSelection()",
+            "the dropdown MUST re-resolve its selection against the current items on each load phase so an invalidated selection is cleared deterministically");
+        // The request projection carries the coded value id.
+        var formModelSrc = Load("src/Students/SchoolCollab.Students.Application/Components/Students/EnrollStudentFormModel.cs");
+        formModelSrc.Should().Contain("GradeCodedValueId!.Value",
+            "EnrollStudentFormModel.ToEnrollRequest MUST project GradeCodedValueId onto the wire request");
+        // The server resolves the join.
+        var handlerSrc = Load("src/Students/SchoolCollab.Students.Core/CQRS/Enrollments/Commands/EnrollStudent/EnrollStudentHandler.cs");
+        handlerSrc.Should().Contain("GetByCodedValueIdAsync(command.GradeCodedValueId",
+            "EnrollStudentHandler MUST resolve the submitted CodedValueId to the GradeLevel row");
     }
-
-    // ── Form follows the canonical FormRow pattern (180px labels) ──────
-    //
-    // Each form field is wrapped in the shared <FormRow> primitive so
-    // the labels are equal-width (180px) and every input's left edge
-    // lands on the same vertical axis. The form uses the canonical
-    // school-collab FormRow pattern, NOT a free <FluentStack>.
-
-    [TestMethod]
+[TestMethod]
     public void EnrollDialog_Uses_FormRow_For_All_Form_Fields()
     {
         // Every form field MUST be wrapped in a <FormRow> with a
@@ -1096,8 +963,8 @@ public class EnrollStudentDialogFeatureFlagTests
             "the SubmitAsync catch block MUST include model.StudentId in the log message (so the operator can correlate the user's error with the student they were enrolling)");
         submitAsyncBody.Should().Contain("_activePeriod.Id",
             "the SubmitAsync catch block MUST include the active period id in the log message (so the operator can check the period state at the time of the failure)");
-        submitAsyncBody.Should().Contain("_selectedGrade.Id",
-            "the SubmitAsync catch block MUST include the selected grade id in the log message (so the operator can check the grade state at the time of the failure)");
+        submitAsyncBody.Should().Contain("_formModel.GradeCodedValueId",
+            "the SubmitAsync catch block MUST include the selected grade coded value id in the log message (so the operator can check the grade state at the time of the failure)");
         // The Error property must still be set to ex.Message so the
         // per-field error MessageBar AND the shared DialogShellFooter
         // both display the rich message (status code + body). The

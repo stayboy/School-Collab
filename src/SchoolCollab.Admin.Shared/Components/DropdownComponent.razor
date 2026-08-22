@@ -166,6 +166,16 @@
         // is no longer present), clear the internal selection so FluentSelect
         // doesn't show a stale option. The parent can detect the mismatch
         // (SelectedValue is set but the dropdown shows nothing) and react.
+        //
+        // NOTE: when resolved is null while FluentSelect's internal Value is
+        // still non-null, ListComponentBase fires its "option not in items"
+        // reset path → ONE SelectedOptionChanged(null) that normalizes the
+        // parent's bound field. That is intentional here: unlike
+        // CodedValueDropdown there is no async reload window, so the event
+        // cannot fire repeatedly — it settles after a single clear. Do NOT
+        // introduce an async load + load-key dance into this component
+        // without carrying over CodedValueDropdown's ComputeLoadKey /
+        // ResolveSelection contract (see StreamDropdownDoubleFireDiagnosticTests).
         var resolved = ResolveOption(SelectedValue);
         if (!EqualityComparer<TItem?>.Default.Equals(resolved, _selectedOption))
         {

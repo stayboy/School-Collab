@@ -25,7 +25,8 @@ public sealed class EnrollStudentHandler(
     ILogger<EnrollStudentHandler> logger,
     IFeatureFlagService featureFlagService,
     IStudentRepository studentRepository,
-    ICompositeEnrollmentSpecification enrollmentSpecification) : ICommandHandler<EnrollStudent, Guid>
+    ICompositeEnrollmentSpecification enrollmentSpecification,
+    ITenantProvider tenantProvider) : ICommandHandler<EnrollStudent, Guid>
 {
     public async Task<Guid> HandleAsync(EnrollStudent command, CancellationToken cancellationToken = default)
     {
@@ -45,12 +46,36 @@ public sealed class EnrollStudentHandler(
                 "Enrollments must target the tenant's active period.");
         }
 
+        // Resolve the target grade from its GRADE coded value (the dialog now
+        // submits the CodedValueId; the CodedValueId → GradeLevelId join is
+        // server-side). A coded value without a GradeLevel row is materialized
+        // here — same idempotent semantics the dialog's inline-create flow used,
+        // now atomic with the enrollment itself.
+        var gradeLevel = await gradeLevelRepository.GetByCodedValueIdAsync(command.GradeCodedValueId, cancellationToken);
+        if (gradeLevel is null)
+        {
+            var cv = await codedValuesApi.GetByIdAsync(command.GradeCodedValueId, cancellationToken)
+                ?? throw new GradeLevelNotFoundException(command.GradeCodedValueId);
+            gradeLevel = GradeLevel.Create(cv.Id, cv.DisplayOrder, cv.Name, cv.DisplayOrder)
+                .WithTenant(tenantProvider);
+            await gradeLevelRepository.AddAsync(gradeLevel, cancellationToken);
+            logger.LogInformation("Materialized GradeLevel {GradeLevelId} for CodedValueId {CodedValueId} during enrollment",
+                gradeLevel.Id, command.GradeCodedValueId);
+        }
+
+        // Enrollment governance: a grade blocked for enrollment rejects the enrol
+        // regardless of how the picker reached it (the client no longer filters).
+        if (gradeLevel.IsBlockedFromEnrollment)
+        {
+            throw new GradeLevelEnrollmentBlockedException(gradeLevel.Id);
+        }
+
         // FR-9: stream validation. If a StreamCodedValueId is provided, the stream
         // must be a child of GRSTREAMS and its gradeLevel attribute must reference a
         // CodedValue that matches the enrollment's GradeLevel.
         if (command.StreamCodedValueId is { } streamId)
         {
-            await ValidateStreamAsync(command.GradeLevelId, streamId, cancellationToken);
+            await ValidateStreamAsync(gradeLevel, streamId, cancellationToken);
         }
 
         // §6 Enrollment validation guard clauses (age, gender, single-active).
@@ -60,13 +85,13 @@ public sealed class EnrollStudentHandler(
         if (await featureFlagService.IsEnabledAsync(
                 FeatureFlagKeys.EnableEnrollmentValidation, cancellationToken))
         {
-            await ValidateEnrollmentAsync(command, cancellationToken);
+            await ValidateEnrollmentAsync(command, gradeLevel, cancellationToken);
         }
 
         var enrollment = StudentEnrollment.Create(
             command.StudentId,
             command.PeriodId,
-            command.GradeLevelId,
+            gradeLevel.Id,
             command.EnrolledOn,
             command.StreamCodedValueId);
 
@@ -94,13 +119,11 @@ public sealed class EnrollStudentHandler(
     /// Runs the enrollment validation specifications (plan §6). Each failing rule
     /// throws its typed domain exception with an actionable, UI-renderable message.
     /// </summary>
-    private async Task ValidateEnrollmentAsync(EnrollStudent command, CancellationToken cancellationToken)
+    private async Task ValidateEnrollmentAsync(
+        EnrollStudent command, Domain.GradeLevel gradeLevel, CancellationToken cancellationToken)
     {
         var student = await studentRepository.GetAsync(command.StudentId, cancellationToken)
             ?? throw new StudentNotFoundException(command.StudentId);
-
-        var gradeLevel = await gradeLevelRepository.GetAsync(command.GradeLevelId, cancellationToken)
-            ?? throw new GradeLevelNotFoundException(command.GradeLevelId);
 
         // Cross-period: any active enrollment for this student blocks a new one.
         var existing = await repository.GetActiveEnrollmentsByStudentAsync(command.StudentId, cancellationToken);
@@ -151,16 +174,13 @@ public sealed class EnrollStudentHandler(
         };
     }
 
-    private async Task ValidateStreamAsync(Guid gradeLevelId, Guid streamCodedValueId, CancellationToken cancellationToken)
+    private async Task ValidateStreamAsync(Domain.GradeLevel gradeLevel, Guid streamCodedValueId, CancellationToken cancellationToken)
     {
-        // Resolve the grade's CodedValueId via the repository.
-        var gradeLevel = await gradeLevelRepository.GetAsync(gradeLevelId, cancellationToken)
-            ?? throw new GradeLevelNotFoundException(gradeLevelId);
         var gradeCodedValueId = gradeLevel.CodedValueId;
 
         // Fetch the stream coded value from the Settings API.
         var stream = await codedValuesApi.GetByIdAsync(streamCodedValueId, cancellationToken)
-            ?? throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
+            ?? throw new StreamGradeMismatchException(streamCodedValueId, gradeLevel.Id);
 
         // The stream's gradeLevel attribute must reference a CodedValue whose Id
         // matches the enrollment's grade's CodedValueId.
@@ -168,7 +188,7 @@ public sealed class EnrollStudentHandler(
             .FirstOrDefault(a => a.Key == "gradeLevel");
         if (gradeLevelAttr is null)
         {
-            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
+            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevel.Id);
         }
 
         // The attribute value is the coded value's GUID (because DataType=CodedValue).
@@ -176,7 +196,7 @@ public sealed class EnrollStudentHandler(
         if (!Guid.TryParse(gradeLevelAttr.Value, out var streamGradeCodedValueId)
             || streamGradeCodedValueId != gradeCodedValueId)
         {
-            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevelId);
+            throw new StreamGradeMismatchException(streamCodedValueId, gradeLevel.Id);
         }
     }
 }
