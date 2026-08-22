@@ -504,9 +504,6 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 0.75rem;
-    padding-bottom: 0.25rem;
-    border-bottom: 1px solid var(--neutral-stroke-divider, #e0e0e0);
 }
 
 .guardian-drawer-add-toggle {
