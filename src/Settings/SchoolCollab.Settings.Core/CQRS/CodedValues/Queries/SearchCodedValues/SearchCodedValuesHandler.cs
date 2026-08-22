@@ -4,12 +4,14 @@ using SchoolCollab.Settings.Core.Caching;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.DTOs;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.SearchCodedValues;
 
 public sealed class SearchCodedValuesHandler(
-    SettingsDbContext db,
-    HybridCache cache) : IQueryHandler<SearchCodedValues, CodedValueDto[]>
+    IDbContextFactory<SettingsDbContext> dbContextFactory,
+    HybridCache cache,
+    ITenantProvider tenantProvider) : IQueryHandler<SearchCodedValues, CodedValueDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -30,14 +32,20 @@ public sealed class SearchCodedValuesHandler(
         var parentIdStr = query.ParentId?.ToString() ?? "root";
         var includeDisabledStr = query.IncludeDisabled ? "1" : "0";
         var rawKey = $"search:{searchText}:{parentIdStr}:{includeDisabledStr}";
-        var cacheKey = $"coded-values:search:{db.CurrentTenantId}:{CacheKeyHelper.Hash(rawKey)}";
+        var cacheKey = $"coded-values:search:{tenantProvider.GetTenantContext().TenantId}:{CacheKeyHelper.Hash(rawKey)}";
 
+        // Short-lived context created INSIDE the cache factory: HybridCache may
+        // run this body after the triggering request's DI scope was disposed
+        // (coalesced callers / cancelled requests), so a captured scoped
+        // SettingsDbContext surfaces as ObjectDisposedException. See
+        // GetCodedValuesByParentHandler for the full rationale.
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, pattern, query),
+            (dbContextFactory, pattern, query),
             static async (state, ct) =>
             {
-                var (db, pattern, query) = state;
+                var (dbContextFactory, pattern, query) = state;
+                await using var db = await dbContextFactory.CreateDbContextAsync(ct);
 
                 IQueryable<Domain.CodedValue> q = db.CodedValues.AsNoTracking();
 

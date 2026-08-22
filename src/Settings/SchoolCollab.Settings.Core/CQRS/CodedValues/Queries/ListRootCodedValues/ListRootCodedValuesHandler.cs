@@ -3,12 +3,14 @@ using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.DTOs;
+using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.ListRootCodedValues;
 
 public sealed class ListRootCodedValuesHandler(
-    SettingsDbContext db,
-    HybridCache cache) : IQueryHandler<ListRootCodedValues, CodedValueDto[]>
+    IDbContextFactory<SettingsDbContext> dbContextFactory,
+    HybridCache cache,
+    ITenantProvider tenantProvider) : IQueryHandler<ListRootCodedValues, CodedValueDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -20,11 +22,14 @@ public sealed class ListRootCodedValuesHandler(
         ListRootCodedValues query,
         CancellationToken cancellationToken = default)
     {
+        // Short-lived context inside the cache factory — see
+        // GetCodedValuesByParentHandler for the ObjectDisposedException rationale.
         return await cache.GetOrCreateAsync(
-            $"tenant:{db.CurrentTenantId}:coded-values:root",
-            db,
-            static async (db, ct) =>
+            $"tenant:{tenantProvider.GetTenantContext().TenantId}:coded-values:root",
+            dbContextFactory,
+            static async (dbContextFactory, ct) =>
             {
+                await using var db = await dbContextFactory.CreateDbContextAsync(ct);
                 var results = await db.CodedValues
                     .AsNoTracking()
                     .Where(x => x.ParentId == null)

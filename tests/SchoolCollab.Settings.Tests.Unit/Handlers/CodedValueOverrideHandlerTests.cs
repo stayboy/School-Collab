@@ -36,7 +36,7 @@ public class CodedValueOverrideHandlerTests
         public SettingsDbContext Db { get; }
         public MutableTenantProvider Tenants { get; } = new();
         public GetCodedValueByIdHandler Resolver { get; }
-        public CodedValueResolver CodedValueResolver { get; }
+        public IDbContextFactory<SettingsDbContext> Factory { get; }
         public GetCodedValuesByParentHandler ByParent { get; }
         public UpsertCodedValueOverrideHandler Upsert { get; }
         public RemoveCodedValueOverrideHandler Remove { get; }
@@ -55,8 +55,12 @@ public class CodedValueOverrideHandlerTests
             // the flag is shared across all accessor instances.
             var accessor = new TenantContextAccessor(new TenantProvider());
             Resolver = new GetCodedValueByIdHandler(Db);
-            CodedValueResolver = new CodedValueResolver(provider.GetRequiredService<ICodedValueRepository>());
-            ByParent = new GetCodedValuesByParentHandler(Db, Cache, Tenants, CodedValueResolver);
+            // GetCodedValuesByParentHandler creates short-lived contexts via
+            // IDbContextFactory (HybridCache body may outlive the request scope);
+            // the factory shares the SAME InMemory database name as Db, so seeds
+            // written through Db are visible to handler-created contexts.
+            Factory = provider.GetRequiredService<IDbContextFactory<SettingsDbContext>>();
+            ByParent = new GetCodedValuesByParentHandler(Factory, Cache, Tenants);
             Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, accessor, Resolver, Cache,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<UpsertCodedValueOverrideHandler>.Instance);
             Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, accessor, Cache);
@@ -74,7 +78,10 @@ public class CodedValueOverrideHandlerTests
             // GetCodedValueById handler would read the global name instead of
             // the per-tenant override.
             services.AddSingleton<ITenantProvider>(tenants);
-            services.AddDbContext<SettingsDbContext>(o => o.UseInMemoryDatabase(name));
+            // AddDbContextFactory ALSO registers SettingsDbContext as a scoped
+            // service, so `provider.GetRequiredService<SettingsDbContext>()`
+            // (used for seeding) keeps working while handlers get the factory.
+            services.AddDbContextFactory<SettingsDbContext>(o => o.UseInMemoryDatabase(name));
             services.AddScoped<ICodedValueRepository, CodedValueRepository>();
             // In-memory HybridCache so cache-invalidation calls in the handlers
             // do not fail in unit tests.

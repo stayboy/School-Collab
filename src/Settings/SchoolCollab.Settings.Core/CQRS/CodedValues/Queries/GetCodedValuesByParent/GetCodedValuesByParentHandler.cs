@@ -3,6 +3,7 @@ using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Settings.Core.Caching;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Settings.Core.Data;
+using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.DTOs;
 using SchoolCollab.Settings.Core.Services;
 using SchoolCollab.Core.Tenancy;
@@ -10,10 +11,9 @@ using SchoolCollab.Core.Tenancy;
 namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValuesByParent;
 
 public sealed class GetCodedValuesByParentHandler(
-    SettingsDbContext db,
+    IDbContextFactory<SettingsDbContext> dbContextFactory,
     HybridCache cache,
-    ITenantProvider tenantProvider,
-    ICodedValueResolver resolver) : IQueryHandler<GetCodedValuesByParent, CodedValueDto[]>
+    ITenantProvider tenantProvider) : IQueryHandler<GetCodedValuesByParent, CodedValueDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -37,10 +37,25 @@ public sealed class GetCodedValuesByParentHandler(
 
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, resolver, tenantId, query),
+            (dbContextFactory, tenantId, query),
             static async (state, ct) =>
             {
-                var (db, resolver, tenantId, query) = state;
+                var (dbContextFactory, tenantId, query) = state;
+
+                // Create a SHORT-LIVED context inside the cache factory instead of
+                // capturing the request-scoped one. HybridCache coalesces concurrent
+                // callers onto one factory execution and may run it after the first
+                // caller's DI scope was disposed (e.g. the stream picker cancelling
+                // an in-flight request), which surfaced as
+                // ObjectDisposedException on SettingsDbContext. A context created
+                // from the singleton IDbContextFactory is owned by this factory body
+                // and disposed here — safe at any point in any scope. Tenant
+                // filtering is unaffected: TenantProvider is a singleton backed by
+                // AsyncLocal/IHttpContextAccessor, so every context — scoped or
+                // factory-created — resolves the same current tenant.
+                await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+                var repository = new CodedValueRepository(db);
+                var resolver = new CodedValueResolver(repository);
 
                 IQueryable<Domain.CodedValue> q = db.CodedValues.AsNoTracking();
 

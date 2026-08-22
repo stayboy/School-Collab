@@ -29,7 +29,13 @@ public class SearchCodedValuesHandlerTests : IDisposable
         var sp = services.BuildServiceProvider();
         _cache = sp.GetRequiredService<HybridCache>();
 
-        _handler = new SearchCodedValuesHandler(_db, _cache);
+        // The handler resolves tenants itself (ITenantProvider) and creates
+        // short-lived contexts via IDbContextFactory; share this test's options
+        // so InMemory data seeded on _db is visible to handler-created contexts.
+        _handler = new SearchCodedValuesHandler(
+            new TestSettingsDbContextFactory(options, tenantProvider),
+            _cache,
+            tenantProvider);
     }
 
     [TestMethod]
