@@ -641,6 +641,8 @@
         }
     }
 
+    private bool _addSessionInitialized;
+
     /// <summary>Initialize the focused edit form's working copy from
     /// <see cref="InitialEditIndex"/> / <see cref="IsAdd"/>. For an edit we copy
     /// the guardian's link-metadata fields (relationship / role / title / name /
@@ -649,8 +651,23 @@
     /// any in-progress edits.</summary>
     private async Task InitializeEditViewAsync()
     {
+        // Add sessions initialize exactly once per drawer-open. Re-renders with
+        // the same parameters (any host refresh while the user works inside the
+        // drawer — e.g. the existing-guardian typeahead) must not clobber
+        // in-progress add state, including the _drawerAddMode surface switch:
+        // without this guard the existing-guardian selection snapped back to
+        // the blank new-guardian form on every parent re-render.
+        if (!IsAdd)
+        {
+            _addSessionInitialized = false;
+        }
         if (IsAdd)
         {
+            if (_addSessionInitialized)
+            {
+                return;
+            }
+            _addSessionInitialized = true;
             _editingIndex = -1;
             // Reset the working-copy model to a blank add form. A new
             // instance drops any leftover drafts from a previous add/edit.
