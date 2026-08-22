@@ -8,7 +8,7 @@ using SchoolCollab.Settings.Core.DTOs;
 namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValuesByIds;
 
 public sealed class GetCodedValuesByIdsHandler(
-    SettingsDbContext db,
+    IDbContextFactory<SettingsDbContext> dbContextFactory,
     HybridCache cache) : IQueryHandler<GetCodedValuesByIds, CodedValueDto[]>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
@@ -29,12 +29,15 @@ public sealed class GetCodedValuesByIdsHandler(
         var sortedIds = string.Join(",", query.Ids.OrderBy(id => id));
         var cacheKey = $"coded-values:by-ids:{CacheKeyHelper.Hash(sortedIds)}";
 
+        // Short-lived context inside the cache factory — see
+        // GetCodedValuesByParentHandler for the ObjectDisposedException rationale.
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, query.Ids),
+            (dbContextFactory, query.Ids),
             static async (state, ct) =>
             {
-                var (db, ids) = state;
+                var (dbContextFactory, ids) = state;
+                await using var db = await dbContextFactory.CreateDbContextAsync(ct);
                 var results = await db.CodedValues
                     .AsNoTracking()
                     .Where(x => ids.Contains(x.Id))

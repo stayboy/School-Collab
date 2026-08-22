@@ -42,9 +42,12 @@ public class GetCodedValueByCodeHandlerTests : IDisposable
         var sp = services.BuildServiceProvider();
         _cache = sp.GetRequiredService<HybridCache>();
 
-        var repository = new SchoolCollab.Settings.Core.Data.Repositories.CodedValueRepository(_db);
-        var resolver = new SchoolCollab.Settings.Core.Services.CodedValueResolver(repository);
-        _handler = new GetCodedValueByCodeHandler(_db, _cache, _tenantProvider.Object, resolver);
+        // Handlers create short-lived contexts via IDbContextFactory (the
+        // HybridCache body may run after the request scope died); the factory
+        // shares this test's options so InMemory data seeded on _db is visible.
+        _handler = new GetCodedValueByCodeHandler(
+            new TestSettingsDbContextFactory(options, _tenantProvider.Object),
+            _cache, _tenantProvider.Object);
 
         // Seed test data
         _rootId = Guid.NewGuid();

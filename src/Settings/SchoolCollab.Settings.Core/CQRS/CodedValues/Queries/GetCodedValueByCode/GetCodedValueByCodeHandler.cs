@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Settings.Core.Data;
+using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.DTOs;
 using SchoolCollab.Settings.Core.Services;
 using SchoolCollab.Core.Tenancy;
@@ -9,10 +10,9 @@ using SchoolCollab.Core.Tenancy;
 namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValueByCode;
 
 public sealed class GetCodedValueByCodeHandler(
-    SettingsDbContext db,
+    IDbContextFactory<SettingsDbContext> dbContextFactory,
     HybridCache cache,
-    ITenantProvider tenantProvider,
-    ICodedValueResolver resolver) : IQueryHandler<GetCodedValueByCode, CodedValueDto?>
+    ITenantProvider tenantProvider) : IQueryHandler<GetCodedValueByCode, CodedValueDto?>
 {
     private static readonly HybridCacheEntryOptions CacheOptions = new()
     {
@@ -30,12 +30,17 @@ public sealed class GetCodedValueByCodeHandler(
             ? $"tenant:{tenantId}:coded-value:code:{normalisedCode}:parent:{query.ParentId.Value}"
             : $"tenant:{tenantId}:coded-value:code:{normalisedCode}";
 
+        // Short-lived context + repository + resolver created INSIDE the cache
+        // factory — see GetCodedValuesByParentHandler for the
+        // ObjectDisposedException rationale.
         return await cache.GetOrCreateAsync(
             cacheKey,
-            (db, resolver, tenantId, normalisedCode, query.ParentId),
+            (dbContextFactory, tenantId, normalisedCode, query.ParentId),
             static async (state, ct) =>
             {
-                var (db, resolver, tenantId, code, parentId) = state;
+                var (dbContextFactory, tenantId, code, parentId) = state;
+                await using var db = await dbContextFactory.CreateDbContextAsync(ct);
+                var resolver = new CodedValueResolver(new CodedValueRepository(db));
                 var cv = parentId.HasValue
                     ? await db.CodedValues
                         .AsNoTracking()
