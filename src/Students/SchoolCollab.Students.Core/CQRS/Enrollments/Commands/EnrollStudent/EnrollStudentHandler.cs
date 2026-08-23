@@ -56,9 +56,13 @@ public sealed class EnrollStudentHandler(
         {
             var cv = await codedValuesApi.GetByIdAsync(command.GradeCodedValueId, cancellationToken)
                 ?? throw new GradeLevelNotFoundException(command.GradeCodedValueId);
-            gradeLevel = GradeLevel.Create(cv.Id, cv.DisplayOrder, cv.Name, cv.DisplayOrder)
+            var candidate = GradeLevel.Create(cv.Id, cv.DisplayOrder, cv.Name, cv.DisplayOrder)
                 .WithTenant(tenantProvider);
-            await gradeLevelRepository.AddAsync(gradeLevel, cancellationToken);
+            // Race-safe insert: a concurrent enroll of the same brand-new coded
+            // value can win the unique index (tenant_id, coded_value_id); we then
+            // reuse the winner's row instead of failing the command with a raw
+            // DbUpdateException (500).
+            gradeLevel = await gradeLevelRepository.AddOrReuseAsync(candidate, cancellationToken);
             logger.LogInformation("Materialized GradeLevel {GradeLevelId} for CodedValueId {CodedValueId} during enrollment",
                 gradeLevel.Id, command.GradeCodedValueId);
         }
