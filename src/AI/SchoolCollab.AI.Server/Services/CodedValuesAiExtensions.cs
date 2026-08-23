@@ -18,9 +18,13 @@ namespace SchoolCollab.AI.Services;
 /// </summary>
 public static class CodedValuesAiExtensions
 {
-    public static IServiceCollection AddCodedValuesAiTools(this IServiceCollection services, Action<HttpClient> configureCodedValuesApi)
+    public static IServiceCollection AddCodedValuesAiTools(
+        this IServiceCollection services,
+        Action<HttpClient> configureCodedValuesApi,
+        Action<IHttpClientBuilder>? configureCodedValuesClientBuilder = null)
     {
-        services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(configureCodedValuesApi);
+        var httpClientBuilder = services.AddHttpClient<ICodedValuesApiClient, CodedValuesApiClient>(configureCodedValuesApi);
+        configureCodedValuesClientBuilder?.Invoke(httpClientBuilder);
         services.AddSingleton<IToolProvider, CodedValuesToolProvider>();
         services.AddSingleton<ISystemPromptProvider, CodedValuesSystemPromptProvider>();
         return services;
