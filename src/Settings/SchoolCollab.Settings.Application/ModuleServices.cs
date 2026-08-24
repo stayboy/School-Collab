@@ -42,7 +42,8 @@ public static class ModuleServices
         // ConfigFlagsApiClient (FeatureFlag CRUD UI) — same pattern. Flags are
         // global but per-tenant overrides (TenantFeatureFlagOverride) are
         // strict-tenant scoped, so the tenant must travel with each request.
-        services.TryAddSingleton<TenantPropagationDelegatingHandler>();
+        // (The handler type was already TryAddTransient above — a second
+        // TryAdd* here is a no-op; all DelegatingHandlers MUST stay TRANSIENT.)
         services.AddHttpClient<ConfigFlagsApiClient>(client =>
             client.BaseAddress = new Uri("https+http://settings-api"))
             .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();

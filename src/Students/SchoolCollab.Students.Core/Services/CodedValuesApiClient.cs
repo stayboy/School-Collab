@@ -40,6 +40,28 @@ public sealed class CodedValuesApiClient(HttpClient http, ILogger<CodedValuesApi
 {
     public async Task<StreamCodedValueDto?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
+        // GET is idempotent → one immediate retry is safe. This heals the
+        // IHttpClientFactory handler-lifetime rotation race where the cached
+        // pipeline hands a request a pooled connection whose NetworkStream was
+        // just disposed (ObjectDisposedException) — the mid-flight enroll
+        // failure "Cannot access a disposed object … NetworkStream". Standard
+        // resilience does NOT classify ObjectDisposedException as retryable,
+        // so without this the whole enroll fails on a transient artifact.
+        try
+        {
+            return await GetByIdCoreAsync(id, ct);
+        }
+        catch (ObjectDisposedException ex)
+        {
+            logger?.LogWarning(ex,
+                "CodedValuesApiClient: GET /api/coded-values/{Id} hit a disposed pooled " +
+                "connection (handler rotation race); retrying once on a fresh request", id);
+            return await GetByIdCoreAsync(id, ct);
+        }
+    }
+
+    private async Task<StreamCodedValueDto?> GetByIdCoreAsync(Guid id, CancellationToken ct)
+    {
         var response = await http.GetAsync($"/api/coded-values/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound)
         {
