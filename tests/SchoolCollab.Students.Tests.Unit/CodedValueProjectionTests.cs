@@ -222,4 +222,29 @@ public class CodedValueProjectionTests
         dto.Code.Should().Be("GRADE7"); // NOT empty string from the placeholder
         dto.Description.Should().Be("desc");
     }
+    [TestMethod]
+    public async Task DisabledEvent_InvalidatesCache_RepositorySeesDisabled()
+    {
+        // Projection-correctness per ADR Phase 1 step 6: publish CodedValueDisabled
+        // -> local row disabled AND the cached read reflects it (tag invalidated).
+        var h = new Harness("cv-proj-cache-invalidated").Init();
+        var id = Guid.NewGuid();
+        var tenantId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        ((TenantProvider)h.Provider.GetRequiredService<ITenantProvider>()).SetTenant(
+            new TenantContext(tenantId, "T", TenantType.School));
+        var cache = h.Provider.GetRequiredService<HybridCache>();
+        var repo = new LocalCodedValueRepository(h.Factory, h.Provider.GetRequiredService<ITenantProvider>(), cache);
+
+        await new CodedValueCreatedProjectionHandler(h.Factory, cache)
+            .HandleAsync(new CodedValueCreated(id, "GRADE7", "Year 7", null, null, 7, DateTimeOffset.UtcNow,
+                ParentCode: "GRADE", IsDisabled: false, Attributes: null, TenantId: null));
+
+        (await repo.GetByIdAsync(id))!.IsDisabled.Should().BeFalse(); // warm cache
+
+        await new CodedValueDisabledProjectionHandler(h.Factory, cache)
+            .HandleAsync(new CodedValueDisabled(id, "GRADE7", DateTimeOffset.UtcNow));
+
+        var after = await repo.GetByIdAsync(id);
+        after!.IsDisabled.Should().BeTrue(); // cache was invalidated, fresh read
+    }
 }

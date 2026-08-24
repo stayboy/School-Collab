@@ -143,9 +143,11 @@ public sealed class CodedValueDisabledProjectionHandler(
     public async Task HandleAsync(CodedValueDisabled @event, CancellationToken cancellationToken = default)
     {
         await using var db = await CreateDbAsync(cancellationToken);
-        await db.LocalCodedValues
+        var rows = await db.LocalCodedValues
             .Where(x => x.Id == @event.Id)
-            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsDisabled, true), cancellationToken);
+            .ToListAsync(cancellationToken);
+        foreach (var row in rows) { row.IsDisabled = true; }
+        await db.SaveChangesAsync(cancellationToken);
         await InvalidateCacheAsync(cancellationToken);
     }
 }
@@ -158,9 +160,11 @@ public sealed class CodedValueEnabledProjectionHandler(
     public async Task HandleAsync(CodedValueEnabled @event, CancellationToken cancellationToken = default)
     {
         await using var db = await CreateDbAsync(cancellationToken);
-        await db.LocalCodedValues
+        var rows = await db.LocalCodedValues
             .Where(x => x.Id == @event.Id)
-            .ExecuteUpdateAsync(s => s.SetProperty(x => x.IsDisabled, false), cancellationToken);
+            .ToListAsync(cancellationToken);
+        foreach (var row in rows) { row.IsDisabled = false; }
+        await db.SaveChangesAsync(cancellationToken);
         await InvalidateCacheAsync(cancellationToken);
     }
 }
