@@ -1,7 +1,9 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Settings.Contracts.Events;
 using SchoolCollab.Settings.Core.Data;
 
 namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RemoveCodedValueOverride;
@@ -20,6 +22,7 @@ public sealed class RemoveCodedValueOverrideHandler(
     SettingsDbContext db,
     ITenantProvider tenantProvider,
     ITenantContextAccessor tenantContextAccessor,
+    IIntegrationEventPublisher publisher,
     HybridCache cache) : ICommandHandler<RemoveCodedValueOverride>
 {
     public async Task HandleAsync(RemoveCodedValueOverride command, CancellationToken ct = default)
@@ -53,5 +56,10 @@ public sealed class RemoveCodedValueOverrideHandler(
         // by-code, search, etc.) refresh promptly after an override is removed.
         await cache.RemoveByTagAsync("coded-values", ct);
         await cache.RemoveByTagAsync($"tenant:{tenantId}", ct);
+
+        // ADR adr-cross-module-calls.md: publish removal so downstream projections
+        // drop their local override row and fall back to the global blueprint.
+        await publisher.EnqueueAsync(new CodedValueOverrideRemoved(
+            tenantId, command.GlobalCodedValueId, DateTimeOffset.UtcNow), ct);
     }
 }

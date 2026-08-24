@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.Domain;
@@ -25,6 +26,7 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.CreateCodedValue;
 /// </summary>
 public sealed class BulkCreateCodedValuesHandler(
     ICodedValueRepository repository,
+    IIntegrationEventPublisher publisher,
     ITenantProvider tenantProvider,
     ITenantContextAccessor tenantContextAccessor,
     HybridCache cache,
@@ -96,6 +98,14 @@ public sealed class BulkCreateCodedValuesHandler(
             }
 
             await cache.RemoveByTagAsync("coded-values", cancellationToken);
+
+            // Bulk-created values must reach the projection like any other create —
+            // the startup backfill only runs once (adr-cross-module-calls.md).
+            // All entities share command.ParentId, so parent.Code serves each event.
+            foreach (var entity in entities)
+            {
+                await publisher.EnqueueAsync(entity.ToCreatedEvent(parent.Code), cancellationToken);
+            }
 
             logger.LogInformation(
                 "Bulk created {Count} coded values under parent {ParentId} (tenant={TenantKind}), skipped {SkippedCount} existing codes",

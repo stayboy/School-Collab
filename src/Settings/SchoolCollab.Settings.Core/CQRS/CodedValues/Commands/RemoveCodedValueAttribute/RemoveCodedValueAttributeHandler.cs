@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
 
@@ -7,6 +8,7 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RemoveCodedValueA
 
 public sealed class RemoveCodedValueAttributeHandler(
     ICodedValueRepository repository,
+    IIntegrationEventPublisher publisher,
     HybridCache cache) : ICommandHandler<RemoveCodedValueAttribute>
 {
     public async Task HandleAsync(RemoveCodedValueAttribute command, CancellationToken cancellationToken = default)
@@ -17,5 +19,10 @@ public sealed class RemoveCodedValueAttributeHandler(
         codedValue.RemoveAttribute(command.Key);
         await repository.UpdateAsync(codedValue, cancellationToken);
         await cache.RemoveByTagAsync("coded-values", cancellationToken);
+
+        // Attribute changes are projection-relevant (see SetCodedValueAttribute).
+        var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
+            repository, codedValue.ParentId, cancellationToken);
+        await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), cancellationToken);
     }
 }

@@ -106,16 +106,14 @@ public sealed class CreateCodedValueHandler(
 
         await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
+        // Enriched full-state payload via CodedValueEventMapper — single source of
+        // truth for the projection contract (adr-cross-module-calls.md).
+        var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
+            repository, codedValue.ParentId, cancellationToken);
+
         foreach (var _ in codedValue.DomainEvents.OfType<CodedValueCreatedEvent>())
         {
-            await publisher.EnqueueAsync(new CodedValueCreated(
-                codedValue.Id,
-                codedValue.Code,
-                codedValue.Name,
-                codedValue.Description,
-                codedValue.ParentId,
-                codedValue.DisplayOrder,
-                codedValue.CreatedAt), cancellationToken);
+            await publisher.EnqueueAsync(codedValue.ToCreatedEvent(parentCode), cancellationToken);
         }
 
         codedValue.ClearDomainEvents();

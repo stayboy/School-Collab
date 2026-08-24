@@ -1,5 +1,7 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
+using SchoolCollab.Settings.Contracts.Events;
 using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
 
@@ -7,6 +9,7 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.DeleteCodedValue;
 
 public sealed class DeleteCodedValueHandler(
     ICodedValueRepository repository,
+    IIntegrationEventPublisher publisher,
     HybridCache cache) : ICommandHandler<DeleteCodedValue>
 {
     public async Task HandleAsync(DeleteCodedValue command, CancellationToken cancellationToken = default)
@@ -29,5 +32,14 @@ public sealed class DeleteCodedValueHandler(
         codedValue.Delete();
         await repository.UpdateAsync(codedValue, cancellationToken);
         await cache.RemoveByTagAsync("coded-values", cancellationToken);
+
+        // Soft-deletes must reach the projection, otherwise consumers would keep
+        // validating against a deleted value (adr-cross-module-calls.md Phase 0).
+        await publisher.EnqueueAsync(
+            new CodedValueDeleted(
+                codedValue.Id,
+                codedValue.Code,
+                codedValue.DeletedAt ?? DateTimeOffset.UtcNow),
+            cancellationToken);
     }
 }

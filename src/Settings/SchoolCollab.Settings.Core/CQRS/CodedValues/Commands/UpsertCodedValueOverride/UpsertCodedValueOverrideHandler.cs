@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Settings.Contracts.Events;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValueById;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -32,6 +34,7 @@ public sealed class UpsertCodedValueOverrideHandler(
     ITenantProvider tenantProvider,
     ITenantContextAccessor tenantContextAccessor,
     IQueryHandler<GetCodedValueById, CodedValueDto?> resolver,
+    IIntegrationEventPublisher publisher,
     HybridCache cache,
     ILogger<UpsertCodedValueOverrideHandler> logger) : ICommandHandler<UpsertCodedValueOverride, CodedValueDto>
 {
@@ -89,6 +92,18 @@ public sealed class UpsertCodedValueOverrideHandler(
         {
             await db.SaveChangesAsync(ct);
         }
+
+        // ADR adr-cross-module-calls.md: publish the override change so downstream
+        // projections (Students local coded-value read model) can update their
+        // tenant-scoped rows without calling back to settings-api. null fields
+        // mean "keep the global blueprint value".
+        await publisher.EnqueueAsync(new CodedValueOverrideUpserted(
+            tenantId,
+            command.GlobalCodedValueId,
+            command.Name,
+            command.Description,
+            command.Code,
+            DateTimeOffset.UtcNow), ct);
 
         // Return the fully-resolved DTO (override applied, attributes/definitions
         // populated) by re-reading through the existing query handler. No cache
