@@ -36,6 +36,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<StudentTransferAuditEntry> StudentTransferAuditEntries => Set<StudentTransferAuditEntry>();
     public DbSet<ActivityGroup> ActivityGroups => Set<ActivityGroup>();
+    public DbSet<LocalCodedValue> LocalCodedValues => Set<LocalCodedValue>();
     public DbSet<ActivityGroupMembership> ActivityGroupMemberships => Set<ActivityGroupMembership>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
@@ -71,6 +72,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new StudentTransferAuditEntryConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ActivityGroupConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ActivityGroupMembershipConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new LocalCodedValueConfiguration());
 
         // FR-18 / AC-17: build-time model audit — every non-allow-listed, non-owned
         // entity MUST have a "Tenant" named query filter.
@@ -82,5 +84,13 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     /// is the queue table (TenantId is dispatch-routing payload, FR-15). Every other
     /// Students entity is strict tenant-scoped (§3.2).
     /// </summary>
-    protected override Type[] GlobalEntityAllowList => [typeof(OutboxMessage)];
+    protected override Type[] GlobalEntityAllowList =>
+    [
+        typeof(OutboxMessage),
+        // Local coded-value read model: intentionally read across tenancy scopes
+        // (global rows carry TenantId = null); resolved explicitly by the
+        // repository, not by an EF filter. adr-cross-module-calls.md Phase 1.
+        typeof(LocalCodedValue),
+        typeof(LocalCodedValueAttribute),
+    ];
 }

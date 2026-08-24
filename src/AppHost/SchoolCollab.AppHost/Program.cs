@@ -138,7 +138,11 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
 var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("students-worker")
     .WithReference(studentsDb)
     .WithReference(rabbit)
+    .WithReference(settingsApi) // coded-value backfill hop (adr-cross-module-calls.md Phase 1)
     .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
+    // Coded-value projection consumer reads from the Settings exchange
+    // (adr-cross-module-calls.md Phase 1).
+    .WithEnvironment("RabbitMq__Subscriber__ExchangeName", settingsOutboxExchange)
     .WaitFor(rabbit)
     .WaitForCompletion(migrator);
 

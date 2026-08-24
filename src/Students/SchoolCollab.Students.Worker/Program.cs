@@ -1,7 +1,10 @@
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using SchoolCollab.Core.Messaging;
+using SchoolCollab.Settings.Contracts.Events;
 using SchoolCollab.Students.Core;
+using SchoolCollab.Students.Worker;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -44,6 +47,29 @@ else
 }
 
 builder.Services.AddStudentsCore(builder.Configuration);
+
+// Backfill HTTP client for the one permitted startup reference-data hop
+// (adr-cross-module-calls.md Phase 1 step 4).
+builder.Services.AddHttpClient("settings-api", client =>
+{
+    client.BaseAddress = new Uri("http://settings-api");
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// Coded-value projection consumer: subscribe to the Settings module's
+// exchange for the six coded-value events (adr-cross-module-calls.md Phase 1).
+builder.Services.AddRabbitMqSubscriber(
+    builder.Configuration,
+    typeof(CodedValueCreated),
+    typeof(CodedValueUpdated),
+    typeof(CodedValueDisabled),
+    typeof(CodedValueEnabled),
+    typeof(CodedValueDeleted),
+    typeof(CodedValueOverrideUpserted),
+    typeof(CodedValueOverrideRemoved));
+
+// One-time projection backfill (no-op while the flag is off).
+builder.Services.AddHostedService<CodedValueBackfillService>();
 
 var host = builder.Build();
 host.Run();

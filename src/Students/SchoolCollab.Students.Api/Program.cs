@@ -1,5 +1,6 @@
 using Serilog;
 using SchoolCollab.Students.Core;
+using Microsoft.Extensions.Configuration;
 using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
@@ -26,10 +27,19 @@ else
 
 // Cross-module: HTTP client for the Settings Coded Values API (strand validation).
 // Minimal client used by handlers (GetByIdAsync only).
-builder.Services.AddHttpClient<ICodedValuesApiClient, SchoolCollab.Students.Core.Services.CodedValuesApiClient>(client =>
+builder.Services.AddHttpClient<SchoolCollab.Students.Core.Services.CodedValuesApiClient>(client =>
 {
     client.BaseAddress = new Uri("http://settings-api");
 });
+
+// Flag-gated swap (adr-cross-module-calls.md Phase 1): when
+// Students:UseLocalCodedValueProjection is on, coded-value reads resolve from
+// the local projection (no settings-api hop); off (default) keeps the HTTP path.
+builder.Services.AddScoped<SchoolCollab.Students.Core.Services.ICodedValuesApiClient>(sp =>
+    new SchoolCollab.Students.Core.Services.FlagRoutedCodedValuesApiClient(
+        sp.GetRequiredService<SchoolCollab.Students.Core.Services.CodedValuesApiClient>(),
+        sp.GetRequiredService<SchoolCollab.Students.Core.Services.ILocalCodedValueRepository>(),
+        sp.GetRequiredService<IConfiguration>()));
 
 // Full-featured CodedValuesApiClient for Admin.Shared UI components (e.g., TeacherEditDialog).
 // Registers as SchoolCollab.Admin.Shared.Services.CodedValuesApiClient so @inject CodedValuesApiClient
