@@ -15,8 +15,11 @@ namespace SchoolCollab.Students.Worker;
 /// settings-api — the single sync reference-data hop permitted by
 /// adr-cross-module-calls.md, and never on a user-facing write path.
 ///
-/// <para><b>Gating:</b> runs only when <c>Students:UseLocalCodedValueProjection</c>
-/// is enabled; with the flag off the table stays empty and behavior is unchanged.</para>
+/// <para><b>Gating:</b> runs only while <c>Students:UseLocalCodedValueProjection</c>
+/// is <b>off</b> — per adr-cross-module-calls.md Phase 1 step 4/6, the table warms
+/// behind the flag (consumer + backfill populating, reads still via HTTP) so that
+/// flipping the flag finds a complete local read model. Once the flag is on, the
+/// consumer maintains the table and the backfill stops.</para>
 ///
 /// <para><b>Strategy:</b> walks the coded-value tree breadth-first from the root
 /// list (<c>GET /api/coded-values/</c>, then <c>/by-parent?...&amp;includeDisabled=true</code>
@@ -61,9 +64,9 @@ public sealed class CodedValueBackfillService(
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!configuration.GetValue("Students:UseLocalCodedValueProjection", defaultValue: false))
+        if (configuration.GetValue("Students:UseLocalCodedValueProjection", defaultValue: false))
         {
-            logger.LogInformation("CodedValueBackfill skipped: Students:UseLocalCodedValueProjection is off");
+            logger.LogInformation("CodedValueBackfill skipped: Students:UseLocalCodedValueProjection is on (table already warmed)");
             return;
         }
 
