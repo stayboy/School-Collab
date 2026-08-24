@@ -134,22 +134,124 @@ and, for reference data, record why replication was rejected.
   verify row counts and event lag → flip the flag → remove the old client and
   its `TenantForwardingDelegatingHandler` for that path in the next release.
 
-## Follow-ups (planned, not yet implemented)
+## Implementation phases
 
-1. **Students coded-value projection** — local table
-   `students.local_coded_values` (hybrid-tenant, unique `(TenantId, Id)`), an
-   `ILocalCodedValueRepository` replacing `ICodedValuesApiClient` in the four
-   handlers, a worker consumer subscribing to Settings'
-   `CodedValueCreated`/`Updated`/`Disabled`/`Enabled` events, a HybridCache
-   layer (key `coded-value:{tenant}:{id}`, tag `coded-values`), and a one-time
-   backfill. Removes four write-path sync hops and the rotation race for them.
-2. **Live-consistency hop hardening** — `SetHandlerLifetime` (long),
-   per-call timeout, circuit breaker, resilience-layer ODE retry, and a
-   documented degradation for `ActivityGroupAssignmentQueryHttpClient`
-   (delete-guard, block-by-default) and `NotificationPolicyResolver`
-   (recipient resolution, skip-and-log-by-default).
-3. **Decommission** `ICodedValuesApiClient` + `TenantForwardingDelegatingHandler`
-   on the students-api enroll path once the projection is live.
+The follow-ups below are sequenced. Phases 0–1 eliminate the reference-data
+write-path hops; Phase 2 hardens the remaining live-consistency hops; Phase 3
+decommissions the old path. The outbox-atomicity follow-up is a prerequisite for
+flipping the projection flag live (see end of section).
+
+### Phase 0 — Settings coded-value event-contract enrichment (DONE)
+
+Branch `feat/settings-codedvalue-event-enrichment` (off `main`). The original
+event set was too lean to drive a projection (`CodedValueCreated`/`Updated`
+lacked `Attributes`/`ParentCode`/`IsDisabled`/`TenantId`; attribute mutations,
+bulk create, delete, recover, provisional approval, and tenant overrides
+published nothing). Phase 0 completes the contract so a local read model can
+stay consistent without calling back to settings-api:
+
+- `CodedValueCreated` / `CodedValueUpdated` enriched with `ParentCode`,
+  `IsDisabled`, `Attributes` (as `CodedValueAttributeEvent`), and `TenantId`
+  (null = shared blueprint, real = tenant-owned). New parameters are optional
+  with defaults, so messages enqueued by a pre-enrichment producer still
+  deserialize after rollout.
+- New events: `CodedValueDeleted`, `CodedValueOverrideUpserted`,
+  `CodedValueOverrideRemoved`, and the `CodedValueAttributeEvent` payload type.
+- A shared `CodedValueEventMapper` (`Settings.Core/CQRS/CodedValues/`) is the
+  single source of truth for the full-state payloads and parent-code
+  resolution; every publisher routes through it.
+- Nine handlers now publish full-state events: `Create`, `CreateProvisional`,
+  `Update`, `UpsertOverride`, `RemoveOverride`, `SetCodedValueAttribute`,
+  `RemoveCodedValueAttribute`, `BulkCreateCodedValues`, `DeleteCodedValue`,
+  `RecoverCodedValue`, `ApproveProvisionalCodedValue`.
+
+The contract implies these consumer rules (used by the Phase 1 projection):
+
+| Event | Projection action |
+|---|---|
+| `Created` (TenantId=t) | upsert row under (t, Id) |
+| `Updated` (TenantId=t) | upsert row under (t, Id) as **live** (clears any prior deleted marker); on approval (`TenantId=null`) also drop any stale tenant-owned row for that Id |
+| `Disabled` / `Enabled` | toggle `IsDisabled` on the matching row(s) |
+| `Deleted` | remove the row (and orphaned override rows for that Id) |
+| `OverrideUpserted` (TenantId, GlobalId) | upsert a tenant overlay row; `null` fields keep the global value |
+| `OverrideRemoved` (TenantId, GlobalId) | drop the tenant overlay row (fall back to global) |
+
+Attribute-definition changes (`Set/RemoveCodedValueAttributeDefinition`) are
+intentionally NOT emitted — the enroll projection reads attribute *values*, not
+the schema.
+
+### Phase 1 — Students local coded-value read model (next)
+
+Eliminates the four Students→settings coded-value write-path hops and the
+handler-rotation race for them. Ordered, each step a reviewable layer:
+
+1. **Read model + migration.** Entity `LocalCodedValue` + EF config +
+   migration `AddLocalCodedValues`. Table `students.local_coded_values`,
+   two-tier hybrid-tenant: a nullable `TenantId` with unique `(TenantId, Id)`
+   and indexes on `Code`. Columns: `Id`, `TenantId` (null = shared blueprint,
+   real = tenant-owned/override), `Code`, `Name`, `Description`, `ParentId`,
+   `ParentCode`, `IsDisabled`, `IsDeleted`, `DisplayOrder`, `Attributes`
+   (jsonb), `CreatedAt`, `UpdatedAt`, `RowVersion`. Three row kinds share the
+   table (disjoint by Id): global rows `(null, Id)`, tenant-owned rows
+   `(t, tenantCv.Id)`, and tenant override rows `(t, globalCv.Id)`.
+2. **Repository.** `ILocalCodedValueRepository.GetByIdAsync(id, ct)` resolves
+   the effective value the way `GetCodedValueByIdHandler` does today: read the
+   global row + the tenant row for `(currentTenant, id)`, merge (tenant overlay
+   overrides `Name`/`Description`/`Code` where non-null; everything else from the
+   global row; a tenant-owned row with no global row stands alone).
+   `HybridCache` in front, key `coded-value:{tenant}:{id}`, tag `coded-values`.
+3. **Worker consumer.** In `SchoolCollab.Students.Worker`, subscribe to the six
+   Settings events and apply the Phase-0 consumer rules above; invalidate the
+   `coded-values` cache tag on every change; idempotent via event-Id dedup.
+4. **Backfill (the one permitted sync reference-data hop).** A one-time
+   MigrationService/worker startup job pages `GET /api/coded-values` and
+   hydrates global rows + known tenant overrides. Runs off the enroll path and
+   only while the flag is off, so it never blocks a user-facing write.
+5. **Flag-gated swap.** Config flag `Students:UseLocalCodedValueProjection`
+   (default **off**). `EnrollStudentHandler`, `TransferStudentHandler`, and
+   `CreateStudentWithLinkedDataHandler` inject `ILocalCodedValueRepository`
+   alongside `ICodedValuesApiClient`; when the flag is on they read locally
+   (same `GetByIdAsync` shape, so the diff is a strategy switch). Keep
+   `ICodedValuesApiClient` registered while the flag exists (needed when off,
+   and for backfill).
+6. **Verify.** Unit tests swap stubs from `ICodedValuesApiClient` to
+   `ILocalCodedValueRepository`; integration tests seed the local table
+   directly and drop the `CapturingSettingsHandler` scaffolding for these
+   flows; add a projection-correctness test (publish `CodedValueDisabled` →
+   assert the local row is disabled + cache invalidated within N ms). Live:
+   run with the flag off (table populating, no behavior change) → verify row
+   counts and event lag → flip the flag → confirm enroll no longer hops and no
+   `NetworkStream` failures recur.
+
+### Phase 2 — Live-consistency hop hardening
+
+`SetHandlerLifetime` (long), per-call timeout, circuit breaker,
+resilience-layer `ObjectDisposedException` retry, and a documented
+degradation for `ActivityGroupAssignmentQueryHttpClient` (delete-guard,
+block-by-default) and `NotificationPolicyResolver` (recipient resolution,
+skip-and-log-by-default).
+
+### Phase 3 — Decommission
+
+Remove `ICodedValuesApiClient` + `TenantForwardingDelegatingHandler` from the
+students-api enroll path once the projection is live; flip the flag default on;
+then remove the flag and the `ICodedValuesApiClient` path entirely.
+
+### Follow-up — Outbox atomicity (discovered in Phase 0; prerequisite for go-live)
+
+`OutboxIntegrationEventPublisher` uses `IDbContextFactory` to create a
+**separate** `DbContext` and runs its own `SaveChangesAsync` — a **separate
+transaction** from the entity mutation (`CodedValueRepository.AddAsync`/
+`UpdateAsync` each call `SaveChangesAsync`). Its doc-comment claims a
+"transactional outbox", but the implementation is not atomic: if the entity
+save commits and the outbox save then fails, the mutation persists and the
+event is **lost** → the projection goes stale → potential incorrect enroll
+validation. This is pre-existing and repo-wide (all handlers enqueue after the
+repository save), so Phase 0 makes nothing worse, but the projection's
+eventual-consistency guarantee depends on reliable delivery. Fix before
+flipping `Students:UseLocalCodedValueProjection` live: enqueue into the
+request-scoped `DbContext` before the handler's `SaveChanges`, or share a
+transaction.
 
 ## References
 
@@ -159,4 +261,6 @@ and, for reference data, record why replication was rejected.
 - `documents/solution/global-tenant-filter.md`
 - PR #181 (handler lifetime + fault isolation), PR #182 (race-safe
   materialization + 404 observability + disposed-connection self-heal +
-  end-to-end coverage)
+  end-to-end coverage + this ADR)
+- Phase 0 branch `feat/settings-codedvalue-event-enrichment` (event-contract
+  enrichment; PR to follow)
