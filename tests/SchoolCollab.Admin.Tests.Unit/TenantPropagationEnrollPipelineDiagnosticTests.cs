@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Net.Sockets;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -88,11 +89,18 @@ public class TenantPropagationEnrollPipelineDiagnosticTests
 
         var ex = (await act.Should().ThrowAsync<HttpRequestException>()).Which;
         var text = ex.ToString();
-        text.Should().Contain("No such host",
-            "an unresolvable service degrades to a literal-DNS lookup of 'students-api' — " +
-            "this signature means SERVICE DISCOVERY had no endpoint for the API resource " +
-            "(resource never started / Admin launched without the AppHost), NOT a " +
-            "TenantPropagationDelegatingHandler defect");
+        // DNS failure message text is OS-dependent: Windows reports "No such host"
+        // (HostNotFound), Linux often "Resource temporarily unavailable" (TryAgain).
+        // Assert on the SocketException error code instead, which is stable across
+        // platforms, so the test pins the name-resolution-failure SIGNATURE rather
+        // than a platform-specific message.
+        ex.InnerException.Should().BeOfType<SocketException>(
+                "an unresolvable service degrades to a literal-DNS lookup of 'students-api' — " +
+                "this signature means SERVICE DISCOVERY had no endpoint for the API resource " +
+                "(resource never started / API launched without the AppHost), NOT a " +
+                "TenantPropagationDelegatingHandler defect");
+        ex.InnerException.As<SocketException>().SocketErrorCode.Should().BeOneOf(
+            SocketError.HostNotFound, SocketError.TryAgain, SocketError.NoData);
         text.Should().Contain("TenantPropagationDelegatingHandler.SendAsync")
             .And.Contain("ResolvingHttpDelegatingHandler.SendAsync",
                 "the resolver sat directly beneath the tenant handler — the failure bubbled " +
