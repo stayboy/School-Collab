@@ -53,4 +53,44 @@ internal sealed class StudentEnrollmentRepository(StudentsDbContext db)
         await Db.StudentEnrollments
             .Where(x => x.StudentId == studentId && x.Status == EnrollmentStatus.Active)
             .ToArrayAsync(cancellationToken);
+
+    public Task<StudentEnrollment?> GetActiveEnrollmentByStudentAndPeriodAsync(
+        Guid studentId, Guid periodId, CancellationToken cancellationToken = default) =>
+        Db.StudentEnrollments.FirstOrDefaultAsync(
+            x => x.StudentId == studentId && x.PeriodId == periodId && x.Status == EnrollmentStatus.Active,
+            cancellationToken);
+
+    public async Task<StudentEnrollment> AddOrReuseAsync(StudentEnrollment enrollment, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await AddAsync(enrollment, cancellationToken);
+            return enrollment;
+        }
+        catch (DbUpdateException ex) when (IsTenantStudentPeriodUniqueConflict(ex))
+        {
+            // A concurrent enroll inserted the (tenant, student, period) row
+            // first — reuse the winner's row. IMPORTANT: the losing insert is
+            // STILL TRACKED as Added (SaveChanges failed but the change tracker
+            // keeps the entity), so it must be evicted here or any subsequent
+            // SaveChanges in this command re-submits it and fails on the same
+            // constraint.
+            Db.Entry(enrollment).State = EntityState.Detached;
+
+            return await Db.StudentEnrollments.FirstOrDefaultAsync(
+                       x => x.StudentId == enrollment.StudentId && x.PeriodId == enrollment.PeriodId,
+                       cancellationToken)
+                   ?? throw new InvalidOperationException(
+                       $"Unique-constraint conflict on ix_student_enrollments_tenant_student_period " +
+                       $"for student {enrollment.StudentId} / period {enrollment.PeriodId}, " +
+                       "but no winning row was found afterwards.", ex);
+        }
+    }
+
+    /// <summary>True when the exception is the Postgres unique violation raised by
+    /// <c>ix_student_enrollments_tenant_student_period</c> (SQLSTATE 23505).
+    /// Scoped to this index so unrelated constraint failures still surface.</summary>
+    private static bool IsTenantStudentPeriodUniqueConflict(DbUpdateException ex) =>
+        ex.InnerException is Npgsql.PostgresException { SqlState: "23505" } pg &&
+        pg.ConstraintName?.Contains("tenant_student_period", StringComparison.OrdinalIgnoreCase) == true;
 }

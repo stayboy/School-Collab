@@ -27,6 +27,18 @@ public record StudentEnrolled(
     DateOnly EnrolledOn,
     DateTimeOffset OccurredAt);
 
+/// <summary>An active enrollment's grade/stream was corrected in place via
+/// the Enroll-dialog upsert (same student + same active period). The
+/// enrollment stays Active — this is not a transfer. Carries both the previous
+/// and new grade so consumers can distinguish a no-op from a real change.</summary>
+public record StudentEnrollmentUpdated(
+    Guid StudentId,
+    Guid PeriodId,
+    Guid PreviousGradeLevelId,
+    Guid NewGradeLevelId,
+    Guid? NewStreamCodedValueId,
+    DateTimeOffset OccurredAt);
+
 public record StudentTransferred(
     Guid StudentId,
     Guid PeriodId,

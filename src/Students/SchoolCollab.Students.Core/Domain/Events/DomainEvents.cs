@@ -17,6 +17,18 @@ public sealed record PeriodCompletedEvent(Guid PeriodId, string Name) : IDomainE
 
 public sealed record StudentEnrolledEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? StreamCodedValueId) : IDomainEvent;
 public sealed record StudentTransferredEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid NewGradeLevelId, Guid? NewStreamCodedValueId) : IDomainEvent;
+
+/// <summary>Raised when an ACTIVE enrollment's grade/stream is corrected in
+/// place via the Enroll-dialog upsert (same student + same period). Unlike
+/// <see cref="StudentTransferredEvent"/> the enrollment stays Active with no
+/// ExitDate — this is a correction of the existing row, not a transfer.</summary>
+public sealed record StudentEnrollmentUpdatedEvent(
+    Guid EnrollmentId,
+    Guid StudentId,
+    Guid PeriodId,
+    Guid PreviousGradeLevelId,
+    Guid NewGradeLevelId,
+    Guid? NewStreamCodedValueId) : IDomainEvent;
 public sealed record StudentWithdrawnEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId) : IDomainEvent;
 
 // --- Student ↔ Guardian links ---
