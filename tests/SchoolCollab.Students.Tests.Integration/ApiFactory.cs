@@ -63,8 +63,12 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
             services.RemoveAll<StudentsDbContext>();
 
             // Default tenant (overridden per-request via the x-tenant-id header).
-            services.Configure<TestAuthHandlerOptions>(options =>
-                options.TenantId = TestTenantA);
+            // NAMED Configure is REQUIRED: TestAuthHandler resolves
+            // IOptionsMonitor.Get("TestAuth"), so an unnamed
+            // Configure<TestAuthHandlerOptions> never reaches the handler.
+            services.Configure<TestAuthHandlerOptions>(
+                SchoolCollab.Core.Auth.TestAuthExtensions.TestAuthScheme,
+                options => options.TenantId = TestTenantA);
 
             // Re-point both the scoped context (handlers) and the factory
             // (outbox publisher) at the test container.
