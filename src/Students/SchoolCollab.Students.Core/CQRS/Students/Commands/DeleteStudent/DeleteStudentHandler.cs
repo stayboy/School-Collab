@@ -25,6 +25,14 @@ public sealed class DeleteStudentHandler(
 
         student.Delete();
 
+        foreach (var _ in student.DomainEvents.OfType<StudentDeletedEvent>())
+        {
+            await publisher.EnqueueAsync(new StudentDeleted(
+                student.Id,
+                student.StudentNumber,
+                DateTimeOffset.UtcNow), cancellationToken);
+        }
+
         try
         {
             await repository.UpdateAsync(student, cancellationToken);
@@ -36,13 +44,6 @@ public sealed class DeleteStudentHandler(
 
         await cache.RemoveByTagAsync("students", cancellationToken);
 
-        foreach (var _ in student.DomainEvents.OfType<StudentDeletedEvent>())
-        {
-            await publisher.EnqueueAsync(new StudentDeleted(
-                student.Id,
-                student.StudentNumber,
-                DateTimeOffset.UtcNow), cancellationToken);
-        }
 
         student.ClearDomainEvents();
 

@@ -32,10 +32,6 @@ public sealed class UnpublishAssignmentCommandHandler(
             submissionRepository.Update(gate);
         }
 
-        await repository.UpdateAsync(assignment, cancellationToken);
-        await submissionRepository.SaveChangesAsync(cancellationToken);
-        await cache.RemoveByTagAsync("assignments", cancellationToken);
-
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentUnpublishedEvent>())
         {
             await publisher.EnqueueAsync(
@@ -45,6 +41,11 @@ public sealed class UnpublishAssignmentCommandHandler(
                     assignment.UpdatedAt),
                 cancellationToken);
         }
+
+        await repository.UpdateAsync(assignment, cancellationToken);
+        await submissionRepository.SaveChangesAsync(cancellationToken);
+        await cache.RemoveByTagAsync("assignments", cancellationToken);
+
 
         assignment.ClearDomainEvents();
 

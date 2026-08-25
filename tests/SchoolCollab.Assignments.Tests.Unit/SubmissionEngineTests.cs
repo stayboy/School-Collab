@@ -511,6 +511,7 @@ public class SubmissionEngineTests
     {
         public int Count;
         public Task EnqueueAsync<T>(T message, CancellationToken ct = default) where T : class { Count++; return Task.CompletedTask; }
+        public Task EnqueueAsync<T>(T message, Guid? tenantStamp, CancellationToken ct = default) where T : class => EnqueueAsync(message, ct);
     }
 
     private sealed class FakeActivityGroupLookup : IActivityGroupLookup

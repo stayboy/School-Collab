@@ -23,6 +23,17 @@ public sealed class UpdateGuardianLinkHandler(
 
         link.Update(command.Role, command.RelationshipCodedValueId, command.IsEmergencyContact);
 
+        foreach (var evt in link.DomainEvents.OfType<StudentGuardianUpdatedEvent>())
+        {
+            await publisher.EnqueueAsync(new StudentGuardianUpdated(
+                evt.StudentId,
+                evt.GuardianId,
+                evt.Role.ToString(),
+                evt.RelationshipCodedValueId,
+                evt.IsEmergencyContact,
+                DateTimeOffset.UtcNow), cancellationToken);
+        }
+
         try
         {
             await repository.UpdateLinkAsync(link, cancellationToken);
@@ -34,16 +45,6 @@ public sealed class UpdateGuardianLinkHandler(
 
         // Spec §3.2 / §5: emit a single StudentGuardianUpdated integration
         // event via the transactional outbox (no unlink+relink double event).
-        foreach (var evt in link.DomainEvents.OfType<StudentGuardianUpdatedEvent>())
-        {
-            await publisher.EnqueueAsync(new StudentGuardianUpdated(
-                evt.StudentId,
-                evt.GuardianId,
-                evt.Role.ToString(),
-                evt.RelationshipCodedValueId,
-                evt.IsEmergencyContact,
-                DateTimeOffset.UtcNow), cancellationToken);
-        }
 
         link.ClearDomainEvents();
 

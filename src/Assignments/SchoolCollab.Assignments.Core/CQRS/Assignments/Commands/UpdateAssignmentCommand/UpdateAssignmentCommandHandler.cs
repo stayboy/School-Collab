@@ -33,9 +33,6 @@ public sealed class UpdateAssignmentCommandHandler(
             command.MaxScore,
             command.MandatoryReview);
 
-        await repository.UpdateAsync(assignment, cancellationToken);
-        await cache.RemoveByTagAsync("assignments", cancellationToken);
-
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentUpdatedEvent>())
         {
             await publisher.EnqueueAsync(
@@ -45,6 +42,10 @@ public sealed class UpdateAssignmentCommandHandler(
                     assignment.UpdatedAt),
                 cancellationToken);
         }
+
+        await repository.UpdateAsync(assignment, cancellationToken);
+        await cache.RemoveByTagAsync("assignments", cancellationToken);
+
 
         assignment.ClearDomainEvents();
 

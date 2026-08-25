@@ -40,10 +40,15 @@ public sealed class BufferingOutboxPublisher<TContext>(
     /// </summary>
     public Task EnqueueAsync<T>(T message, CancellationToken cancellationToken = default)
         where T : class
+        => EnqueueAsync(message, tenantStamp: null, cancellationToken);
+
+    /// <inheritdoc />
+    public Task EnqueueAsync<T>(T message, Guid? tenantStamp, CancellationToken cancellationToken = default)
+        where T : class
     {
         ArgumentNullException.ThrowIfNull(message);
 
-        var currentTenant = tenantProvider.GetTenantContext().TenantId;
+        var currentTenant = tenantStamp ?? tenantProvider.GetTenantContext().TenantId;
         var row = new OutboxMessage
         {
             Id = Guid.NewGuid(),

@@ -96,6 +96,10 @@ public sealed class UpdateStudentWithLinkedDataHandler(
                     new StudentUpdated(student.Id, student.StudentNumber, student.FirstName,
                         student.LastName, student.UpdatedAt)));
 
+            // Enqueue BEFORE the single commit — atomic with the entity changes.
+            foreach (var e in studentUpdatedEvents)
+                await publisher.EnqueueAsync(e, cancellationToken);
+
             try
             {
                 // Layer 3: EF xmin check on every touched row.
@@ -113,14 +117,10 @@ public sealed class UpdateStudentWithLinkedDataHandler(
             return true;
         }, cancellationToken);
 
-        // After the commit: invalidate cache + enqueue outbox events (non-transactional,
-        // so they must stay after the UoW returns — a rollback can never leave a phantom event).
+        // After the commit: invalidate caches (non-transactional by nature).
         await cache.RemoveByTagAsync("students", cancellationToken);
         await cache.RemoveByTagAsync("guardians", cancellationToken);
         await cache.RemoveByTagAsync("contacts", cancellationToken);
-
-        foreach (var e in studentUpdatedEvents)
-            await publisher.EnqueueAsync(e, cancellationToken);
     }
 
     /// <summary>
