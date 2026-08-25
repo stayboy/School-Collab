@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Assignments.Application.Services;
-using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Http;
 
 namespace SchoolCollab.Assignments.Application;
 
@@ -24,14 +24,9 @@ public static class ModuleServices
     /// </summary>
     public static IServiceCollection AddAssignmentsModule(this IServiceCollection services)
     {
-        // Propagates the dev-selected tenant to the assignments-api via the
-        // x-tenant-id header so strict-entity writes resolve the right tenant.
-        services.AddScoped<TenantPropagationDelegatingHandler>();
-        services.AddHttpClient<AssignmentsApiClient>(client =>
-        {
-            client.BaseAddress = new Uri("https+http://assignments-api");
-        })
-        .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+        // Cross-module: admin Blazor app → assignments-api, with the same
+        // resilience reference pattern used for the other module clients.
+        services.AddCrossModuleHttpClient<AssignmentsApiClient>("https+http://assignments-api", propagateTenant: true);
 
         return services;
     }

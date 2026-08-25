@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Http;
 using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Contracts;
 
@@ -10,12 +11,11 @@ public static class ModuleServices
 {
     public static IServiceCollection AddStudentsModule(this IServiceCollection services)
     {
-        // Propagates the dev-selected tenant to the students-api via the
-        // x-tenant-id header so strict-entity writes resolve the right tenant.
-        services.AddScoped<TenantPropagationDelegatingHandler>();
-        services.AddHttpClient<StudentsApiClient>(client =>
-            client.BaseAddress = new Uri("https+http://students-api"))
-            .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+        // Cross-module: admin Blazor app → students-api. Long handler lifetime
+        // + retry on disposed-NetworkStream/HttpRequestException so the tenant
+        // propagation handler does not appear to "block" calls when the factory
+        // rotates its handler pool (adr-cross-module-calls.md reference pattern).
+        services.AddCrossModuleHttpClient<StudentsApiClient>("https+http://students-api", propagateTenant: true);
 
         // Shared contact surface (used by ContactsEditor in Admin.Shared) resolves
         // to the same typed HttpClient-backed client instance.

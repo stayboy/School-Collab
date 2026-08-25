@@ -41,6 +41,14 @@ var settingsOutboxExchange  = builder.AddParameter("outbox-exchange-settings");
 var assignmentsOutboxExchange  = builder.AddParameter("outbox-exchange-assignments");
 var studentsOutboxExchange     = builder.AddParameter("outbox-exchange-students");
 
+// Students coded-value projection flag (adr-cross-module-calls.md Phase 1): off by
+// default — the projection warms behind the flag (Worker backfill + consumer populate
+// local_coded_values), then an operator flips this to "true" to route enroll reads
+// through the local read model. Flipping is a one-config change here; both the API
+// and the Worker receive the same value so backfill (off when flag on) and reads stay
+// consistent. Warm-then-flip rollout: run with false → verify rows → set true.
+var useLocalCodedValueProjection = builder.AddParameter("use-local-coded-value-projection");
+
 // AI provider configuration that the `settings-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
 // see every knob they may need to set in exactly one place — the AppHost's
@@ -99,6 +107,13 @@ var settingsApi = builder.AddProject<Projects.SchoolCollab_Settings_Api>("settin
     .WaitFor(redis)
     .WaitForCompletion(migrator);
 
+// Defensive: migrator references SchoolCollab.Settings.Core which exposes
+// AddConfigFeatureFlagClient (URL "https+http://settings-api"). Migrator does
+// not currently call that client, but CrossModuleWiringTests requires any
+// direct consumer of a cross-module-registering library to have the wiring.
+// Added here (after settingsApi is declared) to keep the migrator block readable.
+migrator = migrator.WithReference(settingsApi);
+
 var settingsAi = builder.AddProject<Projects.SchoolCollab_AI_Server>("settings-ai")
     .WithReference(settingsApi)
     // Env-var names use the double-underscore convention so that ASP.NET
@@ -117,12 +132,18 @@ var settingsAi = builder.AddProject<Projects.SchoolCollab_AI_Server>("settings-a
 
 var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("students-api")
     .WithReference(studentsDb)
+    .WithReference(settingsApi)     // enroll/grade validation hop to Settings CodedValues API
     .WithReference(rabbit)
     .WithReference(redis)
     .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
+    .WithEnvironment("Students__UseLocalCodedValueProjection", useLocalCodedValueProjection)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
+// NOTE: every cross-module HttpClient base address in src/** must have a matching
+// .WithReference(<resource>) on the calling project here. CrossModuleWiringTests
+// (Core.Tests.Unit/Architecture) enforces this — a missing reference surfaces at
+// runtime as "No such host is known (<service>:80)".
 
 var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("assignments-api")
     .WithReference(assignmentsDb)
@@ -135,6 +156,11 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WaitFor(redis)
     .WaitForCompletion(migrator);
 
+// Activity-group delete-guard hop (Phase 2, FR-6); 404 = "no references".
+// Added after assignmentsApi is declared so the studentsApi block above stays in
+// declaration order.
+studentsApi = studentsApi.WithReference(assignmentsApi);
+
 var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("students-worker")
     .WithReference(studentsDb)
     .WithReference(rabbit)
@@ -143,6 +169,7 @@ var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("
     // Coded-value projection consumer reads from the Settings exchange
     // (adr-cross-module-calls.md Phase 1).
     .WithEnvironment("RabbitMq__Subscriber__ExchangeName", settingsOutboxExchange)
+    .WithEnvironment("Students__UseLocalCodedValueProjection", useLocalCodedValueProjection)
     .WaitFor(rabbit)
     .WaitForCompletion(migrator);
 

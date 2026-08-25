@@ -95,7 +95,7 @@ public class OutboxExtensionsTests
 
         // Assert — publisher registered against the shared contract
         var publisher = provider.GetRequiredService<IIntegrationEventPublisher>();
-        Assert.IsInstanceOfType<OutboxIntegrationEventPublisher<FakeDbContext>>(publisher);
+        Assert.IsInstanceOfType<BufferingOutboxPublisher<FakeDbContext>>(publisher);
 
         // Assert — dispatcher registered as a hosted service
         var hostedServices = provider.GetServices<IHostedService>().ToList();
