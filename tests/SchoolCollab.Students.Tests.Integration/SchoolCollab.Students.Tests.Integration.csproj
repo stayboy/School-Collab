@@ -11,6 +11,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Api\SchoolCollab.Students.Api.csproj" />
+    <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Application\SchoolCollab.Students.Application.csproj" />
     <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
   </ItemGroup>
   <ItemGroup>
