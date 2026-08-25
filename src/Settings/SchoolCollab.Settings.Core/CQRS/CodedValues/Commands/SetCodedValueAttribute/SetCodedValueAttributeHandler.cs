@@ -46,15 +46,17 @@ public sealed class SetCodedValueAttributeHandler(
         }
 
         codedValue.SetAttribute(command.Key, command.Value);
-        await repository.UpdateAsync(codedValue, cancellationToken);
-        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         // Attribute values drive downstream validation (e.g. a stream's gradeLevel
         // attribute is read by Students enroll stream validation), so attribute
         // changes MUST reach the projection — publish the full current state
         // (adr-cross-module-calls.md Phase 0 gap fix).
+        // Enqueue BEFORE save: atomic commit with the entity.
         var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
             repository, codedValue.ParentId, cancellationToken);
         await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), cancellationToken);
+
+        await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
     }
 }

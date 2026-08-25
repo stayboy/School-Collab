@@ -64,17 +64,12 @@ public sealed class ApproveProvisionalCodedValueHandler(
         // Promotion rewrites tenant_id from a real tenant to NULL. The strict hybrid
         // save-guard rejects that transition, so suppress it for this sanctioned
         // system-wide operation.
-        using (tenantContextAccessor.SuppressTenantGuard())
-        {
-            await db.SaveChangesAsync(ct);
-        }
-
-        await cache.RemoveByTagAsync("coded-values", ct);
 
         // Tenancy changed (tenant-owned → shared blueprint), so consumers MUST be
         // told: the event carries TenantId=null and consumers upsert a GLOBAL row
         // and reconcile away their previous tenant-scoped row
         // (adr-cross-module-calls.md Phase 0).
+        // Enqueue BEFORE save: atomic commit with the promotion.
         string? parentCode = codedValue.ParentId is { } approvedParentId
             ? (await db.CodedValues
                 .IgnoreQueryFilters(["Tenant"])
@@ -83,6 +78,13 @@ public sealed class ApproveProvisionalCodedValueHandler(
                 .FirstOrDefaultAsync(ct))
             : null;
         await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), ct);
+
+        using (tenantContextAccessor.SuppressTenantGuard())
+        {
+            await db.SaveChangesAsync(ct);
+        }
+
+        await cache.RemoveByTagAsync("coded-values", ct);
 
         logger.LogInformation(
             "Provisional CodedValue {Id} approved as shared blueprint (code {Code})",

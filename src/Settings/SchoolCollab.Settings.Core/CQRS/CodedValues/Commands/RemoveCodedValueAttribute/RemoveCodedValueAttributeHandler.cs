@@ -17,12 +17,14 @@ public sealed class RemoveCodedValueAttributeHandler(
             ?? throw new CodedValueNotFoundException(command.Id);
 
         codedValue.RemoveAttribute(command.Key);
-        await repository.UpdateAsync(codedValue, cancellationToken);
-        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         // Attribute changes are projection-relevant (see SetCodedValueAttribute).
+        // Enqueue BEFORE save: atomic commit with the entity.
         var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
             repository, codedValue.ParentId, cancellationToken);
         await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), cancellationToken);
+
+        await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
     }
 }

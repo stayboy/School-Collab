@@ -87,7 +87,11 @@ public static class OutboxExtensions
         services.AddSingleton(flags);
         OutboxMapping.SetFlagsFor<TContext>(flags);
 
-        services.TryAddSingleton<IIntegrationEventPublisher, OutboxIntegrationEventPublisher<TContext>>();
+        // Atomicity (adr-cross-module-calls.md outbox follow-up): the scoped
+        // buffering publisher commits the outbox row in the SAME SaveChanges as
+        // the domain mutation when handlers enqueue before saving; its disposal
+        // safety-net flush keeps enqueuers-without-save working non-atomically.
+        services.TryAddScoped<IIntegrationEventPublisher, BufferingOutboxPublisher<TContext>>();
         services.AddHostedService<OutboxDispatcher<TContext>>();
 
         return services;

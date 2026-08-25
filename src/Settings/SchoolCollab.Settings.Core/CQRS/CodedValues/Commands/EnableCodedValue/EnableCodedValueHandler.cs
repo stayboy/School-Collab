@@ -19,15 +19,15 @@ public sealed class EnableCodedValueHandler(
             ?? throw new CodedValueNotFoundException(command.Id);
 
         codedValue.Enable();
-        await repository.UpdateAsync(codedValue, cancellationToken);
-        await cache.RemoveByTagAsync("coded-values", cancellationToken);
-
         foreach (var _ in codedValue.DomainEvents.OfType<CodedValueEnabledEvent>())
         {
             await publisher.EnqueueAsync(
                 new CodedValueEnabled(codedValue.Id, codedValue.Code, codedValue.UpdatedAt),
                 cancellationToken);
         }
+
+        await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         codedValue.ClearDomainEvents();
     }

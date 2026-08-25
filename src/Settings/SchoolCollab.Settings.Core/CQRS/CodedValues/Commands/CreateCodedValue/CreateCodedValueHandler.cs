@@ -92,6 +92,17 @@ public sealed class CreateCodedValueHandler(
         // FR-5: the default/dev path writes a NULL-blueprint row under a suppressed
         // guard (belt-and-suspenders â€” the hybrid save-guard already permits NULL;
         // this documents intent and is robust to future guard changes).
+        // Enriched full-state payload via CodedValueEventMapper — single source of
+        // truth for the projection contract (adr-cross-module-calls.md).
+        // Enqueue BEFORE save: the buffering outbox commits event + entity atomically.
+        var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
+            repository, codedValue.ParentId, cancellationToken);
+
+        foreach (var _ in codedValue.DomainEvents.OfType<CodedValueCreatedEvent>())
+        {
+            await publisher.EnqueueAsync(codedValue.ToCreatedEvent(parentCode), cancellationToken);
+        }
+
         if (isDefaultTenant)
         {
             using (tenantContextAccessor.SuppressTenantGuard())
@@ -105,16 +116,6 @@ public sealed class CreateCodedValueHandler(
         }
 
         await cache.RemoveByTagAsync("coded-values", cancellationToken);
-
-        // Enriched full-state payload via CodedValueEventMapper — single source of
-        // truth for the projection contract (adr-cross-module-calls.md).
-        var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
-            repository, codedValue.ParentId, cancellationToken);
-
-        foreach (var _ in codedValue.DomainEvents.OfType<CodedValueCreatedEvent>())
-        {
-            await publisher.EnqueueAsync(codedValue.ToCreatedEvent(parentCode), cancellationToken);
-        }
 
         codedValue.ClearDomainEvents();
 

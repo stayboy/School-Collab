@@ -81,6 +81,18 @@ public sealed class UpsertCodedValueOverrideHandler(
         // Added/Modified, so suppress it for the dev affordance (sanctioned bypass).
         // Real-tenant saves satisfy the guard (TenantId == current) and are NOT
         // suppressed, preserving the mismatch defense.
+        // ADR adr-cross-module-calls.md: publish the override change so downstream
+        // projections can update tenant-scoped rows without calling back to
+        // settings-api. null fields mean "keep the global blueprint value".
+        // Enqueue BEFORE save: atomic commit with the override.
+        await publisher.EnqueueAsync(new CodedValueOverrideUpserted(
+            tenantId,
+            command.GlobalCodedValueId,
+            command.Name,
+            command.Description,
+            command.Code,
+            DateTimeOffset.UtcNow), ct);
+
         if (tenantId == Guid.Empty)
         {
             using (tenantContextAccessor.SuppressTenantGuard())
@@ -92,18 +104,6 @@ public sealed class UpsertCodedValueOverrideHandler(
         {
             await db.SaveChangesAsync(ct);
         }
-
-        // ADR adr-cross-module-calls.md: publish the override change so downstream
-        // projections (Students local coded-value read model) can update their
-        // tenant-scoped rows without calling back to settings-api. null fields
-        // mean "keep the global blueprint value".
-        await publisher.EnqueueAsync(new CodedValueOverrideUpserted(
-            tenantId,
-            command.GlobalCodedValueId,
-            command.Name,
-            command.Description,
-            command.Code,
-            DateTimeOffset.UtcNow), ct);
 
         // Return the fully-resolved DTO (override applied, attributes/definitions
         // populated) by re-reading through the existing query handler. No cache

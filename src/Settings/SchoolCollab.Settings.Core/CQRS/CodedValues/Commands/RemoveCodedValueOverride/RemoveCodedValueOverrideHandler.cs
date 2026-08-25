@@ -37,6 +37,12 @@ public sealed class RemoveCodedValueOverrideHandler(
 
         db.TenantCodedValueOverrides.Remove(existing);
 
+        // ADR adr-cross-module-calls.md: publish removal so downstream projections
+        // drop their local override row and fall back to the global blueprint.
+        // Enqueue BEFORE save: atomic commit with the removal.
+        await publisher.EnqueueAsync(new CodedValueOverrideRemoved(
+            tenantId, command.GlobalCodedValueId, DateTimeOffset.UtcNow), ct);
+
         // FR-8/FR-10: suppress the strict save-guard for the default/dev tenant's
         // Guid.Empty row on delete (sanctioned bypass). Real-tenant deletes satisfy
         // the guard and are not suppressed.
@@ -56,10 +62,5 @@ public sealed class RemoveCodedValueOverrideHandler(
         // by-code, search, etc.) refresh promptly after an override is removed.
         await cache.RemoveByTagAsync("coded-values", ct);
         await cache.RemoveByTagAsync($"tenant:{tenantId}", ct);
-
-        // ADR adr-cross-module-calls.md: publish removal so downstream projections
-        // drop their local override row and fall back to the global blueprint.
-        await publisher.EnqueueAsync(new CodedValueOverrideRemoved(
-            tenantId, command.GlobalCodedValueId, DateTimeOffset.UtcNow), ct);
     }
 }

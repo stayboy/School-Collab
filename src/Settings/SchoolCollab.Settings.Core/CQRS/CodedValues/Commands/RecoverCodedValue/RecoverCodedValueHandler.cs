@@ -27,8 +27,6 @@ public sealed class RecoverCodedValueHandler(
         }
 
         codedValue.Recover();
-        await repository.UpdateAsync(codedValue, cancellationToken);
-        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         // Recovery must reach the projection — consumers treat CodedValueUpdated as
         // "upsert this row as live", which re-materializes the recovered value
@@ -36,5 +34,8 @@ public sealed class RecoverCodedValueHandler(
         var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
             repository, codedValue.ParentId, cancellationToken);
         await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), cancellationToken);
+
+        await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
     }
 }

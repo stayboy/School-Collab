@@ -30,8 +30,6 @@ public sealed class DeleteCodedValueHandler(
         }
 
         codedValue.Delete();
-        await repository.UpdateAsync(codedValue, cancellationToken);
-        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         // Soft-deletes must reach the projection, otherwise consumers would keep
         // validating against a deleted value (adr-cross-module-calls.md Phase 0).
@@ -41,5 +39,8 @@ public sealed class DeleteCodedValueHandler(
                 codedValue.Code,
                 codedValue.DeletedAt ?? DateTimeOffset.UtcNow),
             cancellationToken);
+
+        await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
     }
 }

@@ -82,6 +82,15 @@ public sealed class BulkCreateCodedValuesHandler(
                 return cv;
             }).ToList();
 
+            // Bulk-created values must reach the projection like any other create —
+            // the startup backfill only runs once (adr-cross-module-calls.md).
+            // All entities share command.ParentId, so parent.Code serves each event.
+            // Enqueue BEFORE save: atomic commit with the entities.
+            foreach (var entity in entities)
+            {
+                await publisher.EnqueueAsync(entity.ToCreatedEvent(parent.Code), cancellationToken);
+            }
+
             // FR-5: the default/dev path writes NULL-blueprint rows under a suppressed
             // guard (the hybrid save-guard permits NULL, but this is belt-and-suspenders
             // and documents intent).
@@ -99,13 +108,6 @@ public sealed class BulkCreateCodedValuesHandler(
 
             await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
-            // Bulk-created values must reach the projection like any other create —
-            // the startup backfill only runs once (adr-cross-module-calls.md).
-            // All entities share command.ParentId, so parent.Code serves each event.
-            foreach (var entity in entities)
-            {
-                await publisher.EnqueueAsync(entity.ToCreatedEvent(parent.Code), cancellationToken);
-            }
 
             logger.LogInformation(
                 "Bulk created {Count} coded values under parent {ParentId} (tenant={TenantKind}), skipped {SkippedCount} existing codes",
