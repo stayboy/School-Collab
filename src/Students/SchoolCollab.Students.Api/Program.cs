@@ -27,10 +27,13 @@ else
 
 // Cross-module: HTTP client for the Settings Coded Values API (strand validation).
 // Minimal client used by handlers (GetByIdAsync only).
-builder.Services.AddHttpClient<SchoolCollab.Students.Core.Services.CodedValuesApiClient>(client =>
+// Named client (unique name — Admin.Shared also registers a typed client whose
+// short type name is 'CodedValuesApiClient', and typed names ignore namespace).
+builder.Services.AddHttpClient("students-core-coded-values", client =>
 {
     client.BaseAddress = new Uri("http://settings-api");
-});
+})
+.AddTypedClient<SchoolCollab.Students.Core.Services.CodedValuesApiClient>();
 
 // Flag-gated swap (adr-cross-module-calls.md Phase 1): when
 // Students:UseLocalCodedValueProjection is on, coded-value reads resolve from
