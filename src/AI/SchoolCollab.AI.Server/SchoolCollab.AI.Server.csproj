@@ -25,6 +25,7 @@
     <PackageReference Include="OpenAI" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\SchoolCollab.Core\SchoolCollab.Core.csproj" />
     <ProjectReference Include="..\SchoolCollab.AI.Abstractions\SchoolCollab.AI.Abstractions.csproj" />
     <ProjectReference Include="..\SchoolCollab.AI.Tools.CodedValues\SchoolCollab.AI.Tools.CodedValues.csproj" />
     <ProjectReference Include="..\..\ServiceDefaults\SchoolCollab.ServiceDefaults\SchoolCollab.ServiceDefaults.csproj" />

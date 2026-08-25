@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Core.Auth;
 
@@ -26,7 +27,12 @@ public static class ModuleServices
     {
         // Propagates the dev-selected tenant to the assignments-api via the
         // x-tenant-id header so strict-entity writes resolve the right tenant.
-        services.AddScoped<TenantPropagationDelegatingHandler>();
+        // Transient, not Singleton — see AddStudentsModule note (a Singleton shared
+        // across named clients corrupts InnerHandler / pipeline routing). Also made
+        // idempotent (TryAdd, NOT Add): TenantPropagationDelegatingHandler is a shared
+        // Core type now registered by Settings, Assignments, AND Students modules in
+        // the unified Admin host.
+        services.TryAddTransient<TenantPropagationDelegatingHandler>();
         services.AddHttpClient<AssignmentsApiClient>(client =>
         {
             client.BaseAddress = new Uri("https+http://assignments-api");

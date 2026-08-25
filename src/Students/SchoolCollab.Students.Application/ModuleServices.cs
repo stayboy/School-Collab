@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Students.Application.Services;
@@ -12,7 +13,19 @@ public static class ModuleServices
     {
         // Propagates the dev-selected tenant to the students-api via the
         // x-tenant-id header so strict-entity writes resolve the right tenant.
-        services.AddScoped<TenantPropagationDelegatingHandler>();
+        // Registered as a SINGLETON (NOT scoped): it is stateless apart from the
+        // singleton IDevTenantSelection + logger, and a scoped DelegatingHandler
+        // captured in IHttpClientFactory's cached chain is disposed when the
+        // request scope ends -> reused-disposed-handler (ObjectDisposedException /
+        // "Cannot access a disposed object … NetworkStream"). This was the
+        // EnrollStudentDialog failure.
+        // MUST be TRANSIENT (not Singleton, not Scoped): IHttpClientFactory's
+        // per-named-client pipeline sets InnerHandler on the handler chain.
+        // A Singleton shared across named clients (CodedValuesApiClient,
+        // StudentsApiClient, etc.) gets its InnerHandler overwritten by the
+        // second client, corrupting the first client's cached pipeline
+        // (e.g. coded-values requests hit students-api -> 404 -> blank page).
+        services.TryAddTransient<TenantPropagationDelegatingHandler>();
         services.AddHttpClient<StudentsApiClient>(client =>
             client.BaseAddress = new Uri("https+http://students-api"))
             .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();

@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Serilog;
 using SchoolCollab.Students.Core;
 using SchoolCollab.Settings.Core;
@@ -25,11 +26,23 @@ else
 }
 
 // Cross-module: HTTP client for the Settings Coded Values API (strand validation).
-// Minimal client used by handlers (GetByIdAsync only).
+// Minimal client used by handlers (GetByIdAsync only). TenantForwardingDelegatingHandler
+// forwards the inbound request's resolved tenant (x-tenant-id header, falling back to
+// the tenant_id claim) so stream validation resolves the SAME tenant the enroll
+// request came in under — see docs/plans/2026-08-22-tenant-propagation-enroll-stream-
+// investigation.md (Class B).
+// Registered TRANSIENT (not Singleton): IHttpClientFactory sets InnerHandler per
+// named-client pipeline; a Singleton shared across ICodedValuesApiClient,
+// Admin.Shared CodedValuesApiClient, and the "assignments-api" named client gets
+// its InnerHandler overwritten, routing data to the wrong host (e.g. coded-value
+// validation calls hitting the assignments-api -> 404 -> enrollment failure).
+builder.Services.AddHttpContextAccessor();
+builder.Services.TryAddTransient<TenantForwardingDelegatingHandler>();
 builder.Services.AddHttpClient<ICodedValuesApiClient, SchoolCollab.Students.Core.Services.CodedValuesApiClient>(client =>
 {
     client.BaseAddress = new Uri("http://settings-api");
-});
+})
+.AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
 
 // Full-featured CodedValuesApiClient for Admin.Shared UI components (e.g., TeacherEditDialog).
 // Registers as SchoolCollab.Admin.Shared.Services.CodedValuesApiClient so @inject CodedValuesApiClient
@@ -37,12 +50,17 @@ builder.Services.AddHttpClient<ICodedValuesApiClient, SchoolCollab.Students.Core
 builder.Services.AddHttpClient<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>(client =>
 {
     client.BaseAddress = new Uri("http://settings-api");
-});
+})
+.AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
 
 // Phase 2 (spec activity-group-enrollment.md FR-6): HTTP client for the
 // Assignments API delete-guard check. The named client is resolved via
 // Aspire service discovery once the AppHost references assignments-api.
-builder.Services.AddHttpClient("assignments-api");
+// Tenant forwarding is REQUIRED here: assignments are strict-tenant entities,
+// and a tenant-less guard query can false-negative and allow a delete that
+// should be blocked (Class B / data-integrity follow-up).
+builder.Services.AddHttpClient("assignments-api")
+    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
 builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IActivityGroupAssignmentQuery,
     SchoolCollab.Students.Api.Services.ActivityGroupAssignmentQueryHttpClient>();
 

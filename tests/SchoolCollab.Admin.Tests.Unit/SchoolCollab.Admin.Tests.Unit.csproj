@@ -22,6 +22,8 @@
     <ProjectReference Include="..\..\src\SchoolCollab.Admin\SchoolCollab.Admin.csproj" />
     <ProjectReference Include="..\..\src\SchoolCollab.Core\SchoolCollab.Core.csproj" />
     <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Application\SchoolCollab.Students.Application.csproj" />
+    <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Application\SchoolCollab.Assignments.Application.csproj" />
+    <ProjectReference Include="..\..\src\Settings\SchoolCollab.Settings.Application\SchoolCollab.Settings.Application.csproj" />
   </ItemGroup>
 
 </Project>
