@@ -415,7 +415,8 @@
         var model = new EnrollStudentModel(
             StudentId: Id,
             SuggestedPeriodId: PrimaryActiveEnrollment?.PeriodId,
-            SuggestedGradeLevelId: PrimaryActiveEnrollment?.GradeLevelId);
+            SuggestedGradeLevelId: PrimaryActiveEnrollment?.GradeLevelId,
+            SuggestedStreamCodedValueId: PrimaryActiveEnrollment?.StreamCodedValueId);
         var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
             model, "Enroll student", DialogSize.Medium);
         if (result is { Success: true })

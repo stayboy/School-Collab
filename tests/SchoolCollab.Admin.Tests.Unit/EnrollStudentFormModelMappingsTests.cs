@@ -49,9 +49,51 @@ public class EnrollStudentFormModelMappingsTests
     {
         var model = new EnrollStudentFormModel();
 
-        model.LoadFrom(null);
+        model.LoadFrom(null, Guid.NewGuid());
 
         model.GradeCodedValueId.Should().BeNull();
+        model.StreamCodedValueId.Should().BeNull(
+            "the stream belongs to the grade — without a resolved grade the stream must NOT be applied " +
+            "(the stream picker is attribute-filtered by the selected grade)");
+    }
+
+    [TestMethod]
+    public void LoadFrom_WithStream_AppliesBothGradeAndStream()
+    {
+        var grade = MakeGrade();
+        var streamId = Guid.NewGuid();
+        var model = new EnrollStudentFormModel();
+
+        model.LoadFrom(grade, streamId);
+
+        model.GradeCodedValueId.Should().Be(grade.CodedValueId);
+        model.StreamCodedValueId.Should().Be(streamId);
+    }
+
+    [TestMethod]
+    public void LoadFrom_GradeOnly_StreamStaysNull()
+    {
+        var grade = MakeGrade();
+        var model = new EnrollStudentFormModel();
+
+        model.LoadFrom(grade);
+
+        model.StreamCodedValueId.Should().BeNull("no stream was suggested");
+    }
+
+    [TestMethod]
+    public void LoadFrom_NullStream_AppliesGradeOnly()
+    {
+        // Re-enrollment of a student whose current enrollment has NO stream:
+        // the explicit null must clear any prior stream value rather than keep it.
+        var grade = MakeGrade();
+        var model = new EnrollStudentFormModel { StreamCodedValueId = Guid.NewGuid() };
+
+        model.LoadFrom(grade, null);
+
+        model.GradeCodedValueId.Should().Be(grade.CodedValueId);
+        model.StreamCodedValueId.Should().BeNull(
+            "LoadFrom projects a full snapshot of the suggested enrollment; an absent stream clears the field");
     }
 
     [TestMethod]

@@ -2,6 +2,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.RemoveCodedValueOverride;
@@ -41,6 +42,7 @@ public class CodedValueOverrideHandlerTests
         public UpsertCodedValueOverrideHandler Upsert { get; }
         public RemoveCodedValueOverrideHandler Remove { get; }
         public HybridCache Cache { get; }
+        public Mock<SchoolCollab.Core.Messaging.IIntegrationEventPublisher> Publisher { get; } = new();
 
         public Scope(string dbName)
         {
@@ -61,9 +63,9 @@ public class CodedValueOverrideHandlerTests
             // written through Db are visible to handler-created contexts.
             Factory = provider.GetRequiredService<IDbContextFactory<SettingsDbContext>>();
             ByParent = new GetCodedValuesByParentHandler(Factory, Cache, Tenants);
-            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, accessor, Resolver, Cache,
+            Upsert = new UpsertCodedValueOverrideHandler(Db, Tenants, accessor, Resolver, Publisher.Object, Cache,
                 Microsoft.Extensions.Logging.Abstractions.NullLogger<UpsertCodedValueOverrideHandler>.Instance);
-            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, accessor, Cache);
+            Remove = new RemoveCodedValueOverrideHandler(Db, Tenants, accessor, Publisher.Object, Cache);
         }
 
         public void Dispose() => Db.Dispose();

@@ -76,6 +76,10 @@ public class GuardianContactsCqrsTests
             Enqueued.Add(message);
             return Task.CompletedTask;
         }
+
+        public Task EnqueueAsync<T>(T message, Guid? tenantStamp, CancellationToken ct = default)
+            where T : class
+            => EnqueueAsync(message, ct);
     }
 
     private static async Task<Guid> SeedStudentAsync(StudentsTestScope s, string number)

@@ -57,7 +57,7 @@ public class ProvisionalCodedValueHandlerTests
                 repository, Publisher.Object, Cache, Tenants,
                 NullLogger<CreateProvisionalCodedValueHandler>.Instance);
             Approve = new ApproveProvisionalCodedValueHandler(
-                Db, accessor, Cache, NullLogger<ApproveProvisionalCodedValueHandler>.Instance);
+                Db, accessor, Publisher.Object, Cache, NullLogger<ApproveProvisionalCodedValueHandler>.Instance);
             Reject = new RejectProvisionalCodedValueHandler(
                 Db, accessor, Cache, NullLogger<RejectProvisionalCodedValueHandler>.Instance);
             List = new ListProvisionalCodedValuesHandler(Db);

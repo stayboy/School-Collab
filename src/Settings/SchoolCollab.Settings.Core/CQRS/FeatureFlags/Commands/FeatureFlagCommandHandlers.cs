@@ -30,10 +30,10 @@ public sealed class CreateFeatureFlagHandler(
         db.FeatureFlags.Add(flag);
         auditor.Record(db, tenantId: null, flag.Id, flag.Key, FlagChangeKind.Created,
             previousIsEnabled: null, newIsEnabled: flag.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
-
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, TenantId: null, nameof(FlagChangeKind.Created), flag.IsEnabled, flag.CreatedAt), ct);
+
+        await db.SaveChangesAsync(ct);
 
         return flag.Id;
     }
@@ -50,10 +50,10 @@ public sealed class RenameFeatureFlagHandler(
         flag.Rename(command.Name, command.Description);
         auditor.Record(db, tenantId: null, flag.Id, flag.Key, FlagChangeKind.Renamed,
             previousIsEnabled: flag.IsEnabled, newIsEnabled: flag.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
-
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, null, nameof(FlagChangeKind.Renamed), flag.IsEnabled, flag.UpdatedAt), ct);
+
+        await db.SaveChangesAsync(ct);
     }
 }
 
@@ -76,10 +76,10 @@ public sealed class SetFeatureFlagEnabledHandler(
         var kind = flag.IsEnabled ? FlagChangeKind.Enabled : FlagChangeKind.Disabled;
         auditor.Record(db, tenantId: null, flag.Id, flag.Key, kind,
             previousIsEnabled: previous, newIsEnabled: flag.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
-
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, null, kind.ToString(), flag.IsEnabled, flag.UpdatedAt), ct);
+
+        await db.SaveChangesAsync(ct);
     }
 }
 
@@ -94,9 +94,9 @@ public sealed class ArchiveFeatureFlagHandler(
         flag.Archive();
         auditor.Record(db, null, flag.Id, flag.Key, FlagChangeKind.Archived,
             flag.IsEnabled, flag.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, null, nameof(FlagChangeKind.Archived), flag.IsEnabled, flag.UpdatedAt), ct);
+        await db.SaveChangesAsync(ct);
     }
 }
 
@@ -111,9 +111,9 @@ public sealed class UnarchiveFeatureFlagHandler(
         flag.Unarchive();
         auditor.Record(db, null, flag.Id, flag.Key, FlagChangeKind.Unarchived,
             flag.IsEnabled, flag.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, null, nameof(FlagChangeKind.Unarchived), flag.IsEnabled, flag.UpdatedAt), ct);
+        await db.SaveChangesAsync(ct);
     }
 }
 
@@ -128,9 +128,9 @@ public sealed class DeleteFeatureFlagHandler(
         flag.Delete();
         auditor.Record(db, null, flag.Id, flag.Key, FlagChangeKind.Deleted,
             flag.IsEnabled, flag.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, null, nameof(FlagChangeKind.Deleted), flag.IsEnabled, flag.UpdatedAt), ct);
+        await db.SaveChangesAsync(ct);
     }
 }
 
@@ -146,9 +146,9 @@ public sealed class RecoverFeatureFlagHandler(
         flag.Recover();
         auditor.Record(db, null, flag.Id, flag.Key, FlagChangeKind.Recovered,
             flag.IsEnabled, flag.IsEnabled, command.Reason);
-        await db.SaveChangesAsync(ct);
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, null, nameof(FlagChangeKind.Recovered), flag.IsEnabled, flag.UpdatedAt), ct);
+        await db.SaveChangesAsync(ct);
     }
 }
 
@@ -192,15 +192,19 @@ public sealed class UpsertTenantFlagOverrideHandler(
 
             auditor.Record(db, command.TenantId, flag.Id, flag.Key, kind,
                 previousIsEnabled: previous, newIsEnabled: command.IsEnabled, command.Reason);
+
+            // Enqueue BEFORE save: atomic commit with the override. The explicit
+            // null tenant stamp keeps the outbox row GLOBAL (feature-flag changes
+            // are global config) even though the write runs under the target
+            // tenant's save-guard — same routing as the other handlers.
+            await publisher.EnqueueAsync(new FeatureFlagChanged(
+                flag.Id, flag.Key, command.TenantId, kind.ToString(), command.IsEnabled, existing.UpdatedAt),
+                tenantStamp: null, ct);
+
             await db.SaveChangesAsync(ct2);
 
             return FeatureFlagCommandHelpers.ToDto(existing);
         }, ct);
-
-        // Publish outside the explicit tenant scope so the outbox row stays global
-        // (feature-flag changes are global config), consistent with the other handlers.
-        await publisher.EnqueueAsync(new FeatureFlagChanged(
-            flag.Id, flag.Key, command.TenantId, kind.ToString(), command.IsEnabled, existing.UpdatedAt), ct);
 
         return dto;
     }
@@ -231,12 +235,16 @@ public sealed class DeleteTenantFlagOverrideHandler(
             existing.MarkAsDeleted();
             auditor.Record(db, command.TenantId, flag.Id, flag.Key, FlagChangeKind.OverrideDeleted,
                 previousIsEnabled: previous, newIsEnabled: null, command.Reason);
+
+            // Enqueue BEFORE save: atomic with the removal; explicit null stamp keeps
+            // the outbox row global (see UpsertTenantFlagOverrideHandler).
+            await publisher.EnqueueAsync(new FeatureFlagChanged(
+                flag.Id, flag.Key, command.TenantId, nameof(FlagChangeKind.OverrideDeleted), NewIsEnabled: null, existing.UpdatedAt),
+                tenantStamp: null, ct);
+
             await db.SaveChangesAsync(ct2);
             return 0;
         }, ct);
-
-        await publisher.EnqueueAsync(new FeatureFlagChanged(
-            flag.Id, flag.Key, command.TenantId, nameof(FlagChangeKind.OverrideDeleted), NewIsEnabled: null, existing.UpdatedAt), ct);
     }
 }
 

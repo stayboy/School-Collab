@@ -39,18 +39,20 @@ public sealed class UpdateCodedValueHandler(
         }
 
         codedValue.Update(command.Name, command.Description, command.DisplayOrder);
-        await repository.UpdateAsync(codedValue, cancellationToken);
-        await cache.RemoveByTagAsync("coded-values", cancellationToken);
+
+        // Enriched full-state payload via CodedValueEventMapper — single source of
+        // truth for the projection contract (adr-cross-module-calls.md).
+        // Enqueue BEFORE save: atomic commit with the entity.
+        var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
+            repository, codedValue.ParentId, cancellationToken);
 
         foreach (var _ in codedValue.DomainEvents.OfType<CodedValueUpdatedEvent>())
         {
-            await publisher.EnqueueAsync(new CodedValueUpdated(
-                codedValue.Id,
-                codedValue.Code,
-                codedValue.Name,
-                codedValue.Description,
-                codedValue.UpdatedAt), cancellationToken);
+            await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), cancellationToken);
         }
+
+        await repository.UpdateAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         codedValue.ClearDomainEvents();
 

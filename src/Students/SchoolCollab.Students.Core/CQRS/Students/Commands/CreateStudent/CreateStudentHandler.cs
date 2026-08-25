@@ -44,9 +44,6 @@ public sealed class CreateStudentHandler(
             command.TitleCodedValueId)
             .WithTenant(tenantProvider);
 
-        await repository.AddAsync(student, cancellationToken);
-        await cache.RemoveByTagAsync("students", cancellationToken);
-
         foreach (var _ in student.DomainEvents.OfType<StudentCreatedEvent>())
         {
             await publisher.EnqueueAsync(new StudentCreated(
@@ -56,6 +53,10 @@ public sealed class CreateStudentHandler(
                 student.LastName,
                 student.CreatedAt), cancellationToken);
         }
+
+        await repository.AddAsync(student, cancellationToken);
+        await cache.RemoveByTagAsync("students", cancellationToken);
+
 
         student.ClearDomainEvents();
 

@@ -164,6 +164,14 @@ public sealed class CreateStudentWithLinkedDataHandler(
                             evt.StreamCodedValueId, enrollment.EnrolledOn, DateTimeOffset.UtcNow)));
             }
 
+            // Enqueue BEFORE the single commit — the buffering outbox commits the
+            // events atomically with the entity changes (a rollback can never leave
+            // a phantom event, and a crash after commit can never lose one).
+            foreach (var e in studentCreatedEvents)
+                await publisher.EnqueueAsync(e, cancellationToken);
+            foreach (var e in studentEnrolledEvents)
+                await publisher.EnqueueAsync(e, cancellationToken);
+
             // Single commit — the unit of work commits only if this returns without throwing.
             await ctx.SaveChangesAsync(ct);
 
@@ -175,17 +183,10 @@ public sealed class CreateStudentWithLinkedDataHandler(
             return student.Id;
         }, cancellationToken);
 
-        // After the commit: invalidate cache + enqueue outbox events. Cache invalidation
-        // is non-transactional; the enqueue MUST stay after the UoW returns so a data
-        // rollback can never leave a committed phantom outbox event.
+        // After the commit: invalidate caches (non-transactional by nature).
         await cache.RemoveByTagAsync("students", cancellationToken);
         await cache.RemoveByTagAsync("guardians", cancellationToken);
         await cache.RemoveByTagAsync("contacts", cancellationToken);
-
-        foreach (var e in studentCreatedEvents)
-            await publisher.EnqueueAsync(e, cancellationToken);
-        foreach (var e in studentEnrolledEvents)
-            await publisher.EnqueueAsync(e, cancellationToken);
 
         return studentId;
     }

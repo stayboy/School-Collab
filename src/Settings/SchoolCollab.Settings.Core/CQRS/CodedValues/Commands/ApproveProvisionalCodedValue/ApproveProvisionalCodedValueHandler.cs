@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Settings.Contracts.Events;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.CreateProvisionalCodedValue;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -22,6 +24,7 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.ApproveProvisiona
 public sealed class ApproveProvisionalCodedValueHandler(
     SettingsDbContext db,
     ITenantContextAccessor tenantContextAccessor,
+    IIntegrationEventPublisher publisher,
     HybridCache cache,
     ILogger<ApproveProvisionalCodedValueHandler> logger) : ICommandHandler<ApproveProvisionalCodedValue>
 {
@@ -61,6 +64,21 @@ public sealed class ApproveProvisionalCodedValueHandler(
         // Promotion rewrites tenant_id from a real tenant to NULL. The strict hybrid
         // save-guard rejects that transition, so suppress it for this sanctioned
         // system-wide operation.
+
+        // Tenancy changed (tenant-owned → shared blueprint), so consumers MUST be
+        // told: the event carries TenantId=null and consumers upsert a GLOBAL row
+        // and reconcile away their previous tenant-scoped row
+        // (adr-cross-module-calls.md Phase 0).
+        // Enqueue BEFORE save: atomic commit with the promotion.
+        string? parentCode = codedValue.ParentId is { } approvedParentId
+            ? (await db.CodedValues
+                .IgnoreQueryFilters(["Tenant"])
+                .Where(x => x.Id == approvedParentId)
+                .Select(x => (string?)x.Code)
+                .FirstOrDefaultAsync(ct))
+            : null;
+        await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), ct);
+
         using (tenantContextAccessor.SuppressTenantGuard())
         {
             await db.SaveChangesAsync(ct);

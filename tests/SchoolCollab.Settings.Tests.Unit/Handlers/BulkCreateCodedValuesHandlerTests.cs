@@ -18,6 +18,7 @@ public class BulkCreateCodedValuesHandlerTests
     private Mock<ITenantProvider> _tenantProvider = default!;
     private Mock<ITenantContextAccessor> _tenantContextAccessor = default!;
     private Mock<HybridCache> _cache = default!;
+    private Mock<SchoolCollab.Core.Messaging.IIntegrationEventPublisher> _publisher = default!;
     private Mock<ILogger<BulkCreateCodedValuesHandler>> _logger = default!;
     private BulkCreateCodedValuesHandler _handler = default!;
 
@@ -30,6 +31,7 @@ public class BulkCreateCodedValuesHandlerTests
         _tenantProvider = new Mock<ITenantProvider>();
         _tenantContextAccessor = new Mock<ITenantContextAccessor>();
         _cache = new Mock<HybridCache>();
+        _publisher = new Mock<SchoolCollab.Core.Messaging.IIntegrationEventPublisher>();
         _logger = new Mock<ILogger<BulkCreateCodedValuesHandler>>();
 
         // Default: real tenant — so tests verify the tenant-owned path
@@ -42,6 +44,7 @@ public class BulkCreateCodedValuesHandlerTests
 
         _handler = new BulkCreateCodedValuesHandler(
             _repository.Object,
+            _publisher.Object,
             _tenantProvider.Object,
             _tenantContextAccessor.Object,
             _cache.Object,

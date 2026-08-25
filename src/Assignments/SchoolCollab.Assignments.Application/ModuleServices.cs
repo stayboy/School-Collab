@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Assignments.Application.Services;
-using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Http;
 
 namespace SchoolCollab.Assignments.Application;
 
@@ -25,19 +25,11 @@ public static class ModuleServices
     /// </summary>
     public static IServiceCollection AddAssignmentsModule(this IServiceCollection services)
     {
-        // Propagates the dev-selected tenant to the assignments-api via the
-        // x-tenant-id header so strict-entity writes resolve the right tenant.
-        // Transient, not Singleton — see AddStudentsModule note (a Singleton shared
-        // across named clients corrupts InnerHandler / pipeline routing). Also made
-        // idempotent (TryAdd, NOT Add): TenantPropagationDelegatingHandler is a shared
-        // Core type now registered by Settings, Assignments, AND Students modules in
-        // the unified Admin host.
-        services.TryAddTransient<TenantPropagationDelegatingHandler>();
-        services.AddHttpClient<AssignmentsApiClient>(client =>
-        {
-            client.BaseAddress = new Uri("https+http://assignments-api");
-        })
-        .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+        // Cross-module: admin Blazor app → assignments-api, with the same
+        // resilience reference pattern used for the other module clients.
+        // propagateTenant:true wires TenantPropagationDelegatingHandler
+        // (dev-selected tenant) plus the retry handler + long handler lifetime.
+        services.AddCrossModuleHttpClient<AssignmentsApiClient>("https+http://assignments-api", propagateTenant: true);
 
         return services;
     }

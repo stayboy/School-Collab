@@ -22,9 +22,6 @@ public sealed class CloseAssignmentCommandHandler(
             ?? throw new AssignmentNotFoundException(command.Id);
 
         assignment.Close();
-        await repository.UpdateAsync(assignment, cancellationToken);
-        await cache.RemoveByTagAsync("assignments", cancellationToken);
-
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentClosedEvent>())
         {
             await publisher.EnqueueAsync(
@@ -34,6 +31,10 @@ public sealed class CloseAssignmentCommandHandler(
                     assignment.UpdatedAt),
                 cancellationToken);
         }
+
+        await repository.UpdateAsync(assignment, cancellationToken);
+        await cache.RemoveByTagAsync("assignments", cancellationToken);
+
 
         assignment.ClearDomainEvents();
 

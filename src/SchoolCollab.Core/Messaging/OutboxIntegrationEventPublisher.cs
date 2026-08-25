@@ -48,6 +48,11 @@ public sealed class OutboxIntegrationEventPublisher<TContext> : IIntegrationEven
     }
 
     /// <inheritdoc />
+    public Task EnqueueAsync<T>(T message, Guid? tenantStamp, CancellationToken cancellationToken = default)
+        where T : class
+        => EnqueueAsync(message, cancellationToken);
+
+    /// <inheritdoc />
     public async Task EnqueueAsync<T>(T message, CancellationToken cancellationToken = default)
         where T : class
     {

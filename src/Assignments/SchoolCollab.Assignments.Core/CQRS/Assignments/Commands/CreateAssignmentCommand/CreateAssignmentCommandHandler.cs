@@ -42,9 +42,6 @@ public sealed class CreateAssignmentCommandHandler(
             assignmentNumber: assignmentNumber)
             .WithTenant(tenantProvider);
 
-        await repository.AddAsync(assignment, cancellationToken);
-        await cache.RemoveByTagAsync("assignments", cancellationToken);
-
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentCreatedEvent>())
         {
             await publisher.EnqueueAsync(
@@ -55,6 +52,10 @@ public sealed class CreateAssignmentCommandHandler(
                     assignment.CreatedAt),
                 cancellationToken);
         }
+
+        await repository.AddAsync(assignment, cancellationToken);
+        await cache.RemoveByTagAsync("assignments", cancellationToken);
+
 
         assignment.ClearDomainEvents();
 

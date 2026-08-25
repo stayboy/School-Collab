@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Auth;
+using SchoolCollab.Core.Http;
 using SchoolCollab.Students.Application.Services;
 using SchoolCollab.Students.Core.Contracts;
 
@@ -11,24 +12,14 @@ public static class ModuleServices
 {
     public static IServiceCollection AddStudentsModule(this IServiceCollection services)
     {
-        // Propagates the dev-selected tenant to the students-api via the
-        // x-tenant-id header so strict-entity writes resolve the right tenant.
-        // Registered as a SINGLETON (NOT scoped): it is stateless apart from the
-        // singleton IDevTenantSelection + logger, and a scoped DelegatingHandler
-        // captured in IHttpClientFactory's cached chain is disposed when the
-        // request scope ends -> reused-disposed-handler (ObjectDisposedException /
-        // "Cannot access a disposed object … NetworkStream"). This was the
-        // EnrollStudentDialog failure.
-        // MUST be TRANSIENT (not Singleton, not Scoped): IHttpClientFactory's
-        // per-named-client pipeline sets InnerHandler on the handler chain.
-        // A Singleton shared across named clients (CodedValuesApiClient,
-        // StudentsApiClient, etc.) gets its InnerHandler overwritten by the
-        // second client, corrupting the first client's cached pipeline
-        // (e.g. coded-values requests hit students-api -> 404 -> blank page).
-        services.TryAddTransient<TenantPropagationDelegatingHandler>();
-        services.AddHttpClient<StudentsApiClient>(client =>
-            client.BaseAddress = new Uri("https+http://students-api"))
-            .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+        // Cross-module: admin Blazor app → students-api. Long handler lifetime
+        // + retry on disposed-NetworkStream/HttpRequestException so the tenant
+        // propagation handler does not appear to "block" calls when the factory
+        // rotates its handler pool (adr-cross-module-calls.md reference pattern).
+        // propagateTenant:true wires TenantPropagationDelegatingHandler
+        // (dev-selected tenant, registered TRANSIENT via TryAdd so it cannot be
+        // shared-across-named-clients Singleton that corrupts InnerHandler routing).
+        services.AddCrossModuleHttpClient<StudentsApiClient>("https+http://students-api", propagateTenant: true);
 
         // Shared contact surface (used by ContactsEditor in Admin.Shared) resolves
         // to the same typed HttpClient-backed client instance.

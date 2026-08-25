@@ -2,6 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SchoolCollab.Core.Messaging;
+using SchoolCollab.Settings.Contracts.Events;
+using SchoolCollab.Students.Core.Projections;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.Data.Repositories;
@@ -39,6 +42,17 @@ public static class Extensions
 
         services.AddScoped<IStudentRepository, StudentRepository>();
         services.AddScoped<IGradeLevelRepository, GradeLevelRepository>();
+
+        // Local coded-value read model (adr-cross-module-calls.md Phase 1):
+        // projection repository + event handlers that keep it current.
+        services.AddScoped<ILocalCodedValueRepository, LocalCodedValueRepository>();
+        services.AddScoped<IIntegrationEventHandler<CodedValueCreated>, CodedValueCreatedProjectionHandler>();
+        services.AddScoped<IIntegrationEventHandler<CodedValueUpdated>, CodedValueUpdatedProjectionHandler>();
+        services.AddScoped<IIntegrationEventHandler<CodedValueDisabled>, CodedValueDisabledProjectionHandler>();
+        services.AddScoped<IIntegrationEventHandler<CodedValueEnabled>, CodedValueEnabledProjectionHandler>();
+        services.AddScoped<IIntegrationEventHandler<CodedValueDeleted>, CodedValueDeletedProjectionHandler>();
+        services.AddScoped<IIntegrationEventHandler<CodedValueOverrideUpserted>, CodedValueOverrideUpsertedProjectionHandler>();
+        services.AddScoped<IIntegrationEventHandler<CodedValueOverrideRemoved>, CodedValueOverrideRemovedProjectionHandler>();
         services.AddScoped<ITopicRepository, TopicRepository>();
         services.AddScoped<IPeriodRepository, PeriodRepository>();
         services.AddScoped<IActivePeriodProvider, ActivePeriodProvider>();

@@ -61,3 +61,37 @@ jobs:
         with:
           name: test-results
           path: ./test-results/*.trx
+
+  cross-module-wiring-guard:
+    # Dedicated, fast job that fails the PR immediately if a cross-module HTTP
+    # client base address is added without a matching .WithReference() in the
+    # AppHost. This catches the "No such host is known (settings-api:80)" class
+    # of runtime failures at build time.
+    name: Cross-module wiring guard
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+
+      - name: Restore
+        run: dotnet restore tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj
+
+      - name: Build guard test project
+        run: >
+          dotnet build
+          tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj
+          --no-restore
+          --configuration Release
+
+      - name: Run cross-module wiring guard
+        run: >
+          dotnet test
+          tests/SchoolCollab.Core.Tests.Unit/SchoolCollab.Core.Tests.Unit.csproj
+          --no-build
+          --configuration Release
+          --filter "FullyQualifiedName~CrossModuleWiringTests"

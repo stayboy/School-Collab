@@ -50,6 +50,17 @@ public sealed class TransferStudentHandler(
             enrollment.PeriodId,
             command.Reason);
 
+        foreach (var evt in enrollment.DomainEvents.OfType<StudentTransferredEvent>())
+        {
+            await publisher.EnqueueAsync(new StudentTransferred(
+                enrollment.StudentId,
+                enrollment.PeriodId,
+                fromGradeLevelId,
+                evt.NewGradeLevelId,
+                evt.NewStreamCodedValueId,
+                DateTimeOffset.UtcNow), cancellationToken);
+        }
+
         try
         {
             await repository.UpdateAsync(enrollment, cancellationToken);
@@ -61,16 +72,6 @@ public sealed class TransferStudentHandler(
 
         await cache.RemoveByTagAsync("students", cancellationToken);
 
-        foreach (var evt in enrollment.DomainEvents.OfType<StudentTransferredEvent>())
-        {
-            await publisher.EnqueueAsync(new StudentTransferred(
-                enrollment.StudentId,
-                enrollment.PeriodId,
-                fromGradeLevelId,
-                evt.NewGradeLevelId,
-                evt.NewStreamCodedValueId,
-                DateTimeOffset.UtcNow), cancellationToken);
-        }
 
         enrollment.ClearDomainEvents();
 

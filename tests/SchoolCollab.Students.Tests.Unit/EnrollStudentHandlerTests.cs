@@ -84,6 +84,10 @@ public class EnrollStudentHandlerTests
             Enqueued.Add(message);
             return Task.CompletedTask;
         }
+
+        public Task EnqueueAsync<T>(T message, Guid? tenantStamp, CancellationToken ct = default)
+            where T : class
+            => EnqueueAsync(message, ct);
     }
 
     /// <summary>Stub <see cref="IFeatureFlagService"/> with a fixed verdict so each

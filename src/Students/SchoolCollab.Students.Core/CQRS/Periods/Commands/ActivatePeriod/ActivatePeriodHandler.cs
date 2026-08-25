@@ -39,6 +39,16 @@ public sealed class ActivatePeriodHandler(
 
         period.Activate();
 
+        foreach (var evt in period.DomainEvents.OfType<PeriodActivatedEvent>())
+        {
+            await publisher.EnqueueAsync(new PeriodActivated(
+                period.Id,
+                period.Name,
+                period.StartDate,
+                period.EndDate,
+                DateTimeOffset.UtcNow), cancellationToken);
+        }
+
         try
         {
             await repository.UpdateAsync(period, cancellationToken);
@@ -50,15 +60,6 @@ public sealed class ActivatePeriodHandler(
 
         await cache.RemoveByTagAsync("students", cancellationToken);
 
-        foreach (var evt in period.DomainEvents.OfType<PeriodActivatedEvent>())
-        {
-            await publisher.EnqueueAsync(new PeriodActivated(
-                period.Id,
-                period.Name,
-                period.StartDate,
-                period.EndDate,
-                DateTimeOffset.UtcNow), cancellationToken);
-        }
 
         period.ClearDomainEvents();
 

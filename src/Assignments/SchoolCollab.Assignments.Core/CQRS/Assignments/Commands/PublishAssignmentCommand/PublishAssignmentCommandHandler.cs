@@ -34,20 +34,19 @@ public sealed class PublishAssignmentCommandHandler(
         var tenantId = tenantProvider.GetTenantContext().TenantId;
         var recipients = await ResolveRecipientsAndGatesAsync(assignment, tenantId, command.ContactIds, cancellationToken);
 
-        await repository.UpdateAsync(assignment, cancellationToken);
-        await submissionRepository.SaveChangesAsync(cancellationToken);
-        await cache.RemoveByTagAsync("assignments", cancellationToken);
-
         // Effective-policy resolution (notification-delivery-plan.md §3): drop blocked
         // channels, apply preferred-channel order, cap the sendout at MaxNotifications.
-        // The persisted AssignmentRecipient rows are the full subscription set; the policy
-        // only shapes the broadcast set so a later policy change can re-broadcast.
+        // Enqueue BEFORE save: the buffering outbox commits the broadcast events
+        // atomically with the publish mutation.
         var effectivePolicy = await policyResolver.ResolveEffectiveAsync(tenantId, assignment.GradeLevelId, cancellationToken);
         var broadcastRecipients = NotificationRecipientFilter.Apply(recipients, effectivePolicy);
-
         await broadcaster.BroadcastPublishedAsync(
             new AssignmentPublishedContext(assignment.Id, assignment.Title, assignment.PublishedAt ?? assignment.UpdatedAt, broadcastRecipients),
             cancellationToken);
+
+        await repository.UpdateAsync(assignment, cancellationToken);
+        await submissionRepository.SaveChangesAsync(cancellationToken);
+        await cache.RemoveByTagAsync("assignments", cancellationToken);
 
         assignment.ClearDomainEvents();
 

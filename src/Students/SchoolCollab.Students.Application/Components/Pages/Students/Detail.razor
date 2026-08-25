@@ -104,10 +104,29 @@
                                         ? pn
                                         : context.PeriodId.ToString()[..8])
                                 </TemplateColumn>
-                                <TemplateColumn Title="Grade">
-                                    @(_gradeLevelNames.TryGetValue(context.GradeLevelId, out var gn)
-                                        ? gn
-                                        : context.GradeLevelId.ToString()[..8])
+                                @* Single "Grade (Stream)" column — the grade is
+                                   ALWAYS shown; the stream (when the enrollment has
+                                   one) is appended in parentheses. The separate
+                                   Grade column was folded in here since most rows
+                                   read as "Year 7" or "Year 7 (7A)". *@
+                                <TemplateColumn Title="Grade (Stream)">
+                                    @{
+                                        var gradeText = _gradeLevelNames.TryGetValue(context.GradeLevelId, out var g)
+                                            ? g
+                                            : context.GradeLevelId.ToString()[..8];
+                                        var streamText = context.StreamCodedValueId is { } sid
+                                            && _streamNames.TryGetValue(sid, out var s)
+                                            ? s
+                                            : null;
+                                    }
+                                    @if (streamText is not null)
+                                    {
+                                        <text>@gradeText (@streamText)</text>
+                                    }
+                                    else
+                                    {
+                                        <text>@gradeText</text>
+                                    }
                                 </TemplateColumn>
                                 <TemplateColumn Title="Enrolled on">@context.EnrolledOn.ToString("d")</TemplateColumn>
                                 <TemplateColumn Title="Exit date">@(context.ExitDate?.ToString("d") ?? "—")</TemplateColumn>
@@ -321,6 +340,7 @@
     private StudentEnrollmentDto[]? _enrollments;
     private Dictionary<Guid, string> _gradeLevelNames = new();
     private Dictionary<Guid, string> _periodNames = new();
+    private Dictionary<Guid, string> _streamNames = new();
     private string? _error;
     private bool _savingEnrollment;
     private bool _isRealTenant;
@@ -468,6 +488,12 @@
                 .Select(e => e.GradeLevelId).Distinct().ToArray();
             var periodIds = (_enrollments ?? Array.Empty<StudentEnrollmentDto>())
                 .Select(e => e.PeriodId).Distinct().ToArray();
+            var streamIds = (_enrollments ?? Array.Empty<StudentEnrollmentDto>())
+                .Select(e => e.StreamCodedValueId)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToArray();
 
             var gradesTask = gradeIds.Length > 0
                 ? Api.ListGradeLevelsAsync(ct)
@@ -475,13 +501,18 @@
             var periodsTask = periodIds.Length > 0
                 ? Api.ListPeriodsAsync(ct)
                 : Task.FromResult<PeriodDto[]?>(Array.Empty<PeriodDto>());
-            await Task.WhenAll(gradesTask, periodsTask);
+            var streamsTask = streamIds.Length > 0
+                ? CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.Streams.ToCode(), ct)
+                : Task.FromResult<CodedValueDto[]?>(Array.Empty<CodedValueDto>());
+            await Task.WhenAll(gradesTask, periodsTask, streamsTask);
             if (_disposed) return;
 
             _gradeLevelNames = (gradesTask.Result ?? Array.Empty<GradeLevelDto>())
                 .ToDictionary(g => g.Id, g => g.Name);
             _periodNames = (periodsTask.Result ?? Array.Empty<PeriodDto>())
                 .ToDictionary(p => p.Id, p => p.Name);
+            _streamNames = (streamsTask.Result ?? Array.Empty<CodedValueDto>())
+                .ToDictionary(s => s.Id, s => s.Name);
 
             // 3. Guardian link list (page-owned, replaces the deprecated
             //    <GuardiansTab>). The list is used by the StudentGuardiansList
@@ -516,7 +547,8 @@
         var model = new EnrollStudentModel(
             StudentId: Id,
             SuggestedPeriodId: ActiveEnrollment?.PeriodId,
-            SuggestedGradeLevelId: ActiveEnrollment?.GradeLevelId);
+            SuggestedGradeLevelId: ActiveEnrollment?.GradeLevelId,
+            SuggestedStreamCodedValueId: ActiveEnrollment?.StreamCodedValueId);
         var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
             model, "Enroll student", DialogSize.Medium);
         if (result is { Success: true })
@@ -578,6 +610,20 @@
                 foreach (var p in await Api.ListPeriodsAsync() ?? Array.Empty<PeriodDto>())
                 {
                     _periodNames[p.Id] = p.Name;
+                }
+            }
+
+            var streamIds = _enrollments
+                .Select(e => e.StreamCodedValueId)
+                .Where(id => id.HasValue)
+                .Select(id => id!.Value)
+                .Distinct()
+                .ToArray();
+            if (streamIds.Except(_streamNames.Keys).Any())
+            {
+                foreach (var s in await CodedValuesApi.GetChildrenByParentCodeAsync(CodedValueParent.Streams.ToCode()) ?? Array.Empty<CodedValueDto>())
+                {
+                    _streamNames[s.Id] = s.Name;
                 }
             }
         }

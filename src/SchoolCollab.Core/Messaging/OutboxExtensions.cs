@@ -87,9 +87,49 @@ public static class OutboxExtensions
         services.AddSingleton(flags);
         OutboxMapping.SetFlagsFor<TContext>(flags);
 
-        services.TryAddSingleton<IIntegrationEventPublisher, OutboxIntegrationEventPublisher<TContext>>();
+        // Atomicity (adr-cross-module-calls.md outbox follow-up): the scoped
+        // buffering publisher commits the outbox row in the SAME SaveChanges as
+        // the domain mutation when handlers enqueue before saving; its disposal
+        // safety-net flush keeps enqueuers-without-save working non-atomically.
+        services.TryAddScoped<IIntegrationEventPublisher, BufferingOutboxPublisher<TContext>>();
         services.AddHostedService<OutboxDispatcher<TContext>>();
 
         return services;
     }
+
+    /// <summary>
+    /// Registers the RabbitMQ integration-event subscriber
+    /// (<see cref="RabbitMqSubscriberService"/>) for the supplied event types.
+    /// The consuming host must already have an Aspire RabbitMQ
+    /// <see cref="IConnection"/> registered (via
+    /// <c>builder.AddRabbitMQClient(...)</c>) and an ambient
+    /// <c>ITenantContextAccessor</c>. Handlers are resolved per closed
+    /// <see cref="IIntegrationEventHandler{TEvent}"/> interface from the scope at
+    /// delivery time. Configuration is bound from <c>RabbitMq:Subscriber</c>
+    /// (<see cref="RabbitMqSubscriberOptions.SectionName"/>).
+    /// </summary>
+    public static IServiceCollection AddRabbitMqSubscriber(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        params Type[] eventTypes)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        services
+            .AddOptions<RabbitMqSubscriberOptions>()
+            .Bind(configuration.GetSection(RabbitMqSubscriberOptions.SectionName))
+            .Validate(o => !string.IsNullOrWhiteSpace(o.ExchangeName),
+                $"{nameof(RabbitMqSubscriberOptions.ExchangeName)} must be set in the '{RabbitMqSubscriberOptions.SectionName}' configuration section.")
+            .Validate(o => !string.IsNullOrWhiteSpace(o.QueueName),
+                $"{nameof(RabbitMqSubscriberOptions.QueueName)} must be set in the '{RabbitMqSubscriberOptions.SectionName}' configuration section.")
+            .ValidateOnStart();
+
+        services.AddSingleton(new RabbitMqEventTypes([.. eventTypes]));
+        services.AddHostedService<RabbitMqSubscriberService>();
+        return services;
+    }
 }
+
+/// <summary>The set of integration event types a subscriber consumes.</summary>
+public sealed record RabbitMqEventTypes(IReadOnlyList<Type> EventTypes);

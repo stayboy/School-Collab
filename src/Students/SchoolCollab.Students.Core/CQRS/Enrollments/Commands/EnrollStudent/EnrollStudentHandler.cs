@@ -99,9 +99,6 @@ public sealed class EnrollStudentHandler(
             command.EnrolledOn,
             command.StreamCodedValueId);
 
-        await repository.AddAsync(enrollment, cancellationToken);
-        await cache.RemoveByTagAsync("students", cancellationToken);
-
         foreach (var evt in enrollment.DomainEvents.OfType<StudentEnrolledEvent>())
         {
             await publisher.EnqueueAsync(new StudentEnrolled(
@@ -112,6 +109,10 @@ public sealed class EnrollStudentHandler(
                 enrollment.EnrolledOn,
                 DateTimeOffset.UtcNow), cancellationToken);
         }
+
+        await repository.AddAsync(enrollment, cancellationToken);
+        await cache.RemoveByTagAsync("students", cancellationToken);
+
 
         enrollment.ClearDomainEvents();
 

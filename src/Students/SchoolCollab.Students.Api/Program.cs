@@ -1,9 +1,11 @@
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Serilog;
 using SchoolCollab.Students.Core;
+using Microsoft.Extensions.Configuration;
 using SchoolCollab.Settings.Core;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
+using SchoolCollab.Core.Http;
 using SchoolCollab.Students.Api;
 using SchoolCollab.Students.Api.Auth;
 using SchoolCollab.Students.Core.Services;
@@ -26,40 +28,47 @@ else
 }
 
 // Cross-module: HTTP client for the Settings Coded Values API (strand validation).
-// Minimal client used by handlers (GetByIdAsync only). TenantForwardingDelegatingHandler
-// forwards the inbound request's resolved tenant (x-tenant-id header, falling back to
-// the tenant_id claim) so stream validation resolves the SAME tenant the enroll
-// request came in under — see docs/plans/2026-08-22-tenant-propagation-enroll-stream-
-// investigation.md (Class B).
-// Registered TRANSIENT (not Singleton): IHttpClientFactory sets InnerHandler per
-// named-client pipeline; a Singleton shared across ICodedValuesApiClient,
-// Admin.Shared CodedValuesApiClient, and the "assignments-api" named client gets
-// its InnerHandler overwritten, routing data to the wrong host (e.g. coded-value
-// validation calls hitting the assignments-api -> 404 -> enrollment failure).
+// Minimal client used by handlers (GetByIdAsync only).
+// Named client (unique name — Admin.Shared also registers a typed client whose
+// short type name is 'CodedValuesApiClient', and typed names ignore namespace).
+// TenantForwardingDelegatingHandler forwards the inbound request's resolved
+// tenant (x-tenant-id header, falling back to the tenant_id claim) so stream
+// validation resolves the SAME tenant the enroll request came in under — see
+// docs/plans/2026-08-22-tenant-propagation-enroll-stream-investigation.md (Class B).
+// Registered TRANSIENT (TryAdd, not Add): IHttpClientFactory sets InnerHandler per
+// named-client pipeline; a Singleton shared across ICodedValuesApiClient, the
+// Admin.Shared CodedValuesApiClient, and the "assignments-api" named client would
+// have its InnerHandler overwritten, routing data to the wrong host.
 builder.Services.AddHttpContextAccessor();
 builder.Services.TryAddTransient<TenantForwardingDelegatingHandler>();
-builder.Services.AddHttpClient<ICodedValuesApiClient, SchoolCollab.Students.Core.Services.CodedValuesApiClient>(client =>
-{
-    client.BaseAddress = new Uri("http://settings-api");
-})
-.AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
+builder.Services.AddCrossModuleHttpClient("students-core-coded-values", "http://settings-api", propagateTenant: false)
+    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>()
+    .AddTypedClient<SchoolCollab.Students.Core.Services.CodedValuesApiClient>();
+
+// Flag-gated swap (adr-cross-module-calls.md Phase 1): when
+// Students:UseLocalCodedValueProjection is on, coded-value reads resolve from
+// the local projection (no settings-api hop); off (default) keeps the HTTP path.
+builder.Services.AddScoped<SchoolCollab.Students.Core.Services.ICodedValuesApiClient>(sp =>
+    new SchoolCollab.Students.Core.Services.FlagRoutedCodedValuesApiClient(
+        sp.GetRequiredService<SchoolCollab.Students.Core.Services.CodedValuesApiClient>(),
+        sp.GetRequiredService<SchoolCollab.Students.Core.Services.ILocalCodedValueRepository>(),
+        sp.GetRequiredService<IConfiguration>()));
 
 // Full-featured CodedValuesApiClient for Admin.Shared UI components (e.g., TeacherEditDialog).
 // Registers as SchoolCollab.Admin.Shared.Services.CodedValuesApiClient so @inject CodedValuesApiClient
 // in Blazor components resolves to the full-featured version with GetChildrenByParentCodeAsync, etc.
-builder.Services.AddHttpClient<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>(client =>
-{
-    client.BaseAddress = new Uri("http://settings-api");
-})
-.AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
+// TenantForwardingDelegatingHandler forwards the inbound request's tenant (see Class B
+// investigation) so Admin.Shared components resolve the same tenant as the API request.
+builder.Services.AddCrossModuleHttpClient<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>("http://settings-api", propagateTenant: false)
+    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
 
 // Phase 2 (spec activity-group-enrollment.md FR-6): HTTP client for the
 // Assignments API delete-guard check. The named client is resolved via
 // Aspire service discovery once the AppHost references assignments-api.
-// Tenant forwarding is REQUIRED here: assignments are strict-tenant entities,
-// and a tenant-less guard query can false-negative and allow a delete that
-// should be blocked (Class B / data-integrity follow-up).
-builder.Services.AddHttpClient("assignments-api")
+// TenantForwardingDelegatingHandler forwards the inbound request's tenant
+// (Class B): assignments are strict-tenant entities, and a tenant-less guard
+// query can false-negative and allow a delete that should be blocked.
+builder.Services.AddCrossModuleHttpClient("assignments-api", "https+http://assignments-api", propagateTenant: false)
     .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
 builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IActivityGroupAssignmentQuery,
     SchoolCollab.Students.Api.Services.ActivityGroupAssignmentQueryHttpClient>();

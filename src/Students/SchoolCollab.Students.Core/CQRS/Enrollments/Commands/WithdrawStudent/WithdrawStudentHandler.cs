@@ -25,6 +25,14 @@ public sealed class WithdrawStudentHandler(
 
         enrollment.Withdraw(command.ExitDate, command.Reason);
 
+        foreach (var evt in enrollment.DomainEvents.OfType<StudentWithdrawnEvent>())
+        {
+            await publisher.EnqueueAsync(new StudentWithdrawn(
+                evt.StudentId,
+                evt.PeriodId,
+                DateTimeOffset.UtcNow), cancellationToken);
+        }
+
         try
         {
             await repository.UpdateAsync(enrollment, cancellationToken);
@@ -36,13 +44,6 @@ public sealed class WithdrawStudentHandler(
 
         await cache.RemoveByTagAsync("students", cancellationToken);
 
-        foreach (var evt in enrollment.DomainEvents.OfType<StudentWithdrawnEvent>())
-        {
-            await publisher.EnqueueAsync(new StudentWithdrawn(
-                evt.StudentId,
-                evt.PeriodId,
-                DateTimeOffset.UtcNow), cancellationToken);
-        }
 
         enrollment.ClearDomainEvents();
 

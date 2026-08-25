@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Settings.Core.Data.Repositories;
 using SchoolCollab.Settings.Core.Domain.Exceptions;
 
@@ -7,6 +8,7 @@ namespace SchoolCollab.Settings.Core.CQRS.CodedValues.Commands.SetCodedValueAttr
 
 public sealed class SetCodedValueAttributeHandler(
     ICodedValueRepository repository,
+    IIntegrationEventPublisher publisher,
     HybridCache cache) : ICommandHandler<SetCodedValueAttribute>
 {
     public async Task HandleAsync(SetCodedValueAttribute command, CancellationToken cancellationToken = default)
@@ -44,6 +46,16 @@ public sealed class SetCodedValueAttributeHandler(
         }
 
         codedValue.SetAttribute(command.Key, command.Value);
+
+        // Attribute values drive downstream validation (e.g. a stream's gradeLevel
+        // attribute is read by Students enroll stream validation), so attribute
+        // changes MUST reach the projection — publish the full current state
+        // (adr-cross-module-calls.md Phase 0 gap fix).
+        // Enqueue BEFORE save: atomic commit with the entity.
+        var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
+            repository, codedValue.ParentId, cancellationToken);
+        await publisher.EnqueueAsync(codedValue.ToUpdatedEvent(parentCode), cancellationToken);
+
         await repository.UpdateAsync(codedValue, cancellationToken);
         await cache.RemoveByTagAsync("coded-values", cancellationToken);
     }

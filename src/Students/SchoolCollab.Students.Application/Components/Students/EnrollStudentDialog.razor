@@ -223,6 +223,7 @@
                         <CodedValueDropdown @ref="_gradeCodedValueDropdown"
                                             Parent="CodedValueParent.Grades"
                                             @bind-SelectedId="_formModel.GradeCodedValueId"
+                                            @bind-SelectedId:after="OnGradePicked"
                                             Placeholder="Select a grade"
                                             class="enroll-grade-select" />
                         <FeatureFlagGate Key="@FeatureFlagKeys.EnableGradeLevelSetupOnEnrollDialog">
@@ -446,6 +447,21 @@
 
     // Stream selection lives on _formModel.StreamCodedValueId.
 
+    /// <summary>Side-effect of a USER grade pick (fires via
+    /// <c>@bind-SelectedId:after</c>, i.e. only when the dropdown itself raises
+    /// <c>SelectedIdChanged</c> — never during the initial pre-selection of the
+    /// student's current enrollment values). A stream belongs to exactly one
+    /// grade (the picker is attribute-filtered by the selected grade's coded
+    /// value), so switching grades invalidates any previously picked/streamed-in
+    /// value — same rule as <c>StudentTransferDialog.OnGradeSelectedValueChanged</c>.
+    /// Without this, a grade change followed by submit would send the OLD
+    /// grade's stream id with the NEW grade.</summary>
+    private Task OnGradePicked()
+    {
+        _formModel.StreamCodedValueId = null;
+        return Task.CompletedTask;
+    }
+
     /// <summary>The coded value id of the selected grade, used as the
     /// stream picker's <c>AttributeFilter</c> value. Null when no grade is
     /// selected yet OR the id is empty (the dropdown's sentinel) — the
@@ -482,14 +498,25 @@
             _activePeriod = periods.FirstOrDefault(p =>
                 string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase));
 
-            // Pre-select the grade the caller suggested (the student's
-            // current active-enrollment grade, if any). The suggestion is a
+            // Pre-select the grade + stream the caller suggested (the student's
+            // current active-enrollment values, if any). The grade suggestion is a
             // GradeLevel row id; resolve its coded value with a single-item
             // fetch (best-effort - an unknown/deleted grade just leaves the
-            // picker empty) so the dropdown shows it pre-picked.
+            // picker empty) so the dropdown shows it pre-picked. The stream is
+            // applied together with the grade because the stream picker is
+            // attribute-filtered by the resolved grade's coded value — applying
+            // a stream without its grade would leave it filtered to a different
+            // grade and silently drop the pre-selection.
             if (Model.SuggestedGradeLevelId is { } suggestedId)
             {
-                _formModel.LoadFrom(await Api.GetGradeLevelByIdAsync(suggestedId, CancellationToken.None));
+                var suggestedGrade = await Api.GetGradeLevelByIdAsync(suggestedId, CancellationToken.None);
+                if (suggestedGrade is null)
+                {
+                    Logger.LogWarning(
+                        "Suggested grade level {GradeLevelId} for student {StudentId} no longer exists; leaving the grade picker empty",
+                        suggestedId, Model.StudentId);
+                }
+                _formModel.LoadFrom(suggestedGrade, Model.SuggestedStreamCodedValueId);
             }
         }
         catch (Exception ex)

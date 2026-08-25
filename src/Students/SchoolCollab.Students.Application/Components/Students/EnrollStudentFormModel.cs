@@ -58,12 +58,17 @@ public sealed class EnrollStudentFormModel
     /// <summary>
     /// Pre-selects the suggested grade (the student's current active-enrollment
     /// grade, if any) on this existing model by its coded value. A null
-    /// suggestion (new enrollment) is a no-op.
+    /// suggestion (new enrollment) is a no-op. When <paramref name="streamCodedValueId"/>
+    /// is supplied it is pre-selected as well — but ONLY when the grade
+    /// suggestion resolves: the stream picker is attribute-filtered by the
+    /// selected grade's coded value, so applying a stream whose grade did not
+    /// resolve would leave the picker filtered to a different (or no) grade.
     /// </summary>
-    public void LoadFrom(GradeLevelDto? suggestedGrade)
+    public void LoadFrom(GradeLevelDto? suggestedGrade, Guid? streamCodedValueId = null)
     {
         if (suggestedGrade is null) return;
         GradeCodedValueId = suggestedGrade.CodedValueId;
+        StreamCodedValueId = streamCodedValueId;
     }
 
     /// <summary>

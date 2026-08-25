@@ -30,6 +30,16 @@ public sealed class UpdateStudentHandler(
             command.GenderCodedValueId,
             command.TitleCodedValueId);
 
+        foreach (var _ in student.DomainEvents.OfType<StudentUpdatedEvent>())
+        {
+            await publisher.EnqueueAsync(new StudentUpdated(
+                student.Id,
+                student.StudentNumber,
+                student.FirstName,
+                student.LastName,
+                student.UpdatedAt), cancellationToken);
+        }
+
         try
         {
             await repository.UpdateAsync(student, cancellationToken);
@@ -41,15 +51,6 @@ public sealed class UpdateStudentHandler(
 
         await cache.RemoveByTagAsync("students", cancellationToken);
 
-        foreach (var _ in student.DomainEvents.OfType<StudentUpdatedEvent>())
-        {
-            await publisher.EnqueueAsync(new StudentUpdated(
-                student.Id,
-                student.StudentNumber,
-                student.FirstName,
-                student.LastName,
-                student.UpdatedAt), cancellationToken);
-        }
 
         student.ClearDomainEvents();
 

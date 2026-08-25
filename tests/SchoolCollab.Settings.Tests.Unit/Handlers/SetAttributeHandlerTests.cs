@@ -16,12 +16,14 @@ public class SetAttributeHandlerTests
 {
     private Mock<ICodedValueRepository> _repository = default!;
     private Mock<HybridCache> _cache = default!;
+    private Mock<SchoolCollab.Core.Messaging.IIntegrationEventPublisher> _publisher = default!;
 
     [TestInitialize]
     public void Setup()
     {
         _repository = new Mock<ICodedValueRepository>();
         _cache = new Mock<HybridCache>();
+        _publisher = new Mock<SchoolCollab.Core.Messaging.IIntegrationEventPublisher>();
     }
 
     [TestMethod]
@@ -29,7 +31,7 @@ public class SetAttributeHandlerTests
     {
         var cv = CodedValue.Create("STATE", "State", null, null, 0);
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new SetCodedValueAttributeHandler(_repository.Object, _cache.Object);
+        var handler = new SetCodedValueAttributeHandler(_repository.Object, _publisher.Object, _cache.Object);
 
         await handler.HandleAsync(new SetCodedValueAttribute(cv.Id, "country", "US"));
 
@@ -43,7 +45,7 @@ public class SetAttributeHandlerTests
         var cv = CodedValue.Create("STATE", "State", null, null, 0);
         cv.SetAttribute("country", "US");
         _repository.Setup(r => r.GetAsync(cv.Id, default)).ReturnsAsync(cv);
-        var handler = new RemoveCodedValueAttributeHandler(_repository.Object, _cache.Object);
+        var handler = new RemoveCodedValueAttributeHandler(_repository.Object, _publisher.Object, _cache.Object);
 
         await handler.HandleAsync(new RemoveCodedValueAttribute(cv.Id, "country"));
 
@@ -55,7 +57,7 @@ public class SetAttributeHandlerTests
     public async Task SetAttribute_WhenNotFound_ThrowsNotFoundException()
     {
         _repository.Setup(r => r.GetAsync(It.IsAny<Guid>(), default)).ReturnsAsync((CodedValue?)null);
-        var handler = new SetCodedValueAttributeHandler(_repository.Object, _cache.Object);
+        var handler = new SetCodedValueAttributeHandler(_repository.Object, _publisher.Object, _cache.Object);
 
         var act = async () => await handler.HandleAsync(new SetCodedValueAttribute(Guid.NewGuid(), "k", "v"));
 

@@ -62,20 +62,19 @@ public sealed class CreateProvisionalCodedValueHandler(
         codedValue.SetTenant(currentTenantId);
         codedValue.MarkProvisional();
 
-        await repository.AddAsync(codedValue, cancellationToken);
-        await cache.RemoveByTagAsync("coded-values", cancellationToken);
+        // Enriched full-state payload via CodedValueEventMapper — same fields as the
+        // regular create so provisional values project completely too.
+        // Enqueue BEFORE save: atomic commit with the entity.
+        var parentCode = await CodedValueEventMapper.ResolveParentCodeAsync(
+            repository, codedValue.ParentId, cancellationToken);
 
         foreach (var _ in codedValue.DomainEvents.OfType<CodedValueCreatedEvent>())
         {
-            await publisher.EnqueueAsync(new CodedValueCreated(
-                codedValue.Id,
-                codedValue.Code,
-                codedValue.Name,
-                codedValue.Description,
-                codedValue.ParentId,
-                codedValue.DisplayOrder,
-                codedValue.CreatedAt), cancellationToken);
+            await publisher.EnqueueAsync(codedValue.ToCreatedEvent(parentCode), cancellationToken);
         }
+
+        await repository.AddAsync(codedValue, cancellationToken);
+        await cache.RemoveByTagAsync("coded-values", cancellationToken);
 
         codedValue.ClearDomainEvents();
 

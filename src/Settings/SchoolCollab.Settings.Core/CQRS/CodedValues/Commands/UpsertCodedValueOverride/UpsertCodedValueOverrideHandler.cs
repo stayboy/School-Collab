@@ -2,7 +2,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Settings.Contracts.Events;
 using SchoolCollab.Settings.Core.CQRS.CodedValues.Queries.GetCodedValueById;
 using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
@@ -32,6 +34,7 @@ public sealed class UpsertCodedValueOverrideHandler(
     ITenantProvider tenantProvider,
     ITenantContextAccessor tenantContextAccessor,
     IQueryHandler<GetCodedValueById, CodedValueDto?> resolver,
+    IIntegrationEventPublisher publisher,
     HybridCache cache,
     ILogger<UpsertCodedValueOverrideHandler> logger) : ICommandHandler<UpsertCodedValueOverride, CodedValueDto>
 {
@@ -78,6 +81,18 @@ public sealed class UpsertCodedValueOverrideHandler(
         // Added/Modified, so suppress it for the dev affordance (sanctioned bypass).
         // Real-tenant saves satisfy the guard (TenantId == current) and are NOT
         // suppressed, preserving the mismatch defense.
+        // ADR adr-cross-module-calls.md: publish the override change so downstream
+        // projections can update tenant-scoped rows without calling back to
+        // settings-api. null fields mean "keep the global blueprint value".
+        // Enqueue BEFORE save: atomic commit with the override.
+        await publisher.EnqueueAsync(new CodedValueOverrideUpserted(
+            tenantId,
+            command.GlobalCodedValueId,
+            command.Name,
+            command.Description,
+            command.Code,
+            DateTimeOffset.UtcNow), ct);
+
         if (tenantId == Guid.Empty)
         {
             using (tenantContextAccessor.SuppressTenantGuard())
