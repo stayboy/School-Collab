@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Core.Http;
 
@@ -26,6 +27,8 @@ public static class ModuleServices
     {
         // Cross-module: admin Blazor app → assignments-api, with the same
         // resilience reference pattern used for the other module clients.
+        // propagateTenant:true wires TenantPropagationDelegatingHandler
+        // (dev-selected tenant) plus the retry handler + long handler lifetime.
         services.AddCrossModuleHttpClient<AssignmentsApiClient>("https+http://assignments-api", propagateTenant: true);
 
         return services;

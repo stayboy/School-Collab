@@ -505,6 +505,16 @@ public class EnrollStudentHandlerTests
             await db.SaveChangesAsync(ct);
         }
 
+        // The in-memory provider enforces neither unique indexes nor Postgres
+        // SQLSTATEs, so the conflict branch cannot fire here — behave as the
+        // no-conflict path. The race contract itself is pinned by the stub-based
+        // ConcurrentMaterialization tests below.
+        public async Task<GradeLevel> AddOrReuseAsync(GradeLevel candidate, CancellationToken ct = default)
+        {
+            await AddAsync(candidate, ct);
+            return candidate;
+        }
+
         public async Task UpdateAsync(GradeLevel gradeLevel, CancellationToken ct = default)
         {
             db.GradeLevels.Update(gradeLevel);
@@ -558,5 +568,102 @@ public class EnrollStudentHandlerTests
         var row = await s.Db.StudentEnrollments.SingleAsync();
         var materialized = await s.Db.GradeLevels.SingleAsync(g => g.CodedValueId == unknownCodedValueId);
         row.GradeLevelId.Should().Be(materialized.Id);
+    }
+
+    // ── Materialization race: concurrent first-time enrolls ─────────────────
+
+    /// <summary><see cref="IGradeLevelRepository"/> decorator that simulates the
+    /// Postgres unique-index loss: the candidate insert "fails" and a
+    /// pre-seeded winner row is returned by <see cref="AddOrReuseAsync"/>,
+    /// exactly what <see cref="GradeLevelRepository.AddOrReuseAsync"/> does on
+    /// a real 23505 conflict. Pins the handler-side contract: the enrollment
+    /// must reference the WINNING row and publish exactly one event.</summary>
+    private sealed class RacingGradeLevelRepository(IGradeLevelRepository inner, GradeLevel winner) : IGradeLevelRepository
+    {
+        public int ConflictCount;
+
+        public Task<GradeLevel?> GetAsync(Guid id, CancellationToken ct = default) => inner.GetAsync(id, ct);
+
+        // Simulates the read racing AHEAD of the concurrent commit: while the
+        // conflict has not yet "happened", the winning row is invisible (the
+        // reader's snapshot predates it); after the simulated 23505, reads see it.
+        public Task<GradeLevel?> GetByCodedValueIdAsync(Guid codedValueId, CancellationToken ct = default) =>
+            ConflictCount == 0 && codedValueId == winner.CodedValueId
+                ? Task.FromResult<GradeLevel?>(null)
+                : inner.GetByCodedValueIdAsync(codedValueId, ct);
+
+        public Task<GradeLevelDto[]> ListAsync(CancellationToken ct = default) => inner.ListAsync(ct);
+        public Task AddAsync(GradeLevel gradeLevel, CancellationToken ct = default) => inner.AddAsync(gradeLevel, ct);
+        public Task UpdateAsync(GradeLevel gradeLevel, CancellationToken ct = default) => inner.UpdateAsync(gradeLevel, ct);
+
+        public async Task<GradeLevel> AddOrReuseAsync(GradeLevel candidate, CancellationToken ct = default)
+        {
+            ConflictCount++;
+            return await Task.FromResult(winner);
+        }
+    }
+
+    private static async Task<(EnrollStudentHandler Handler, RacingGradeLevelRepository Repo)> NewHandlerWithRacingRepo(
+        StudentsTestScope s,
+        StubActivePeriodProvider periods,
+        RecordingPublisher publisher)
+    {
+        // Seed the WINNING GradeLevel — the row the concurrent enroll already
+        // committed before our insert hit the unique index.
+        var raceCodedValueId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        var winner = GradeLevel.Create(raceCodedValueId, level: 1, name: "Winner", displayOrder: 1);
+        s.Db.GradeLevels.Add(winner);
+        s.Db.SaveChanges();
+
+        var gradeCodedValueId = Guid.Parse("22222222-2222-2222-2222-222222222223");
+        s.Db.GradeLevels.Add(GradeLevel.Create(gradeCodedValueId, level: 2, name: "Grade 1", displayOrder: 1));
+        s.Db.SaveChanges();
+
+        var racingRepo = new RacingGradeLevelRepository(new InMemoryGradeLevelRepository(s.Db), winner);
+
+        var handler = new EnrollStudentHandler(
+            new StudentEnrollmentRepository(s.Db),
+            periods,
+            racingRepo,
+            new StubCodedValuesApiClient(),
+            publisher,
+            s.Cache,
+            NullLogger<EnrollStudentHandler>.Instance,
+            new StubFeatureFlagService(false),
+            new StudentRepository(s.Db),
+            new CompositeEnrollmentSpecification(new ILeafEnrollmentSpecification[]
+            {
+                new AgeRangeSpecification(),
+                new GenderRestrictionSpecification(),
+                new SingleActiveEnrollmentSpecification()
+            }),
+            s.Tenants);
+
+        return (handler, racingRepo);
+    }
+
+    [TestMethod]
+    public async Task ConcurrentMaterialization_LosesRace_EnrollsAgainstWinningRow()
+    {
+        using var s = new StudentsTestScope("enroll-race-loser");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var (h, racingRepo) = await NewHandlerWithRacingRepo(s, periods, publisher);
+
+        var raceCodedValueId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale);
+
+        var id = await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, raceCodedValueId, null, null));
+
+        id.Should().NotBeEmpty("the command succeeds despite losing the materialization race");
+        racingRepo.ConflictCount.Should().Be(1, "the handler routed the insert through AddOrReuseAsync");
+
+        var row = await s.Db.StudentEnrollments.SingleAsync();
+        var winner = await s.Db.GradeLevels.SingleAsync(g => g.CodedValueId == raceCodedValueId);
+        row.GradeLevelId.Should().Be(winner.Id,
+            "the enrollment references the WINNING row, not the losing candidate — a second GradeLevel for the same coded value must not exist");
+        (await s.Db.GradeLevels.CountAsync(g => g.CodedValueId == raceCodedValueId)).Should().Be(1,
+            "exactly one GradeLevel row per (tenant, coded_value) survives the race");
+        publisher.Enqueued.OfType<StudentEnrolled>().Should().ContainSingle("exactly one event is published once the race resolves");
     }
 }

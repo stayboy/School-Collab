@@ -1,7 +1,9 @@
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.AI.Abstractions;
 using SchoolCollab.AI.Services;
 using SchoolCollab.AI.Tools.CodedValues;
+using SchoolCollab.Core.Auth;
 using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -73,8 +75,20 @@ builder.Services.AddSingleton<IChatClientFactory>(sp =>
 // exposes the CodedValues aggregate endpoints under /api/coded-values/*
 // alongside the FeatureFlag aggregate endpoints under /api/config/* +
 // /api/features/*. See documents/solution/settings-context-merge-spec.md §8.
+//
+// Tenant forwarding: the chat endpoint receives the caller's x-tenant-id
+// header; TenantForwardingDelegatingHandler forwards it onto every settings-api
+// tool call so coded-value tools resolve the CALLING tenant's data instead of
+// the default tenant. See docs/plans/2026-08-22-tenant-propagation-enroll-
+// stream-investigation.md (Class B).
+// Registered TRANSIENT (not Singleton): consistent with the same handler in
+// Students.Api/Program.cs — avoids InnerHandler corruption if a second named
+// client is ever attached.
+builder.Services.AddHttpContextAccessor();
+builder.Services.TryAddTransient<TenantForwardingDelegatingHandler>();
 builder.Services.AddCodedValuesAiTools(client =>
-    client.BaseAddress = new Uri("https+http://settings-api"));
+    client.BaseAddress = new Uri("https+http://settings-api"),
+    clientBuilder => clientBuilder.AddHttpMessageHandler<TenantForwardingDelegatingHandler>());
 
 // Generic AI chat engine — drives /api/ai/chat for every registered
 // IToolProvider / ISystemPromptProvider. Adding a second bounded context is a

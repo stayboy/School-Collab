@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Http;
@@ -15,6 +16,9 @@ public static class ModuleServices
         // + retry on disposed-NetworkStream/HttpRequestException so the tenant
         // propagation handler does not appear to "block" calls when the factory
         // rotates its handler pool (adr-cross-module-calls.md reference pattern).
+        // propagateTenant:true wires TenantPropagationDelegatingHandler
+        // (dev-selected tenant, registered TRANSIENT via TryAdd so it cannot be
+        // shared-across-named-clients Singleton that corrupts InnerHandler routing).
         services.AddCrossModuleHttpClient<StudentsApiClient>("https+http://students-api", propagateTenant: true);
 
         // Shared contact surface (used by ContactsEditor in Admin.Shared) resolves
