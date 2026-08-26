@@ -38,12 +38,13 @@ namespace SchoolCollab.Students.Tests.Unit;
 ///         via the repository, invalidates the "students" cache tag, enqueues a
 ///         <see cref="StudentEnrolled"/> integration event, and returns the new
 ///         enrollment id.</item>
-///   <item><b>No duplicate-active guard at the handler</b> — two enrolments for
-///         the same student+period both persist. The single-active-enrollment
-///         invariant is enforced at the UX layer (the dialog's
-///         <c>IsNewEnrollment</c> check + the re-enroll/transfer flow), NOT in
-///         the handler. This test documents that contract so a future change to
-///         add a handler-level guard is a conscious decision.</item>
+///   <item><b>Upsert on re-enroll</b> — submitting the enroll command for a
+///         student already actively enrolled in the target period updates that
+///         row in place (same id returned): a no-op when grade+stream match,
+///         an audited grade/stream correction otherwise. The unique index
+///         <c>ix_student_enrollments_tenant_student_period</c> makes any other
+///         behaviour impossible (23505), and the insert itself is race-safe via
+///         <see cref="StudentEnrollmentRepository.AddOrReuseAsync"/>.</item>
 /// </list>
 ///
 /// <para>The handler's dependencies are wired with a stub
@@ -150,8 +151,14 @@ public class EnrollStudentHandlerTests
                 new GenderRestrictionSpecification(),
                 new SingleActiveEnrollmentSpecification()
             }),
-            s.Tenants);
+            s.Tenants,
+            s.Db,
+            TestActor);
     }
+
+    /// <summary>Fixed audit actor for handler tests (the upsert writes a
+    /// StudentTransferAuditEntry through the shared auditor).</summary>
+    private static readonly SystemActorAccessor TestActor = new("test:actor", "Test Actor");
 
     // ── FR-A3: active-period enforcement ────────────────────────────────────
 
@@ -253,38 +260,177 @@ public class EnrollStudentHandlerTests
             "a null EnrolledOn defaults to today (UtcNow) via StudentEnrollment.Create");
     }
 
-    // ── No duplicate-active guard at the handler ────────────────────────────
+    // ── Upsert: re-enrolling an already-enrolled student ─────────────────────
 
     [TestMethod]
-    public async Task TwoEnrollments_ForSameStudentAndPeriod_BothPersist()
+    public async Task ReEnroll_SameGradeAndStream_IsNoOp_ReturnsExistingId()
     {
-        // The handler does NOT enforce a single active enrollment per
-        // student+period — it creates a fresh StudentEnrollment row on every
-        // call that passes the period guard. The single-active-enrollment
-        // invariant is enforced at the UX layer (the dialog's
-        // IsNewEnrollment check hides the inline-grade-setup path for a
-        // re-enrollment; the Transfer / Withdraw flows are the supported way
-        // to move an already-enrolled student). This test pins the handler's
-        // current "no guard" contract so adding a handler-level duplicate
-        // check later is a conscious, reviewed decision (it would change the
-        // behaviour the dialog + transfer flow rely on).
-        using var s = new StudentsTestScope("enroll-no-dupe-guard");
+        // The Enroll-dialog upsert: submitting the enroll command again for a
+        // student who is already actively enrolled in the active period with the
+        // SAME grade+stream must be an idempotent no-op — it returns the existing
+        // enrollment id, persists no second row, publishes no extra events, and
+        // leaves UpdatedAt untouched. This replaces the former "two rows persist"
+        // contract, which collided with ix_student_enrollments_tenant_student_period.
+        using var s = new StudentsTestScope("enroll-upsert-noop");
         var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
         var publisher = new RecordingPublisher();
         var h = await NewHandler(s, periods, publisher);
 
         var gradeLevel = s.Db.GradeLevels.Single();
-        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 15)));
-        await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 16)));
+        var firstId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 15)));
+        var updatedAtBefore = (await s.Db.StudentEnrollments.SingleAsync()).UpdatedAt;
 
-        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(2,
-            "the handler persists a second enrollment for the same student+period — no handler-level duplicate guard");
-        publisher.Enqueued.OfType<StudentEnrolled>().Should().HaveCount(2,
-            "one StudentEnrolled event is published per persisted enrollment");
-        var rows = await s.Db.StudentEnrollments.OrderByDescending(e => e.EnrolledOn).ToArrayAsync();
-        rows[0].Status.Should().Be(EnrollmentStatus.Active);
-        rows[1].Status.Should().Be(EnrollmentStatus.Active,
-            "both rows are Active — the handler does not auto-withdraw the prior enrollment");
+        var secondId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 16)));
+
+        secondId.Should().Be(firstId, "the no-op returns the existing enrollment id");
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
+            "the unique index (tenant, student, period) forbids a second row — the upsert converges instead");
+        (await s.Db.StudentEnrollments.SingleAsync()).UpdatedAt.Should().Be(updatedAtBefore,
+            "a no-op must not touch the enrollment row");
+        publisher.Enqueued.OfType<StudentEnrolled>().Should().ContainSingle("only the original insert publishes StudentEnrolled");
+        publisher.Enqueued.OfType<StudentEnrollmentUpdated>().Should().BeEmpty("a no-op publishes no update event");
+        s.Db.StudentTransferAuditEntries.ToList().Should().BeEmpty("a no-op writes no audit entry");
+    }
+
+    [TestMethod]
+    public async Task ReEnroll_DifferentGrade_UpdatesInPlace_StaysActive_Audits_PublishesUpdatedEvent()
+    {
+        using var s = new StudentsTestScope("enroll-upsert-update");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher);
+
+        var oldGrade = s.Db.GradeLevels.First();
+        var firstId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, oldGrade.CodedValueId, null, new DateOnly(2025, 9, 15)));
+
+        // A second grade level so the resubmit targets a different grade.
+        var newCodedValueId = Guid.Parse("22222222-2222-2222-2222-222222222224");
+        s.Db.GradeLevels.Add(GradeLevel.Create(newCodedValueId, level: 2, name: "Grade 2", displayOrder: 2));
+        s.Db.SaveChanges();
+
+        var secondId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, newCodedValueId, null, null));
+
+        secondId.Should().Be(firstId, "the update path keeps the SAME enrollment row (upsert)");
+        var row = await s.Db.StudentEnrollments.SingleAsync();
+        row.Id.Should().Be(firstId);
+        var updatedGradeLevel = s.Db.GradeLevels.Single(g => g.CodedValueId == newCodedValueId);
+        row.GradeLevelId.Should().Be(updatedGradeLevel.Id, "the grade was corrected in place");
+        row.Status.Should().Be(EnrollmentStatus.Active,
+            "UpdateGrade corrects the row without flipping Status to Transferred");
+        row.ExitDate.Should().BeNull("an in-place correction stamps no exit date");
+
+        publisher.Enqueued.OfType<StudentEnrolled>().Should().ContainSingle("only the original insert publishes StudentEnrolled");
+        var upd = publisher.Enqueued.OfType<StudentEnrollmentUpdated>().Should().ContainSingle().Which;
+        upd.StudentId.Should().Be(StudentId);
+        upd.PeriodId.Should().Be(ActivePeriodId);
+        upd.PreviousGradeLevelId.Should().Be(oldGrade.Id);
+        upd.NewGradeLevelId.Should().Be(updatedGradeLevel.Id);
+
+        // Audit trail: exactly one grade-change entry covering previous → new.
+        var audit = s.Db.StudentTransferAuditEntries.Should().ContainSingle().Which;
+        audit.FromGradeLevelId.Should().Be(oldGrade.Id);
+        audit.ToGradeLevelId.Should().Be(updatedGradeLevel.Id);
+        audit.ActorId.Should().Be("test:actor");
+    }
+
+    [TestMethod]
+    public async Task ReEnroll_SameGrade_DifferentStream_UpdatesStreamOnly()
+    {
+        // The upsert equality check compares BOTH GradeLevelId and
+        // StreamCodedValueId. A change that only touches the stream must still
+        // trigger UpdateGrade (same id, same grade, new stream) and publish an
+        // update event — this prevents a silent no-op when the user switches
+        // from "no stream" to a stream for the same grade.
+        using var s = new StudentsTestScope("enroll-upsert-stream-only");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var firstId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, null));
+
+        var streamId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var secondId = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, streamId, null));
+
+        secondId.Should().Be(firstId);
+        var row = await s.Db.StudentEnrollments.SingleAsync();
+        row.GradeLevelId.Should().Be(gradeLevel.Id, "the grade must not change in a stream-only update");
+        row.StreamCodedValueId.Should().Be(streamId, "the stream must be updated in place");
+        row.Status.Should().Be(EnrollmentStatus.Active);
+
+        var upd = publisher.Enqueued.OfType<StudentEnrollmentUpdated>().Should().ContainSingle().Which;
+        upd.PreviousGradeLevelId.Should().Be(gradeLevel.Id);
+        upd.NewGradeLevelId.Should().Be(gradeLevel.Id);
+        upd.NewStreamCodedValueId.Should().Be(streamId);
+
+        var audit = s.Db.StudentTransferAuditEntries.Should().ContainSingle().Which;
+        audit.FromGradeLevelId.Should().Be(gradeLevel.Id);
+        audit.ToGradeLevelId.Should().Be(gradeLevel.Id,
+            "the grade-level audit entry records no grade change for a stream-only update");
+    }
+
+    [TestMethod]
+    public async Task ReEnroll_InsertRace_ConvergesOnWinningRow()
+    {
+        // Same shape as ConcurrentMaterialization_LosesRace_EnrollsAgainstWinningRow:
+        // the lookup sees no row but the INSERT loses the (tenant, student, period)
+        // unique-index race. The handler must converge on the winner's row (update
+        // its grade/stream) rather than fail with a raw DbUpdateException.
+        using var s = new StudentsTestScope("enroll-upsert-race");
+        var periods = new StubActivePeriodProvider { Active = ActivePeriod() };
+        var publisher = new RecordingPublisher();
+
+        var gradeLevel = GradeLevel.Create(
+            Guid.Parse("22222222-2222-2222-2222-222222222223"), level: 1, name: "Grade 1", displayOrder: 1);
+        s.Db.GradeLevels.Add(gradeLevel);
+        s.Db.SaveChanges();
+
+        // The winner row the concurrent request committed between our lookup and
+        // our insert — enrolled in a DIFFERENT grade so convergence must update it.
+        var winnerCodedValueId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+        var winnerGrade = GradeLevel.Create(winnerCodedValueId, level: 3, name: "Winner Grade", displayOrder: 3);
+        s.Db.GradeLevels.Add(winnerGrade);
+        s.Db.SaveChanges();
+        var winner = StudentEnrollment.Create(StudentId, ActivePeriodId, winnerGrade.Id);
+        s.Db.StudentEnrollments.Add(winner);
+        s.Db.SaveChanges();
+
+        var racingRepo = new RacingEnrollmentRepository(
+            new StudentEnrollmentRepository(s.Db),
+            invisibleUntilConflict: () => s.Db.StudentEnrollments.FirstOrDefault(
+                e => e.StudentId == StudentId && e.PeriodId == ActivePeriodId && e.Status == EnrollmentStatus.Active));
+
+        var h = new EnrollStudentHandler(
+            racingRepo,
+            periods,
+            new InMemoryGradeLevelRepository(s.Db),
+            new StubCodedValuesApiClient(),
+            publisher,
+            s.Cache,
+            NullLogger<EnrollStudentHandler>.Instance,
+            new StubFeatureFlagService(false),
+            new StudentRepository(s.Db),
+            new CompositeEnrollmentSpecification(new ILeafEnrollmentSpecification[]
+            {
+                new AgeRangeSpecification(),
+                new GenderRestrictionSpecification(),
+                new SingleActiveEnrollmentSpecification()
+            }),
+            s.Tenants,
+            s.Db,
+            TestActor);
+
+        var id = await h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, null));
+
+        id.Should().NotBeEmpty("the command succeeds despite losing the insert race");
+        racingRepo.ConflictCount.Should().Be(1, "the insert went through AddOrReuseAsync and simulated the 23505");
+        (await s.Db.StudentEnrollments.CountAsync(e => e.StudentId == StudentId && e.PeriodId == ActivePeriodId)).Should().Be(1,
+            "exactly one enrollment row per (tenant, student, period) survives the race");
+        var row = await s.Db.StudentEnrollments.SingleAsync(e => e.StudentId == StudentId && e.PeriodId == ActivePeriodId);
+        row.Id.Should().Be(winner.Id, "the winning row is kept");
+        row.GradeLevelId.Should().Be(gradeLevel.Id, "the winning row converged onto OUR requested grade");
+        publisher.Enqueued.OfType<StudentEnrolled>().Should().BeEmpty("our insert never committed, so no StudentEnrolled of our own");
+        publisher.Enqueued.OfType<StudentEnrollmentUpdated>().Should().ContainSingle("convergence is published as an update");
     }
 
     // ── Phase 5: Feature-flagged enrollment validation (plan §11) ───────────
@@ -393,17 +539,20 @@ public class EnrollStudentHandlerTests
         var gradeLevel = s.Db.GradeLevels.Single();
         var student = SeedStudent(s, new DateOnly(2018, 1, 15), GenderMale);
 
-        // First enrollment succeeds (no existing active enrollment)
-        await h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 1)));
-        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1);
+        // Seed an ACTIVE enrollment for the student in a DIFFERENT period (the
+        // upsert only reroutes same-period resubmits; an active enrollment in any
+        // other period still makes this a genuinely-new enrollment, which the
+        // single-active rule rejects while the flag is on).
+        var otherPeriodId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        s.Db.StudentEnrollments.Add(StudentEnrollment.Create(student.Id, otherPeriodId, gradeLevel.Id));
+        s.Db.SaveChanges();
 
-        // Second enrollment for the same student → blocked by single-active rule
         var act = () => h.HandleAsync(new EnrollStudent(student.Id, ActivePeriodId, gradeLevel.CodedValueId, null, new DateOnly(2025, 9, 2)));
 
         (await act.Should().ThrowAsync<MultipleActiveEnrollmentsException>())
             .Which.Message.Should().Contain("already has");
-        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(1,
-            "no second enrollment row must be persisted when the single-active guard rejects the command");
+        (await s.Db.StudentEnrollments.CountAsync(e => e.PeriodId == ActivePeriodId)).Should().Be(0,
+            "no enrollment row must be persisted when the single-active guard rejects the command");
     }
 
     [TestMethod]
@@ -637,9 +786,53 @@ public class EnrollStudentHandlerTests
                 new GenderRestrictionSpecification(),
                 new SingleActiveEnrollmentSpecification()
             }),
-            s.Tenants);
+            s.Tenants,
+            s.Db,
+            TestActor);
 
         return (handler, racingRepo);
+    }
+
+    /// <summary><see cref="IStudentEnrollmentRepository"/> decorator that simulates
+    /// the Postgres unique-index loss on the enrollment insert: the lookup runs
+    /// against the real repository (the winning row is hidden until the simulated
+    /// conflict fires), then <see cref="AddOrReuseAsync"/> returns the pre-seeded
+    /// winner — exactly what <see cref="StudentEnrollmentRepository.AddOrReuseAsync"/>
+    /// does on a real 23505 on ix_student_enrollments_tenant_student_period. Pins
+    /// the handler-side convergence contract of the enroll upsert.</summary>
+    private sealed class RacingEnrollmentRepository(IStudentEnrollmentRepository inner, Func<StudentEnrollment?> invisibleUntilConflict)
+        : IStudentEnrollmentRepository
+    {
+        public int ConflictCount;
+
+        public Task<StudentEnrollment?> GetAsync(Guid id, CancellationToken ct = default) => inner.GetAsync(id, ct);
+        public Task UpdateAsync(StudentEnrollment enrollment, CancellationToken ct = default) => inner.UpdateAsync(enrollment, ct);
+        public Task<StudentEnrollmentDto[]> ListByPeriodAsync(Guid periodId, CancellationToken ct = default) => inner.ListByPeriodAsync(periodId, ct);
+        public Task<StudentEnrollmentDto[]> ListByStudentAsync(Guid studentId, CancellationToken ct = default) => inner.ListByStudentAsync(studentId, ct);
+        public Task<StudentEnrollment[]> GetActiveEnrollmentsForPeriodAsync(Guid periodId, CancellationToken ct = default) => inner.GetActiveEnrollmentsForPeriodAsync(periodId, ct);
+        public Task<StudentEnrollment[]> GetActiveEnrollmentsByStudentAsync(Guid studentId, CancellationToken ct = default) => inner.GetActiveEnrollmentsByStudentAsync(studentId, ct);
+        public Task AddAsync(StudentEnrollment enrollment, CancellationToken ct = default) => inner.AddAsync(enrollment, ct);
+
+        // The upsert lookup races AHEAD of the concurrent commit: while the conflict
+        // has not yet "happened", the winning row is invisible; afterwards reads see it.
+        public Task<StudentEnrollment?> GetActiveEnrollmentByStudentAndPeriodAsync(
+            Guid studentId, Guid periodId, CancellationToken ct = default)
+        {
+            var visible = invisibleUntilConflict();
+            return Task.FromResult(ConflictCount == 0 ? null : visible);
+        }
+
+        public async Task<StudentEnrollment> AddOrReuseAsync(StudentEnrollment candidate, CancellationToken ct = default)
+        {
+            // First insert loses the simulated 23505; subsequent inserts commit.
+            if (ConflictCount++ > 0)
+            {
+                await inner.AddAsync(candidate, ct);
+                return candidate;
+            }
+            return invisibleUntilConflict()
+                ?? throw new InvalidOperationException("Simulated race produced no winner row.");
+        }
     }
 
     [TestMethod]

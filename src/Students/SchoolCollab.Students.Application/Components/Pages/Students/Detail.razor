@@ -76,7 +76,8 @@
                             <h3>Enrollments</h3>
                             <FluentButton Appearance="Appearance.Accent"
                                           OnClick="OnEnrollAsync"
-                                          Disabled="@_savingEnrollment">
+                                          Disabled="@(_enrollments is null || _savingEnrollment)"
+                                          Title="@(_enrollments is null ? "Loading enrollments…" : "Enroll this student in a grade level for the active period")">
                                 <FluentIcon Icon="@(Icons.Regular.Size16.Add)" Slot="start" />
                                 Enroll
                             </FluentButton>
@@ -544,13 +545,21 @@
     private async Task OnEnrollAsync()
     {
         if (_disposed || _student is null) return;
+        // Guard against clicks racing the initial load: without enrollments we
+        // cannot resolve ActiveEnrollment, so the suggestions would be null and
+        // the dialog would treat this as a NEW enrollment — losing the current
+        // grade/stream pre-selection (and wrongly offering "+" create-grade).
+        if (_enrollments is null) return;
         var model = new EnrollStudentModel(
             StudentId: Id,
             SuggestedPeriodId: ActiveEnrollment?.PeriodId,
             SuggestedGradeLevelId: ActiveEnrollment?.GradeLevelId,
             SuggestedStreamCodedValueId: ActiveEnrollment?.StreamCodedValueId);
+        // Title reflects the upsert semantics: with an active enrollment the
+        // enroll submit UPDATES that row in place (server-side), so "Update
+        // enrollment" is the accurate label; without one it's a genuine enroll.
         var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
-            model, "Enroll student", DialogSize.Medium);
+            model, ActiveEnrollment is null ? "Enroll student" : "Update enrollment", DialogSize.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();

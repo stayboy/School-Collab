@@ -129,8 +129,8 @@
                                     <FluentButton Appearance="Appearance.Accent"
                                                   Size="ButtonSize.Small"
                                                   OnClick="OnEnrollAsync"
-                                                  Disabled="@_savingEnrollment"
-                                                  Title="Enroll this student in a grade level for the active period"
+                                                  Disabled="@(_enrollments is null || _savingEnrollment)"
+                                                  Title="@(_enrollments is null ? "Loading enrollments…" : "Enroll this student in a grade level for the active period")"
                                                   IconStart="@FluentIcons.Add">
                                         Enroll
                                     </FluentButton>
@@ -412,13 +412,20 @@
     private async Task OnEnrollAsync()
     {
         if (_disposed || _student is null) return;
+        // Same race guard as Detail.razor: no enrollments yet means we cannot
+        // seed SuggestedGradeLevelId/SuggestedStreamCodedValueId, so the dialog
+        // would open as a NEW enrollment instead of pre-selecting the current
+        // grade/stream.
+        if (_enrollments is null) return;
         var model = new EnrollStudentModel(
             StudentId: Id,
             SuggestedPeriodId: PrimaryActiveEnrollment?.PeriodId,
             SuggestedGradeLevelId: PrimaryActiveEnrollment?.GradeLevelId,
             SuggestedStreamCodedValueId: PrimaryActiveEnrollment?.StreamCodedValueId);
+        // Title reflects the upsert semantics (same as Detail.razor): an active
+        // enrollment means the submit updates that row in place server-side.
         var result = await DialogService.ShowShellDialogAsync<EnrollStudentDialog, EnrollStudentModel, EnrollStudentResult>(
-            model, "Enroll student", DialogSize.Medium);
+            model, PrimaryActiveEnrollment is null ? "Enroll student" : "Update enrollment", DialogSize.Medium);
         if (result is { Success: true })
         {
             await ReloadEnrollmentsAsync();

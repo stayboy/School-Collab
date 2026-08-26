@@ -70,6 +70,30 @@ public sealed class StudentEnrollment : ITenantEntity, IEntity, IAuditableEntity
         _domainEvents.Add(new StudentTransferredEvent(Id, StudentId, PeriodId, newGradeLevelId, newStreamCodedValueId));
     }
 
+    /// <summary>
+    /// Updates an ACTIVE enrollment's grade/stream in place, keeping the
+    /// enrollment Active. This is the domain half of the Enroll-dialog upsert:
+    /// re-submitting the enroll command for a student already enrolled in the
+    /// active period is a same-period grade/stream correction, NOT a transfer
+    /// (<see cref="Transfer"/> would flip Status to Transferred and stamp an
+    /// ExitDate, which is wrong for this flow) and NOT a second enrollment row
+    /// (the unique index ix_student_enrollments_tenant_student_period forbids
+    /// it). Raises <see cref="StudentEnrollmentUpdatedEvent"/> so handlers can
+    /// audit + publish the correction.
+    /// </summary>
+    public void UpdateGrade(Guid newGradeLevelId, Guid? newStreamCodedValueId = null)
+    {
+        if (Status != EnrollmentStatus.Active)
+            throw new InvalidOperationException("Only active enrollments can be updated.");
+
+        var previousGradeLevelId = GradeLevelId;
+        GradeLevelId = newGradeLevelId;
+        StreamCodedValueId = newStreamCodedValueId;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new StudentEnrollmentUpdatedEvent(
+            Id, StudentId, PeriodId, previousGradeLevelId, newGradeLevelId, newStreamCodedValueId));
+    }
+
     public void Withdraw(DateOnly? exitDate = null, string? reason = null)
     {
         if (Status != EnrollmentStatus.Active)
