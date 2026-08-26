@@ -26,6 +26,10 @@ public sealed record StudentDto(
     string? GenderName = null,
     // Current grade enrollment info, populated client-side from enrollments
     GradeLevelDto? CurrentGrade = null,
+    // Stream name of the current enrollment (resolved client-side via the
+    // CodedValues module). Null when the enrollment has no stream or resolution
+    // fails; rendered as "Grade (Stream)" in the students landing grid.
+    string? CurrentStream = null,
     // Guardian count, populated client-side from the bulk guardian-counts endpoint
     int? GuardianCount = null,
     // Title salutation (SALUTS parent), projected server-side.
@@ -673,15 +677,48 @@ public sealed class StudentsApiClient : IContactsClient
             // Continue with GuardianCount unpopulated rather than failing the list.
         }
 
+        // Stream names for current enrollments (optional enrichment — same
+        // resilience as gender: a failed lookup must not gate CurrentGrade).
+        var streamNames = new Dictionary<Guid, string>();
+        try
+        {
+            var streamIds = enrollmentsByStudent.Values
+                .Select(enrolls => GetCurrentEnrollment(enrolls))
+                .OfType<StudentEnrollmentDto>()
+                .Select(e => e.StreamCodedValueId)
+                .OfType<Guid>()
+                .Distinct()
+                .ToArray();
+            if (streamIds.Length > 0)
+            {
+                var streamDtos = await _codedValues.GetByIdsAsync(streamIds, ct);
+                streamNames = streamDtos.ToDictionary(x => x.Id, x => x.Name);
+            }
+        }
+        catch (Exception)
+        {
+            // Continue with CurrentStream unpopulated rather than failing the list.
+        }
+
         return withAge.Select(s => s with
         {
             Age = ComputeAge(s.DateOfBirth),
             GenderName = s.GenderCodedValueId is { } id && map.TryGetValue(id, out var name) ? name : null,
             CurrentGrade = GetCurrentGrade(s.Id, enrollmentsByStudent, gradeDict),
+            CurrentStream = GetCurrentStreamName(s.Id, enrollmentsByStudent, streamNames),
             GuardianCount = guardianCountByStudent.TryGetValue(s.Id, out var count) ? count : null
         }).ToArray();
     }
 
+    /// <summary>
+    /// The student's most recent active (or open-ended) enrollment — the single
+    /// source for both <see cref="GetCurrentGrade"/> and <see cref="GetCurrentStreamName"/>.
+    /// </summary>
+    private static StudentEnrollmentDto? GetCurrentEnrollment(StudentEnrollmentDto[] enrollments) =>
+        enrollments
+            .Where(e => e.Status == "Active" || e.ExitDate == null)
+            .OrderByDescending(e => e.EnrolledOn)
+            .FirstOrDefault();
     private static GradeLevelDto? GetCurrentGrade(Guid studentId,
         Dictionary<Guid, StudentEnrollmentDto[]> enrollmentsByStudent,
         Dictionary<Guid, GradeLevelDto?> gradeDict)
@@ -689,17 +726,25 @@ public sealed class StudentsApiClient : IContactsClient
         if (!enrollmentsByStudent.TryGetValue(studentId, out var enrollments) || enrollments.Length == 0)
             return null;
 
-        // Get the most recent active enrollment
-        var currentEnrollment = enrollments
-            .Where(e => e.Status == "Active" || e.ExitDate == null)
-            .OrderByDescending(e => e.EnrolledOn)
-            .FirstOrDefault();
-            
+        var currentEnrollment = GetCurrentEnrollment(enrollments);
         if (currentEnrollment == null)
             return null;
 
         gradeDict.TryGetValue(currentEnrollment.GradeLevelId, out var grade);
         return grade;
+    }
+
+    private static string? GetCurrentStreamName(Guid studentId,
+        Dictionary<Guid, StudentEnrollmentDto[]> enrollmentsByStudent,
+        Dictionary<Guid, string> streamNames)
+    {
+        if (!enrollmentsByStudent.TryGetValue(studentId, out var enrollments) || enrollments.Length == 0)
+            return null;
+
+        return GetCurrentEnrollment(enrollments)?.StreamCodedValueId is { } sid
+            && streamNames.TryGetValue(sid, out var streamName)
+            ? streamName
+            : null;
     }
 
     private async Task<StudentDto?> EnrichSingleAsync(StudentDto? item, CancellationToken ct = default)

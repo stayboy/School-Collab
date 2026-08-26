@@ -83,12 +83,19 @@
                 <FluentBadge Appearance="Appearance.Accent">Active</FluentBadge>
             }
         </TemplateColumn>
-        <TemplateColumn TGridItem="StudentDto" Title="Current Grade" Class="student-current-grade-col">
+        <TemplateColumn TGridItem="StudentDto" Title="Grade (Stream)" Class="student-current-grade-col">
             <HeaderCellTitleTemplate>
-                <span class="grid-header-wrap" title="Current Grade">Current Grade</span>
+                <span class="grid-header-wrap" title="Grade (Stream)">Grade (Stream)</span>
             </HeaderCellTitleTemplate>
             <ChildContent>
-                <span class="student-current-grade">@(context.CurrentGrade?.Name ?? "—")</span>
+                @* Same "Grade (Stream)" shape as the Detail page's enrollments
+                   grid: grade always shown, stream appended when the current
+                   enrollment has one (e.g. "Year 7 (7A)"). *@
+                <span class="student-current-grade">
+                    @(context.CurrentGrade?.Name is { } gradeName
+                        ? (context.CurrentStream is { } streamName ? $"{gradeName} ({streamName})" : gradeName)
+                        : "—")
+                </span>
             </ChildContent>
         </TemplateColumn>
         <TemplateColumn TGridItem="StudentDto" Title="Guardians" Class="student-guardians-col">
@@ -137,7 +144,7 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "80px minmax(120px,2fr) minmax(100px,1fr) 110px 180px 130px 102px"
+        GridTemplateColumns = "80px minmax(120px,2fr) minmax(100px,1fr) 110px 200px 130px 102px"
     };
 
     private StudentDto[] _filteredItems

@@ -747,4 +747,37 @@ public class EnrollStudentDialogBunitTests : BunitContext
         handler.StreamLookupCount.Should().Be(0,
             "no GRSTREAMS lookup may be issued when no grade is selected");
     }
+
+    /// <summary>
+    /// Regression for "gradelevel isn't selecting": when the dialog opens for
+    /// a re-enrollment, the grade CodedValueDropdown must bind to the suggested
+    /// grade's coded value and the stream CodedValueDropdown must bind to the
+    /// suggested stream. This verifies the data-binding and the dropdown's
+    /// internal selection survive the async load workaround.
+    /// </summary>
+    [TestMethod]
+    public void ReEnrollment_PreselectsSuggestedGradeAndStream()
+    {
+        var (handler, _) = RegisterServices(flagOn: false);
+        handler.IncludeGrade5 = true;
+
+        var (cut, _) = OpenDialog(new EnrollStudentModel(
+            StudentId,
+            SuggestedPeriodId: PeriodId,
+            SuggestedGradeLevelId: GradeLevelId5,
+            SuggestedStreamCodedValueId: Stream5AId));
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+
+        var gradeDropdown = cut.FindComponents<CodedValueDropdown>()
+            .First(d => d.Instance.Parent == CodedValueParent.Grades);
+        gradeDropdown.Instance.SelectedId.Should().Be(Grade5CodedValueId,
+            "the grade dropdown must bind to the suggested grade's coded value");
+
+        var streamDropdown = cut.FindComponents<CodedValueDropdown>()
+            .FirstOrDefault(d => d.Instance.Parent == CodedValueParent.Streams);
+        streamDropdown.Should().NotBeNull("the stream picker renders when a grade is preselected");
+        streamDropdown!.Instance.SelectedId.Should().Be(Stream5AId,
+            "the stream dropdown must bind to the suggested stream");
+    }
 }

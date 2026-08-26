@@ -49,7 +49,7 @@
     font-size: 0.85em;
 }
 
-/* Current Grade column — plain text in the cell. The width is set on
+/* Grade (Stream) column — plain text in the cell (stream appended in parens). The width is set on
    GridTemplateColumns in @code; this rule just prevents the text from
    hugging/overflowing the cell edge. */
 ::deep .student-current-grade {
