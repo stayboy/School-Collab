@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using SchoolCollab.Students.Contracts.Events;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data.Repositories;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Events;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Core.Messaging;
@@ -23,18 +24,47 @@ public sealed class ActivatePeriodHandler(
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
 
-        // ── "At most one active period" invariant (§5.6 / FR-A1): opening this
-        //    period MUST close any other currently-Active period for the tenant.
-        //    (Transfers between grades are handled explicitly via the transfer
-        //    feature; NextPeriodId links periods for navigation.)
-        var activeOther = await repository.GetActivePeriodAsync(
-            excludeId: command.Id, cancellationToken);
-        if (activeOther is not null)
+        // ── Hierarchy-aware "at most one active" invariant (FR-H4, FR-H5):
+        //    - Activating an AcademicYear closes the prior active AcademicYear and
+        //      cascade-completes its still-Active sub-periods.
+        //    - Activating a Term/Semester requires its parent AcademicYear to be
+        //      Active (else PeriodNotOpenException) and closes the prior active
+        //      sibling sub-period of the same type within that year.
+        if (period.PeriodType == PeriodType.AcademicYear)
         {
-            logger.LogInformation(
-                "Closing prior active period {PriorId} ('{PriorName}') before activating {Id}",
-                activeOther.Id, activeOther.Name, command.Id);
-            activeOther.Complete();
+            var priorYear = await repository.GetActiveAcademicYearAsync(
+                excludeId: command.Id, cancellationToken);
+            if (priorYear is not null)
+            {
+                logger.LogInformation(
+                    "Closing prior active AcademicYear {PriorId} ('{PriorName}') before activating {Id}",
+                    priorYear.Id, priorYear.Name, command.Id);
+                foreach (var sp in await repository.GetActiveSubPeriodsAsync(priorYear.Id, cancellationToken: cancellationToken))
+                    sp.Complete();
+                priorYear.Complete();
+            }
+        }
+        else
+        {
+            // Sub-period: its parent AcademicYear must be Active (FR-H5).
+            var parent = await repository.GetAsync(period.ParentPeriodId!.Value, cancellationToken)
+                ?? throw new PeriodNotFoundException(period.ParentPeriodId!.Value);
+            if (parent.Status != PeriodStatus.Active)
+            {
+                throw new PeriodNotOpenException(
+                    $"Cannot activate {period.PeriodType} '{period.Name}': its AcademicYear " +
+                    $"'{parent.Name}' is not active.");
+            }
+
+            var priorSiblings = await repository.GetActiveSubPeriodsAsync(
+                parent.Id, period.PeriodType, excludeId: command.Id, cancellationToken);
+            foreach (var sibling in priorSiblings)
+            {
+                logger.LogInformation(
+                    "Closing prior active {Type} {PriorId} before activating {Id}",
+                    sibling.PeriodType, sibling.Id, command.Id);
+                sibling.Complete();
+            }
         }
 
         period.Activate();

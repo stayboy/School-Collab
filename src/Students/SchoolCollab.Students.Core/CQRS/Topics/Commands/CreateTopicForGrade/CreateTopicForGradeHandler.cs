@@ -22,6 +22,7 @@ public sealed class CreateTopicForGradeHandler(
     ITopicRepository topicRepository,
     IGradeTopicAssignmentRepository assignmentRepository,
     IGradeLevelRepository gradeLevelRepository,
+    IPeriodRepository periodRepository,
     HybridCache cache,
     ITenantProvider tenantProvider,
     IEntityCodeGenerator entityCodeGenerator,
@@ -41,6 +42,10 @@ public sealed class CreateTopicForGradeHandler(
         // 1. Verify the grade level exists.
         var gradeLevel = await gradeLevelRepository.GetAsync(command.GradeLevelId, cancellationToken)
             ?? throw new GradeLevelNotFoundException(command.GradeLevelId);
+
+        // 1b. Rev. 6 FR-57: a grade-owned topic's PeriodId, when set, must be an
+        //     AcademicYear or a Term/Semester within the active academic year.
+        await ValidatePeriodAsync(command.PeriodId, cancellationToken);
 
         // 2. The bridge is date-based, not period-bound. A new assignment opens
         //    today and stays open-ended (EndDate = null), so no current period is
@@ -103,16 +108,23 @@ public sealed class CreateTopicForGradeHandler(
 
         // 4. Retain GradeTopicAssignment as the M:N bridge between the topic and
         //    its grade level, effective from today and open-ended. Idempotent: skip
-        //    if an active (unended) assignment already exists for this grade/topic.
+        //    only if an active (unended) assignment already exists for this
+        //    grade/topic with the SAME effective period scope (Rev. 6 FR-55/57).
+        //    A differently-scoped request (e.g. a Term when a year-spanning
+        //    assignment exists) creates a new assignment carrying the requested
+        //    PeriodId — the domain permits multiple bridge rows per (grade, topic).
         var existingAssignments = await assignmentRepository
             .ListByGradeLevelAsync(command.GradeLevelId, today, cancellationToken);
 
-        if (!existingAssignments.Any(a => a.TopicId == subject.Id))
+        if (!existingAssignments.Any(a => a.TopicId == subject.Id && a.PeriodId == command.PeriodId))
         {
             var assignment = GradeTopicAssignment.Create(
                     command.GradeLevelId,
                     subject.Id,
-                    today)
+                    today,
+                    endDate: null,
+                    topicStrandId: null,
+                    periodId: command.PeriodId)
                 .WithTenant(tenantProvider);
 
             await assignmentRepository.AddAsync(assignment, cancellationToken);
@@ -124,7 +136,7 @@ public sealed class CreateTopicForGradeHandler(
         else
         {
             logger.LogInformation(
-                "GradeTopicAssignment already active for grade {GradeLevelId}, topic {TopicId} — skipping",
+                "GradeTopicAssignment already active for grade {GradeLevelId}, topic {TopicId} with the same period scope — skipping",
                 command.GradeLevelId, subject.Id);
         }
 
@@ -137,5 +149,24 @@ public sealed class CreateTopicForGradeHandler(
             subject.DisplayOrder,
             subject.CreatedAt,
             subject.UpdatedAt);
+    }
+
+    private async Task ValidatePeriodAsync(Guid? periodId, CancellationToken cancellationToken)
+    {
+        if (periodId is null)
+            return; // null = year-spanning date-based delivery (back-compat).
+
+        var period = await periodRepository.GetAsync(periodId.Value, cancellationToken)
+            ?? throw new TopicAssignmentPeriodException($"Period '{periodId}' does not exist.", periodId);
+
+        if (period.PeriodType == PeriodType.AcademicYear)
+            return; // any academic year is a valid grade-topic period.
+
+        // Term/Semester must belong to the tenant's active academic year (FR-57, EC-24).
+        var activeYear = await periodRepository.GetActiveAcademicYearAsync(
+            cancellationToken: cancellationToken);
+        if (activeYear is null || period.ParentPeriodId != activeYear.Id)
+            throw new TopicAssignmentPeriodException(
+                $"Grade topic period '{periodId}' is a {period.PeriodType} outside the tenant's active academic year.", periodId);
     }
 }

@@ -6,6 +6,7 @@
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Core.Features
 @inject StudentsApiClient Api
+@inject CodedValuesApiClient CodedValuesApi
 @inject IDialogService DialogService
 @inject NavigationManager Nav
 @inject ILogger<ActivityGroups> Logger
@@ -48,7 +49,33 @@
                 }
             </TemplateColumn>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Status">
-                <FluentBadge Appearance="@StatusBadge(context.Status)">@context.Status</FluentBadge>
+                <FluentBadge Appearance="@(context.IsActive ? Appearance.Accent : Appearance.Neutral)">@(context.IsActive ? "Active" : "Inactive")</FluentBadge>
+            </TemplateColumn>
+            <TemplateColumn TGridItem="ActivityGroupDto" Title="Span">
+                <FluentBadge Appearance="Appearance.Neutral">@context.Span</FluentBadge>
+            </TemplateColumn>
+            <TemplateColumn TGridItem="ActivityGroupDto" Title="Window">
+                @if (context.Span == "DateRange" && context.EnrollmentStartDate.HasValue)
+                {
+                    @($"{context.EnrollmentStartDate:yyyy-MM-dd} → {context.EnrollmentEndDate:yyyy-MM-dd}")
+                }
+                else
+                {
+                    <span class="muted">—</span>
+                }
+            </TemplateColumn>
+            <TemplateColumn TGridItem="ActivityGroupDto" Title="Auto-renew">
+                @(context.AutoRenewDefault ? "Yes" : "No")
+            </TemplateColumn>
+            <TemplateColumn TGridItem="ActivityGroupDto" Title="Eligible grades">
+                @if (context.EligibleGradeIds.Length == 0)
+                {
+                    <span class="muted">All</span>
+                }
+                else
+                {
+                    @string.Join(", ", context.EligibleGradeIds.Select(id => _gradeNames.TryGetValue(id, out var n) ? n : id.ToString()[..8]))
+                }
             </TemplateColumn>
             <TemplateColumn TGridItem="ActivityGroupDto" Title="Capacity">
                 @(context.Capacity?.ToString() ?? "Unlimited")
@@ -68,13 +95,14 @@
     private ActivityGroupDto[]? _items;
     private string _searchText = string.Empty;
     private string? _error;
+    private Dictionary<Guid, string> _gradeNames = new();
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
     private bool _isRealTenant;
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(200px,2fr) 100px 90px 90px 80px auto"
+        GridTemplateColumns = "minmax(180px,2fr) 110px 90px 120px 150px 90px 150px 90px 80px auto"
     };
 
     private static readonly GridSort<ActivityGroupDto> _sortByName =
@@ -92,12 +120,7 @@
                 ? $"No activity groups match '{_searchText}'."
                 : "No activity groups yet. Create one to get started.");
 
-    private static Appearance StatusBadge(string status) => status switch
-    {
-        "Archived" => Appearance.Neutral,
-        "Suspended" => Appearance.Outline,
-        _ => Appearance.Accent,
-    };
+    private static Appearance StatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
 
     protected override async Task OnInitializedAsync()
     {
@@ -121,6 +144,14 @@
         {
             _items = await Api.ListActivityGroupsAsync(token);
             if (_disposed) return;
+
+            // Resolve eligible-grade names (grade level id → name) for the chips.
+            var gradeLevels = await Api.ListGradeLevelsForLandingAsync(token);
+            if (gradeLevels is not null)
+            {
+                _gradeNames = gradeLevels.ToDictionary(g => g.Id, g => g.Name);
+            }
+
             Logger.LogInformation("Loaded {Count} activity groups", _items?.Length ?? 0);
         }
         catch (OperationCanceledException) { }
@@ -160,15 +191,10 @@
             RowAction.Separator(),
         };
 
-        if (row.Status == "Suspended")
-            actions.Add(RowAction.Callback("Resume", () => OnSuspendAsync(row.Id, resume: true), FluentIcons.ArrowClockwise));
-        else if (row.Status == "Active")
-            actions.Add(RowAction.Callback("Suspend", () => OnSuspendAsync(row.Id, resume: false), null));
-
-        if (row.Status != "Archived")
-        {
-            actions.Add(RowAction.Callback("Archive", () => OnArchiveAsync(row.Id, row.Name), null));
-        }
+        if (row.IsActive)
+            actions.Add(RowAction.Callback("Deactivate", () => OnToggleActiveAsync(row.Id, false), null));
+        else
+            actions.Add(RowAction.Callback("Activate", () => OnToggleActiveAsync(row.Id, true), null));
 
         actions.Add(RowAction.Separator());
         actions.Add(RowAction.Callback("Delete", () => OnDeleteAsync(row.Id, row.Name), FluentIcons.Delete));
@@ -187,6 +213,11 @@
             Description = row.Description,
             Category = row.Category,
             Capacity = row.Capacity,
+            Span = row.Span,
+            EnrollmentStartDate = row.EnrollmentStartDate?.ToDateTime(TimeOnly.MinValue),
+            EnrollmentEndDate = row.EnrollmentEndDate?.ToDateTime(TimeOnly.MinValue),
+            AutoRenewDefault = row.AutoRenewDefault,
+            EligibleGradeIds = row.EligibleGradeIds,
         };
 
         var updated = await DialogService.ShowShellDialogAsync<
@@ -202,38 +233,15 @@
         }
     }
 
-    private async Task OnSuspendAsync(Guid id, bool resume)
+    private async Task OnToggleActiveAsync(Guid id, bool active)
     {
         if (_disposed) return;
         try
         {
-            // Resume (reactivate) is not exposed by the Phase 2 API; only suspend
-            // is available via the dark endpoints. Resume is a Phase 6 refinement.
-            if (!resume)
-            {
-                await Api.SuspendActivityGroupAsync(id);
-            }
-            await ReloadAsync();
-        }
-        catch (Exception ex)
-        {
-            if (_disposed) return;
-            _error = ex.Message;
-        }
-    }
-
-    private async Task OnArchiveAsync(Guid id, string name)
-    {
-        if (_disposed) return;
-        var dialog = await DialogService.ShowConfirmationAsync(
-            $"Archive activity group '{name}'? Members can still view history, but no new members can join.",
-            "Archive", "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
-
-        try
-        {
-            await Api.ArchiveActivityGroupAsync(id);
+            if (active)
+                await Api.ActivateActivityGroupAsync(id);
+            else
+                await Api.DeactivateActivityGroupAsync(id);
             await ReloadAsync();
         }
         catch (Exception ex)

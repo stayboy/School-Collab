@@ -65,7 +65,7 @@ public class StudentsStrictTenancyTests
     {
         using var s = new StudentsTestScope("strict-period");
         var h = new CreatePeriodHandler(
-            s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
+            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
 
         // Tenant A creates H1 (Jan–Jun 2026).
         AsTenant(s, TenantA);
@@ -108,7 +108,7 @@ public class StudentsStrictTenancyTests
         using var s = new StudentsTestScope("strict-fr4-period");
         AsDefault(s);
         var h = new CreatePeriodHandler(
-            s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
+            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
 
         var act = async () => await h.HandleAsync(
             new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));

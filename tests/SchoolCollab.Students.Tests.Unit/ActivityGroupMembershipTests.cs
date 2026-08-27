@@ -22,7 +22,7 @@ public class ActivityGroupMembershipTests
         var studentId = Guid.NewGuid();
         var joinedOn = new DateOnly(2026, 8, 1);
 
-        var membership = ActivityGroupMembership.Create(groupId, studentId, joinedOn);
+        var membership = ActivityGroupMembership.Create(groupId, studentId, joinedOn: joinedOn);
 
         membership.ActivityGroupId.Should().Be(groupId);
         membership.StudentId.Should().Be(studentId);

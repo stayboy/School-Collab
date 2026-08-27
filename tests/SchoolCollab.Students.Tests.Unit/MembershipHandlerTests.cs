@@ -1,12 +1,14 @@
 using FluentAssertions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.AddMembership;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.ExitMembership;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.RemoveMembership;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Queries.GetGroupMembers;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Queries.GetStudentGroups;
+using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
@@ -23,7 +25,11 @@ namespace SchoolCollab.Students.Tests.Unit;
 public class MembershipHandlerTests
 {
     private static AddMembershipHandler NewAdd(StudentsTestScope s) => new(
-        s.ActivityGroups, s.Memberships, s.Students, s.Cache, s.Tenants,
+        s.ActivityGroups, s.Memberships, s.Students,
+        Mock.Of<IStudentEnrollmentRepository>(),
+        Mock.Of<IActivePeriodProvider>(),
+        Mock.Of<IPeriodRepository>(),
+        s.Cache, s.Tenants,
         NullLogger<AddMembershipHandler>.Instance);
 
     private static async Task<(Guid groupId, Guid studentId)> SeedAsync(StudentsTestScope s)
@@ -49,14 +55,14 @@ public class MembershipHandlerTests
     }
 
     [TestMethod]
-    public async Task Add_ArchivedGroup_Throws()
+    public async Task Add_InactiveGroup_Throws()
     {
         using var s = new StudentsTestScope("mem-" + Guid.NewGuid());
         var (gid, sid) = await SeedAsync(s);
-        (await s.ActivityGroups.GetAsync(gid))!.Archive();
+        (await s.ActivityGroups.GetAsync(gid))!.Deactivate();
         await s.Db.SaveChangesAsync();
         await FluentActions.Awaiting(() => NewAdd(s).HandleAsync(new AddMembership(gid, sid)))
-            .Should().ThrowAsync<ArchivedGroupException>();
+            .Should().ThrowAsync<InactiveGroupException>();
     }
 
     [TestMethod]

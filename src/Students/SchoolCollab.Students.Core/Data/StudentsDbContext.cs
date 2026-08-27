@@ -38,6 +38,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
     public DbSet<ActivityGroup> ActivityGroups => Set<ActivityGroup>();
     public DbSet<LocalCodedValue> LocalCodedValues => Set<LocalCodedValue>();
     public DbSet<ActivityGroupMembership> ActivityGroupMemberships => Set<ActivityGroupMembership>();
+    public DbSet<ActivityGroupGradeLevel> ActivityGroupGradeLevels => Set<ActivityGroupGradeLevel>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -72,6 +73,7 @@ public sealed class StudentsDbContext(DbContextOptions<StudentsDbContext> option
         modelBuilder.ApplyConfiguration(new StudentTransferAuditEntryConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ActivityGroupConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new ActivityGroupMembershipConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new ActivityGroupGradeLevelConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new LocalCodedValueConfiguration());
 
         // FR-18 / AC-17: build-time model audit — every non-allow-listed, non-owned

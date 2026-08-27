@@ -7,7 +7,7 @@ namespace SchoolCollab.Students.Tests.Unit;
 
 /// <summary>
 /// Entity-invariant tests for <see cref="ActivityGroup"/> lifecycle
-/// (spec activity-group-enrollment.md §5 AC-* / §6 EC-*).
+/// (spec activity-group-enrollment.md Rev. 2 §5 AC-* / §6 EC-*).
 /// Tests that require a repository/handler (duplicate-name DB constraint,
 /// delete-referenced-by-assignment cross-context check, capacity count) are
 /// deferred to Phase 2 (membership commands/queries + APIs).
@@ -15,22 +15,18 @@ namespace SchoolCollab.Students.Tests.Unit;
 [TestClass]
 public class ActivityGroupTests
 {
-    // AC-1 (FR-1..4): create group sets all properties, Status=Active, event raised
+    // AC-1 (FR-1..4): create group sets all properties, IsActive=true, event raised
     [TestMethod]
     public void Create_SetsAllProperties()
     {
-        var periodId = Guid.NewGuid();
-
         var group = ActivityGroup.Create(
-            "Chess Club", "After-school chess", "Sports",
-            periodId, capacity: 20);
+            "Chess Club", "After-school chess", "Sports", capacity: 20);
 
         group.Name.Should().Be("Chess Club");
         group.Description.Should().Be("After-school chess");
         group.Category.Should().Be("Sports");
-        group.PeriodId.Should().Be(periodId);
         group.Capacity.Should().Be(20);
-        group.Status.Should().Be(ActivityGroupStatus.Active);
+        group.IsActive.Should().BeTrue();
         group.CreatedAt.Should().BeCloseTo(DateTimeOffset.UtcNow, TimeSpan.FromSeconds(5));
         group.UpdatedAt.Should().Be(group.CreatedAt);
 
@@ -39,13 +35,12 @@ public class ActivityGroupTests
             .Which.Name.Should().Be("Chess Club");
     }
 
-    // AC-2 (FR-3, FR-4): create without a period succeeds
+    // AC-2 (Rev. 2 FR-4/5): create succeeds with no period (group is period-independent).
     [TestMethod]
-    public void Create_WithoutPeriod_Succeeds()
+    public void Create_DefaultsToActive()
     {
         var group = ActivityGroup.Create("Chess Club");
-        group.PeriodId.Should().BeNull();
-        group.Status.Should().Be(ActivityGroupStatus.Active);
+        group.IsActive.Should().BeTrue();
     }
 
     // FR-1: empty/whitespace name rejected
@@ -89,98 +84,64 @@ public class ActivityGroupTests
             .Which.Should().BeOfType<ActivityGroupUpdatedEvent>();
     }
 
-    // FR-3: suspend from Active succeeds
+    // Rev. 2 FR-3: deactivate from Active succeeds
     [TestMethod]
-    public void Suspend_FromActive_Succeeds()
+    public void Deactivate_FromActive_TurnsOff()
     {
         var group = ActivityGroup.Create("Chess Club");
-        group.Suspend();
+        group.Deactivate();
 
-        group.Status.Should().Be(ActivityGroupStatus.Suspended);
-        group.DomainEvents.Should().Contain(e => e is ActivityGroupSuspendedEvent);
+        group.IsActive.Should().BeFalse();
+        group.DomainEvents.Should().Contain(e => e is ActivityGroupDeactivatedEvent);
     }
 
-    // FR-3: suspend from Archived throws
+    // Rev. 2 FR-3: deactivate twice is a no-op (idempotent, no throw).
     [TestMethod]
-    public void Suspend_FromArchived_Throws()
+    public void Deactivate_WhenAlreadyInactive_NoOp()
     {
         var group = ActivityGroup.Create("Chess Club");
-        group.Archive();
+        group.Deactivate();
+        group.ClearDomainEvents();
 
-        var act = () => group.Suspend();
-        act.Should().Throw<InvalidOperationException>();
+        group.Deactivate();
+
+        group.IsActive.Should().BeFalse();
+        group.DomainEvents.Should().BeEmpty("deactivating an already-inactive group is a no-op");
     }
-    // FR-3: archive from Active succeeds
+
+    // Rev. 2 FR-3: activate from inactive turns on and raises the event.
     [TestMethod]
-    public void Archive_FromActive_Succeeds()
+    public void Activate_FromInactive_TurnsOn()
     {
         var group = ActivityGroup.Create("Chess Club");
-        group.Archive();
+        group.Deactivate();
 
-        group.Status.Should().Be(ActivityGroupStatus.Archived);
-        group.DomainEvents.Should().Contain(e => e is ActivityGroupArchivedEvent);
+        group.Activate();
+
+        group.IsActive.Should().BeTrue();
+        group.DomainEvents.Should().Contain(e => e is ActivityGroupActivatedEvent);
     }
 
-    // EC-4 (FR-3): archive is the soft-retire path — at the entity level it
-    // always succeeds from Active/Suspended regardless of assignment links
-    // (the cross-context assignment check is a Phase 2 handler concern).
+    // Rev. 2 FR-3: activate twice is a no-op.
     [TestMethod]
-    public void Archive_CanBeCalledOnSuspendedGroup()
+    public void Activate_WhenAlreadyActive_NoOp()
     {
         var group = ActivityGroup.Create("Chess Club");
-        group.Suspend();
-        group.Archive();
+        group.Activate();
 
-        group.Status.Should().Be(ActivityGroupStatus.Archived);
+        group.IsActive.Should().BeTrue();
+        group.DomainEvents.Should().ContainSingle()
+            .Which.Should().BeOfType<ActivityGroupCreatedEvent>();
     }
 
-    // FR-3: archive twice throws
+    // Rev. 2 FR-3: a group is period-independent — its on/off state is decoupled
+    // from any PeriodStatus. There is no PeriodId on the group.
     [TestMethod]
-    public void Archive_AlreadyArchived_Throws()
+    public void IsActive_IndependentOfPeriod()
     {
         var group = ActivityGroup.Create("Chess Club");
-        group.Archive();
-
-        var act = () => group.Archive();
-        act.Should().Throw<InvalidOperationException>();
-    }
-
-    // FR-3: reactivate from Suspended succeeds
-    [TestMethod]
-    public void Reactivate_FromSuspended_Succeeds()
-    {
-        var group = ActivityGroup.Create("Chess Club");
-        group.Suspend();
-        group.Reactivate();
-
-        group.Status.Should().Be(ActivityGroupStatus.Active);
-        group.DomainEvents.Should().Contain(e => e is ActivityGroupReactivatedEvent);
-    }
-
-    // FR-3: reactivate from Archived throws (archive is terminal)
-    [TestMethod]
-    public void Reactivate_FromArchived_Throws()
-    {
-        var group = ActivityGroup.Create("Chess Club");
-        group.Archive();
-
-        var act = () => group.Reactivate();
-        act.Should().Throw<InvalidOperationException>();
-    }
-
-    // AC-19 (FR-3, FR-4, FR-10): group status is independent of period — the
-    // entity has no coupling to PeriodStatus; it remains Active regardless.
-    [TestMethod]
-    public void Status_RemainsActive_IndependentOfPeriod()
-    {
-        var periodId = Guid.NewGuid();
-        var group = ActivityGroup.Create("Chess Club", periodId: periodId);
-
-        // The group does not react to period status changes at the entity level.
-        // Periods may complete/archive; the group stays Active and membership
-        // operations continue to succeed (the group outlasts the period).
-        group.Status.Should().Be(ActivityGroupStatus.Active);
-        group.PeriodId.Should().Be(periodId);
+        group.IsActive.Should().BeTrue();
+        // Rev. 2 removed PeriodId from the group; membership is period/window-scoped.
     }
 
     // FR-6: Delete raises the deleted event (referential guard is handler-level)
@@ -201,4 +162,3 @@ public class ActivityGroupTests
     // AC-18 (delete with membership history) — needs the repository
     //   HasAnyMembershipAsync check in the delete handler (Phase 2).
 }
-

@@ -69,6 +69,12 @@ public sealed class AssignmentsApiClient
         return id;
     }
 
+    public async Task LinkAssignmentGroupsAsync(Guid assignmentId, IReadOnlyList<Guid> groupIds, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/assignments/{assignmentId}/groups", new { ActivityGroupIds = groupIds }, _jsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     public async Task UpdateAsync(Guid id, UpdateAssignmentRequest req, CancellationToken ct = default)
     {
         _logger.LogInformation("Updating assignment {AssignmentId}", id);

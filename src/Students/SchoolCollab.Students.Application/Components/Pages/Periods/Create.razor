@@ -2,6 +2,7 @@
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components
+@using Microsoft.AspNetCore.WebUtilities
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
@@ -23,7 +24,7 @@
                 else
                 {
                     <section class="page-container">
-                        <PeriodForm CancelRoute="/students/periods" OnSaved="OnSavedAsync" />
+                        <PeriodForm CancelRoute="/students/periods" OnSaved="OnSavedAsync" InitialParentPeriodId="@_initialParent" />
                     </section>
                 }
             </ChildContent>
@@ -41,12 +42,19 @@
 
 @code {
     private bool _isRealTenant;
+    private Guid? _initialParent;
     private volatile bool _disposed;
 
     protected override async Task OnInitializedAsync()
     {
         var scope = await VisibleTenant.GetScopeAsync();
         _isRealTenant = scope.IsRealTenant;
+
+        if (QueryHelpers.ParseQuery(Nav.ToAbsoluteUri(Nav.Uri).Query).TryGetValue("parent", out var parentVal)
+            && Guid.TryParse(parentVal, out var parentId))
+        {
+            _initialParent = parentId;
+        }
     }
 
     private void OnSavedAsync(PeriodDto _) => Nav.NavigateTo("/students/periods");

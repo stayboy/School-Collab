@@ -490,8 +490,13 @@ aspire.config.json
 
 # Agent / tooling artifacts
 .cline/
-.pi/
+.pi/*
+!.pi/skills/
+!.pi/extensions/
 School-Collab/
 intrun*.txt
 intout*.txt
 int*.err.txt
+_tresult/
+testerr.txt
+testout.txt

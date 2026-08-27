@@ -27,7 +27,7 @@ internal sealed class PeriodRepository(StudentsDbContext db)
             .OrderByDescending(x => x.StartDate)
             .Select(x => new PeriodDto(
                 x.Id, x.Name, x.StartDate, x.EndDate,
-                x.Status.ToString(), x.NextPeriodId,
+                x.Status.ToString(), x.PeriodType.ToString(), x.ParentPeriodId, x.NextPeriodId,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 
@@ -40,11 +40,13 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         DateOnly startDate,
         DateOnly endDate,
         Guid? excludeId = null,
+        Guid? excludeParentId = null,
         CancellationToken cancellationToken = default)
         => await Db.Periods
             .Where(p => p.StartDate <= endDate
                 && p.EndDate >= startDate
-                && (excludeId == null || p.Id != excludeId))
+                && (excludeId == null || p.Id != excludeId)
+                && (excludeParentId == null || p.Id != excludeParentId))
             .ToArrayAsync(cancellationToken);
 
     public async Task<Period?> GetActivePeriodAsync(Guid? excludeId = null, CancellationToken cancellationToken = default)
@@ -52,6 +54,25 @@ internal sealed class PeriodRepository(StudentsDbContext db)
             .Where(p => p.Status == PeriodStatus.Active
                 && (excludeId == null || p.Id != excludeId))
             .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<Period?> GetActiveAcademicYearAsync(Guid? excludeId = null, CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .Where(p => p.Status == PeriodStatus.Active
+                && p.PeriodType == PeriodType.AcademicYear
+                && (excludeId == null || p.Id != excludeId))
+            .FirstOrDefaultAsync(cancellationToken);
+
+    public async Task<Period[]> GetActiveSubPeriodsAsync(
+        Guid parentPeriodId,
+        PeriodType? periodType = null,
+        Guid? excludeId = null,
+        CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .Where(p => p.Status == PeriodStatus.Active
+                && p.ParentPeriodId == parentPeriodId
+                && (periodType == null || p.PeriodType == periodType)
+                && (excludeId == null || p.Id != excludeId))
+            .ToArrayAsync(cancellationToken);
 
     public async Task<Period?> GetCurrentPeriodAsync(CancellationToken cancellationToken = default)
     {

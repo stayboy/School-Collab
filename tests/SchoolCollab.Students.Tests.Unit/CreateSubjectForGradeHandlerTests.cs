@@ -4,6 +4,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Moq;
 using SchoolCollab.Core.EntityCodes;
+using SchoolCollab.Core.Messaging;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.ActivatePeriod;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 using SchoolCollab.Students.Core.CQRS.Topics.Commands.CreateTopicForGrade;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -18,6 +21,7 @@ public class CreateTopicForGradeHandlerTests
             s.Topics,
             s.GradeTopicAssignments,
             s.GradeLevels,
+            s.Periods,
             s.Cache,
             s.Tenants,
             gen ?? new Mock<IEntityCodeGenerator>().Object,
@@ -38,6 +42,23 @@ public class CreateTopicForGradeHandlerTests
         s.Db.Periods.Add(period);
         await s.Db.SaveChangesAsync();
         return period.Id;
+    }
+
+    private static async Task<Guid> SeedActiveYearAndTermAsync(StudentsTestScope s)
+    {
+        var create = new CreatePeriodHandler(
+            s.Periods, s.Cache, s.Tenants,
+            new StubAcademicYearDivisionProvider("Terms"),
+            NullLogger<CreatePeriodHandler>.Instance);
+        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        var term = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
+            PeriodType.Term, ParentPeriodId: ay));
+        var activate = new ActivatePeriodHandler(
+            s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache,
+            NullLogger<ActivatePeriodHandler>.Instance);
+        await activate.HandleAsync(new ActivatePeriod(ay));
+        await activate.HandleAsync(new ActivatePeriod(term));
+        return term;
     }
 
     [TestMethod]
@@ -124,6 +145,95 @@ public class CreateTopicForGradeHandlerTests
         (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
         var assignment = await s.Db.GradeTopicAssignments.FirstAsync();
         assignment.EndDate.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task CreateForGrade_WithPeriodId_ScopesAssignmentToPeriod()
+    {
+        // Rev. 6 FR-55/57: a grade-owned topic's PeriodId, when set, must be an
+        // AcademicYear or a Term/Semester within the active academic year. The
+        // created assignment must carry that PeriodId (no duplicate assignment).
+        using var s = new StudentsTestScope("csfg-period");
+        var cv = Guid.NewGuid();
+        var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
+        var termId = await SeedActiveYearAndTermAsync(s);
+        var h = NewHandler(s);
+
+        var dto = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: termId));
+
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
+        var assignment = await s.Db.GradeTopicAssignments.FirstAsync();
+        assignment.TopicId.Should().Be(dto.Id);
+        assignment.PeriodId.Should().Be(termId);
+    }
+
+    [TestMethod]
+    public async Task CreateForGrade_WithTermOutsideActiveYear_Throws()
+    {
+        // Rev. 6 EC-24: a grade topic PeriodId that is a Term outside the active
+        // academic year is rejected.
+        using var s = new StudentsTestScope("csfg-period-invalid");
+        var cv = Guid.NewGuid();
+        var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
+        var termId = await SeedActiveYearAndTermAsync(s);
+        // A second academic year (not active) with a term inside it.
+        var create = new CreatePeriodHandler(
+            s.Periods, s.Cache, s.Tenants,
+            new StubAcademicYearDivisionProvider("Terms"),
+            NullLogger<CreatePeriodHandler>.Instance);
+        var otherAy = await create.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31)));
+        var otherTerm = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2027, 9, 1), new DateOnly(2028, 1, 31),
+            PeriodType.Term, ParentPeriodId: otherAy));
+        var h = NewHandler(s);
+
+        var act = async () => await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: otherTerm));
+
+        await act.Should().ThrowAsync<TopicAssignmentPeriodException>();
+    }
+
+    [TestMethod]
+    public async Task CreateForGrade_ExistingAssignmentDifferentPeriod_CreatesScopedAssignment()
+    {
+        // Rev. 6 FR-55/57: a request scoped to a Term when a year-spanning
+        // (PeriodId = null) assignment already exists must create a NEW assignment
+        // carrying the requested Term — the idempotency guard is period-scoped.
+        using var s = new StudentsTestScope("csfg-diff-period");
+        var cv = Guid.NewGuid();
+        var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
+        var termId = await SeedActiveYearAndTermAsync(s);
+        var h = NewHandler(s);
+
+        // First: year-spanning assignment (no period).
+        var yearSpanning = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1));
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1);
+
+        // Second: same topic, now scoped to the active Term.
+        var scoped = await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: termId));
+
+        scoped.Id.Should().Be(yearSpanning.Id, "the shared topic is reused");
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(2, "a differently-scoped request adds a new assignment");
+        var termAssignment = await s.Db.GradeTopicAssignments.SingleAsync(a => a.PeriodId == termId);
+        termAssignment.TopicId.Should().Be(yearSpanning.Id);
+        termAssignment.GradeLevelId.Should().Be(gradeId);
+    }
+
+    [TestMethod]
+    public async Task CreateForGrade_ExistingSamePeriod_Skips()
+    {
+        // Rev. 6 FR-55/57: repeating the SAME period-scoped request must not
+        // duplicate the assignment — the guard is true idempotency.
+        using var s = new StudentsTestScope("csfg-same-period");
+        var cv = Guid.NewGuid();
+        var gradeId = await SeedGradeLevelAsync(s, cv, 1, "Grade 1");
+        var termId = await SeedActiveYearAndTermAsync(s);
+        var h = NewHandler(s);
+
+        await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: termId));
+        await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: termId));
+
+        (await s.Db.GradeTopicAssignments.CountAsync()).Should().Be(1, "same period scope is idempotent");
+        var assignment = await s.Db.GradeTopicAssignments.SingleAsync();
+        assignment.PeriodId.Should().Be(termId);
     }
 
     [TestMethod]

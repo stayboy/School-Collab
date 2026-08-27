@@ -162,7 +162,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
                     {
                         new(PeriodId, "2025/2026",
                             new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31),
-                            "Active", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                            "Active", "AcademicYear", null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
                     };
                 return Json(HttpStatusCode.OK, periods);
             }

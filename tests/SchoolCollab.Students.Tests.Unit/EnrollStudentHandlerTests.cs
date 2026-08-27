@@ -72,6 +72,8 @@ public class EnrollStudentHandlerTests
         public ActivePeriod? Active { get; set; }
         public Task<ActivePeriod?> GetActivePeriodAsync(CancellationToken ct = default) => Task.FromResult(Active);
         public Task<ActivePeriod?> GetCurrentPeriodAsync(CancellationToken ct = default) => Task.FromResult(Active);
+        public Task<ActivePeriod?> GetActiveAcademicYearAsync(CancellationToken ct = default) => Task.FromResult(Active);
+        public Task<ActivePeriod?> GetActiveSubPeriodAsync(CancellationToken ct = default) => Task.FromResult(Active);
     }
 
     /// <summary>Recording publisher — captures every enqueued integration event
@@ -102,7 +104,7 @@ public class EnrollStudentHandlerTests
 
     private static ActivePeriod ActivePeriod() => new(
         ActivePeriodId, "2025/2026",
-        new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), "Active");
+        new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), "Active", "AcademicYear", null);
 
     private static async Task<EnrollStudentHandler> NewHandler(
         StudentsTestScope s,
@@ -201,6 +203,31 @@ public class EnrollStudentHandlerTests
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0,
             "no enrollment row must be persisted when the command targets a non-active period");
         publisher.Enqueued.Should().BeEmpty("no integration event must be published on a rejected enrol");
+    }
+
+    [TestMethod]
+    public async Task ActiveSubPeriod_ThrowsYearLevelPeriodNotOpen_AndPersistsNothing()
+    {
+        // FR-H9 / AC-H8: grade enrollment is year-level. Even if the active period
+        // resolved to a Term/Semester sub-period, enrollment must be rejected.
+        using var s = new StudentsTestScope("enroll-sub-period-active");
+        var periods = new StubActivePeriodProvider
+        {
+            Active = new ActivePeriod(
+                ActivePeriodId, "T1",
+                new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), "Active", "Term", null)
+        };
+        var publisher = new RecordingPublisher();
+        var h = await NewHandler(s, periods, publisher);
+
+        var gradeLevel = s.Db.GradeLevels.Single();
+        var act = () => h.HandleAsync(new EnrollStudent(StudentId, ActivePeriodId, gradeLevel.CodedValueId, null, null));
+
+        var ex = (await act.Should().ThrowAsync<PeriodNotOpenException>()).Which.Message;
+        ex.Should().Contain("year-level")
+            .And.Contain("Term", "the message names the sub-period type it rejects");
+        (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0);
+        publisher.Enqueued.Should().BeEmpty();
     }
 
     // ── Happy path ──────────────────────────────────────────────────────────

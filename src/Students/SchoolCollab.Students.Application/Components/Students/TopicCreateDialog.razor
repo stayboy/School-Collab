@@ -35,6 +35,7 @@
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValues
 @inject EntityCodeRulesApiClient EntityCodeRules
+@inject ILogger<TopicCreateDialog> Logger
 
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
@@ -68,6 +69,51 @@
         @* Horizontal separator (CSS border-top, per dialog-ui §2) between the
            CodedValueDropdown picker section and the topic fields below. *@
         <div class="topic-fields-section">
+            <FormRow Label="Owner" For="topic-create-owner">
+                <FluentSelect TOption="string" @bind-Value="Model.OwnerType" @bind-Value:after="OnOwnerTypeChangedAsync" Id="topic-create-owner" Style="flex:1; min-width:0">
+                    <FluentOption Value="GradeLevel">Grade Level</FluentOption>
+                    <FluentOption Value="ActivityGroup">Activity Group</FluentOption>
+                </FluentSelect>
+            </FormRow>
+
+            @if (Model.OwnerType == "ActivityGroup")
+            {
+                <FormRow Label="Activity group" For="topic-create-group" Required="true">
+                    <FluentSelect TOption="string" @bind-Value="_activityGroupIdText" @bind-Value:after="OnActivityGroupChangedAsync" Id="topic-create-group" Style="flex:1; min-width:0">
+                        <FluentOption Value="">— Select activity group —</FluentOption>
+                        @foreach (var g in _activityGroups)
+                        {
+                            <FluentOption Value="@g.Id.ToString()">@g.Name</FluentOption>
+                        }
+                    </FluentSelect>
+                </FormRow>
+                @if (_groupDuplicateCodedValue)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Warning" class="mb-2">
+                        This subject is already assigned to this activity group.
+                    </FluentMessageBar>
+                }
+            }
+
+            <FormRow Label="Period (optional)" For="topic-create-period">
+                @if (_filteredPeriods.Length == 0)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info" class="mb-2">
+                        @_periodHint
+                    </FluentMessageBar>
+                }
+                else
+                {
+                    <FluentSelect TOption="string" @bind-Value="_periodIdText" Id="topic-create-period" Style="flex:1; min-width:0">
+                        <FluentOption Value="">— Current period —</FluentOption>
+                        @foreach (var p in _filteredPeriods)
+                        {
+                            <FluentOption Value="@p.Id.ToString()">@p.Name</FluentOption>
+                        }
+                    </FluentSelect>
+                }
+            </FormRow>
+
             <TopicFormFields Model="Model"
                              Mode="@(_editing ? TopicFormFields.TopicFormMode.Edit : TopicFormFields.TopicFormMode.Display)"
                              CodeDisabled="@(Model.CodedValueId.HasValue)"
@@ -97,7 +143,7 @@
                            SavingText="Creating..."
                            SubmitIsServerSubmit="@(!_editing)"
                            OnSubmit="UpdateFields"
-                           SubmitDisabled="@(_duplicateCodedValue || (!_editing && string.IsNullOrWhiteSpace(Model.Name)))"
+                           SubmitDisabled="@(_duplicateCodedValue || _groupDuplicateCodedValue || (!_editing && string.IsNullOrWhiteSpace(Model.Name)))"
                            OnCancel="HandleCancel" />
     </EditForm>
 </div>
@@ -109,6 +155,30 @@
     private bool _regeneratingCode;
     private bool _editing;
     private bool _duplicateCodedValue;
+    private bool _groupDuplicateCodedValue;
+    private string _activityGroupIdText = "";
+    private string _periodIdText = "";
+    private ActivityGroupDto[] _activityGroups = [];
+    private PeriodDto[] _periods = [];
+    private SubjectDto[] _groupExistingTopics = [];
+    private Guid? _activeYearId;
+
+    /// <summary>
+    /// Periods offered to the user, filtered to those valid for the chosen owner
+    /// (spec FR-56/57): grade-owned topics may target the active academic year or
+    /// a Term/Semester within it; group-owned topics must match the group's
+    /// <see cref="ActivityGroupDto.Span"/> (Termly→Term, Semester→Semester,
+    /// WholeAcademicYear→AcademicYear; OpenEnded/DateRange carry no period).
+    /// </summary>
+    private PeriodDto[] _filteredPeriods =>
+        Model.OwnerType == "ActivityGroup"
+            ? FilterPeriodsForGroup()
+            : FilterPeriodsForGrade();
+
+    private string _periodHint =>
+        Model.OwnerType == "ActivityGroup"
+            ? "This group's enrollment span carries no period — the topic is delivered on a date-based window."
+            : "No active academic year is open — the topic is delivered year-spanning.";
 
     // Snapshot of the pre-edit values so Cancel can revert the user's edits.
     private string _origName = string.Empty;
@@ -147,9 +217,110 @@
         public string? Description { get; set; }
 
         public int DisplayOrder { get; set; }
+
+        /// <summary>Owner kind: <c>GradeLevel</c> (default) or <c>ActivityGroup</c>.</summary>
+        public string OwnerType { get; set; } = "GradeLevel";
+
+        /// <summary>The activity group the new topic is wired to (when <see cref="OwnerType"/> is <c>ActivityGroup</c>).</summary>
+        public Guid? ActivityGroupId { get; set; }
+
+        /// <summary>Optional period to align the topic assignment to (Rev. 6).</summary>
+        public Guid? PeriodId { get; set; }
     }
 
     protected override string SubmitText => "Create";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _activityGroups = await Api.ListActivityGroupsAsync() ?? [];
+        _periods = await Api.ListPeriodsAsync() ?? [];
+        var activeYear = await Api.GetActiveAcademicYearAsync();
+        _activeYearId = activeYear?.Id;
+
+        if (Model.ActivityGroupId.HasValue)
+        {
+            _activityGroupIdText = Model.ActivityGroupId.Value.ToString();
+            // Fire the same group-topic load the user-path selection uses, so
+            // the Item-3 duplicate guard is effective when the dialog opens
+            // pre-seeded with an activity group (e.g. from Subjects.razor).
+            _ = LoadGroupExistingTopicsAsync();
+        }
+        if (Model.PeriodId.HasValue)
+            _periodIdText = Model.PeriodId.Value.ToString();
+    }
+
+    private void OnOwnerTypeChangedAsync()
+    {
+        // Re-filter the period options for the new owner; clear an invalid selection.
+        _periodIdText = "";
+    }
+
+    private void OnActivityGroupChangedAsync()
+    {
+        _periodIdText = "";
+        _groupDuplicateCodedValue = false;
+        _ = LoadGroupExistingTopicsAsync();
+    }
+
+    /// <summary>
+    /// Loads the topics already assigned to the selected activity group so the
+    /// create flow can reject a coded value that would duplicate an existing
+    /// group assignment (mirrors the grade-path <c>_duplicateCodedValue</c>
+    /// guard). Cleared when the selection is invalid/empty. Failures degrade to
+    /// an empty set (no hard block on the load path).
+    /// </summary>
+    private async Task LoadGroupExistingTopicsAsync()
+    {
+        if (!Guid.TryParse(_activityGroupIdText, out var groupId))
+        {
+            _groupExistingTopics = [];
+            _groupDuplicateCodedValue = false;
+            return;
+        }
+
+        try
+        {
+            _groupExistingTopics = await Api.ListSubjectsByGroupAsync(groupId, null) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load existing topics for activity group {GroupId}", groupId);
+            _groupExistingTopics = [];
+        }
+
+        _groupDuplicateCodedValue = Model.CodedValueId is { } id
+            && _groupExistingTopics.Any(t => t.CodedValueId == id);
+    }
+
+    private PeriodDto[] FilterPeriodsForGrade()
+    {
+        // Grade-owned: AcademicYear, or a Term/Semester within the active year.
+        return _periods
+            .Where(p => p.PeriodType == "AcademicYear"
+                || (_activeYearId.HasValue && p.ParentPeriodId == _activeYearId.Value))
+            .ToArray();
+    }
+
+    private PeriodDto[] FilterPeriodsForGroup()
+    {
+        if (!Guid.TryParse(_activityGroupIdText, out var groupId))
+            return [];
+        var group = _activityGroups.FirstOrDefault(g => g.Id == groupId);
+        if (group is null)
+            return [];
+
+        var requiredType = group.Span switch
+        {
+            "Termly" => "Term",
+            "Semester" => "Semester",
+            "WholeAcademicYear" => "AcademicYear",
+            _ => null // OpenEnded / DateRange carry no period.
+        };
+        if (requiredType is null)
+            return [];
+
+        return _periods.Where(p => p.PeriodType == requiredType).ToArray();
+    }
 
     /// <summary>Switches from display mode to edit mode, snapshotting the
     /// current values so Cancel can revert.</summary>
@@ -222,6 +393,11 @@
 
         // Reject a coded value already used by another subject in this grade.
         _duplicateCodedValue = Model.ExistingTopicCodedValueIds.Contains(id);
+
+        // For an activity-group owner, also reject a coded value already assigned
+        // to the selected group (mirrors the grade-path guard).
+        _groupDuplicateCodedValue = Model.OwnerType == "ActivityGroup"
+            && _groupExistingTopics.Any(t => t.CodedValueId == id);
     }
 
     /// <summary>
@@ -272,15 +448,43 @@
         var (resolvedCvId, effectiveCode) = await TopicCodedValueSaver.SaveAsync(
             CodedValues, cv, model.Name, model.Code, model.Description, model.DisplayOrder);
 
-        // Create (or reuse) the shared topic and wire it to the grade in one
+        // Create (or reuse) the shared topic and wire it to the owner in one
         // atomic call. Code is optional — the server generates it from the name
         // when blank. A brand-new topic is created; existing topics are never
         // renamed by this flow.
-        return await Api.CreateTopicForGradeAsync(new CreateTopicForGradeRequest(
+        Guid? periodId = Guid.TryParse(_periodIdText, out var pid) ? pid : null;
+
+        if (model.OwnerType == "ActivityGroup")
+        {
+            if (!Guid.TryParse(_activityGroupIdText, out var groupId))
+            {
+                Error = "Select an activity group.";
+                return null;
+            }
+
+            // Guard against a stale group-topic list: re-check immediately before
+            // assigning so a duplicate coded value never reaches the assign call.
+            if (model.CodedValueId is { } dupId
+                && _groupExistingTopics.Any(t => t.CodedValueId == dupId))
+            {
+                Error = "This subject is already assigned to this activity group.";
+                return null;
+            }
+
+            var topicId = await Api.CreateTopicAsync(new CreateTopicRequest(
+                resolvedCvId ?? Guid.Empty, effectiveCode ?? "", model.Name.Trim(), model.DisplayOrder));
+            await Api.AssignActivityGroupTopicAsync(new AssignActivityGroupTopicRequest(
+                groupId, topicId, DateOnly.FromDateTime(DateTime.UtcNow), null, periodId));
+            return await Api.GetTopicByIdAsync(topicId);
+        }
+
+        var topic = await Api.CreateTopicForGradeAsync(new CreateTopicForGradeRequest(
             model.GradeLevelId,
             resolvedCvId,
             effectiveCode,
             model.Name.Trim(),
-            model.DisplayOrder));
+            model.DisplayOrder,
+            periodId));
+        return topic;
     }
 }

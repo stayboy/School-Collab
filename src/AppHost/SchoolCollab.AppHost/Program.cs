@@ -161,6 +161,12 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
 // declaration order.
 studentsApi = studentsApi.WithReference(assignmentsApi);
 
+// FR-H7 (period-hierarchy-terms-semesters.md): the Settings API's academic-year-
+// division switch-rejection queries the Students API for the sub-period count.
+// Added here (after studentsApi is fully declared) so Settings resolves students-api
+// via service discovery. CrossModuleWiringTests enforces this reference.
+settingsApi = settingsApi.WithReference(studentsApi);
+
 var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("students-worker")
     .WithReference(studentsDb)
     .WithReference(rabbit)

@@ -68,6 +68,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
+        if (targetAudienceType == TargetAudienceType.SelectedGrades && !gradeLevelId.HasValue)
+            throw new ArgumentException("SelectedGrades assignments require a grade level.", nameof(gradeLevelId));
 
         var now = DateTimeOffset.UtcNow;
         var assignment = new Assignment
@@ -105,6 +107,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             throw new InvalidOperationException("Only draft assignments can be updated.");
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
+        if (targetAudienceType == TargetAudienceType.SelectedGrades && !gradeLevelId.HasValue)
+            throw new ArgumentException("SelectedGrades assignments require a grade level.", nameof(gradeLevelId));
 
         Title = title.Trim();
         Description = description?.Trim();

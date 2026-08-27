@@ -21,11 +21,11 @@ public sealed class UpdateTopicAssignmentTagsHandler(StudentsDbContext db) : ICo
             GradeTopicAssignment grade => new TopicAssignmentDto(
                 grade.Id, "grade", grade.GradeLevelId, null,
                 grade.TopicId, grade.StartDate, grade.EndDate,
-                grade.TopicStrandId, grade.CreatedAt, grade.UpdatedAt),
+                grade.TopicStrandId, grade.PeriodId, grade.CreatedAt, grade.UpdatedAt),
             ActivityGroupTopicAssignment group => new TopicAssignmentDto(
                 group.Id, "activity_group", null, group.ActivityGroupId,
                 group.TopicId, group.StartDate, group.EndDate,
-                group.TopicStrandId, group.CreatedAt, group.UpdatedAt),
+                group.TopicStrandId, group.PeriodId, group.CreatedAt, group.UpdatedAt),
             _ => throw new InvalidOperationException($"Unknown topic assignment subtype '{assignment.GetType().Name}'.")
         };
     }

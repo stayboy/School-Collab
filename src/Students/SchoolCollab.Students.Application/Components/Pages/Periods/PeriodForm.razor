@@ -1,4 +1,5 @@
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components
 @using Microsoft.AspNetCore.Components
@@ -48,6 +49,29 @@
                           Title="Fill the form with the next academic year after the latest period"
                           OnClick="BackfillAsync" />
         </FormRow>
+
+        @* Period type + parent academic year. The type selector is always
+           shown; the parent dropdown appears only for Term/Semester. *@
+        <FormRow Label="Period type *" AlignTop>
+            <FluentSelect TOption="string" @bind-Value="_periodTypeText" Label="" Style="flex:1; min-width:0">
+                <FluentOption Value="AcademicYear">Academic Year</FluentOption>
+                <FluentOption Value="Term">Term</FluentOption>
+                <FluentOption Value="Semester">Semester</FluentOption>
+            </FluentSelect>
+        </FormRow>
+
+        @if (_periodTypeText != "AcademicYear")
+        {
+            <FormRow Label="Parent academic year *" AlignTop>
+                <FluentSelect TOption="string" @bind-Value="_parentPeriodIdText" Label="" Style="flex:1; min-width:0">
+                    <FluentOption Value="">— Select academic year —</FluentOption>
+                    @foreach (var ay in _academicYears)
+                    {
+                        <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
+                    }
+                </FluentSelect>
+            </FormRow>
+        }
 
         @* Two date pickers side-by-side. AlignTop so the "Dates *" label
            sits at the top of the row (top-align reads better against a
@@ -122,9 +146,19 @@
     /// </summary>
     [Parameter] public IEnumerable<PeriodDto>? ExistingPeriods { get; set; }
 
+    /// <summary>
+    /// When creating a sub-period, pre-selects this parent academic year and
+    /// switches the type selector to Term. Used by the sub-period list's
+    /// "+ New Sub-period" action (route query <c>?parent=…</c>).
+    /// </summary>
+    [Parameter] public Guid? InitialParentPeriodId { get; set; }
+
     private string _name = string.Empty;
     private DateTime? _start;
     private DateTime? _end;
+    private string _periodTypeText = "AcademicYear";
+    private string _parentPeriodIdText = "";
+    private PeriodDto[] _academicYears = [];
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _cts;
@@ -146,6 +180,15 @@
 
         try
         {
+            _loadedPeriods = await Api.ListPeriodsAsync(ct) ?? [];
+            _academicYears = _loadedPeriods.Where(p => p.PeriodType == "AcademicYear").ToArray();
+
+            if (!PeriodId.HasValue && InitialParentPeriodId.HasValue)
+            {
+                _parentPeriodIdText = InitialParentPeriodId.Value.ToString();
+                _periodTypeText = "Term";
+            }
+
             if (PeriodId.HasValue)
             {
                 var p = await Api.GetPeriodByIdAsync(PeriodId.Value, ct);
@@ -154,15 +197,13 @@
                     _name = p.Name;
                     _start = p.StartDate.ToDateTime(TimeOnly.MinValue);
                     _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
+                    _periodTypeText = p.PeriodType;
+                    _parentPeriodIdText = p.ParentPeriodId?.ToString() ?? "";
                 }
             }
-            else
+            else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name))
             {
-                _loadedPeriods = await Api.ListPeriodsAsync(ct) ?? [];
-                if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name))
-                {
-                    SuggestAcademicYearAsync();
-                }
+                SuggestAcademicYearAsync();
             }
         }
         catch (OperationCanceledException) { }
@@ -173,6 +214,13 @@
             _error = ex.Message;
         }
     }
+
+    private static PeriodType ParsePeriodType(string value) => value switch
+    {
+        "Term" => PeriodType.Term,
+        "Semester" => PeriodType.Semester,
+        _ => PeriodType.AcademicYear
+    };
 
     private void SuggestAcademicYearAsync()
     {
@@ -211,22 +259,29 @@
             _error = "End date must be on or after the start date.";
             return;
         }
+        if (_periodTypeText != "AcademicYear" && !Guid.TryParse(_parentPeriodIdText, out _))
+        {
+            _error = "Select a parent academic year for this period.";
+            return;
+        }
 
         _saving = true;
         try
         {
             var startDate = DateOnly.FromDateTime(_start.Value.Date);
             var endDate = DateOnly.FromDateTime(_end.Value.Date);
+            var periodType = ParsePeriodType(_periodTypeText);
+            Guid? parentId = Guid.TryParse(_parentPeriodIdText, out var pid) ? pid : null;
             PeriodDto? saved = null;
 
             if (PeriodId.HasValue)
             {
-                await Api.UpdatePeriodAsync(PeriodId.Value, new UpdatePeriodRequest(_name.Trim(), startDate, endDate));
+                await Api.UpdatePeriodAsync(PeriodId.Value, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, periodType, parentId));
                 saved = await Api.GetPeriodByIdAsync(PeriodId.Value);
             }
             else
             {
-                var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate));
+                var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, periodType, parentId));
                 if (AutoActivateOnCreate)
                 {
                     await Api.ActivatePeriodAsync(id);

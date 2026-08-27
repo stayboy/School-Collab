@@ -178,7 +178,7 @@ public sealed class UpsertTenantFlagOverrideHandler(
             if (existing is null)
             {
                 var created = TenantFeatureFlagOverride.Create(
-                    command.TenantId, flag.Id, command.IsEnabled, command.Reason, command.EffectiveFrom, command.EffectiveTo);
+                    command.TenantId, flag.Id, command.IsEnabled, command.Value, command.Reason, command.EffectiveFrom, command.EffectiveTo);
                 db.TenantFlagOverrides.Add(created);
                 existing = created;
                 kind = FlagChangeKind.OverrideCreated;
@@ -186,7 +186,7 @@ public sealed class UpsertTenantFlagOverrideHandler(
             else
             {
                 previous = existing.IsEnabled;
-                existing.Update(command.IsEnabled, command.Reason, command.EffectiveFrom, command.EffectiveTo);
+                existing.Update(command.IsEnabled, command.Value, command.Reason, command.EffectiveFrom, command.EffectiveTo);
                 kind = FlagChangeKind.OverrideUpdated;
             }
 
@@ -258,6 +258,6 @@ internal static class FeatureFlagCommandHelpers
     }
 
     public static TenantFlagOverrideDto ToDto(TenantFeatureFlagOverride o) => new(
-        o.Id, o.TenantId, o.FeatureFlagId, o.IsEnabled, o.Reason,
+        o.Id, o.TenantId, o.FeatureFlagId, o.IsEnabled, o.Value, o.Reason,
         o.EffectiveFrom, o.EffectiveTo, o.CreatedAt, o.UpdatedAt);
 }

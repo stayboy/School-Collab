@@ -1,7 +1,8 @@
 @*
     ActivityGroupCreateDialog — opens from the Activity Groups landing's
-    + New button. Collects name (required), category, description, and an
-    optional capacity; posts to POST /activity-groups (spec §7.1).
+    + New button. Collects name (required), category, description, capacity,
+    enrollment span + window, auto-renew default, and eligible grades; posts
+    to POST /activity-groups (spec §7.1, Rev. 2–6).
 *@
 @inherits DialogShellBase<ActivityGroupCreateDialog.ActivityGroupCreateModel, ActivityGroupDto>
 @using System.ComponentModel.DataAnnotations
@@ -34,6 +35,52 @@
                             Placeholder="What does the group do? (optional)" />
         </FormRow>
 
+        <FormRow Label="Enrollment span" For="ag-create-span" Required="true">
+            <FluentSelect TOption="string" @bind-Value="Model.Span" Id="ag-create-span" Style="flex:1; min-width:0">
+                <FluentOption Value="OpenEnded">Open-ended</FluentOption>
+                <FluentOption Value="WholeAcademicYear">Whole academic year</FluentOption>
+                <FluentOption Value="Termly">Termly</FluentOption>
+                <FluentOption Value="Semester">Semester</FluentOption>
+                <FluentOption Value="DateRange">Date range</FluentOption>
+            </FluentSelect>
+        </FormRow>
+
+        @if (Model.Span == "DateRange")
+        {
+            <FormRow Label="Enrollment window" AlignTop>
+                <FluentDatePicker @bind-Value="Model.EnrollmentStartDate" Label="Start" Style="flex:1; min-width:0" />
+                <FluentDatePicker @bind-Value="Model.EnrollmentEndDate" Label="End" Style="flex:1; min-width:0" />
+            </FormRow>
+            <FormRow Label="Next window (optional)" AlignTop>
+                <FluentDatePicker @bind-Value="Model.NextEnrollmentStartDate" Label="Next start" Style="flex:1; min-width:0" />
+                <FluentDatePicker @bind-Value="Model.NextEnrollmentEndDate" Label="Next end" Style="flex:1; min-width:0" />
+            </FormRow>
+        }
+
+        <FormRow Label="Auto-renew by default" For="ag-create-autorenew">
+            <FluentCheckbox @bind-Value="Model.AutoRenewDefault"
+                            Id="ag-create-autorenew"
+                            Label="Members auto-renew into the next window" />
+        </FormRow>
+
+        <FormRow Label="Eligible grades" AlignTop>
+            <div class="grade-checkbox-list">
+                @if (_gradeLevels.Length == 0)
+                {
+                    <span class="muted">No grade levels found. Leave empty to allow all grades.</span>
+                }
+                else
+                {
+                    @foreach (var g in _gradeLevels)
+                    {
+                        <FluentCheckbox Value="@_selectedGradeIds.Contains(g.Id)"
+                                        ValueChanged="@(v => ToggleGrade(g.Id, v))"
+                                        Label="@g.Name" />
+                    }
+                }
+            </div>
+        </FormRow>
+
         <FormRow Label="Capacity" For="ag-create-capacity">
             <FluentNumberField @bind-Value="Model.Capacity"
                                Id="ag-create-capacity"
@@ -47,18 +94,71 @@
 </div>
 
 @code {
+    private GradeLevelLandingDto[] _gradeLevels = [];
+    private readonly HashSet<Guid> _selectedGradeIds = new();
+
     public sealed class ActivityGroupCreateModel
     {
         [Required] [StringLength(200)] public string Name { get; set; } = "";
         [StringLength(100)] public string? Category { get; set; }
         [StringLength(2000)] public string? Description { get; set; }
         [Range(1, int.MaxValue)] public int? Capacity { get; set; }
+        public string Span { get; set; } = "OpenEnded";
+        public DateTime? EnrollmentStartDate { get; set; }
+        public DateTime? EnrollmentEndDate { get; set; }
+        public DateTime? NextEnrollmentStartDate { get; set; }
+        public DateTime? NextEnrollmentEndDate { get; set; }
+        public bool AutoRenewDefault { get; set; } = true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _gradeLevels = await Api.ListGradeLevelsForLandingAsync() ?? [];
+    }
+
+    private void ToggleGrade(Guid id, bool selected)
+    {
+        if (selected) _selectedGradeIds.Add(id);
+        else _selectedGradeIds.Remove(id);
     }
 
     protected override async Task<ActivityGroupDto?> SubmitAsync(ActivityGroupCreateModel model)
     {
+        DateOnly? start = model.EnrollmentStartDate.HasValue ? DateOnly.FromDateTime(model.EnrollmentStartDate.Value) : null;
+        DateOnly? end = model.EnrollmentEndDate.HasValue ? DateOnly.FromDateTime(model.EnrollmentEndDate.Value) : null;
+
+        // Validate the optional next window (FR-53/AC-43): next start must be on
+        // or after the current window's end.
+        if (model.Span == "DateRange"
+            && (model.NextEnrollmentStartDate.HasValue || model.NextEnrollmentEndDate.HasValue))
+        {
+            if (!model.NextEnrollmentStartDate.HasValue || !model.NextEnrollmentEndDate.HasValue)
+            {
+                Error = "Enter both next-window dates, or clear both.";
+                return null;
+            }
+            if (end.HasValue && DateOnly.FromDateTime(model.NextEnrollmentStartDate.Value) < end.Value)
+            {
+                Error = "The next window's start must be on or after the current window's end.";
+                return null;
+            }
+        }
+
         var id = await Api.CreateActivityGroupAsync(new CreateActivityGroupRequest(
-            model.Name, model.Description, model.Category, null, model.Capacity));
+            model.Name, model.Description, model.Category, model.Capacity,
+            model.Span, start, end,
+            model.AutoRenewDefault, _selectedGradeIds.Count > 0 ? _selectedGradeIds.ToArray() : null));
+
+        if (model.Span == "DateRange"
+            && model.NextEnrollmentStartDate.HasValue
+            && model.NextEnrollmentEndDate.HasValue)
+        {
+            await Api.SetActivityGroupNextWindowAsync(
+                id,
+                DateOnly.FromDateTime(model.NextEnrollmentStartDate.Value),
+                DateOnly.FromDateTime(model.NextEnrollmentEndDate.Value));
+        }
+
         return await Api.GetActivityGroupByIdAsync(id);
     }
 }

@@ -18,6 +18,7 @@ using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicLessons;
 using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicStrands;
 using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopics;
 using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicsByGrade;
+using SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicsByGroup;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -67,16 +68,41 @@ public static class TopicRoutes
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
+        group.MapGet($"{prefix}/by-group/{{activityGroupId:guid}}", async (
+            Guid activityGroupId,
+            DateOnly? effectiveDate,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTopicsByGroup, SchoolCollab.Students.Core.DTOs.TopicDto[]> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var topics = await handler.HandleAsync(
+                    new ListTopicsByGroup(activityGroupId, effectiveDate), ct);
+                return Results.Ok(topics);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return Results.StatusCode(StatusCodes.Status499ClientClosedRequest);
+            }
+            catch (Exception ex)
+            {
+                return Results.Json(
+                    new { Message = "Topics by group: unexpected error", Detail = ex.Message },
+                    statusCode: StatusCodes.Status500InternalServerError);
+            }
+        });
+
         group.MapGet($"{prefix}/by-grade/{{gradeLevelId:guid}}", async (
             Guid gradeLevelId,
             DateOnly? effectiveDate,
+            Guid? periodId,
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTopicsByGrade, SchoolCollab.Students.Core.DTOs.TopicDto[]> handler,
             CancellationToken ct) =>
         {
             try
             {
                 var topics = await handler.HandleAsync(
-                    new ListTopicsByGrade(gradeLevelId, effectiveDate), ct);
+                    new ListTopicsByGrade(gradeLevelId, effectiveDate, periodId), ct);
                 return Results.Ok(topics);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -132,7 +158,7 @@ public static class TopicRoutes
             try
             {
                 var dto = await handler.HandleAsync(
-                    new CreateTopicForGrade(req.GradeLevelId, req.CodedValueId, req.Code, req.Name, req.DisplayOrder), ct);
+                    new CreateTopicForGrade(req.GradeLevelId, req.CodedValueId, req.Code, req.Name, req.DisplayOrder, req.PeriodId), ct);
                 return Results.Ok(dto);
             }
             catch (GradeLevelNotFoundException)
@@ -331,7 +357,8 @@ internal record CreateTopicForGradeRequest(
     Guid? CodedValueId,
     string? Code,
     string Name,
-    int DisplayOrder);
+    int DisplayOrder,
+    Guid? PeriodId = null);
 
 internal record GetOrCreateTopicRequest(
     Guid GradeLevelId,

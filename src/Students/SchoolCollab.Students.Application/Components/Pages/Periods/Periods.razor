@@ -25,6 +25,9 @@
              RowActionsAriaLabel="Period actions">
     <Columns>
         <PropertyColumn TGridItem="PeriodDto" TProp="string" Property="@(x => x.Name)" Sortable="true" Title="Name" />
+        <TemplateColumn TGridItem="PeriodDto" Title="Type">
+            <FluentBadge Appearance="Appearance.Neutral">@context.PeriodType</FluentBadge>
+        </TemplateColumn>
         <TemplateColumn TGridItem="PeriodDto" Title="Start Date">
             @context.StartDate.ToString("d")
         </TemplateColumn>
@@ -48,7 +51,7 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(160px,2fr) 110px 110px 120px auto"
+        GridTemplateColumns = "minmax(160px,2fr) 100px 110px 110px 120px auto"
     };
 
     private string CurrentEmptyMessage =>
@@ -180,6 +183,10 @@
         else if (period.Status == "Active")
         {
             actions.Add(RowAction.Callback("Complete", () => OnCompleteAsync(period.Id), FluentIcons.Checkmark));
+        }
+        if (period.PeriodType == "AcademicYear")
+        {
+            actions.Add(RowAction.Navigate("Sub-periods", $"/students/periods/{period.Id}/sub-periods", FluentIcons.Calendar));
         }
         actions.Add(RowAction.Navigate("Edit", $"/students/periods/{period.Id}/edit", FluentIcons.Edit));
         return actions;

@@ -212,7 +212,7 @@
                                     </TemplateColumn>
                                     <TemplateColumn Title="Category">@(context.Category ?? "—")</TemplateColumn>
                                     <TemplateColumn Title="Status">
-                                        <FluentBadge Appearance="@GroupStatusBadge(context.Status)">@context.Status</FluentBadge>
+                                        <FluentBadge Appearance="@(context.IsActive ? Appearance.Accent : Appearance.Neutral)">@(context.IsActive ? "Active" : "Inactive")</FluentBadge>
                                     </TemplateColumn>
                                     <TemplateColumn Title="Members">@context.ActiveMemberCount</TemplateColumn>
                                     <TemplateColumn Title="Actions" Class="activity-group-actions-col">
@@ -1015,13 +1015,10 @@
 
     /// <summary>
     /// Badge appearance for a group status in the Activity Groups section.
-    /// Active groups are accented; Exited/Removed/Suspended fall back to
-    /// neutral so the section's visual language matches the group details page.
+    /// Active groups are accented; inactive fall back to neutral so the section's
+    /// visual language matches the group details page.
     /// </summary>
-    private static Appearance GroupStatusBadge(string status) =>
-        string.Equals(status, "Active", StringComparison.OrdinalIgnoreCase)
-            ? Appearance.Accent
-            : Appearance.Neutral;
+    private static Appearance GroupStatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
 
     public void Dispose()
     {

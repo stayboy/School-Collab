@@ -7,4 +7,5 @@ public sealed record AssignGradeTopic(
     Guid TopicId,
     DateOnly StartDate,
     DateOnly? EndDate = null,
-    Guid? TopicStrandId = null) : ICommand;
+    Guid? TopicStrandId = null,
+    Guid? PeriodId = null) : ICommand;

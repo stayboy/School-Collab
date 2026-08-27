@@ -7,4 +7,4 @@ namespace SchoolCollab.Assignments.Core.DTOs;
 public sealed record ActivityGroupRefDto(
     Guid Id,
     string Name,
-    string Status);
+    bool IsActive);

@@ -71,5 +71,10 @@ builder.Services.AddRabbitMqSubscriber(
 // One-time projection backfill (no-op while the flag is off).
 builder.Services.AddHostedService<CodedValueBackfillService>();
 
+// Scheduled DateRange rollover sweep (spec activity-group-enrollment.md FR-54).
+// Only acts on DateRange groups (which exist only under FEATURE:EnableActivityGroups,
+// off by default), so it is a no-op while the feature is dark.
+builder.Services.AddHostedService<ActivityGroupRolloverService>();
+
 var host = builder.Build();
 host.Run();

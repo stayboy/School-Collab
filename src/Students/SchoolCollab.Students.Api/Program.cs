@@ -73,6 +73,14 @@ builder.Services.AddCrossModuleHttpClient("assignments-api", "https+http://assig
 builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IActivityGroupAssignmentQuery,
     SchoolCollab.Students.Api.Services.ActivityGroupAssignmentQueryHttpClient>();
 
+// H3.4 (period-hierarchy-terms-semesters.md FR-H7): HTTP client for the Settings
+// API academic-year-division resolution. TenantForwardingDelegatingHandler forwards
+// the inbound request's tenant so the Settings endpoint resolves the same tenant.
+builder.Services.AddCrossModuleHttpClient("settings-api", "http://settings-api", propagateTenant: false)
+    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
+builder.Services.AddScoped<SchoolCollab.Students.Core.Services.IAcademicYearDivisionProvider,
+    SchoolCollab.Students.Api.Services.AcademicYearDivisionProviderHttpClient>();
+
 builder.Services.AddStudentsCore(builder.Configuration);
 // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
 // is resolvable by the Student/Teacher creation handlers.

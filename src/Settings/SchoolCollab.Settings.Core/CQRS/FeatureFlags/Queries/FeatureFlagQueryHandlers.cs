@@ -3,6 +3,7 @@ using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Settings.Core.DTOs;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Core.Features;
 
 namespace SchoolCollab.Settings.Core.CQRS.FeatureFlags.Queries;
 
@@ -35,7 +36,7 @@ public sealed class ListFeatureFlagsHandler(SettingsDbContext db)
     }
 
     private static FeatureFlagDto ToDto(FeatureFlag f, int overrideCount) => new(
-        f.Id, f.Key, f.Name, f.Description, (FlagKindDto)f.Kind, f.IsEnabled, f.IsArchived, f.IsDeleted,
+        f.Id, f.Key, f.Name, f.Description, (FlagKindDto)f.Kind, f.Value, f.IsEnabled, f.IsArchived, f.IsDeleted,
         overrideCount, f.CreatedAt, f.UpdatedAt);
 }
 
@@ -53,7 +54,7 @@ public sealed class GetFeatureFlagHandler(SettingsDbContext db)
             .CountAsync(o => o.FeatureFlagId == flag.Id && !o.IsDeleted, ct);
 
         return new FeatureFlagDto(flag.Id, flag.Key, flag.Name, flag.Description,
-            (FlagKindDto)flag.Kind, flag.IsEnabled, flag.IsArchived, flag.IsDeleted,
+            (FlagKindDto)flag.Kind, flag.Value, flag.IsEnabled, flag.IsArchived, flag.IsDeleted,
             overrideCount, flag.CreatedAt, flag.UpdatedAt);
     }
 }
@@ -117,5 +118,30 @@ public sealed class ResolveFlagsForTenantHandler(SettingsDbContext db)
 
             return new ResolvedFlagDto(f.Key, f.IsEnabled, "GlobalDefault", now);
         }).ToArray();
+    }
+}
+
+public sealed class GetAcademicYearDivisionHandler(SettingsDbContext db)
+    : IQueryHandler<GetAcademicYearDivision, AcademicYearDivisionDto>
+{
+    public async Task<AcademicYearDivisionDto> HandleAsync(GetAcademicYearDivision query, CancellationToken ct = default)
+    {
+        var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.AcademicYearDivision);
+        var flag = await db.FeatureFlags.AsNoTracking()
+            .SingleOrDefaultAsync(f => f.Key == key && !f.IsDeleted && !f.IsArchived, ct)
+            ?? throw new KeyNotFoundException($"Academic-year division flag '{key}' not found.");
+
+        var overrideRow = await db.TenantFlagOverrides.AsNoTracking()
+            .IgnoreQueryFilters(["Tenant"])
+            .Where(o => o.FeatureFlagId == flag.Id && o.TenantId == query.TenantId && !o.IsDeleted)
+            .FirstOrDefaultAsync(ct);
+
+        if (overrideRow is not null && !string.IsNullOrWhiteSpace(overrideRow.Value))
+        {
+            return new AcademicYearDivisionDto(overrideRow.Value, "TenantOverride");
+        }
+
+        return new AcademicYearDivisionDto(
+            flag.Value ?? nameof(AcademicYearDivision.None), "GlobalDefault");
     }
 }

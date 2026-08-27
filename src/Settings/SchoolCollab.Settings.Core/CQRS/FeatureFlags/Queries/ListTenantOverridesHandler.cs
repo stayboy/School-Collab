@@ -24,7 +24,7 @@ public sealed class ListTenantOverridesHandler(SettingsDbContext db)
             .ToArrayAsync(ct);
 
         return overrides.Select(o => new TenantFlagOverrideDto(
-            o.Id, o.TenantId, o.FeatureFlagId, o.IsEnabled, o.Reason,
+            o.Id, o.TenantId, o.FeatureFlagId, o.IsEnabled, o.Value, o.Reason,
             o.EffectiveFrom, o.EffectiveTo, o.CreatedAt, o.UpdatedAt)).ToArray();
     }
 }

@@ -12,6 +12,7 @@ namespace SchoolCollab.Admin.Shared.Services;
 public enum FlagKindDto
 {
     Boolean = 0,
+    String = 1,
 }
 
 public record FeatureFlagDto(
@@ -20,6 +21,7 @@ public record FeatureFlagDto(
     string Name,
     string? Description,
     FlagKindDto Kind,
+    string? Value,
     bool IsEnabled,
     bool IsArchived,
     bool IsDeleted,
@@ -32,6 +34,7 @@ public record TenantFlagOverrideDto(
     Guid TenantId,
     Guid FeatureFlagId,
     bool? IsEnabled,
+    string? Value,
     string Reason,
     DateTimeOffset? EffectiveFrom,
     DateTimeOffset? EffectiveTo,
@@ -55,7 +58,14 @@ public record CreateFlagRequest(string Key, string Name, string? Description, bo
 public record UpdateFlagRequest(string Name, string? Description, string Reason);
 public record SetEnabledRequest(bool IsEnabled, string Reason);
 public record ReasonRequest(string Reason);
-public record UpsertOverrideRequest(bool? IsEnabled, string Reason, DateTimeOffset? EffectiveFrom, DateTimeOffset? EffectiveTo);
+public record UpsertOverrideRequest(bool? IsEnabled, string? Value, string Reason, DateTimeOffset? EffectiveFrom, DateTimeOffset? EffectiveTo);
+
+/// <summary>
+/// Mirror of <see cref="SchoolCollab.Settings.Core.DTOs.AcademicYearDivisionDto"/>
+/// so the shared admin client can deserialize the division setting without a
+/// reference on Settings.Core.
+/// </summary>
+public record AcademicYearDivisionSettingDto(string Value, string Source);
 
 /// <summary>
 /// HTTP client for the central Config service, used by the unified admin host's
@@ -168,6 +178,49 @@ public sealed class ConfigFlagsApiClient(HttpClient http)
 
         var result = await http.GetFromJsonAsync<FlagAuditEntryDto[]>(url, JsonOptions, ct);
         return result ?? [];
+    }
+
+    /// <summary>
+    /// GET the current tenant's effective academic-year division. Returns
+    /// <c>null</c> when no division is set (404 → caller renders "None (default)").
+    /// </summary>
+    public async Task<AcademicYearDivisionSettingDto?> GetAcademicYearDivisionAsync(CancellationToken ct = default)
+    {
+        var response = await http.GetAsync("/api/config/flags/academic_year_division", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<AcademicYearDivisionSettingDto>(JsonOptions, ct);
+    }
+
+    /// <summary>
+    /// PUT the current tenant's academic-year division. On non-success, reads the
+    /// server's <c>message</c> property (camelCase JSON) and surfaces it verbatim
+    /// so the FR-H7 framework-switch rejection text reaches the UI.
+    /// </summary>
+    public async Task SetAcademicYearDivisionAsync(string value, string reason, CancellationToken ct = default)
+    {
+        var response = await http.PutAsJsonAsync(
+            "/api/config/flags/academic_year_division", new { value, reason }, JsonOptions, ct);
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var body = await response.Content.ReadAsStringAsync(ct);
+        var message = ExtractMessage(body) ?? $"Request failed with status {(int)response.StatusCode}.";
+        throw new HttpRequestException(message, null, response.StatusCode);
+    }
+
+    private static string? ExtractMessage(string body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return null;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            if (doc.RootElement.TryGetProperty("message", out var msg) && msg.ValueKind == JsonValueKind.String)
+                return msg.GetString();
+        }
+        catch (JsonException) { /* fall through to status-code message */ }
+        return null;
     }
 
     public record CreateFlagResponse(Guid Id);

@@ -36,7 +36,7 @@ public sealed class LinkAssignmentGroupsHandler(
                 $"Activity group(s) not found or not in the current tenant: {string.Join(", ", missing)}");
 
         // FR-22: reject archived groups.
-        var archived = groups.Where(g => g.Status == "Archived").ToArray();
+        var archived = groups.Where(g => !g.IsActive).ToArray();
         if (archived.Length > 0)
             throw new ArgumentException(
                 $"Cannot link archived activity group(s): {string.Join(", ", archived.Select(a => a.Id))}");

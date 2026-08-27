@@ -55,6 +55,7 @@ public class AssignmentActivityGroupTests
                resolver,
                linkRepo,
                lookup,
+               new FakeTopicAssignmentLookup(),
                new FakeTenantProvider(TenantId),
                broadcaster,
                new FakeNotificationPolicyResolver(),
@@ -97,6 +98,28 @@ public class AssignmentActivityGroupTests
             new FakeLinkRepository { GroupIds = [] },
             new FakeActivityGroupLookup(),
             new FakeBroadcaster());
+
+        await FluentActions.Awaiting(() => handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)))
+            .Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    // ── FR-58: SelectedGroups publish rejects when the subject is not assigned to the group ──
+    [TestMethod]
+    public async Task Publish_SelectedGroups_SubjectNotAssigned_Rejected()
+    {
+        var assignment = NewAssignment(TargetAudienceType.SelectedGroups);
+        var handler = new PublishAssignmentCommandHandler(
+            new FakeAssignmentRepository { Assignment = assignment },
+            new FakeSubmissionRepository(),
+            new FakeContactResolver([]),
+            new FakeLinkRepository { GroupIds = [Group1] },
+            new FakeActivityGroupLookup { MemberIds = [StudentId1] },
+            new FakeTopicAssignmentLookup { Result = false },
+            new FakeTenantProvider(TenantId),
+            new FakeBroadcaster(),
+            new FakeNotificationPolicyResolver(),
+            new FakeHybridCache(),
+            NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await FluentActions.Awaiting(() => handler.HandleAsync(new PublishAssignmentCommand(assignment.Id)))
             .Should().ThrowAsync<InvalidOperationException>();
@@ -188,7 +211,7 @@ public class AssignmentActivityGroupTests
         var handler = new LinkAssignmentGroupsHandler(
             new FakeAssignmentRepository { Assignment = assignment },
             new FakeLinkRepository(),
-            new FakeActivityGroupLookup { Groups = [new ActivityGroupRefDto(Group1, "Chess", "Archived")] },
+            new FakeActivityGroupLookup { Groups = [new ActivityGroupRefDto(Group1, "Chess", IsActive: false)] },
             new FakeTenantProvider(TenantId),
             new FakeHybridCache(),
             NullLogger<LinkAssignmentGroupsHandler>.Instance);
@@ -321,6 +344,15 @@ public class AssignmentActivityGroupTests
         public Task<Guid[]> GetActiveMemberIdsAsync(IReadOnlyList<Guid> activityGroupIds, CancellationToken ct = default)
             => Task.FromResult(MemberIds);
     }
+
+    private sealed class FakeTopicAssignmentLookup : SchoolCollab.Assignments.Core.Services.ITopicAssignmentLookup
+    {
+        public bool Result = true;
+        public Task<bool> IsTopicAssignedAsync(Guid? gradeLevelId, IReadOnlyList<Guid> activityGroupIds,
+            Guid topicId, DateOnly effectiveDate, CancellationToken ct = default)
+            => Task.FromResult(Result);
+    }
+
 
     private sealed class FakeLinkRepository : IAssignmentActivityGroupRepository
     {

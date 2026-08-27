@@ -24,10 +24,11 @@ public sealed class ActivityGroupTopicAssignment : TopicAssignment
         Guid topicId,
         DateOnly startDate,
         DateOnly? endDate = null,
-        Guid? topicStrandId = null)
+        Guid? topicStrandId = null,
+        Guid? periodId = null)
     {
         var assignment = new ActivityGroupTopicAssignment { ActivityGroupId = activityGroupId };
-        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId);
+        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId, periodId);
         assignment.AddEvent(new ActivityGroupTopicAssignedEvent(
             assignment.Id, activityGroupId, topicId, startDate, endDate));
         return assignment;

@@ -7,5 +7,8 @@ public sealed record UpdateActivityGroup(
     string Name,
     string? Description = null,
     string? Category = null,
-    Guid? PeriodId = null,
-    int? Capacity = null) : ICommand;
+    int? Capacity = null,
+    DateOnly? EnrollmentStartDate = null,
+    DateOnly? EnrollmentEndDate = null,
+    bool? AutoRenewDefault = null,
+    Guid[]? EligibleGradeIds = null) : ICommand;
