@@ -3,7 +3,10 @@ using System.Text;
 using System.Text.Json;
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Rendering;
+using Microsoft.AspNetCore.Components.Sections;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -199,6 +202,77 @@ public class ActivityGroupsPageTests : BunitContext
         cut.Markup.Should().Contain("Alice Smith");
         cut.Markup.Should().Contain("Members");
         cut.Markup.Should().Contain("Remove");
+    }
+
+    /// <summary>
+    /// B1 (AC-38): the Roll over button renders only for a non-OpenEnded active
+    /// group. The button lives in the page-toolbar SectionContent, so the page
+    /// is hosted under a component that provides the matching SectionOutlet.
+    /// Render-level assertion only — no confirmation-dialog driving.
+    /// </summary>
+    [TestMethod]
+    public void DetailsPage_RolloverButton_HiddenForOpenEnded()
+    {
+        RegisterWith(
+            ($"/activity-groups/{GroupId}/members", HttpStatusCode.OK, MembersJson()),
+            ($"/activity-groups/{GroupId}", HttpStatusCode.OK, GroupJsonWithSpan("OpenEnded")));
+
+        var cut = Render<RolloverHost>(p => p.Add(x => x.GroupId, GroupId));
+        cut.WaitForState(() => cut.Markup.Contains("After-school chess"), TimeSpan.FromSeconds(2));
+        cut.Markup.Should().NotContain("Roll over", "an OpenEnded group has no rollover");
+    }
+
+    /// <summary>
+    /// B1 (AC-38): a non-OpenEnded active group renders the Roll over button.
+    /// </summary>
+    [TestMethod]
+    public void DetailsPage_RolloverButton_ShownForDateRange()
+    {
+        RegisterWith(
+            ($"/activity-groups/{GroupId}/members", HttpStatusCode.OK, MembersJson()),
+            ($"/activity-groups/{GroupId}", HttpStatusCode.OK, GroupJsonWithSpan("DateRange")));
+
+        var cut = Render<RolloverHost>(p => p.Add(x => x.GroupId, GroupId));
+        cut.WaitForState(() => cut.Markup.Contains("Roll over"), TimeSpan.FromSeconds(2));
+        cut.Markup.Should().Contain("Roll over", "a DateRange group offers rollover");
+    }
+
+    private static string GroupJsonWithSpan(string span) => JsonSerializer.Serialize(new
+    {
+        Id = GroupId,
+        Name = "Chess Club",
+        Description = "After-school chess",
+        Category = "Games",
+        Capacity = 20,
+        IsActive = true,
+        Span = span,
+        EnrollmentStartDate = (DateOnly?)null,
+        EnrollmentEndDate = (DateOnly?)null,
+        AutoRenewDefault = true,
+        EligibleGradeIds = Array.Empty<Guid>(),
+        ActiveMemberCount = 3,
+        CreatedAt = DateTimeOffset.UnixEpoch,
+        UpdatedAt = DateTimeOffset.UnixEpoch,
+    });
+
+    /// <summary>
+    /// Test host that renders the page-toolbar SectionOutlet so the details
+    /// page's toolbar (including the Roll over button) renders in bUnit.
+    /// </summary>
+    private sealed class RolloverHost : ComponentBase
+    {
+        [Parameter] public Guid GroupId { get; set; }
+
+        protected override void BuildRenderTree(RenderTreeBuilder builder)
+        {
+            builder.OpenComponent<SectionOutlet>(0);
+            builder.AddAttribute(1, "SectionName", "page-toolbar");
+            builder.CloseComponent();
+
+            builder.OpenComponent<ActivityGroupDetails>(2);
+            builder.AddAttribute(3, "Id", GroupId);
+            builder.CloseComponent();
+        }
     }
 }
 

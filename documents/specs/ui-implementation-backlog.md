@@ -249,9 +249,23 @@
 - [x] **P2** bUnit: division client methods — `ConfigFlagsApiClientTests`
   (`GetAcademicYearDivisionAsync` 404→null / 200→deserialize; `SetAcademicYearDivisionAsync`
   204 success / 422 message extraction).
-- [ ] **P2** bUnit: span-aware create/edit dialog validation (AC-35..43).
-- [ ] **P2** bUnit: rollover / next-window UI (AC-38/43).
-- [ ] **P2** bUnit: `PeriodType` + parent selector validation.
+- [x] **P2** bUnit: span-aware create/edit dialog validation (AC-35..43) —
+  `ActivityGroupSpanDialogTests.cs` (`CreateDialog_DateRangeSpan_RevealsWindowDates`,
+  `CreateDialog_OpenEndedSpan_HidesWindowDates`, `CreateDialog_NextWindow_OnlyStart_ShowsBothOrNeitherError`,
+  `CreateDialog_NextWindow_StartBeforeEnd_Rejected`, `CreateDialog_ValidDateRange_PostsCreateAndNextWindow`,
+  `EditDialog_ReadOnlySpan_AndValidPut`).
+- [x] **P2** bUnit: rollover / next-window UI (AC-38/43) — rollover button
+  visibility by span (`DetailsPage_RolloverButton_HiddenForOpenEnded` /
+  `DetailsPage_RolloverButton_ShownForDateRange` in `ActivityGroupsPageTests.cs`);
+  next-window validation covered by the create/edit dialog tests above.
+  Confirmation-dialog driving dropped as optional/fragile (documented follow-up).
+  Product fix surfaced by these tests: `ActivityGroupCreateDialog`/`EditDialog`
+  `DialogShellFooter` now binds `Error="Error"` so validation errors render.
+- [x] **P2** bUnit: `PeriodType` + parent selector validation — `PeriodFormTests.cs`
+  (`PeriodForm_Term_ShowsParentSelector`, `PeriodForm_AcademicYear_HidesParentSelector`,
+  `PeriodForm_Term_NoParent_ShowsError`).
+- [x] **P2** bUnit: span-aware join filtering (AC-35/36) — `JoinGroupsDialogTests.cs`
+  (`JoinDialog_OpenEnded_Listed_WhenNoActivePeriod`, `JoinDialog_Termly_Listed_SemesterFiltered_WhenActiveTerm`).
 
 ### 6.2 Playwright smoke
 
@@ -287,12 +301,22 @@
   re-checks before `AssignActivityGroupTopicAsync` (client-side guard).
 - [x] **Item 6** `SubPeriods.razor` row actions: Edit (navigate), Activate
   (disabled for Active), Complete (confirm + disabled unless Active).
-- [ ] **Item 4** Topic-assignment `PeriodId` editing on existing assignments —
-  re-deferred (feature-sized; needs a new update command/endpoint + edit surface).
-- [ ] **Item 5** String-flag audit-log value display — re-deferred (needs
-  `FlagAuditEntry` value columns + migration + auditor + DTO/query + UI).
-- [ ] **Backend guard** for `AssignActivityGroupTopic` duplicate active
-  assignments — re-deferred (client check closes the create-dialog flow only).
+- [x] **Item 4** Topic-assignment `PeriodId` editing on existing assignments —
+  `UpdateTopicAssignmentPeriod` command/handler + `PUT /topic-assignments/{id}/period`
+  (reuses shared `TopicAssignmentPeriodValidator`), `TopicAssignment.UpdatePeriod`,
+  application-layer `TopicAssignmentDto.PeriodId`, grade Topics card "Edit period"
+  action + `TopicAssignmentPeriodEditDialog`. Group-path UI deferred (no group-topics
+  list page; endpoint supports it). Tests: `UpdateTopicAssignmentPeriodTests.cs`.
+- [x] **Item 5** String-flag audit-log value display — `FlagAuditEntry.PreviousValue`/
+  `NewValue` + migration `AddFlagAuditEntryValueColumns`, auditor + call sites capture
+  string-flag values, `FlagAuditEntryDto` (Core + Admin.Shared) + query expose them,
+  `ConfigFlagDetail.razor` renders a Value column for string flags. Tests:
+  `FeatureFlagAuditorTests.Record_adds_audit_row_with_previous_and_new_value`,
+  `ConfigApiTests.PUT_UpsertStringOverride_WritesValueAuditRow`.
+- [x] **Backend guard** for `AssignActivityGroupTopic` duplicate active assignments —
+  `DuplicateTopicAssignmentException` (→409) in `AssignActivityGroupTopicHandler`
+  (period validation runs first, so 422 wins over 409). Grade-path skip-vs-reject
+  semantics deferred. Tests: `TopicAssignmentPeriodTests` (4 new).
 
 ---
 
