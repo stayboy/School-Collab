@@ -85,6 +85,12 @@ guidance instead of duplicating it.
 optional-on-demand — it applies to every C# edit in this repo, and the rule's "Never" list is
 enforced in CI by `SchoolCollab.ArchitectureTests.Unit`.
 
+**Feature/fix implementation — ask before starting:** Before beginning a feature or fix
+implementation, **ask the user whether to go solo or use the 3-agent
+`orchestrator-worker-reviewer` skill** (orchestrator plans + owns docs, worker implements,
+reviewer verifies, orchestrator accepts). Do not default to one approach; the user wants to
+choose explicitly.
+
 ## Tenancy & Operational Standards
 
 ### Tenancy Patterns

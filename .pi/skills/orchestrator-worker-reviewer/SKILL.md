@@ -26,7 +26,7 @@ them (bare ids resolve only when unique in the registry).
 
 | Role | Default agent definition | Default model |
 |------|--------------------------|---------------|
-| Orchestrator | `delegate` (or `oracle`) | `ollama/glm-5.2:cloud` |
+| Orchestrator | `delegate` (or `oracle`) | `ollama/glm-5.3-flash:cloud` |
 | Worker | `worker` | `ollama/deepseek-v4-flash:0731-cloud` |
 | Reviewer | `reviewer` | `ollama/kimi-k2.7-code:cloud` |
 
@@ -110,7 +110,7 @@ checked by a document owner before closing.
   with `subagent_supervisor({ action: "reply", replyTo: <id>, message: ... })`
   then `subagent_wait({ id: <childId> })` to resume.
 - **Bare model ids resolve only when unique.** Always copy the exact
-  `provider/id` from the models list (e.g. `ollama/glm-5.2:cloud`, not
+  `provider/id` from the models list (e.g. `ollama/glm-5.3-flash:cloud`, not
   `glm-5.2`).
 - **Do not let the worker edit the orchestrator's plan or acceptance docs.**
   That breaks the ownership/correctness contract. Only the orchestrator owns
