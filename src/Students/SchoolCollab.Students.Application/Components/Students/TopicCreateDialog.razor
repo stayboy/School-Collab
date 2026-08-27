@@ -35,6 +35,7 @@
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValues
 @inject EntityCodeRulesApiClient EntityCodeRules
+@inject ILogger<TopicCreateDialog> Logger
 
 <div class="dialog-container">
     <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
@@ -86,6 +87,12 @@
                         }
                     </FluentSelect>
                 </FormRow>
+                @if (_groupDuplicateCodedValue)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Warning" class="mb-2">
+                        This subject is already assigned to this activity group.
+                    </FluentMessageBar>
+                }
             }
 
             <FormRow Label="Period (optional)" For="topic-create-period">
@@ -136,7 +143,7 @@
                            SavingText="Creating..."
                            SubmitIsServerSubmit="@(!_editing)"
                            OnSubmit="UpdateFields"
-                           SubmitDisabled="@(_duplicateCodedValue || (!_editing && string.IsNullOrWhiteSpace(Model.Name)))"
+                           SubmitDisabled="@(_duplicateCodedValue || _groupDuplicateCodedValue || (!_editing && string.IsNullOrWhiteSpace(Model.Name)))"
                            OnCancel="HandleCancel" />
     </EditForm>
 </div>
@@ -148,10 +155,12 @@
     private bool _regeneratingCode;
     private bool _editing;
     private bool _duplicateCodedValue;
+    private bool _groupDuplicateCodedValue;
     private string _activityGroupIdText = "";
     private string _periodIdText = "";
     private ActivityGroupDto[] _activityGroups = [];
     private PeriodDto[] _periods = [];
+    private SubjectDto[] _groupExistingTopics = [];
     private Guid? _activeYearId;
 
     /// <summary>
@@ -229,7 +238,13 @@
         _activeYearId = activeYear?.Id;
 
         if (Model.ActivityGroupId.HasValue)
+        {
             _activityGroupIdText = Model.ActivityGroupId.Value.ToString();
+            // Fire the same group-topic load the user-path selection uses, so
+            // the Item-3 duplicate guard is effective when the dialog opens
+            // pre-seeded with an activity group (e.g. from Subjects.razor).
+            _ = LoadGroupExistingTopicsAsync();
+        }
         if (Model.PeriodId.HasValue)
             _periodIdText = Model.PeriodId.Value.ToString();
     }
@@ -243,6 +258,38 @@
     private void OnActivityGroupChangedAsync()
     {
         _periodIdText = "";
+        _groupDuplicateCodedValue = false;
+        _ = LoadGroupExistingTopicsAsync();
+    }
+
+    /// <summary>
+    /// Loads the topics already assigned to the selected activity group so the
+    /// create flow can reject a coded value that would duplicate an existing
+    /// group assignment (mirrors the grade-path <c>_duplicateCodedValue</c>
+    /// guard). Cleared when the selection is invalid/empty. Failures degrade to
+    /// an empty set (no hard block on the load path).
+    /// </summary>
+    private async Task LoadGroupExistingTopicsAsync()
+    {
+        if (!Guid.TryParse(_activityGroupIdText, out var groupId))
+        {
+            _groupExistingTopics = [];
+            _groupDuplicateCodedValue = false;
+            return;
+        }
+
+        try
+        {
+            _groupExistingTopics = await Api.ListSubjectsByGroupAsync(groupId, null) ?? [];
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load existing topics for activity group {GroupId}", groupId);
+            _groupExistingTopics = [];
+        }
+
+        _groupDuplicateCodedValue = Model.CodedValueId is { } id
+            && _groupExistingTopics.Any(t => t.CodedValueId == id);
     }
 
     private PeriodDto[] FilterPeriodsForGrade()
@@ -346,6 +393,11 @@
 
         // Reject a coded value already used by another subject in this grade.
         _duplicateCodedValue = Model.ExistingTopicCodedValueIds.Contains(id);
+
+        // For an activity-group owner, also reject a coded value already assigned
+        // to the selected group (mirrors the grade-path guard).
+        _groupDuplicateCodedValue = Model.OwnerType == "ActivityGroup"
+            && _groupExistingTopics.Any(t => t.CodedValueId == id);
     }
 
     /// <summary>
@@ -409,6 +461,16 @@
                 Error = "Select an activity group.";
                 return null;
             }
+
+            // Guard against a stale group-topic list: re-check immediately before
+            // assigning so a duplicate coded value never reaches the assign call.
+            if (model.CodedValueId is { } dupId
+                && _groupExistingTopics.Any(t => t.CodedValueId == dupId))
+            {
+                Error = "This subject is already assigned to this activity group.";
+                return null;
+            }
+
             var topicId = await Api.CreateTopicAsync(new CreateTopicRequest(
                 resolvedCvId ?? Guid.Empty, effectiveCode ?? "", model.Name.Trim(), model.DisplayOrder));
             await Api.AssignActivityGroupTopicAsync(new AssignActivityGroupTopicRequest(

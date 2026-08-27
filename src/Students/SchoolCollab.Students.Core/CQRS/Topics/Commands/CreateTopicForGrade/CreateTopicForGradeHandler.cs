@@ -108,11 +108,15 @@ public sealed class CreateTopicForGradeHandler(
 
         // 4. Retain GradeTopicAssignment as the M:N bridge between the topic and
         //    its grade level, effective from today and open-ended. Idempotent: skip
-        //    if an active (unended) assignment already exists for this grade/topic.
+        //    only if an active (unended) assignment already exists for this
+        //    grade/topic with the SAME effective period scope (Rev. 6 FR-55/57).
+        //    A differently-scoped request (e.g. a Term when a year-spanning
+        //    assignment exists) creates a new assignment carrying the requested
+        //    PeriodId — the domain permits multiple bridge rows per (grade, topic).
         var existingAssignments = await assignmentRepository
             .ListByGradeLevelAsync(command.GradeLevelId, today, cancellationToken);
 
-        if (!existingAssignments.Any(a => a.TopicId == subject.Id))
+        if (!existingAssignments.Any(a => a.TopicId == subject.Id && a.PeriodId == command.PeriodId))
         {
             var assignment = GradeTopicAssignment.Create(
                     command.GradeLevelId,
@@ -132,7 +136,7 @@ public sealed class CreateTopicForGradeHandler(
         else
         {
             logger.LogInformation(
-                "GradeTopicAssignment already active for grade {GradeLevelId}, topic {TopicId} — skipping",
+                "GradeTopicAssignment already active for grade {GradeLevelId}, topic {TopicId} with the same period scope — skipping",
                 command.GradeLevelId, subject.Id);
         }
 

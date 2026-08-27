@@ -228,14 +228,30 @@
 
 ### 6.1 bUnit tests
 
+- [x] **P2** bUnit: grade topic term-scoped assignment validation (AC-44) —
+  covered by handler tests `CreateForGrade_ExistingAssignmentDifferentPeriod_CreatesScopedAssignment`
+  and `CreateForGrade_ExistingSamePeriod_Skips` (Students.Tests.Unit, +2).
+- [x] **P2** bUnit: null `PeriodId` back-compat UI (AC-46) —
+  `CreateDialog_GradeOwner_NullPeriodId_PostsPeriodIdNull` (Admin.Tests.Unit).
+- [x] **P2** bUnit: duplicate-coded-value warning + disabled Create (grade owner) —
+  `CreateDialog_GradeOwner_DuplicateCodedValue_WarnsAndDisables` (Admin.Tests.Unit, +1).
+- [x] **P2** bUnit: activity-group topic span mismatch UI (AC-45) —
+  `CreateDialog_GroupOwner_TermlyGroup_OffersOnlyTermPeriods` / `_OpenEndedGroup_ShowsHintNoPeriods`
+  (Admin.Tests.Unit).
+- [x] **P2** bUnit: group-path duplicate guard —
+  `CreateDialog_GroupOwner_DuplicateCodedValue_WarnsAndBlocksAssign` (Admin.Tests.Unit).
+- [x] **P2** bUnit: `AcademicYearDivision` setting UI and framework-switch
+  rejection messaging — `AcademicYearDivisionSettingTests.cs`
+  (`DivisionSetting_CardShowsEffectiveValueAndSource`,
+  `DivisionSetting_SwitchRejection_ShowsServerMessage`).
+- [x] **P2** bUnit: sub-period list loading/empty/error states — `SubPeriodsPageTests.cs`
+  (`SubPeriods_EmptyList_ShowsEmptyMessage`, `SubPeriods_LoadError_ShowsErrorBarAndBackButton`).
+- [x] **P2** bUnit: division client methods — `ConfigFlagsApiClientTests`
+  (`GetAcademicYearDivisionAsync` 404→null / 200→deserialize; `SetAcademicYearDivisionAsync`
+  204 success / 422 message extraction).
 - [ ] **P2** bUnit: span-aware create/edit dialog validation (AC-35..43).
 - [ ] **P2** bUnit: rollover / next-window UI (AC-38/43).
 - [ ] **P2** bUnit: `PeriodType` + parent selector validation.
-- [ ] **P2** bUnit: `AcademicYearDivision` setting UI and framework-switch
-  rejection messaging.
-- [ ] **P2** bUnit: grade topic term-scoped assignment validation (AC-44).
-- [ ] **P2** bUnit: activity-group topic span mismatch UI (AC-45).
-- [ ] **P2** bUnit: null `PeriodId` back-compat UI (AC-46).
 
 ### 6.2 Playwright smoke
 
@@ -244,11 +260,39 @@
   assignment linked to the group + topic → publish → only group members'
   subscribed contacts receive it.
   - *Source:* `activity-group-enrollment.md` §11
+  - **DEFERRED until the activity-group feature is complete** (per user, 2026-08-27).
+    The smoke test needs a running AppHost + seeded data and is most valuable once
+    the remaining Sprint 6 items (AC-35..43, rollover/next-window, PeriodType
+    selector) and the re-deferred items (Item 4 PeriodId editing, Item 5 string-flag
+    audit, backend group duplicate guard) are shipped.
 
 ### 6.3 Cross-cutting polish
 
-- [ ] **P2** Loading / empty / error states for sub-period lists and the
-  academic-year division setting.
+- [x] **P2** Loading / empty / error states for sub-period lists and the
+  academic-year division setting — `SubPeriods.razor` (`_loading` →
+  `FluentProgressRing`, `_error` → `FluentMessageBar` + Back, `EmptyMessage`,
+  `ErrorBoundary`); `ConfigFlagDetail.razor` division card (loading ring,
+  error bar, value/source, select + reason + save, reload on success). Locked by
+  `SubPeriodsPageTests.cs` + `AcademicYearDivisionSettingTests.cs`.
+
+### Deferred P2 fold-in (Sprint 6 Round 1 — plan-ui-sprint6.md)
+
+- [x] **Item 1** `ExistingTopicCodedValueIds` seeded from `Subjects.razor`
+  `OpenCreateDialogAsync` (duplicate-coded-value warning works from Topics landing).
+- [x] **Item 2** `CreateTopicForGradeHandler` idempotency guard is now
+  period-scoped (same `(TopicId, PeriodId)`); a differently-scoped request
+  creates a new assignment carrying the requested `PeriodId`.
+- [x] **Item 3** `TopicCreateDialog` activity-group path loads the group's
+  existing topics, warns + disables submit on a duplicate `CodedValueId`, and
+  re-checks before `AssignActivityGroupTopicAsync` (client-side guard).
+- [x] **Item 6** `SubPeriods.razor` row actions: Edit (navigate), Activate
+  (disabled for Active), Complete (confirm + disabled unless Active).
+- [ ] **Item 4** Topic-assignment `PeriodId` editing on existing assignments —
+  re-deferred (feature-sized; needs a new update command/endpoint + edit surface).
+- [ ] **Item 5** String-flag audit-log value display — re-deferred (needs
+  `FlagAuditEntry` value columns + migration + auditor + DTO/query + UI).
+- [ ] **Backend guard** for `AssignActivityGroupTopic` duplicate active
+  assignments — re-deferred (client check closes the create-dialog flow only).
 
 ---
 

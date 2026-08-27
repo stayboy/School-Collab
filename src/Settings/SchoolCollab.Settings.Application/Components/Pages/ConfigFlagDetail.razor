@@ -1,4 +1,5 @@
 @page "/config-flags/{Key}"
+@using SchoolCollab.Core.Features
 @inject ConfigFlagsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<ConfigFlagDetail> Logger
@@ -29,6 +30,41 @@
                     <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="@(() => Nav.NavigateTo("/config-flags"))">Back</FluentButton>
                 </div>
             </SectionContent>
+
+            @* ── Academic-year division (FR-H6/H7) ── *@
+            @if (IsDivisionFlag)
+            {
+                <FluentCard class="pa-4 mt-3">
+                    <h2>Academic-year division</h2>
+                    @if (_divisionLoading)
+                    {
+                        <FluentProgressRing />
+                    }
+                    else
+                    {
+                        @if (!string.IsNullOrEmpty(_divisionError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error">@_divisionError</FluentMessageBar>
+                        }
+                        <FluentStack Orientation="Orientation.Horizontal">
+                            <FluentBadge Appearance="@(_divisionSource == "TenantOverride" ? Appearance.Accent : Appearance.Neutral)">
+                                @(_divisionValue ?? "None")
+                            </FluentBadge>
+                            <span class="text-muted">@(_divisionSource == "TenantOverride" ? "TenantOverride" : "GlobalDefault")</span>
+                        </FluentStack>
+                        <FluentStack Orientation="Orientation.Horizontal" class="mt-2">
+                            <FluentSelect TOption="string" Label="Division" @bind-Value="_divisionSelect">
+                                <FluentOption Value="None">None</FluentOption>
+                                <FluentOption Value="Terms">Terms</FluentOption>
+                                <FluentOption Value="Semesters">Semesters</FluentOption>
+                            </FluentSelect>
+                            <FluentTextField Label="Reason (required)" @bind-Value="_divisionReason" Style="min-width:320px;" />
+                            <FluentButton Appearance="Appearance.Accent" Disabled="@(_busy || string.IsNullOrWhiteSpace(_divisionReason))" OnClick="SaveDivisionAsync">Save</FluentButton>
+                        </FluentStack>
+                        <p class="text-muted">Changing the division is rejected while non-completed Term/Semester sub-periods exist.</p>
+                    }
+                </FluentCard>
+            }
 
             @* ── Default toggle ── *@
             <FluentCard class="pa-4 mt-3">
@@ -160,6 +196,16 @@
     private string _newOverrideValueText = "None";
     private string _newOverrideReason = "";
 
+    private bool IsDivisionFlag =>
+        _flag is not null && string.Equals(_flag.Key, FeatureFlagKeys.AcademicYearDivision, StringComparison.OrdinalIgnoreCase);
+
+    private bool _divisionLoading;
+    private string? _divisionValue;
+    private string? _divisionSource;
+    private string _divisionSelect = "None";
+    private string _divisionReason = "";
+    private string? _divisionError;
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -173,6 +219,8 @@
             _toggleValue = _flag.IsEnabled;
             _overrides = await Api.ListOverridesAsync(Key);
             _audit = await Api.ListAuditAsync(Key, tenantId: null, from: null, to: null, skip: 0, take: 50);
+            if (IsDivisionFlag)
+                await LoadDivisionAsync();
         }
         catch (OperationCanceledException)
         {
@@ -188,6 +236,48 @@
         {
             _loading = false;
         }
+    }
+
+    private async Task LoadDivisionAsync()
+    {
+        _divisionLoading = true;
+        _divisionError = null;
+        try
+        {
+            var setting = await Api.GetAcademicYearDivisionAsync();
+            _divisionValue = setting?.Value;
+            _divisionSource = setting?.Source;
+            _divisionSelect = setting?.Value ?? "None";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Load academic-year division failed");
+            _divisionError = $"Failed to load division: {ex.Message}";
+        }
+        finally
+        {
+            _divisionLoading = false;
+        }
+    }
+
+    private async Task SaveDivisionAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_divisionReason)) return;
+        _busy = true;
+        _divisionError = null;
+        try
+        {
+            await Api.SetAcademicYearDivisionAsync(_divisionSelect, _divisionReason);
+            _divisionReason = "";
+            await LoadDivisionAsync();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Save academic-year division failed");
+            _divisionError = ex.Message;
+        }
+        finally { _busy = false; }
     }
 
     private async Task SaveEnabledAsync()

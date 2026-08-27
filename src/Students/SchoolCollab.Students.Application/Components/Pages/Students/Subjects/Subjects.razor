@@ -354,6 +354,11 @@
                 && Guid.TryParse(_selectedActivityGroup.Value, out var agid)
                 ? agid
                 : null,
+            // Seed the duplicate-coded-value guard from the topics currently
+            // listed for the selected owner, so picking a coded value already
+            // used by a topic in this owner shows the warning and disables
+            // Create (mirrors GradeLevels/Detail.razor).
+            ExistingTopicCodedValueIds = [.. (_items ?? []).Select(i => i.CodedValueId)],
         };
 
         var created = await DialogService.ShowShellDialogAsync<
