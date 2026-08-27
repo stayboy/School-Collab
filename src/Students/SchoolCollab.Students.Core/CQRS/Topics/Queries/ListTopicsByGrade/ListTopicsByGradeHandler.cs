@@ -27,9 +27,13 @@ public sealed class ListTopicsByGradeHandler(StudentsDbContext db)
     {
         var effectiveDate = query.EffectiveDate ?? DateOnly.FromDateTime(DateTime.UtcNow);
 
+        // When a PeriodId is supplied, restrict to assignments scoped to that
+        // period (Rev. 6 FR-55). Otherwise fall back to the date-based effective
+        // window (year-spanning + period-aligned assignments in effect on the date).
         var topicIds = db.GradeTopicAssignments
             .AsNoTracking()
             .Where(a => a.GradeLevelId == query.GradeLevelId
+                && (query.PeriodId == null || a.PeriodId == query.PeriodId)
                 && a.StartDate <= effectiveDate
                 && (a.EndDate == null || a.EndDate >= effectiveDate));
 

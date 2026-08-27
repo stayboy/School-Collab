@@ -945,23 +945,21 @@
     {
         if (_disposed) return;
 
-        // Resolve the active period up front. When one is open, pass the grade so the
-        // new student is enrolled atomically as part of the compound create (no separate
-        // EnrollStudentAsync round-trip, no "created but not on the grade card" state).
-        // When no period is open, the student is still created (with its guardians) but
-        // without an enrollment — preserving the previous "create even without a period"
-        // behavior.
-        var periods = await Api.ListPeriodsAsync() ?? [];
-        var active = periods
-            .Where(p => string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(p => p.StartDate)
-            .FirstOrDefault();
+        // Resolve the active academic year up front. When one is open, pass the
+        // grade so the new student is enrolled atomically as part of the compound
+        // create (no separate EnrollStudentAsync round-trip, no "created but not on
+        // the grade card" state). When no active year is open, the student is still
+        // created (with its guardians) but without an enrollment — preserving the
+        // previous "create even without a period" behavior. Using the active
+        // AcademicYear (not just any active period) matches the period-hierarchy
+        // gate (active-period-per-tenancy.md FR-A6).
+        var active = await Api.GetActiveAcademicYearAsync();
 
         var parameters = new Dictionary<string, object?>();
         if (active is not null)
             parameters[StudentCreateDialog.EnrollmentGradeLevelIdKey] = Id;
         else
-            _studentsError = "No active period is open — the new student will be created without enrolling them to this grade.";
+            _studentsError = "No active academic year is open — the new student will be created without enrolling them to this grade.";
 
         var dialog = await DialogService.ShowReadonlyDialogAsync<StudentCreateDialog>(
             "New Student",

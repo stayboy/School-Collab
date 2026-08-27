@@ -35,17 +35,45 @@ public sealed class ActivePeriodProvider(
     };
 
     public async Task<ActivePeriod?> GetActivePeriodAsync(CancellationToken ct = default)
+        => await GetActiveAcademicYearAsync(ct);
+
+    public async Task<ActivePeriod?> GetActiveAcademicYearAsync(CancellationToken ct = default)
     {
         var tenantId = tenantProvider.GetTenantContext().TenantId;
         return await cache.GetOrCreateAsync(
-            $"active-period:{tenantId}",
+            $"active-academic-year:{tenantId}",
             (db, tenantId),
             static async (state, token) =>
             {
                 var (db, tenantId) = state;
                 var period = await db.Periods
                     .IgnoreQueryFilters(["Tenant"])
-                    .Where(p => p.TenantId == tenantId && p.Status == PeriodStatus.Active)
+                    .Where(p => p.TenantId == tenantId
+                        && p.Status == PeriodStatus.Active
+                        && p.PeriodType == PeriodType.AcademicYear)
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(token);
+                return period is null ? null : ToActivePeriod(period);
+            },
+            CacheOptions,
+            tags: [CacheTag],
+            cancellationToken: ct);
+    }
+
+    public async Task<ActivePeriod?> GetActiveSubPeriodAsync(CancellationToken ct = default)
+    {
+        var tenantId = tenantProvider.GetTenantContext().TenantId;
+        return await cache.GetOrCreateAsync(
+            $"active-sub-period:{tenantId}",
+            (db, tenantId),
+            static async (state, token) =>
+            {
+                var (db, tenantId) = state;
+                var period = await db.Periods
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(p => p.TenantId == tenantId
+                        && p.Status == PeriodStatus.Active
+                        && p.PeriodType != PeriodType.AcademicYear)
                     .AsNoTracking()
                     .FirstOrDefaultAsync(token);
                 return period is null ? null : ToActivePeriod(period);
@@ -78,5 +106,5 @@ public sealed class ActivePeriodProvider(
     }
 
     private static ActivePeriod ToActivePeriod(Period p) =>
-        new(p.Id, p.Name, p.StartDate, p.EndDate, p.Status.ToString());
+        new(p.Id, p.Name, p.StartDate, p.EndDate, p.Status.ToString(), p.PeriodType.ToString(), p.ParentPeriodId);
 }

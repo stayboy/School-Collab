@@ -30,11 +30,26 @@ public sealed class ActivityGroupMembership : ITenantEntity, IEntity, IAuditable
     public Guid TenantId { get; private set; }
 
     // FK → activity_groups.id, ON DELETE RESTRICT (NFR-8/FR-6 — a group with any
-    // membership row cannot be hard-deleted, only Archived).
+    // membership row cannot be hard-deleted, only deactivated/removed).
     public Guid ActivityGroupId { get; private set; }
 
     // FK → students.id.
     public Guid StudentId { get; private set; }
+
+    // Rev. 2 FR-7/10: optional period scope. Null for OpenEnded/DateRange
+    // (window-scoped) spans; set to the matching typed period for
+    // period-aligned spans (WholeAcademicYear/Termly/Semester — Phase 8/10).
+    public Guid? PeriodId { get; private set; }
+
+    // Rev. 4/5 FR-49: consent to auto-roll into the next window at rollover.
+    // Defaults to the group's AutoRenewDefault (true). Admin-set.
+    public bool AutoRenew { get; private set; }
+
+    // Rev. 4 FR-47/48: window bounds recorded on the membership for window-scoped
+    // spans. DateRange sets both to the group's current window; OpenEnded leaves
+    // both null (continuous). Period-aligned spans leave these null.
+    public DateOnly? WindowStartDate { get; private set; }
+    public DateOnly? WindowEndDate { get; private set; }
 
     public DateOnly JoinedOn { get; private set; }
 
@@ -53,15 +68,19 @@ public sealed class ActivityGroupMembership : ITenantEntity, IEntity, IAuditable
     /// <summary>
     /// Creates a new active membership (FR-7). Multi-membership is allowed
     /// (FR-9) — the entity does not constrain how many groups a student
-    /// belongs to. Duplicate-active prevention (FR-10), archived-group
-    /// rejection (FR-12), deleted-student rejection (FR-11), and capacity
-    /// enforcement (FR-13) are handler/repository concerns that require
-    /// cross-entity lookups; the partial unique index backs FR-10 at the DB
-    /// level. Age/gender specs are NOT applied (FR-16, AC-11).
+    /// belongs to. Duplicate-active prevention (FR-10), inactive-group
+    /// rejection (FR-12), deleted-student rejection (FR-11), capacity and
+    /// span/window enforcement (FR-13, FR-46, FR-52) are handler/repository
+    /// concerns that require cross-entity lookups; the partial unique indexes
+    /// back FR-10 at the DB level. Age/gender specs are NOT applied (FR-16, AC-11).
     /// </summary>
     public static ActivityGroupMembership Create(
         Guid activityGroupId,
         Guid studentId,
+        Guid? periodId = null,
+        bool autoRenew = true,
+        DateOnly? windowStartDate = null,
+        DateOnly? windowEndDate = null,
         DateOnly? joinedOn = null)
     {
         if (activityGroupId == Guid.Empty)
@@ -75,6 +94,10 @@ public sealed class ActivityGroupMembership : ITenantEntity, IEntity, IAuditable
             Id = Guid.NewGuid(),
             ActivityGroupId = activityGroupId,
             StudentId = studentId,
+            PeriodId = periodId,
+            AutoRenew = autoRenew,
+            WindowStartDate = windowStartDate,
+            WindowEndDate = windowEndDate,
             JoinedOn = joinedOn ?? DateOnly.FromDateTime(DateTime.UtcNow),
             Status = MembershipStatus.Active,
             CreatedAt = now,
@@ -119,4 +142,17 @@ public sealed class ActivityGroupMembership : ITenantEntity, IEntity, IAuditable
     }
 
     public void ClearDomainEvents() => _domainEvents.Clear();
+
+    /// <summary>
+    /// Sets the member's <see cref="AutoRenew"/> consent (Rev. 5 FR-49).
+    /// Admin-set at any time while the membership is active; read at rollover.
+    /// </summary>
+    public void SetAutoRenew(bool autoRenew)
+    {
+        if (Status != MembershipStatus.Active)
+            throw new InvalidOperationException($"Only an active member's AutoRenew can be changed. Current status: {Status}.");
+
+        AutoRenew = autoRenew;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
 }

@@ -16,6 +16,7 @@ public sealed class PublishAssignmentCommandHandler(
     IContactResolver contactResolver,
     IAssignmentActivityGroupRepository linkRepository,
     IActivityGroupLookup groupLookup,
+    ITopicAssignmentLookup topicAssignmentLookup,
     ITenantProvider tenantProvider,
     IAssignmentNotificationBroadcaster broadcaster,
     INotificationPolicyResolver policyResolver,
@@ -67,6 +68,11 @@ public sealed class PublishAssignmentCommandHandler(
     private async Task<List<AssignmentRecipient>> ResolveRecipientsAndGatesAsync(
         Assignment assignment, Guid tenantId, IReadOnlyList<Guid>? selectedContactIds, CancellationToken cancellationToken)
     {
+        // ── Rev. 6 FR-58: the assignment's subject must be assigned to its target
+        //    audience for a period covering the effective date.
+        var effectiveDate = DateOnly.FromDateTime(
+            (assignment.DueDate ?? assignment.PublishedAt ?? DateTimeOffset.UtcNow).UtcDateTime);
+
         ResolveSubscribersRequest request;
         if (assignment.TargetAudienceType == TargetAudienceType.SelectedGroups)
         {
@@ -79,12 +85,22 @@ public sealed class PublishAssignmentCommandHandler(
                 throw new InvalidOperationException(
                     $"Assignment '{assignment.Id}' targets SelectedGroups but has no linked activity groups; link at least one group before publishing.");
 
+            // FR-58: the subject must be assigned to every linked group.
+            if (!await topicAssignmentLookup.IsTopicAssignedAsync(null, groupIds, assignment.TopicId, effectiveDate, cancellationToken))
+                throw new InvalidOperationException(
+                    $"Assignment '{assignment.Id}' subject is not assigned to its linked activity group(s) for the effective period; assign the topic before publishing.");
+
             // EC-4: archived groups are excluded from recipient resolution.
             var memberIds = await groupLookup.GetActiveMemberIdsAsync(groupIds, cancellationToken);
             request = new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, StudentIds: memberIds);
         }
         else
         {
+            // FR-58: the subject must be assigned to the target grade.
+            if (!await topicAssignmentLookup.IsTopicAssignedAsync(assignment.GradeLevelId, [], assignment.TopicId, effectiveDate, cancellationToken))
+                throw new InvalidOperationException(
+                    $"Assignment '{assignment.Id}' subject is not assigned to the target grade for the effective period; assign the topic before publishing.");
+
             // AllStudents / SelectedGrades keep the existing grade-level path.
             request = new ResolveSubscribersRequest(tenantId, SubscriptionScope.AllAssignments, assignment.GradeLevelId);
         }

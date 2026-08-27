@@ -9,4 +9,5 @@ namespace SchoolCollab.Students.Core.CQRS.Topics.Queries.ListTopicsByGrade;
 /// </summary>
 public sealed record ListTopicsByGrade(
     Guid GradeLevelId,
-    DateOnly? EffectiveDate = null) : IQuery<TopicDto[]>;
+    DateOnly? EffectiveDate = null,
+    Guid? PeriodId = null) : IQuery<TopicDto[]>;

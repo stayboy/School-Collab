@@ -1,0 +1,124 @@
+@page "/students/periods/{AcademicYearId:guid}/sub-periods"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components.Landing
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<SubPeriods> Logger
+@inject VisibleTenantService VisibleTenant
+@implements IDisposable
+
+<PageTitle>Sub-periods</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (!string.IsNullOrEmpty(_error))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Neutral" OnClick="@(() => Nav.NavigateTo("/students/periods"))">Back</FluentButton>
+        }
+        else
+        {
+            <div class="title-row">
+                <h1 class="page-title">Sub-periods — @(_academicYear?.Name ?? "Academic Year")</h1>
+                <FluentButton Appearance="Appearance.Neutral" IconStart="@FluentIcons.ArrowLeft" OnClick="@(() => Nav.NavigateTo("/students/periods"))">Back</FluentButton>
+            </div>
+
+            <LandingPage TItem="PeriodDto"
+                         Title=""
+                         CreateLabel="+ New Sub-period"
+                         CreateRoute="@($"/students/periods/create?parent={AcademicYearId}")"
+                         CreateEnabled="@_isRealTenant"
+                         SearchEnabled="false"
+                         EmptyMessage="No sub-periods for this academic year yet."
+                         Items="@_items"
+                         Loading="@_loading"
+                         GridSettings="@_gridSettings"
+                         Error="@_error">
+                <Columns>
+                    <PropertyColumn TGridItem="PeriodDto" TProp="string" Property="@(x => x.Name)" Sortable="true" Title="Name" />
+                    <TemplateColumn TGridItem="PeriodDto" Title="Type">
+                        <FluentBadge Appearance="Appearance.Neutral">@context.PeriodType</FluentBadge>
+                    </TemplateColumn>
+                    <TemplateColumn TGridItem="PeriodDto" Title="Start Date">
+                        @context.StartDate.ToString("d")
+                    </TemplateColumn>
+                    <TemplateColumn TGridItem="PeriodDto" Title="End Date">
+                        @context.EndDate.ToString("d")
+                    </TemplateColumn>
+                    <TemplateColumn TGridItem="PeriodDto" Title="Status">
+                        <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
+                    </TemplateColumn>
+                </Columns>
+            </LandingPage>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid AcademicYearId { get; set; }
+
+    private PeriodDto[]? _items;
+    private PeriodDto? _academicYear;
+    private string? _error;
+    private bool _loading = true;
+    private bool _isRealTenant;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    private static readonly LandingGridSettings _gridSettings = new()
+    {
+        GridTemplateColumns = "minmax(160px,2fr) 100px 110px 110px 120px auto"
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        var token = _loadCts.Token;
+
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+
+        try
+        {
+            _academicYear = await Api.GetPeriodByIdAsync(AcademicYearId, token);
+            _items = await Api.ListSubPeriodsAsync(AcademicYearId, token) ?? [];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load sub-periods for {YearId}", AcademicYearId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    private static Appearance GetStatusAppearance(string status) => status switch
+    {
+        "Draft"     => Appearance.Neutral,
+        "Active"    => Appearance.Accent,
+        "Completed" => Appearance.Outline,
+        "Archived"  => Appearance.Neutral,
+        _           => Appearance.Neutral
+    };
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

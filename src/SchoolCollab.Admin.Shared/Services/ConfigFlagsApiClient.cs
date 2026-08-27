@@ -12,6 +12,7 @@ namespace SchoolCollab.Admin.Shared.Services;
 public enum FlagKindDto
 {
     Boolean = 0,
+    String = 1,
 }
 
 public record FeatureFlagDto(
@@ -20,6 +21,7 @@ public record FeatureFlagDto(
     string Name,
     string? Description,
     FlagKindDto Kind,
+    string? Value,
     bool IsEnabled,
     bool IsArchived,
     bool IsDeleted,
@@ -32,6 +34,7 @@ public record TenantFlagOverrideDto(
     Guid TenantId,
     Guid FeatureFlagId,
     bool? IsEnabled,
+    string? Value,
     string Reason,
     DateTimeOffset? EffectiveFrom,
     DateTimeOffset? EffectiveTo,
@@ -55,7 +58,7 @@ public record CreateFlagRequest(string Key, string Name, string? Description, bo
 public record UpdateFlagRequest(string Name, string? Description, string Reason);
 public record SetEnabledRequest(bool IsEnabled, string Reason);
 public record ReasonRequest(string Reason);
-public record UpsertOverrideRequest(bool? IsEnabled, string Reason, DateTimeOffset? EffectiveFrom, DateTimeOffset? EffectiveTo);
+public record UpsertOverrideRequest(bool? IsEnabled, string? Value, string Reason, DateTimeOffset? EffectiveFrom, DateTimeOffset? EffectiveTo);
 
 /// <summary>
 /// HTTP client for the central Config service, used by the unified admin host's

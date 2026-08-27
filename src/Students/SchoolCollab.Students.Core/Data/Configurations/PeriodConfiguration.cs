@@ -33,11 +33,48 @@ internal sealed class PeriodConfiguration : TenantEntityTypeConfigurationBase<Pe
             .IsRequired()
             .HasDefaultValue(PeriodStatus.Draft);
 
+        // Period hierarchy (FR-H1/H2). Additive: existing rows default to
+        // AcademicYear with a null parent (back-filled by the migration).
+        builder.Property(x => x.PeriodType)
+            .IsRequired()
+            .HasDefaultValue(PeriodType.AcademicYear);
+
+        builder.Property(x => x.ParentPeriodId);
+
+        // Self-referencing hierarchy FK: deleting an AcademicYear cascades its
+        // sub-periods (EC-H1). A sub-period still cannot be hard-deleted while
+        // activity-group memberships reference it (membership FK is RESTRICT).
+        builder.HasOne<Period>()
+            .WithMany()
+            .HasForeignKey(x => x.ParentPeriodId)
+            .OnDelete(DeleteBehavior.Cascade);
+
         builder.Property(x => x.NextPeriodId);
 
         // NFR-3 hot path: per-tenant current-period lookup and overlap check.
         builder.HasIndex(x => new { x.TenantId, x.Status })
             .HasDatabaseName("ix_periods_tenant_status");
+
+        // NFR-H3 hot paths: active-year/active-sub-period lookups, sub-periods
+        // of a year, and overlap checks.
+        builder.HasIndex(x => new { x.TenantId, x.PeriodType, x.Status })
+            .HasDatabaseName("ix_periods_tenant_type_status");
+
+        builder.HasIndex(x => new { x.TenantId, x.ParentPeriodId, x.Status })
+            .HasDatabaseName("ix_periods_tenant_parent_status");
+
+        // H2.1 (FR-H4): at most one Active AcademicYear per tenant, and at most
+        // one Active sub-period of each type per academic year. PeriodStatus.Active
+        // = 1 (the spec §8.1 filter used 0, which is Draft — corrected here).
+        builder.HasIndex(x => new { x.TenantId })
+            .IsUnique()
+            .HasFilter("period_type = 0 AND status = 1")
+            .HasDatabaseName("ix_periods_one_active_year");
+
+        builder.HasIndex(x => new { x.TenantId, x.ParentPeriodId, x.PeriodType })
+            .IsUnique()
+            .HasFilter("status = 1")
+            .HasDatabaseName("ix_periods_one_active_sub_period");
 
         builder.HasIndex(x => x.StartDate)
             .HasDatabaseName("ix_periods_start_date");

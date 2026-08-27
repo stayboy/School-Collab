@@ -5,6 +5,7 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using SchoolCollab.Admin.Shared.Components.Landing
 @using SchoolCollab.Admin.Shared.Services
+@using TopicDto = SchoolCollab.Students.Core.DTOs.TopicDto
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject CodedValuesApiClient CodedValuesApi
@@ -16,9 +17,9 @@
 @implements IDisposable
 
 <LandingPage TItem="SubjectDto"
-             Title="Subjects"
-             CreateLabel="+ New Subject"
-             CreateEnabled="@(_isRealTenant && _selectedGradeLevel is not null)"
+             Title="Topics"
+             CreateLabel="+ New Topic"
+             CreateEnabled="@(_isRealTenant && ((_ownerType == "GradeLevel" && _selectedGradeLevel is not null) || (_ownerType == "ActivityGroup" && _selectedActivityGroup is not null)))"
              OnCreate="@OpenCreateDialogAsync"
              SearchEnabled="@_isRealTenant"
              EmptyMessage="@CurrentEmptyMessage"
@@ -27,19 +28,43 @@
              GridSettings="@_gridSettings"
              SearchText="@_searchText"
              SearchTextChanged="@OnSearchValueChanged"
-             SearchPlaceholder="Search subjects…"
+             SearchPlaceholder="Search topics…"
              RowActions="@BuildRowActions"
              RowActionsAriaLabel="Subject actions"
              RowActionsUseMenuService="false">
     <ToolbarFilters>
-        <FluentSelect TOption="GradeLevelOption"
-                      Items="@_gradeLevelOptions"
-                      @bind-SelectedOption="_selectedGradeLevel"
-                      OptionText="@(o => o?.Label ?? "")"
-                      OptionValue="@(o => o?.Value ?? "")"
-                      Label="Grade Level"
-                      Placeholder="Select a grade level"
-                      class="grade-filter" />
+        <FluentSelect TOption="string"
+                      @bind-Value="_ownerType"
+                      @bind-Value:after="OnOwnerTypeChangedAsync"
+                      Label="Owner"
+                      Style="width:160px;">
+            <FluentOption Value="GradeLevel">Grade Level</FluentOption>
+            <FluentOption Value="ActivityGroup">Activity Group</FluentOption>
+        </FluentSelect>
+        @if (_ownerType == "GradeLevel")
+        {
+            <FluentSelect TOption="GradeLevelOption"
+                          Items="@_gradeLevelOptions"
+                          @bind-SelectedOption="_selectedGradeLevel"
+                          @bind-SelectedOption:after="OnSelectedGradeLevelChangedAsync"
+                          OptionText="@(o => o?.Label ?? "")"
+                          OptionValue="@(o => o?.Value ?? "")"
+                          Label="Grade Level"
+                          Placeholder="Select a grade level"
+                          class="grade-filter" />
+        }
+        else
+        {
+            <FluentSelect TOption="ActivityGroupOption"
+                          Items="@_activityGroupOptions"
+                          @bind-SelectedOption="_selectedActivityGroup"
+                          @bind-SelectedOption:after="OnSelectedActivityGroupChangedAsync"
+                          OptionText="@(o => o?.Label ?? "")"
+                          OptionValue="@(o => o?.Value ?? "")"
+                          Label="Activity Group"
+                          Placeholder="Select an activity group"
+                          class="grade-filter" />
+        }
     </ToolbarFilters>
     <Columns>
         <TemplateColumn TGridItem="SubjectDto" Title="Code" SortBy="@_sortByCode" Sortable="true">
@@ -70,8 +95,13 @@
 
     private GradeLevelOption? _selectedGradeLevel;
     private GradeLevelOption[] _gradeLevelOptions = [];
+    private string _ownerType = "GradeLevel";
+    private ActivityGroupDto[]? _activityGroups;
+    private ActivityGroupOption? _selectedActivityGroup;
+    private ActivityGroupOption[] _activityGroupOptions = [];
 
     private record GradeLevelOption(string Value, string Label);
+    private record ActivityGroupOption(string Value, string Label);
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
@@ -103,14 +133,14 @@
                 return "No grade levels exist. Create a grade level first.";
 
             if (_selectedGradeLevel is null)
-                return "Select a grade level to view its subjects.";
+                return "Select a grade level to view its topics.";
 
             if (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0)
-                return $"No subjects match '{_searchText}'.";
+                return $"No topics match '{_searchText}'.";
 
             return _items?.Length == 0
-                ? "No subjects assigned to this grade level for the current period."
-                : "No subjects yet.";
+                ? "No topics assigned to this grade level for the current period."
+                : "No topics yet.";
         }
     }
 
@@ -135,13 +165,21 @@
             return;
         }
 
-        Logger.LogInformation("Loading subjects page");
+        Logger.LogInformation("Loading topics page");
 
         try
         {
             // Load grade levels first (for the filter)
             _gradeLevels = await Api.ListGradeLevelsAsync(token);
             if (_disposed) return;
+
+            // Load activity groups (for the ActivityGroup owner filter)
+            _activityGroups = await Api.ListActivityGroupsAsync(token);
+            if (_disposed) return;
+            _activityGroupOptions = (_activityGroups ?? [])
+                .OrderBy(g => g.Name)
+                .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
+                .ToArray();
 
             if (_gradeLevels is not null && _gradeLevels.Length > 0)
             {
@@ -167,7 +205,7 @@
             // Load subjects for selected grade level
             await LoadSubjectsAsync(token);
 
-            Logger.LogInformation("Loaded {Count} subjects", _items?.Length ?? 0);
+            Logger.LogInformation("Loaded {Count} topics", _items?.Length ?? 0);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -198,6 +236,31 @@
 
     private async Task LoadSubjectsAsync(CancellationToken token)
     {
+        if (_ownerType == "ActivityGroup")
+        {
+            if (_selectedActivityGroup is null || !Guid.TryParse(_selectedActivityGroup.Value, out var groupId))
+            {
+                _items = [];
+                _resolvedNames = new();
+                return;
+            }
+            try
+            {
+                _items = await Api.ListSubjectsByGroupAsync(groupId, null, token);
+                if (_disposed) return;
+                await ResolveNamesAsync(token);
+            }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to load subjects for group {GroupId}", groupId);
+                _error = ex.Message;
+                _items = [];
+                _resolvedNames = new();
+            }
+            return;
+        }
+
         if (_selectedGradeLevel is null || !Guid.TryParse(_selectedGradeLevel.Value, out var gradeLevelId))
         {
             _items = [];
@@ -210,23 +273,7 @@
             // Use the period from query param, or null to derive current period server-side
             _items = await Api.ListSubjectsByGradeAsync(gradeLevelId, PeriodId, token);
             if (_disposed) return;
-
-            // Batch-load tenant-resolved SUBJECT names so the Name column
-            // reflects any per-tenant overrides (mirrors the GradeLevels
-            // landing's _resolvedNames pattern).
-            var subjectIds = (_items ?? []).Select(s => s.CodedValueId).Distinct().ToArray();
-            _resolvedNames = new();
-            if (subjectIds.Length > 0)
-            {
-                var cv = await CodedValuesApi.GetByIdsAsync(subjectIds, token);
-                foreach (var v in cv)
-                {
-                    foreach (var s in _items ?? [])
-                    {
-                        if (s.CodedValueId == v.Id) _resolvedNames[s.Id] = v.Name;
-                    }
-                }
-            }
+            await ResolveNamesAsync(token);
         }
         catch (Exception ex)
         {
@@ -236,6 +283,31 @@
             _items = [];
             _resolvedNames = new();
         }
+    }
+
+    private async Task ResolveNamesAsync(CancellationToken token)
+    {
+        var subjectIds = (_items ?? []).Select(s => s.CodedValueId).Distinct().ToArray();
+        _resolvedNames = new();
+        if (subjectIds.Length > 0)
+        {
+            var cv = await CodedValuesApi.GetByIdsAsync(subjectIds, token);
+            foreach (var v in cv)
+            {
+                foreach (var s in _items ?? [])
+                {
+                    if (s.CodedValueId == v.Id) _resolvedNames[s.Id] = v.Name;
+                }
+            }
+        }
+    }
+
+    private async Task OnOwnerTypeChangedAsync()
+    {
+        _items = null;
+        _loadCts ??= new CancellationTokenSource();
+        await LoadSubjectsAsync(_loadCts.Token);
+        StateHasChanged();
     }
 
     /// <summary>
@@ -260,35 +332,41 @@
     }
 
     /// <summary>
-    /// Opens the Create dialog. Passes the current Grade Level filter
-    /// context so the dialog can wire the new subject to the grade via
-    /// CreateSubjectForGradeAsync in one round-trip when the filter is set.
+    /// Opens the shared TopicCreateDialog with the current owner context so a new
+    /// topic can be created and wired to the selected grade or activity group in
+    /// one atomic call. Replaces the legacy SubjectCreateDialog so the owner and
+    /// period-alignment fields are available from the Topics landing (spec FR-56/57).
     /// </summary>
     private async Task OpenCreateDialogAsync()
     {
         if (_disposed) return;
 
-        var gradeLevelId = _selectedGradeLevel is not null
-            && Guid.TryParse(_selectedGradeLevel.Value, out var gid)
-            ? gid
-            : (Guid?)null;
-
-        var model = new SubjectCreateDialog.SubjectCreateModel
+        var model = new TopicCreateDialog.TopicCreateModel
         {
-            GradeLevelId = gradeLevelId,
+            OwnerType = _ownerType,
+            GradeLevelId = _ownerType == "GradeLevel"
+                && _selectedGradeLevel is not null
+                && Guid.TryParse(_selectedGradeLevel.Value, out var gid)
+                ? gid
+                : Guid.Empty,
+            ActivityGroupId = _ownerType == "ActivityGroup"
+                && _selectedActivityGroup is not null
+                && Guid.TryParse(_selectedActivityGroup.Value, out var agid)
+                ? agid
+                : null,
         };
 
         var created = await DialogService.ShowShellDialogAsync<
-            SubjectCreateDialog,
-            SubjectCreateDialog.SubjectCreateModel,
-            SubjectDto>(
-            model, "New subject", gradeLevelId.HasValue ? DialogSize.Small : DialogSize.Medium);
+            TopicCreateDialog,
+            TopicCreateDialog.TopicCreateModel,
+            TopicDto>(
+            model, "New topic", DialogSize.Large);
 
         if (_disposed) return;
         if (created is not null)
         {
-            // Reload so the new (or reused) subject row appears in the
-            // current grade-level filter.
+            // Reload so the new (or reused) topic row appears in the
+            // current owner filter.
             await LoadSubjectsAsync(_loadCts?.Token ?? CancellationToken.None);
         }
     }
@@ -314,7 +392,7 @@
             SubjectEditDialog,
             SubjectEditDialog.SubjectEditModel,
             CodedValueDto>(
-            model, $"Edit subject — {row.Code}", DialogSize.Small);
+            model, $"Edit topic — {row.Code}", DialogSize.Small);
 
         if (_disposed) return;
         await LoadSubjectsAsync(_loadCts?.Token ?? CancellationToken.None);
@@ -354,9 +432,16 @@
         }
     }
 
-    private async Task OnSelectedGradeLevelChangedAsync(GradeLevelOption? option)
+    private async Task OnSelectedGradeLevelChangedAsync()
     {
-        _selectedGradeLevel = option;
+        _items = null;
+        _loadCts ??= new CancellationTokenSource();
+        await LoadSubjectsAsync(_loadCts.Token);
+        StateHasChanged();
+    }
+
+    private async Task OnSelectedActivityGroupChangedAsync()
+    {
         _items = null;
         _loadCts ??= new CancellationTokenSource();
         await LoadSubjectsAsync(_loadCts.Token);

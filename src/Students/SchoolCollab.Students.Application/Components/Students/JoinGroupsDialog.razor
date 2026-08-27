@@ -60,6 +60,7 @@
     private List<ActivityGroupDto> _availableGroups = new();
     private bool _loadingGroups = true;
     private HashSet<Guid> _selectedIds = new();
+    private string _activePeriodType = "AcademicYear";
 
     private IEnumerable<ActivityGroupDto> _filteredGroups =>
         string.IsNullOrWhiteSpace(_search)
@@ -74,7 +75,7 @@
             : $"{g.ActiveMemberCount} members";
 
     private static string GroupOptionText(ActivityGroupDto g) =>
-        $"{g.Name}  ·  {g.Category ?? "General"} · {FormatMembers(g)}";
+        $"{g.Name}  ·  {g.Category ?? "General"} · {g.Span} · {FormatMembers(g)}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -91,10 +92,17 @@
             var current = await Api.ListStudentGroupsAsync(Model.StudentId);
             var currentIds = new HashSet<Guid>(current?.Select(g => g.Id) ?? Array.Empty<Guid>());
 
+            // Resolve the active period type so period-aligned spans can be
+            // filtered to the currently-open period (spec FR-43).
+            var activeSub = await Api.GetActiveSubPeriodAsync();
+            var activeYear = await Api.GetActiveAcademicYearAsync();
+            _activePeriodType = activeSub?.PeriodType ?? activeYear?.PeriodType ?? "AcademicYear";
+
             _availableGroups = (all ?? Array.Empty<ActivityGroupDto>())
-                .Where(g => string.Equals(g.Status, "Active", StringComparison.OrdinalIgnoreCase)
+                .Where(g => g.IsActive
                     && !currentIds.Contains(g.Id)
-                    && (!g.Capacity.HasValue || g.ActiveMemberCount < g.Capacity.Value))
+                    && (!g.Capacity.HasValue || g.ActiveMemberCount < g.Capacity.Value)
+                    && SpanCompatible(g))
                 .OrderBy(g => g.Name)
                 .ToList();
         }
@@ -106,6 +114,26 @@
         {
             _loadingGroups = false;
         }
+    }
+
+    /// <summary>
+    /// Span-aware joinability (spec FR-28..32, FR-40/43/52). OpenEnded is always
+    /// joinable; DateRange only while its window is open; period-aligned spans
+    /// only when the active period matches the span's required period type.
+    /// </summary>
+    private bool SpanCompatible(ActivityGroupDto g)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return g.Span switch
+        {
+            "OpenEnded" => true,
+            "DateRange" => g.EnrollmentStartDate.HasValue && g.EnrollmentEndDate.HasValue
+                && today >= g.EnrollmentStartDate.Value && today <= g.EnrollmentEndDate.Value,
+            "WholeAcademicYear" => _activePeriodType == "AcademicYear",
+            "Termly" => _activePeriodType == "Term",
+            "Semester" => _activePeriodType == "Semester",
+            _ => true
+        };
     }
 
     protected override async Task<JoinGroupsResult?> SubmitAsync(JoinGroupsModel model)

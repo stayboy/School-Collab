@@ -15,7 +15,7 @@
             <h1 class="page-title">@(_group?.Name ?? "Activity Group")</h1>
             @if (_group is not null)
             {
-                <FluentBadge Appearance="@StatusBadge(_group.Status)">@_group.Status</FluentBadge>
+                <FluentBadge Appearance="@(_group.IsActive ? Appearance.Accent : Appearance.Neutral)">@(_group.IsActive ? "Active" : "Inactive")</FluentBadge>
             }
         </div>
         <div class="action-bar">
@@ -24,7 +24,7 @@
                           OnClick="@(() => Nav.NavigateTo("/activity-groups"))">
                 Back
             </FluentButton>
-            @if (_group is not null && _group.Status != "Archived")
+            @if (_group is not null && _group.IsActive)
             {
                 <FluentButton Appearance="Appearance.Accent"
                               Icon="@FluentIcons.PersonAdd"
@@ -32,6 +32,15 @@
                               OnClick="@OpenAddMemberDialogAsync">
                     Add members
                 </FluentButton>
+                @if (_group.Span != "OpenEnded")
+                {
+                    <FluentButton Appearance="Appearance.Outline"
+                                  Icon="@FluentIcons.ArrowClockwise"
+                                  Disabled="@(_loading || _saving)"
+                                  OnClick="@OnRolloverAsync">
+                        Roll over
+                    </FluentButton>
+                }
             }
         </div>
     </SectionContent>
@@ -82,12 +91,28 @@
         {
             <FluentDataGrid TGridItem="MembershipDto"
                             Items="@_members.AsQueryable()"
-                            GridTemplateColumns="2fr 130px 100px auto">
+                            GridTemplateColumns="2fr 130px 150px 120px 100px auto">
                 <TemplateColumn Title="Student" Context="m">
                     <span>@m.StudentName</span>
                 </TemplateColumn>
                 <TemplateColumn Title="Joined" Context="m">
                     <span class="muted">@m.JoinedOn.ToString("d MMM yyyy")</span>
+                </TemplateColumn>
+                <TemplateColumn Title="Window" Context="m">
+                    @if (m.WindowStartDate.HasValue)
+                    {
+                        @($"{m.WindowStartDate:yyyy-MM-dd} → {m.WindowEndDate:yyyy-MM-dd}")
+                    }
+                    else
+                    {
+                        <span class="muted">—</span>
+                    }
+                </TemplateColumn>
+                <TemplateColumn Title="Auto-renew" Context="m">
+                    <FluentSwitch Value="@m.AutoRenew"
+                                  ValueChanged="@(v => OnToggleAutoRenewAsync(m, v))"
+                                  Disabled="@_saving"
+                                  Title="Admin-settable: re-enrol this member into the next window on rollover" />
                 </TemplateColumn>
                 <TemplateColumn Title="Status" Context="m">
                     <FluentBadge Appearance="@MemberStatusBadge(m.Status)">@m.Status</FluentBadge>
@@ -95,6 +120,12 @@
                 <TemplateColumn Title="" Context="m">
                     @if (m.Status == "Active")
                     {
+                        <FluentButton Appearance="Appearance.Lightweight"
+                                      Icon="@FluentIcons.ArrowRight"
+                                      Disabled="@_saving"
+                                      OnClick="@(() => OnExitMemberAsync(m.StudentId))">
+                            Exit
+                        </FluentButton>
                         <FluentButton Appearance="Appearance.Lightweight"
                                       Icon="@FluentIcons.Delete"
                                       Disabled="@_saving"
@@ -120,12 +151,7 @@
     private bool _loading;
     private bool _saving;
 
-    private static Appearance StatusBadge(string status) => status switch
-    {
-        "Archived" => Appearance.Neutral,
-        "Suspended" => Appearance.Outline,
-        _ => Appearance.Accent,
-    };
+    private static Appearance StatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
 
     private static Appearance MemberStatusBadge(string status) =>
         status == "Active" ? Appearance.Accent : Appearance.Neutral;
@@ -205,6 +231,72 @@
         try
         {
             await Api.RemoveGroupMemberAsync(Id, studentId);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnExitMemberAsync(Guid studentId)
+    {
+        if (_disposed || _saving) return;
+        _saving = true;
+        try
+        {
+            await Api.ExitGroupMemberAsync(Id, studentId);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnToggleAutoRenewAsync(MembershipDto m, bool autoRenew)
+    {
+        if (_disposed || _saving) return;
+        _saving = true;
+        try
+        {
+            await Api.SetMembershipAutoRenewAsync(m.Id, autoRenew);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private async Task OnRolloverAsync()
+    {
+        if (_disposed || _saving) return;
+        var dialog = await DialogService.ShowConfirmationAsync(
+            "Roll over this group? This closes the current window and re-enrols auto-renew members into the next window.",
+            "Roll over", "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        _saving = true;
+        try
+        {
+            await Api.RolloverActivityGroupAsync(Id);
             await LoadAsync();
         }
         catch (Exception ex)

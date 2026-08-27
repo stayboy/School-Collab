@@ -1,7 +1,8 @@
 @*
     ActivityGroupEditDialog — opens from the Activity Groups landing's Edit
     row action. Pre-seeds the group fields and posts to PUT /activity-groups/{id}
-    (spec §7.1).
+    (spec §7.1, Rev. 2–6). Span is immutable after creation (shown read-only);
+    window dates, auto-renew default, and eligible grades are editable.
 *@
 @inherits DialogShellBase<ActivityGroupEditDialog.ActivityGroupEditModel, ActivityGroupDto>
 @using System.ComponentModel.DataAnnotations
@@ -31,6 +32,46 @@
                             Style="min-height:90px;" />
         </FormRow>
 
+        <FormRow Label="Enrollment span" For="ag-edit-span">
+            <FluentTextField Value="@Model.Span" Readonly="true" Id="ag-edit-span" Style="flex:1; min-width:0" />
+        </FormRow>
+
+        @if (Model.Span == "DateRange")
+        {
+            <FormRow Label="Enrollment window" AlignTop>
+                <FluentDatePicker @bind-Value="Model.EnrollmentStartDate" Label="Start" Style="flex:1; min-width:0" />
+                <FluentDatePicker @bind-Value="Model.EnrollmentEndDate" Label="End" Style="flex:1; min-width:0" />
+            </FormRow>
+            <FormRow Label="Next window (optional)" AlignTop>
+                <FluentDatePicker @bind-Value="Model.NextEnrollmentStartDate" Label="Next start" Style="flex:1; min-width:0" />
+                <FluentDatePicker @bind-Value="Model.NextEnrollmentEndDate" Label="Next end" Style="flex:1; min-width:0" />
+            </FormRow>
+        }
+
+        <FormRow Label="Auto-renew by default" For="ag-edit-autorenew">
+            <FluentCheckbox @bind-Value="Model.AutoRenewDefault"
+                            Id="ag-edit-autorenew"
+                            Label="Members auto-renew into the next window" />
+        </FormRow>
+
+        <FormRow Label="Eligible grades" AlignTop>
+            <div class="grade-checkbox-list">
+                @if (_gradeLevels.Length == 0)
+                {
+                    <span class="muted">No grade levels found. Leave empty to allow all grades.</span>
+                }
+                else
+                {
+                    @foreach (var g in _gradeLevels)
+                    {
+                        <FluentCheckbox Value="@_selectedGradeIds.Contains(g.Id)"
+                                        ValueChanged="@(v => ToggleGrade(g.Id, v))"
+                                        Label="@g.Name" />
+                    }
+                }
+            </div>
+        </FormRow>
+
         <FormRow Label="Capacity" For="ag-edit-capacity">
             <FluentNumberField @bind-Value="Model.Capacity"
                                Id="ag-edit-capacity"
@@ -43,6 +84,9 @@
 </div>
 
 @code {
+    private GradeLevelLandingDto[] _gradeLevels = [];
+    private readonly HashSet<Guid> _selectedGradeIds = new();
+
     public sealed class ActivityGroupEditModel
     {
         public Guid Id { get; set; }
@@ -50,12 +94,65 @@
         [StringLength(100)] public string? Category { get; set; }
         [StringLength(2000)] public string? Description { get; set; }
         [Range(1, int.MaxValue)] public int? Capacity { get; set; }
+        public string Span { get; set; } = "OpenEnded";
+        public DateTime? EnrollmentStartDate { get; set; }
+        public DateTime? EnrollmentEndDate { get; set; }
+        public DateTime? NextEnrollmentStartDate { get; set; }
+        public DateTime? NextEnrollmentEndDate { get; set; }
+        public bool AutoRenewDefault { get; set; } = true;
+        public Guid[] EligibleGradeIds { get; set; } = [];
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _gradeLevels = await Api.ListGradeLevelsForLandingAsync() ?? [];
+        foreach (var id in Model.EligibleGradeIds)
+            _selectedGradeIds.Add(id);
+    }
+
+    private void ToggleGrade(Guid id, bool selected)
+    {
+        if (selected) _selectedGradeIds.Add(id);
+        else _selectedGradeIds.Remove(id);
     }
 
     protected override async Task<ActivityGroupDto?> SubmitAsync(ActivityGroupEditModel model)
     {
+        DateOnly? start = model.EnrollmentStartDate.HasValue ? DateOnly.FromDateTime(model.EnrollmentStartDate.Value) : null;
+        DateOnly? end = model.EnrollmentEndDate.HasValue ? DateOnly.FromDateTime(model.EnrollmentEndDate.Value) : null;
+
+        // Validate the optional next window (FR-53/AC-43): next start must be on
+        // or after the current window's end.
+        if (model.Span == "DateRange"
+            && (model.NextEnrollmentStartDate.HasValue || model.NextEnrollmentEndDate.HasValue))
+        {
+            if (!model.NextEnrollmentStartDate.HasValue || !model.NextEnrollmentEndDate.HasValue)
+            {
+                Error = "Enter both next-window dates, or clear both.";
+                return null;
+            }
+            if (end.HasValue && DateOnly.FromDateTime(model.NextEnrollmentStartDate.Value) < end.Value)
+            {
+                Error = "The next window's start must be on or after the current window's end.";
+                return null;
+            }
+        }
+
         await Api.UpdateActivityGroupAsync(model.Id, new UpdateActivityGroupRequest(
-            model.Name, model.Description, model.Category, null, model.Capacity));
+            model.Name, model.Description, model.Category, model.Capacity,
+            start, end,
+            model.AutoRenewDefault, _selectedGradeIds.Count > 0 ? _selectedGradeIds.ToArray() : null));
+
+        if (model.Span == "DateRange"
+            && model.NextEnrollmentStartDate.HasValue
+            && model.NextEnrollmentEndDate.HasValue)
+        {
+            await Api.SetActivityGroupNextWindowAsync(
+                model.Id,
+                DateOnly.FromDateTime(model.NextEnrollmentStartDate.Value),
+                DateOnly.FromDateTime(model.NextEnrollmentEndDate.Value));
+        }
+
         return await Api.GetActivityGroupByIdAsync(model.Id);
     }
 }

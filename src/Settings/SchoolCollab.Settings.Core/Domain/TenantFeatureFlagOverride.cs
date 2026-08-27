@@ -15,6 +15,13 @@ public sealed class TenantFeatureFlagOverride : BaseTenantEntityWithAudit, IHasR
 
     public Guid FeatureFlagId { get; private set; }
     public bool? IsEnabled { get; private set; }
+
+    /// <summary>
+    /// The tenant's value for a value-valued flag (<see cref="FlagKind.String"/>).
+    /// Null = inherit the global <see cref="FeatureFlag.Value"/>.
+    /// </summary>
+    public string? Value { get; private set; }
+
     public string Reason { get; private set; } = default!;
     public DateTimeOffset? EffectiveFrom { get; private set; }
     public DateTimeOffset? EffectiveTo { get; private set; }
@@ -24,6 +31,7 @@ public sealed class TenantFeatureFlagOverride : BaseTenantEntityWithAudit, IHasR
         Guid tenantId,
         Guid featureFlagId,
         bool? isEnabled,
+        string? value,
         string reason,
         DateTimeOffset? effectiveFrom,
         DateTimeOffset? effectiveTo)
@@ -38,6 +46,7 @@ public sealed class TenantFeatureFlagOverride : BaseTenantEntityWithAudit, IHasR
             TenantId = tenantId,
             FeatureFlagId = featureFlagId,
             IsEnabled = isEnabled,
+            Value = value,
             Reason = reason.Trim(),
             EffectiveFrom = effectiveFrom,
             EffectiveTo = effectiveTo,
@@ -46,17 +55,32 @@ public sealed class TenantFeatureFlagOverride : BaseTenantEntityWithAudit, IHasR
         };
     }
 
-    public void Update(bool? isEnabled, string reason, DateTimeOffset? effectiveFrom, DateTimeOffset? effectiveTo)
+    /// <summary>Boolean-only overload (no value) for backward compatibility.</summary>
+    public static TenantFeatureFlagOverride Create(
+        Guid tenantId,
+        Guid featureFlagId,
+        bool? isEnabled,
+        string reason,
+        DateTimeOffset? effectiveFrom,
+        DateTimeOffset? effectiveTo)
+        => Create(tenantId, featureFlagId, isEnabled, value: null, reason, effectiveFrom, effectiveTo);
+
+    public void Update(bool? isEnabled, string? value, string reason, DateTimeOffset? effectiveFrom, DateTimeOffset? effectiveTo)
     {
         ValidateReason(reason);
         ValidateWindow(effectiveFrom, effectiveTo);
 
         IsEnabled = isEnabled;
+        Value = value;
         Reason = reason.Trim();
         EffectiveFrom = effectiveFrom;
         EffectiveTo = effectiveTo;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
+
+    /// <summary>Boolean-only overload (no value) for backward compatibility.</summary>
+    public void Update(bool? isEnabled, string reason, DateTimeOffset? effectiveFrom, DateTimeOffset? effectiveTo)
+        => Update(isEnabled, value: null, reason, effectiveFrom, effectiveTo);
 
     /// <summary>
     /// True when the override is in effect right now, considering its optional

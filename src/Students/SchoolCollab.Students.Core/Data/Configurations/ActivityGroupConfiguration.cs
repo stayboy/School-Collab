@@ -34,19 +34,24 @@ internal sealed class ActivityGroupConfiguration : TenantEntityTypeConfiguration
         builder.Property(x => x.Category)
             .HasMaxLength(100);
 
-        builder.Property(x => x.PeriodId).IsRequired(false);
         builder.Property(x => x.Capacity).IsRequired(false);
 
-        builder.Property(x => x.Status)
+        // Rev. 2 FR-3: on/off switch (replaces the ActivityGroupStatus enum).
+        builder.Property(x => x.IsActive)
             .IsRequired()
-            .HasDefaultValue(ActivityGroupStatus.Active);
+            .HasDefaultValue(true);
 
-        // Optional FK → periods.id (FR-4). A group MAY outlast its period.
-        builder.HasOne<Period>()
-            .WithMany()
-            .HasForeignKey(x => x.PeriodId)
-            .IsRequired(false)
-            .OnDelete(DeleteBehavior.SetNull);
+        // Rev. 3/4 FR-42: enrollment span (default OpenEnded) + window bounds.
+        builder.Property(x => x.Span)
+            .IsRequired()
+            .HasDefaultValue(EnrollmentSpan.OpenEnded);
+        builder.Property(x => x.EnrollmentStartDate).IsRequired(false);
+        builder.Property(x => x.EnrollmentEndDate).IsRequired(false);
+        builder.Property(x => x.NextEnrollmentStartDate).IsRequired(false);
+        builder.Property(x => x.NextEnrollmentEndDate).IsRequired(false);
+        builder.Property(x => x.AutoRenewDefault)
+            .IsRequired()
+            .HasDefaultValue(true);
 
         // FR-1 / AC-3: case-insensitive unique name per tenant. The actual
         // unique index on (tenant_id, lower(name)) is created via raw SQL in the
@@ -56,12 +61,9 @@ internal sealed class ActivityGroupConfiguration : TenantEntityTypeConfiguration
         builder.HasIndex(x => new { x.TenantId, x.Name })
             .HasDatabaseName("ix_activity_groups_tenant_name");
 
-        // NFR-3 hot paths (tenant_id leading).
-        builder.HasIndex(x => new { x.TenantId, x.Status })
-            .HasDatabaseName("ix_activity_groups_tenant_status");
-
-        builder.HasIndex(x => new { x.TenantId, x.PeriodId })
-            .HasDatabaseName("ix_activity_groups_tenant_period");
+        // NFR-3 hot paths (tenant_id leading) — active-group lookups lead on is_active.
+        builder.HasIndex(x => new { x.TenantId, x.IsActive })
+            .HasDatabaseName("ix_activity_groups_tenant_active");
 
         builder.Ignore(x => x.DomainEvents);
     }

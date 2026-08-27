@@ -21,4 +21,5 @@ public sealed record CreateTopicForGrade(
     Guid? CodedValueId,
     string? Code,
     string Name,
-    int DisplayOrder) : ICommand;
+    int DisplayOrder,
+    Guid? PeriodId = null) : ICommand;

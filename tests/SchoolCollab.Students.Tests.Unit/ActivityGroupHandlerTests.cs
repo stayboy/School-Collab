@@ -2,10 +2,10 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Microsoft.Extensions.Logging.Abstractions;
 using SchoolCollab.Core.Tenancy;
-using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.ArchiveActivityGroup;
+using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.ActivateActivityGroup;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.CreateActivityGroup;
+using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.DeactivateActivityGroup;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.DeleteActivityGroup;
-using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.SuspendActivityGroup;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.UpdateActivityGroup;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Queries.GetActivityGroupById;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Queries.ListActivityGroups;
@@ -25,10 +25,11 @@ public class ActivityGroupHandlerTests
             => Throw ? throw new HttpRequestException("x") : Task.FromResult(Array.Empty<SchoolCollab.Students.Core.DTOs.AssignmentReferenceDto>());
     }
 
-    private static (CreateActivityGroupHandler h, StudentsTestScope s) New()
+    private static (CreateActivityGroupHandler h, StudentsTestScope s) New(string division = "None")
     {
         var s = new StudentsTestScope("ag-" + Guid.NewGuid());
         return (new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
+            new StubAcademicYearDivisionProvider(division),
             NullLogger<CreateActivityGroupHandler>.Instance), s);
     }
 
@@ -36,10 +37,20 @@ public class ActivityGroupHandlerTests
     public async Task Create_PersistsGroup()
     {
         var (h, s) = New();
-        var id = await h.HandleAsync(new CreateActivityGroup("Chess Club", "d", "Sp", null, 20));
+        var id = await h.HandleAsync(new CreateActivityGroup("Chess Club", "d", "Sp", Capacity: 20));
         var g = await s.ActivityGroups.GetAsync(id);
         g!.Name.Should().Be("Chess Club");
-        g.Status.Should().Be(ActivityGroupStatus.Active);
+        g.IsActive.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task Create_WithEligibleGrades_PersistsLinks()
+    {
+        var (h, s) = New();
+        var gradeId = Guid.NewGuid();
+        var id = await h.HandleAsync(new CreateActivityGroup("Chess Club", EligibleGradeIds: [gradeId]));
+        var eligible = await s.ActivityGroups.GetEligibleGradeIdsAsync(id);
+        eligible.Should().BeEquivalentTo([gradeId]);
     }
 
     [TestMethod]
@@ -53,6 +64,17 @@ public class ActivityGroupHandlerTests
     }
 
     [TestMethod]
+    public async Task Update_ReplaceSetEligibleGrades()
+    {
+        var (h, s) = New();
+        var id = await h.HandleAsync(new CreateActivityGroup("Chess Club", EligibleGradeIds: [Guid.NewGuid()]));
+        var g1 = Guid.NewGuid();
+        await new UpdateActivityGroupHandler(s.ActivityGroups, s.Cache, NullLogger<UpdateActivityGroupHandler>.Instance)
+            .HandleAsync(new UpdateActivityGroup(id, "Chess Club", EligibleGradeIds: [g1]));
+        (await s.ActivityGroups.GetEligibleGradeIdsAsync(id)).Should().Equal([g1]);
+    }
+
+    [TestMethod]
     public async Task Update_NotFound_Throws()
     {
         var s = new StudentsTestScope("ag-nf-" + Guid.NewGuid());
@@ -62,23 +84,25 @@ public class ActivityGroupHandlerTests
     }
 
     [TestMethod]
-    public async Task Archive_SetsStatus()
+    public async Task Deactivate_SetsInactive()
     {
         var (h, s) = New();
         var id = await h.HandleAsync(new CreateActivityGroup("Chess Club"));
-        await new ArchiveActivityGroupHandler(s.ActivityGroups, s.Cache, NullLogger<ArchiveActivityGroupHandler>.Instance)
-            .HandleAsync(new ArchiveActivityGroup(id));
-        (await s.ActivityGroups.GetAsync(id))!.Status.Should().Be(ActivityGroupStatus.Archived);
+        await new DeactivateActivityGroupHandler(s.ActivityGroups, s.Cache, NullLogger<DeactivateActivityGroupHandler>.Instance)
+            .HandleAsync(new DeactivateActivityGroup(id));
+        (await s.ActivityGroups.GetAsync(id))!.IsActive.Should().BeFalse();
     }
 
     [TestMethod]
-    public async Task Suspend_SetsStatus()
+    public async Task Activate_SetsActive()
     {
         var (h, s) = New();
         var id = await h.HandleAsync(new CreateActivityGroup("Chess Club"));
-        await new SuspendActivityGroupHandler(s.ActivityGroups, s.Cache, NullLogger<SuspendActivityGroupHandler>.Instance)
-            .HandleAsync(new SuspendActivityGroup(id));
-        (await s.ActivityGroups.GetAsync(id))!.Status.Should().Be(ActivityGroupStatus.Suspended);
+        await new DeactivateActivityGroupHandler(s.ActivityGroups, s.Cache, NullLogger<DeactivateActivityGroupHandler>.Instance)
+            .HandleAsync(new DeactivateActivityGroup(id));
+        await new ActivateActivityGroupHandler(s.ActivityGroups, s.Cache, NullLogger<ActivateActivityGroupHandler>.Instance)
+            .HandleAsync(new ActivateActivityGroup(id));
+        (await s.ActivityGroups.GetAsync(id))!.IsActive.Should().BeTrue();
     }
 
     [TestMethod]
@@ -122,7 +146,7 @@ public class ActivityGroupHandlerTests
     public async Task GetById_ReturnsDtoWithCount()
     {
         var (h, s) = New();
-        var id = await h.HandleAsync(new CreateActivityGroup("Chess Club", null, null, null, 5));
+        var id = await h.HandleAsync(new CreateActivityGroup("Chess Club", Capacity: 5));
         var dto = await new GetActivityGroupByIdHandler(s.Db).HandleAsync(new GetActivityGroupById(id));
         dto!.ActiveMemberCount.Should().Be(0);
     }
@@ -138,4 +162,3 @@ public class ActivityGroupHandlerTests
         dtos[0].Name.Should().Be("Chess Club");
     }
 }
-

@@ -46,6 +46,13 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
     /// </summary>
     public DateOnly? EndDate { get; private set; }
     public Guid? TopicStrandId { get; private set; }
+
+    /// <summary>
+    /// Rev. 6 FR-55: optional period scope. Null = the current date-based,
+    /// year-spanning assignment; non-null = the topic is delivered during that
+    /// specific academic-year/term/semester period (FR-56/57). Additive.
+    /// </summary>
+    public Guid? PeriodId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -61,7 +68,8 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         Guid topicId,
         DateOnly startDate,
         DateOnly? endDate,
-        Guid? topicStrandId)
+        Guid? topicStrandId,
+        Guid? periodId)
     {
         if (endDate is { } e && e < startDate)
             throw new ArgumentException("EndDate must be on or after StartDate.", nameof(endDate));
@@ -72,6 +80,7 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         StartDate = startDate;
         EndDate = endDate;
         TopicStrandId = topicStrandId;
+        PeriodId = periodId;
         CreatedAt = now;
         UpdatedAt = now;
     }

@@ -60,6 +60,12 @@ public class TopicCreateDialogTests : BunitContext
 
     private void Register(ScriptedHandler handler)
     {
+        // The dialog's OnInitializedAsync loads activity groups and periods to
+        // populate the owner/period pickers. Map them to empty so the dialog
+        // renders in the test. GetActiveAcademicYearAsync returns null on 404.
+        handler.Map("GET", "/activity-groups", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         var cv = new CodedValuesApiClient(http);
         Services.AddSingleton(cv);

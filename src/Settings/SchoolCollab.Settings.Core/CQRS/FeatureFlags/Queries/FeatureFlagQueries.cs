@@ -18,3 +18,9 @@ public sealed record ListAuditEntries(
 public sealed record ResolveFlagsForTenant(Guid? TenantId) : IQuery<ResolvedFlagDto[]>;
 
 public sealed record ListTenantOverrides(string Key) : IQuery<TenantFlagOverrideDto[]>;
+
+/// <summary>
+/// Resolves the effective academic-year division for a tenant (override value,
+/// else the global default). (period-hierarchy-terms-semesters.md FR-H6.)
+/// </summary>
+public sealed record GetAcademicYearDivision(Guid TenantId) : IQuery<AcademicYearDivisionDto>;

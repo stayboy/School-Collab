@@ -6,6 +6,7 @@ using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.RemoveTopicAssig
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicAssignmentTags;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicAssignments;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListActivityGroupTopicAssignments;
+using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -43,8 +44,12 @@ public static class TopicAssignmentRoutes
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<AssignGradeTopic, Guid> handler,
             CancellationToken ct) =>
         {
-            var id = await handler.HandleAsync(command, ct);
-            return Results.Created($"/topic-assignments/{id}", new { id });
+            try
+            {
+                var id = await handler.HandleAsync(command, ct);
+                return Results.Created($"/topic-assignments/{id}", new { id });
+            }
+            catch (TopicAssignmentPeriodException ex) { return Results.Json(new { ex.Message }, statusCode: 422); }
         });
 
         group.MapPost("/topic-assignments/activity-group", async (
@@ -52,8 +57,13 @@ public static class TopicAssignmentRoutes
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<AssignActivityGroupTopic, Guid> handler,
             CancellationToken ct) =>
         {
-            var id = await handler.HandleAsync(command, ct);
-            return Results.Created($"/topic-assignments/{id}", new { id });
+            try
+            {
+                var id = await handler.HandleAsync(command, ct);
+                return Results.Created($"/topic-assignments/{id}", new { id });
+            }
+            catch (TopicAssignmentPeriodException ex) { return Results.Json(new { ex.Message }, statusCode: 422); }
+            catch (ActivityGroupNotFoundException) { return Results.NotFound(); }
         });
 
         group.MapPut("/topic-assignments/{id:guid}/tags", async (

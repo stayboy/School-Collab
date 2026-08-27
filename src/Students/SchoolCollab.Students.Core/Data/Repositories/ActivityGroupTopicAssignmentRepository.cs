@@ -18,6 +18,7 @@ internal sealed class ActivityGroupTopicAssignmentRepository(StudentsDbContext d
                 x.Id, "activity_group", null, x.ActivityGroupId, x.TopicId,
                 x.StartDate, x.EndDate,
                 x.TopicStrandId,
+                x.PeriodId,
                 x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
 }

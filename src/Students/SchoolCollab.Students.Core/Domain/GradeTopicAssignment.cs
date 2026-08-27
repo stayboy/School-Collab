@@ -24,10 +24,11 @@ public sealed class GradeTopicAssignment : TopicAssignment
         Guid topicId,
         DateOnly startDate,
         DateOnly? endDate = null,
-        Guid? topicStrandId = null)
+        Guid? topicStrandId = null,
+        Guid? periodId = null)
     {
         var assignment = new GradeTopicAssignment { GradeLevelId = gradeLevelId };
-        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId);
+        assignment.Initialize(Guid.NewGuid(), topicId, startDate, endDate, topicStrandId, periodId);
         assignment.AddEvent(new GradeTopicAssignedEvent(
             assignment.Id, gradeLevelId, topicId, startDate, endDate));
         return assignment;

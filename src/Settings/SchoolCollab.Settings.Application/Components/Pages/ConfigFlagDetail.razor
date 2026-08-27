@@ -32,12 +32,22 @@
 
             @* ── Default toggle ── *@
             <FluentCard class="pa-4 mt-3">
-                <h2>Default state</h2>
-                <FluentStack Orientation="Orientation.Horizontal">
-                    <FluentSwitch Label="Enabled by default" @bind-Value="_toggleValue" />
-                    <FluentTextField Label="Reason (required for save)" @bind-Value="_toggleReason" Style="min-width:320px;" />
-                    <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="SaveEnabledAsync">Save</FluentButton>
-                </FluentStack>
+                <h2>Default state <FluentBadge Appearance="Appearance.Neutral">@_flag.Kind</FluentBadge></h2>
+                @if (_flag.Kind == FlagKindDto.String)
+                {
+                    <FluentStack Orientation="Orientation.Horizontal">
+                        <FluentTextField Label="Value (global default)" Value="@(_flag.Value ?? "—")" Readonly="true" Style="min-width:320px;" />
+                    </FluentStack>
+                    <p class="text-muted">String flags carry a value; tenants override it below. The global default is set at seed time.</p>
+                }
+                else
+                {
+                    <FluentStack Orientation="Orientation.Horizontal">
+                        <FluentSwitch Label="Enabled by default" @bind-Value="_toggleValue" />
+                        <FluentTextField Label="Reason (required for save)" @bind-Value="_toggleReason" Style="min-width:320px;" />
+                        <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="SaveEnabledAsync">Save</FluentButton>
+                    </FluentStack>
+                }
                 <p class="text-muted">Description: @(_flag.Description ?? "—")</p>
             </FluentCard>
 
@@ -70,6 +80,12 @@
                                 @(context.IsEnabled is true ? "On" : context.IsEnabled is false ? "Off" : "Inherit")
                             </FluentBadge>
                         </TemplateColumn>
+                        @if (_flag.Kind == FlagKindDto.String)
+                        {
+                            <TemplateColumn Title="Value">
+                                @(context.Value ?? "—")
+                            </TemplateColumn>
+                        }
                         <PropertyColumn Title="Reason" Property="@(o => o.Reason)" />
                         <PropertyColumn Title="Effective" Property="@(o => o.EffectiveFrom)" Format="yyyy-MM-dd" />
                         <TemplateColumn Title="Actions">
@@ -85,11 +101,22 @@
                 <h3 class="mt-3">Add override</h3>
                 <FluentStack Orientation="Orientation.Horizontal">
                     <FluentTextField Label="Tenant Id (GUID)" @bind-Value="_newOverrideTenant" Style="min-width:320px;" />
-                    <FluentSelect TOption="string" Label="Enabled" @bind-Value="_newOverrideEnabledText">
-                        <FluentOption Value="inherit">Inherit</FluentOption>
-                        <FluentOption Value="on">On</FluentOption>
-                        <FluentOption Value="off">Off</FluentOption>
-                    </FluentSelect>
+                    @if (_flag.Kind == FlagKindDto.String)
+                    {
+                        <FluentSelect TOption="string" Label="Value" @bind-Value="_newOverrideValueText">
+                            <FluentOption Value="None">None</FluentOption>
+                            <FluentOption Value="Terms">Terms</FluentOption>
+                            <FluentOption Value="Semesters">Semesters</FluentOption>
+                        </FluentSelect>
+                    }
+                    else
+                    {
+                        <FluentSelect TOption="string" Label="Enabled" @bind-Value="_newOverrideEnabledText">
+                            <FluentOption Value="inherit">Inherit</FluentOption>
+                            <FluentOption Value="on">On</FluentOption>
+                            <FluentOption Value="off">Off</FluentOption>
+                        </FluentSelect>
+                    }
                     <FluentTextField Label="Reason (required)" @bind-Value="_newOverrideReason" Style="min-width:320px;" />
                     <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="AddOverrideAsync">Add</FluentButton>
                 </FluentStack>
@@ -130,6 +157,7 @@
     private string _lifecycleReason = "";
     private string _newOverrideTenant = "";
     private string _newOverrideEnabledText = "inherit";
+    private string _newOverrideValueText = "None";
     private string _newOverrideReason = "";
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -202,12 +230,15 @@
     private async Task AddOverrideAsync()
     {
         if (!Guid.TryParse(_newOverrideTenant, out var tenantId) || string.IsNullOrWhiteSpace(_newOverrideReason)) return;
-        bool? enabled = _newOverrideEnabledText switch { "on" => true, "off" => false, _ => null };
+        bool? enabled = _flag.Kind == FlagKindDto.String
+            ? null
+            : _newOverrideEnabledText switch { "on" => true, "off" => false, _ => null };
+        string? value = _flag.Kind == FlagKindDto.String ? _newOverrideValueText : null;
         _busy = true;
         try
         {
             await Api.UpsertOverrideAsync(Key, tenantId,
-                new UpsertOverrideRequest(enabled, _newOverrideReason, EffectiveFrom: null, EffectiveTo: null));
+                new UpsertOverrideRequest(enabled, value, _newOverrideReason, EffectiveFrom: null, EffectiveTo: null));
             _newOverrideTenant = ""; _newOverrideReason = "";
             _overrides = await Api.ListOverridesAsync(Key);
         }

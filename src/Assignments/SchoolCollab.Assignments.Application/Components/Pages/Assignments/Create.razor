@@ -224,7 +224,20 @@
                                     <FluentTextField Id="assignmentCreateTitle" @bind-Value="_model.Title" Required Placeholder="e.g. Chapter 5 Quiz" class="full-width required-field" />
                                 </FormRow>
 
-                                @if (_gradeLevels is null || _gradeLevels.Length == 0)
+                                @if (_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)
+                                {
+                                    <FormRow Label="Activity Groups" Required For="assignmentCreateGroups">
+                                        <FluentListbox Items="@_activityGroupOptions"
+                                                       @bind-SelectedValues="_selectedGroupIds"
+                                                       @bind-SelectedValues:after="OnSelectedGroupsChangedAsync"
+                                                       OptionText="@(g => g.Label)"
+                                                       OptionValue="@(g => g.Value)"
+                                                       Multiple="true"
+                                                       Id="assignmentCreateGroups"
+                                                       class="full-width" />
+                                    </FormRow>
+                                }
+                                else if (_gradeLevels is null || _gradeLevels.Length == 0)
                                 {
                                     <FluentMessageBar Intent="MessageIntent.Warning">
                                         No grade levels available. Please create grade levels in the Students module first.
@@ -248,12 +261,12 @@
                                 <FormRow Label="Subject" Required For="assignmentCreateSubject">
                                     <FluentSelect TOption="SubjectOption"
                                                   Id="assignmentCreateSubject"
-                                                  Items="@_subjectOptions"
+                                                  Items="@SubjectOptions"
                                                   @bind-SelectedOption="_selectedSubject"
                                                   OptionText="@(o => o?.Label ?? "")"
                                                   OptionValue="@(o => o?.Value ?? "")"
-                                                  Placeholder="@(_selectedGradeLevel is null ? "Select a grade level first" : "Select a subject")"
-                                                  Disabled="@(_selectedGradeLevel is null || _loadingSubjects)"
+                                                  Placeholder="@SubjectPickerPlaceholder"
+                                                  Disabled="@SubjectPickerDisabled"
                                                   class="full-width" />
                                 </FormRow>
 
@@ -261,7 +274,7 @@
                                     <FluentTextArea Id="assignmentCreateDescription" @bind-Value="_model.Description" Rows="4" Placeholder="Assignment instructions…" class="full-width" />
                                 </FormRow>
                                 <FormRow Label="Due Date" For="assignmentCreateDue">
-                                    <FluentDatePicker Id="assignmentCreateDue" @bind-Value="_model.DueDate" Style="width: 12rem;" />
+                                    <FluentDatePicker Id="assignmentCreateDue" @bind-Value="_model.DueDate" @bind-Value:after="OnDueDateChangedAsync" Style="width: 12rem;" />
                                 </FormRow>
                                 <FormRow Label="Max Score" For="assignmentCreateMaxScore">
                                     <FluentNumberField Id="assignmentCreateMaxScore" @bind-Value="_model.MaxScore" Style="width: 12rem;" />
@@ -311,8 +324,8 @@
                                     <span class="review-value">@(string.IsNullOrWhiteSpace(_model.Description) ? "—" : _model.Description)</span>
                                 </div>
                                 <div class="review-row">
-                                    <span class="review-label">Grade Level</span>
-                                    <span class="review-value">@(_selectedGradeLevel?.Label ?? "—")</span>
+                                    <span class="review-label">@(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups ? "Activity Groups" : "Grade Level")</span>
+                                    <span class="review-value">@(_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups ? SelectedGroupNames : (_selectedGradeLevel?.Label ?? "—"))</span>
                                 </div>
                                 <div class="review-row">
                                     <span class="review-label">Subject</span>
@@ -399,15 +412,48 @@
     private GradeLevelOption? _selectedGradeLevel;
     private bool _loadingSubjects;
 
+    // Activity Group multi-select state (SelectedGroups audience)
+    private ActivityGroupOption[] _activityGroupOptions = [];
+    private HashSet<Guid> _selectedGroupIds = new();
+
     // Subject dropdown state (filtered by grade)
     private SubjectDto[]? _subjects;
     private SubjectOption? _selectedSubject;
+
+    // Group-owned subject state (SelectedGroups audience)
+    private SubjectDto[]? _groupSubjects;
+    private SubjectOption[] _groupSubjectOptions = [];
+    private bool _loadingGroupSubjects;
 
     private record GradeLevelOption(string Value, string Label);
     private GradeLevelOption[] _gradeLevelOptions = [];
 
     private record SubjectOption(string Value, string Label);
     private SubjectOption[] _subjectOptions = [];
+
+    private record ActivityGroupOption(string Value, string Label);
+
+    private SubjectOption[] SubjectOptions =>
+        _selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups
+            ? _groupSubjectOptions
+            : _subjectOptions;
+
+    private bool SubjectPickerDisabled =>
+        _selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups
+            ? (_selectedGroupIds.Count == 0 || _loadingGroupSubjects)
+            : (_selectedGradeLevel is null || _loadingSubjects);
+
+    private string SubjectPickerPlaceholder =>
+        _selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups
+            ? (_selectedGroupIds.Count == 0 ? "Select activity groups first" : "Select a subject")
+            : (_selectedGradeLevel is null ? "Select a grade level first" : "Select a subject");
+
+    private string SelectedGroupNames =>
+        _selectedGroupIds.Count == 0
+            ? "—"
+            : string.Join(", ", _activityGroupOptions
+                .Where(g => _selectedGroupIds.Contains(Guid.Parse(g.Value)))
+                .Select(g => g.Label));
 
     private string GetCardClass(bool isSelected) => isSelected ? "wizard-card selected" : "wizard-card";
 
@@ -453,6 +499,16 @@
                     .Select(gl => new GradeLevelOption(gl.Id.ToString(), gl.Name))
                     .ToArray();
             }
+
+            var groups = await StudentsApi.ListActivityGroupsAsync(ct);
+            if (groups is not null)
+            {
+                _activityGroupOptions = groups
+                    .Where(g => g.IsActive)
+                    .OrderBy(g => g.Name)
+                    .Select(g => new ActivityGroupOption(g.Id.ToString(), g.Name))
+                    .ToArray();
+            }
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -480,7 +536,10 @@
         try
         {
             var gradeLevelId = Guid.Parse(option.Value);
-            _subjects = await StudentsApi.ListSubjectsByGradeAsync(gradeLevelId, null, ct);
+            var effectiveDate = _model.DueDate.HasValue
+                ? DateOnly.FromDateTime(_model.DueDate.Value)
+                : DateOnly.FromDateTime(DateTime.UtcNow);
+            _subjects = await StudentsApi.ListSubjectsByGradeEffectiveAsync(gradeLevelId, effectiveDate, ct);
             if (_subjects is not null)
             {
                 _subjectOptions = _subjects
@@ -501,6 +560,103 @@
         }
     }
 
+    private async Task OnDueDateChangedAsync()
+    {
+        // Re-filter the subject picker so only topics effective on the new due
+        // date are offered (spec FR-58).
+        if (_selectedGradeLevel is not null && Guid.TryParse(_selectedGradeLevel.Value, out var gradeLevelId))
+        {
+            _selectedSubject = null;
+            _subjectOptions = [];
+            _loadingSubjects = true;
+            var ct = _loadCts?.Token ?? CancellationToken.None;
+            try
+            {
+                var effectiveDate = _model.DueDate.HasValue
+                    ? DateOnly.FromDateTime(_model.DueDate.Value)
+                    : DateOnly.FromDateTime(DateTime.UtcNow);
+                _subjects = await StudentsApi.ListSubjectsByGradeEffectiveAsync(gradeLevelId, effectiveDate, ct);
+                if (_subjects is not null)
+                {
+                    _subjectOptions = _subjects
+                        .OrderBy(s => s.DisplayOrder)
+                        .Select(s => new SubjectOption(s.Id.ToString(), s.Name))
+                        .ToArray();
+                }
+            }
+            catch (OperationCanceledException) { }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to reload subjects for due date");
+            }
+            finally
+            {
+                _loadingSubjects = false;
+            }
+        }
+
+        // Group path (new) — mirror FR-58 for SelectedGroups: reload the group
+        // subject union so only topics effective on the new due date are offered.
+        if (_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups && _selectedGroupIds.Count > 0)
+        {
+            _selectedSubject = null;
+            _groupSubjectOptions = [];
+            await LoadGroupSubjectsAsync();
+        }
+    }
+
+    private async Task OnSelectedGroupsChangedAsync()
+    {
+        _selectedSubject = null;
+        _groupSubjectOptions = [];
+        if (_selectedGroupIds.Count == 0)
+        {
+            _groupSubjects = null;
+            return;
+        }
+        await LoadGroupSubjectsAsync();
+    }
+
+    private async Task LoadGroupSubjectsAsync()
+    {
+        _loadingGroupSubjects = true;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            // Compute the effective date once per load so the union across all
+            // selected groups is consistent (spec FR-58), mirroring the grade path.
+            var effectiveDate = _model.DueDate.HasValue
+                ? DateOnly.FromDateTime(_model.DueDate.Value)
+                : DateOnly.FromDateTime(DateTime.UtcNow);
+            var union = new List<SubjectDto>();
+            var seen = new HashSet<Guid>();
+            foreach (var groupId in _selectedGroupIds)
+            {
+                var subjects = await StudentsApi.ListSubjectsByGroupAsync(groupId, effectiveDate, ct) ?? [];
+                foreach (var s in subjects)
+                {
+                    if (seen.Add(s.Id)) union.Add(s);
+                }
+            }
+            _groupSubjects = union.ToArray();
+            _groupSubjectOptions = _groupSubjects
+                .OrderBy(s => s.DisplayOrder)
+                .Select(s => new SubjectOption(s.Id.ToString(), s.Name))
+                .ToArray();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load subjects for selected groups");
+        }
+        finally
+        {
+            _loadingGroupSubjects = false;
+        }
+    }
+
     private async Task SubmitAsync()
     {
         _saving = true;
@@ -514,6 +670,25 @@
             {
                 _error = "Please select a subject.";
                 return;
+            }
+
+            if (_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups && _selectedGroupIds.Count == 0)
+            {
+                _error = "Select at least one activity group.";
+                return;
+            }
+
+            if (_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)
+            {
+                // FR-58: the chosen subject must be assigned to at least one of
+                // the selected activity groups.
+                var subjectId = Guid.Parse(_selectedSubject.Value);
+                var assignedToGroup = _groupSubjects?.Any(s => s.Id == subjectId) ?? false;
+                if (!assignedToGroup)
+                {
+                    _error = "The selected subject is not assigned to any of the selected activity groups.";
+                    return;
+                }
             }
 
             Logger.LogInformation("User initiated create for assignment {Title}", _model.Title);
@@ -531,6 +706,11 @@
                 _mandatoryReview);
 
             var assignmentId = await Api.CreateAsync(req, ct);
+
+            if (_selectedTargetAudience == TargetAudienceTypeDto.SelectedGroups)
+            {
+                await Api.LinkAssignmentGroupsAsync(assignmentId, _selectedGroupIds.ToList(), ct);
+            }
 
             Logger.LogInformation("Assignment {AssignmentId} created, questions will be added in future update", assignmentId);
             Nav.NavigateTo("/assignments");

@@ -6,6 +6,8 @@ public sealed record PeriodDto(
     DateOnly StartDate,
     DateOnly EndDate,
     string Status,
+    string PeriodType,
+    Guid? ParentPeriodId,
     Guid? NextPeriodId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

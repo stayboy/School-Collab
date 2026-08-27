@@ -4,27 +4,27 @@ using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
-namespace SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.ArchiveActivityGroup;
+namespace SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.ActivateActivityGroup;
 
-public sealed class ArchiveActivityGroupHandler(
+public sealed class ActivateActivityGroupHandler(
     IActivityGroupRepository repository,
     HybridCache cache,
-    ILogger<ArchiveActivityGroupHandler> logger) : ICommandHandler<ArchiveActivityGroup>
+    ILogger<ActivateActivityGroupHandler> logger) : ICommandHandler<ActivateActivityGroup>
 {
-    public async Task HandleAsync(ArchiveActivityGroup command, CancellationToken cancellationToken = default)
+    public async Task HandleAsync(ActivateActivityGroup command, CancellationToken cancellationToken = default)
     {
-        logger.LogDebug("Handling ArchiveActivityGroup {Id}", command.Id);
+        logger.LogDebug("Handling ActivateActivityGroup {Id}", command.Id);
 
         var group = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new ActivityGroupNotFoundException(command.Id);
 
-        group.Archive();
+        group.Activate();
 
         await repository.UpdateAsync(group, cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);
 
         group.ClearDomainEvents();
 
-        logger.LogInformation("ActivityGroup {Id} archived", group.Id);
+        logger.LogInformation("ActivityGroup {Id} activated", group.Id);
     }
 }

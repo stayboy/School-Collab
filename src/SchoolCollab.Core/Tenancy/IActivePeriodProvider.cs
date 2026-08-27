@@ -11,7 +11,9 @@ public sealed record ActivePeriod(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    string Status);
+    string Status,
+    string PeriodType,
+    Guid? ParentPeriodId);
 
 /// <summary>
 /// Resolves the active (or date-derived "current") period for the current
@@ -21,10 +23,19 @@ public sealed record ActivePeriod(
 /// </summary>
 public interface IActivePeriodProvider
 {
-    /// <summary>The single Active period for the current tenant, or null.</summary>
+    /// <summary>The active <b>AcademicYear</b> for the current tenant, or null.
+    /// Under the period hierarchy (period-hierarchy-terms-semesters.md) this is
+    /// the year-level period that grade enrollment attaches to.</summary>
     Task<ActivePeriod?> GetActivePeriodAsync(CancellationToken ct = default);
 
     /// <summary>The date-derived "current" period for the current tenant, or null
     /// (display use; see grade-level-setup.md §0.3).</summary>
     Task<ActivePeriod?> GetCurrentPeriodAsync(CancellationToken ct = default);
+
+    /// <summary>The active <b>AcademicYear</b> period, or null.</summary>
+    Task<ActivePeriod?> GetActiveAcademicYearAsync(CancellationToken ct = default);
+
+    /// <summary>The active sub-period (<see cref="ActivePeriod.PeriodType"/> is
+    /// Term or Semester) within the active academic year, or null.</summary>
+    Task<ActivePeriod?> GetActiveSubPeriodAsync(CancellationToken ct = default);
 }

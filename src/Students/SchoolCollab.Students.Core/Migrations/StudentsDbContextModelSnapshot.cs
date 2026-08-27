@@ -80,6 +80,12 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("id");
 
+                    b.Property<bool>("AutoRenewDefault")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("auto_renew_default");
+
                     b.Property<int?>("Capacity")
                         .HasColumnType("integer")
                         .HasColumnName("capacity");
@@ -98,15 +104,33 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("character varying(2000)")
                         .HasColumnName("description");
 
+                    b.Property<DateOnly?>("EnrollmentEndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("enrollment_end_date");
+
+                    b.Property<DateOnly?>("EnrollmentStartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("enrollment_start_date");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("is_active");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("name");
 
-                    b.Property<Guid?>("PeriodId")
-                        .HasColumnType("uuid")
-                        .HasColumnName("period_id");
+                    b.Property<DateOnly?>("NextEnrollmentEndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("next_enrollment_end_date");
+
+                    b.Property<DateOnly?>("NextEnrollmentStartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("next_enrollment_start_date");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -114,11 +138,11 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
 
-                    b.Property<int>("Status")
+                    b.Property<int>("Span")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("status");
+                        .HasDefaultValue(4)
+                        .HasColumnName("span");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")
@@ -131,22 +155,16 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_activity_groups");
 
-                    b.HasIndex("PeriodId")
-                        .HasDatabaseName("ix_activity_groups_period_id");
+                    b.HasIndex("TenantId", "IsActive")
+                        .HasDatabaseName("ix_activity_groups_tenant_active");
 
                     b.HasIndex("TenantId", "Name")
                         .HasDatabaseName("ix_activity_groups_tenant_name");
 
-                    b.HasIndex("TenantId", "PeriodId")
-                        .HasDatabaseName("ix_activity_groups_tenant_period");
-
-                    b.HasIndex("TenantId", "Status")
-                        .HasDatabaseName("ix_activity_groups_tenant_status");
-
                     b.ToTable("activity_groups", (string)null);
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroupMembership", b =>
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroupGradeLevel", b =>
                 {
                     b.Property<Guid>("Id")
                         .HasColumnType("uuid")
@@ -160,6 +178,63 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<Guid>("GradeLevelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("grade_level_id");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_activity_group_grade_levels");
+
+                    b.HasIndex("ActivityGroupId")
+                        .HasDatabaseName("ix_activity_group_grade_levels_activity_group_id");
+
+                    b.HasIndex("GradeLevelId")
+                        .HasDatabaseName("ix_activity_group_grade_levels_grade_level_id");
+
+                    b.HasIndex("TenantId", "GradeLevelId")
+                        .HasDatabaseName("ix_agg_tenant_grade");
+
+                    b.HasIndex("TenantId", "ActivityGroupId", "GradeLevelId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_agg_tenant_group_grade_unique");
+
+                    b.ToTable("activity_group_grade_levels", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroupMembership", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("ActivityGroupId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("activity_group_id");
+
+                    b.Property<bool>("AutoRenew")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true)
+                        .HasColumnName("auto_renew");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
                     b.Property<DateOnly?>("ExitedOn")
                         .HasColumnType("date")
                         .HasColumnName("exited_on");
@@ -167,6 +242,10 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<DateOnly>("JoinedOn")
                         .HasColumnType("date")
                         .HasColumnName("joined_on");
+
+                    b.Property<Guid?>("PeriodId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("period_id");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -192,11 +271,22 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
+                    b.Property<DateOnly?>("WindowEndDate")
+                        .HasColumnType("date")
+                        .HasColumnName("window_end_date");
+
+                    b.Property<DateOnly?>("WindowStartDate")
+                        .HasColumnType("date")
+                        .HasColumnName("window_start_date");
+
                     b.HasKey("Id")
                         .HasName("pk_activity_group_memberships");
 
                     b.HasIndex("ActivityGroupId")
                         .HasDatabaseName("ix_activity_group_memberships_activity_group_id");
+
+                    b.HasIndex("PeriodId")
+                        .HasDatabaseName("ix_activity_group_memberships_period_id");
 
                     b.HasIndex("StudentId")
                         .HasDatabaseName("ix_activity_group_memberships_student_id");
@@ -210,7 +300,12 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasIndex("TenantId", "StudentId", "ActivityGroupId")
                         .IsUnique()
                         .HasDatabaseName("ix_agm_tenant_student_group_active")
-                        .HasFilter("status = 0");
+                        .HasFilter("status = 0 AND period_id IS NULL");
+
+                    b.HasIndex("TenantId", "StudentId", "ActivityGroupId", "PeriodId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_agm_tenant_student_group_period_active")
+                        .HasFilter("status = 0 AND period_id IS NOT NULL");
 
                     b.ToTable("activity_group_memberships", (string)null);
                 });
@@ -834,6 +929,16 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("next_period_id");
 
+                    b.Property<Guid?>("ParentPeriodId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("parent_period_id");
+
+                    b.Property<int>("PeriodType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("period_type");
+
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -861,11 +966,30 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasKey("Id")
                         .HasName("pk_periods");
 
+                    b.HasIndex("ParentPeriodId")
+                        .HasDatabaseName("ix_periods_parent_period_id");
+
                     b.HasIndex("StartDate")
                         .HasDatabaseName("ix_periods_start_date");
 
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_periods_one_active_year")
+                        .HasFilter("period_type = 0 AND status = 1");
+
                     b.HasIndex("TenantId", "Status")
                         .HasDatabaseName("ix_periods_tenant_status");
+
+                    b.HasIndex("TenantId", "ParentPeriodId", "PeriodType")
+                        .IsUnique()
+                        .HasDatabaseName("ix_periods_one_active_sub_period")
+                        .HasFilter("status = 1");
+
+                    b.HasIndex("TenantId", "ParentPeriodId", "Status")
+                        .HasDatabaseName("ix_periods_tenant_parent_status");
+
+                    b.HasIndex("TenantId", "PeriodType", "Status")
+                        .HasDatabaseName("ix_periods_tenant_type_status");
 
                     b.ToTable("periods", (string)null);
                 });
@@ -1572,6 +1696,10 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("date")
                         .HasColumnName("end_date");
 
+                    b.Property<Guid?>("PeriodId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("period_id");
+
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
@@ -1606,6 +1734,9 @@ namespace SchoolCollab.Students.Core.Migrations
 
                     b.HasKey("Id")
                         .HasName("pk_topic_assignments");
+
+                    b.HasIndex("PeriodId")
+                        .HasDatabaseName("ix_topic_assignments_period_id");
 
                     b.HasIndex("TopicStrandId")
                         .HasDatabaseName("ix_topic_assignments_topic_strand_id");
@@ -1731,13 +1862,21 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasDiscriminator().HasValue("grade");
                 });
 
-            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroup", b =>
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroupGradeLevel", b =>
                 {
-                    b.HasOne("SchoolCollab.Students.Core.Domain.Period", null)
+                    b.HasOne("SchoolCollab.Students.Core.Domain.ActivityGroup", null)
                         .WithMany()
-                        .HasForeignKey("PeriodId")
-                        .OnDelete(DeleteBehavior.SetNull)
-                        .HasConstraintName("fk_activity_groups_periods_period_id");
+                        .HasForeignKey("ActivityGroupId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_activity_group_grade_levels_activity_groups_activity_group_");
+
+                    b.HasOne("SchoolCollab.Students.Core.Domain.GradeLevel", null)
+                        .WithMany()
+                        .HasForeignKey("GradeLevelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_activity_group_grade_levels_grade_levels_grade_level_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.ActivityGroupMembership", b =>
@@ -1748,6 +1887,12 @@ namespace SchoolCollab.Students.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_activity_group_memberships_activity_groups_activity_group_id");
+
+                    b.HasOne("SchoolCollab.Students.Core.Domain.Period", null)
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_activity_group_memberships_periods_period_id");
 
                     b.HasOne("SchoolCollab.Students.Core.Domain.Student", null)
                         .WithMany()
@@ -1765,6 +1910,15 @@ namespace SchoolCollab.Students.Core.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired()
                         .HasConstraintName("fk_grade_notification_policies_grade_levels_grade_level_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.Period", b =>
+                {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.Period", null)
+                        .WithMany()
+                        .HasForeignKey("ParentPeriodId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasConstraintName("fk_periods_periods_parent_period_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TeacherActivityAssignment", b =>
@@ -1796,6 +1950,12 @@ namespace SchoolCollab.Students.Core.Migrations
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.TopicAssignment", b =>
                 {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.Period", null)
+                        .WithMany()
+                        .HasForeignKey("PeriodId")
+                        .OnDelete(DeleteBehavior.SetNull)
+                        .HasConstraintName("fk_topic_assignments_periods_period_id");
+
                     b.HasOne("SchoolCollab.Students.Core.Domain.TopicStrand", null)
                         .WithMany()
                         .HasForeignKey("TopicStrandId")

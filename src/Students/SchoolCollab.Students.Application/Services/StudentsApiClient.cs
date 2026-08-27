@@ -76,9 +76,13 @@ public sealed record ActivityGroupDto(
     string Name,
     string? Description,
     string? Category,
-    Guid? PeriodId,
     int? Capacity,
-    string Status,
+    bool IsActive,
+    string Span,
+    DateOnly? EnrollmentStartDate,
+    DateOnly? EnrollmentEndDate,
+    bool AutoRenewDefault,
+    Guid[] EligibleGradeIds,
     int ActiveMemberCount,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -88,6 +92,10 @@ public sealed record MembershipDto(
     Guid ActivityGroupId,
     Guid StudentId,
     string StudentName,
+    Guid? PeriodId,
+    bool AutoRenew,
+    DateOnly? WindowStartDate,
+    DateOnly? WindowEndDate,
     DateOnly JoinedOn,
     DateOnly? ExitedOn,
     string Status,
@@ -110,6 +118,8 @@ public sealed record PeriodDto(
     DateOnly StartDate,
     DateOnly EndDate,
     string Status,
+    string PeriodType,
+    Guid? ParentPeriodId,
     Guid? NextPeriodId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
@@ -293,15 +303,22 @@ public record CreateActivityGroupRequest(
     string Name,
     string? Description = null,
     string? Category = null,
-    Guid? PeriodId = null,
-    int? Capacity = null);
+    int? Capacity = null,
+    string Span = "OpenEnded",
+    DateOnly? EnrollmentStartDate = null,
+    DateOnly? EnrollmentEndDate = null,
+    bool AutoRenewDefault = true,
+    Guid[]? EligibleGradeIds = null);
 
 public record UpdateActivityGroupRequest(
     string Name,
     string? Description = null,
     string? Category = null,
-    Guid? PeriodId = null,
-    int? Capacity = null);
+    int? Capacity = null,
+    DateOnly? EnrollmentStartDate = null,
+    DateOnly? EnrollmentEndDate = null,
+    bool? AutoRenewDefault = null,
+    Guid[]? EligibleGradeIds = null);
 
 public record AddActivityGroupMemberRequest(
     Guid StudentId,
@@ -327,12 +344,16 @@ public record UpdateSubjectRequest(
 public record CreatePeriodRequest(
     string Name,
     DateOnly StartDate,
-    DateOnly EndDate);
+    DateOnly EndDate,
+    PeriodType PeriodType = PeriodType.AcademicYear,
+    Guid? ParentPeriodId = null);
 
 public record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
-    DateOnly EndDate);
+    DateOnly EndDate,
+    PeriodType PeriodType = PeriodType.AcademicYear,
+    Guid? ParentPeriodId = null);
 
 public record EnrollStudentRequest(
     Guid StudentId,
@@ -355,7 +376,15 @@ public record AssignGradeTopicRequest(
     Guid GradeLevelId,
     Guid TopicId,
     DateOnly StartDate,
-    DateOnly? EndDate = null);
+    DateOnly? EndDate = null,
+    Guid? PeriodId = null);
+
+public record AssignActivityGroupTopicRequest(
+    Guid ActivityGroupId,
+    Guid TopicId,
+    DateOnly StartDate,
+    DateOnly? EndDate = null,
+    Guid? PeriodId = null);
 
 public record AssignStudentTopicRequest(
     Guid StudentId,
@@ -399,6 +428,13 @@ public record CreateTopicForGradeRequest(
     Guid GradeLevelId,
     Guid? CodedValueId,
     string? Code,
+    string Name,
+    int DisplayOrder,
+    Guid? PeriodId = null);
+
+public record CreateTopicRequest(
+    Guid CodedValueId,
+    string Code,
     string Name,
     int DisplayOrder);
 
@@ -923,11 +959,21 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task DeleteActivityGroupAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/activity-groups/{id}", ct)).EnsureSuccessStatusCode();
 
-    public async Task ArchiveActivityGroupAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/activity-groups/{id}/archive", null, ct)).EnsureSuccessStatusCode();
+    public async Task ActivateActivityGroupAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/activity-groups/{id}/activate", null, ct)).EnsureSuccessStatusCode();
 
-    public async Task SuspendActivityGroupAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/activity-groups/{id}/suspend", null, ct)).EnsureSuccessStatusCode();
+    public async Task DeactivateActivityGroupAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/activity-groups/{id}/deactivate", null, ct)).EnsureSuccessStatusCode();
+
+    public async Task RolloverActivityGroupAsync(Guid id, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/activity-groups/{id}/rollover", null, ct)).EnsureSuccessStatusCode();
+
+    /// <summary>
+    /// Sets the next DateRange window in advance (spec FR-51/53). The backend
+    /// rejects a next start before the current window's end.
+    /// </summary>
+    public async Task SetActivityGroupNextWindowAsync(Guid id, DateOnly nextStartDate, DateOnly nextEndDate, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/activity-groups/{id}/next-window", new { NextStartDate = nextStartDate, NextEndDate = nextEndDate }, ct)).EnsureSuccessStatusCode();
 
     public async Task<MembershipDto[]?> ListGroupMembersAsync(Guid groupId, CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<MembershipDto[]>($"/activity-groups/{groupId}/members", ct);
@@ -940,6 +986,12 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task RemoveGroupMemberAsync(Guid groupId, Guid studentId, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/activity-groups/{groupId}/members/{studentId}", ct)).EnsureSuccessStatusCode();
+
+    public async Task ExitGroupMemberAsync(Guid groupId, Guid studentId, CancellationToken ct = default) =>
+        (await _http.PostAsync($"/activity-groups/{groupId}/members/{studentId}/exit", null, ct)).EnsureSuccessStatusCode();
+
+    public async Task SetMembershipAutoRenewAsync(Guid membershipId, bool autoRenew, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/activity-groups/members/{membershipId}/auto-renew", new { autoRenew }, ct)).EnsureSuccessStatusCode();
 
     /// <summary>
     /// Lists the activity groups a student is an active member of (spec §7.2,
@@ -992,6 +1044,14 @@ public sealed class StudentsApiClient : IContactsClient
         return (await response.Content.ReadFromJsonAsync<TopicDto>(ct))!;
     }
 
+    public async Task<Guid> CreateTopicAsync(CreateTopicRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/topics", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
     public async Task<SubjectDto[]?> ListSubjectsAsync(CancellationToken ct = default) =>
         await _http.GetFromJsonAsync<SubjectDto[]>("/students/subjects", ct);
 
@@ -1000,6 +1060,32 @@ public sealed class StudentsApiClient : IContactsClient
         var url = periodId.HasValue
             ? $"/students/subjects/by-grade/{gradeLevelId}?periodId={periodId}"
             : $"/students/subjects/by-grade/{gradeLevelId}";
+        return await _http.GetFromJsonAsync<SubjectDto[]>(url, ct);
+    }
+
+    /// <summary>
+    /// Lists topics assigned to a grade that are effective on the given date
+    /// (spec FR-58). The backend filters by the topic assignment's effective
+    /// <c>[StartDate, EndDate]</c> window and Rev. 6 <c>PeriodId</c>.
+    /// </summary>
+    public async Task<SubjectDto[]?> ListSubjectsByGradeEffectiveAsync(Guid gradeLevelId, DateOnly? effectiveDate, CancellationToken ct = default)
+    {
+        var url = effectiveDate.HasValue
+            ? $"/students/subjects/by-grade/{gradeLevelId}?effectiveDate={effectiveDate:yyyy-MM-dd}"
+            : $"/students/subjects/by-grade/{gradeLevelId}";
+        return await _http.GetFromJsonAsync<SubjectDto[]>(url, ct);
+    }
+
+    /// <summary>
+    /// Lists topics assigned to an activity group that are effective on the
+    /// given date (spec FR-58). The backend filters by the topic assignment's
+    /// effective <c>[StartDate, EndDate]</c> window and Rev. 6 <c>PeriodId</c>.
+    /// </summary>
+    public async Task<SubjectDto[]?> ListSubjectsByGroupAsync(Guid activityGroupId, DateOnly? effectiveDate, CancellationToken ct = default)
+    {
+        var url = effectiveDate.HasValue
+            ? $"/students/subjects/by-group/{activityGroupId}?effectiveDate={effectiveDate:yyyy-MM-dd}"
+            : $"/students/subjects/by-group/{activityGroupId}";
         return await _http.GetFromJsonAsync<SubjectDto[]>(url, ct);
     }
 
@@ -1159,6 +1245,36 @@ public sealed class StudentsApiClient : IContactsClient
         return await response.Content.ReadFromJsonAsync<PeriodDto[]>(ct);
     }
 
+    public async Task<PeriodDto[]?> ListSubPeriodsAsync(Guid academicYearId, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/students/periods/{academicYearId}/sub-periods", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ListSubPeriods failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        return await response.Content.ReadFromJsonAsync<PeriodDto[]>(ct);
+    }
+
+    public async Task<PeriodDto?> GetActiveAcademicYearAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/students/periods/active-academic-year", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<PeriodDto>(ct);
+    }
+
+    public async Task<PeriodDto?> GetActiveSubPeriodAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/students/periods/active-sub-period", ct);
+        if (response.StatusCode == HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<PeriodDto>(ct);
+    }
+
     public async Task<PeriodDto?> GetPeriodByIdAsync(Guid id, CancellationToken ct = default)
     {
         var response = await _http.GetAsync($"/students/periods/{id}", ct);
@@ -1298,6 +1414,14 @@ public sealed class StudentsApiClient : IContactsClient
     public async Task<Guid> AssignGradeTopicAsync(AssignGradeTopicRequest req, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/students/topic-assignments/grade", req, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        return result!.Id;
+    }
+
+    public async Task<Guid> AssignActivityGroupTopicAsync(AssignActivityGroupTopicRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsJsonAsync("/students/topic-assignments/activity-group", req, ct);
         response.EnsureSuccessStatusCode();
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;

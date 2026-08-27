@@ -16,8 +16,12 @@ public sealed class GetActivityGroupByIdHandler(StudentsDbContext db)
             .AsNoTracking()
             .Where(g => g.Id == query.Id)
             .Select(g => new ActivityGroupDto(
-                g.Id, g.Name, g.Description, g.Category, g.PeriodId,
-                g.Capacity, g.Status.ToString(),
+                g.Id, g.Name, g.Description, g.Category, g.Capacity, g.IsActive,
+                g.Span.ToString(), g.EnrollmentStartDate, g.EnrollmentEndDate, g.AutoRenewDefault,
+                db.ActivityGroupGradeLevels
+                    .Where(agg => agg.ActivityGroupId == g.Id)
+                    .Select(agg => agg.GradeLevelId)
+                    .ToArray(),
                 db.ActivityGroupMemberships
                     .Count(m => m.ActivityGroupId == g.Id && m.Status == MembershipStatus.Active),
                 g.CreatedAt, g.UpdatedAt))

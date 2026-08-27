@@ -11,7 +11,8 @@ namespace SchoolCollab.Students.Core.Data.Configurations;
 /// shared <c>topic_assignments</c> table and the <c>topic_assignment_type</c>
 /// discriminator selecting <see cref="GradeTopicAssignment"/> or
 /// <see cref="ActivityGroupTopicAssignment"/>. The effective period is
-/// date-based (<c>start_date</c> / <c>end_date</c>), not period-bound.
+/// date-based (<c>start_date</c> / <c>end_date</c>) by default, and may be
+/// optionally scoped to a specific period via <c>period_id</c> (Rev. 6).
 /// </summary>
 internal sealed class TopicAssignmentConfiguration : EntityTypeConfigurationBase<TopicAssignment>
 {
@@ -37,10 +38,19 @@ internal sealed class TopicAssignmentConfiguration : EntityTypeConfigurationBase
         builder.Property(x => x.StartDate).IsRequired();
         builder.Property(x => x.EndDate);
         builder.Property(x => x.TopicStrandId);
+        builder.Property(x => x.PeriodId).IsRequired(false);
 
         builder.HasOne<TopicStrand>()
             .WithMany()
             .HasForeignKey(x => x.TopicStrandId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // Rev. 6 FR-55: optional period scope FK → periods.id (SetNull — removing
+        // the period reverts the topic to year-spanning date-based delivery).
+        builder.HasOne<Period>()
+            .WithMany()
+            .HasForeignKey(x => x.PeriodId)
+            .IsRequired(false)
             .OnDelete(DeleteBehavior.SetNull);
 
         builder.HasIndex(x => new { x.TenantId, x.StartDate, x.EndDate })

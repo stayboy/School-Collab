@@ -54,6 +54,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationP
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,
     SchoolCollab.Assignments.Api.Services.ActivityGroupLookupHttpClient>();
 
+// Rev. 6 (spec activity-group-enrollment.md FR-58): subject/period consistency
+// check at publish (Assignments → Students topic-assignment lookup).
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITopicAssignmentLookup,
+    SchoolCollab.Assignments.Api.Services.TopicAssignmentLookupHttpClient>();
+
 builder.Services.AddOpenApi();
 
 // Auth + tenancy (OIDC via Keycloak)

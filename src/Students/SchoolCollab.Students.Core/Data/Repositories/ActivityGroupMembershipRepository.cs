@@ -21,11 +21,26 @@ internal sealed class ActivityGroupMembershipRepository(StudentsDbContext db)
         }
     }
 
+    public Task SaveChangesAsync(CancellationToken cancellationToken = default) =>
+        Db.SaveChangesAsync(cancellationToken);
+
+    public async Task AddRangeAsync(IEnumerable<ActivityGroupMembership> memberships, CancellationToken cancellationToken = default)
+    {
+        var items = memberships as ActivityGroupMembership[] ?? memberships.ToArray();
+        Db.ActivityGroupMemberships.AddRange(items);
+        await Db.SaveChangesAsync(cancellationToken);
+    }
+
     public Task<ActivityGroupMembership?> GetActiveAsync(Guid studentId, Guid activityGroupId, CancellationToken cancellationToken = default) =>
         Db.ActivityGroupMemberships
             .FirstOrDefaultAsync(m => m.StudentId == studentId
                 && m.ActivityGroupId == activityGroupId
                 && m.Status == MembershipStatus.Active, cancellationToken);
+
+    public Task<ActivityGroupMembership[]> ListActiveAsync(Guid activityGroupId, CancellationToken cancellationToken = default) =>
+        Db.ActivityGroupMemberships
+            .Where(m => m.ActivityGroupId == activityGroupId && m.Status == MembershipStatus.Active)
+            .ToArrayAsync(cancellationToken);
 
     public async Task<MembershipDto[]> ListByGroupAsync(Guid activityGroupId, CancellationToken cancellationToken = default) =>
         await Db.ActivityGroupMemberships
@@ -35,6 +50,7 @@ internal sealed class ActivityGroupMembershipRepository(StudentsDbContext db)
             .Join(Db.Students, m => m.StudentId, s => s.Id, (m, s) => new MembershipDto(
                 m.Id, m.ActivityGroupId, m.StudentId,
                 (s.FirstName + " " + s.LastName).Trim(),
+                m.PeriodId, m.AutoRenew, m.WindowStartDate, m.WindowEndDate,
                 m.JoinedOn, m.ExitedOn, m.Status.ToString(),
                 m.CreatedAt, m.UpdatedAt))
             .ToArrayAsync(cancellationToken);
@@ -47,6 +63,7 @@ internal sealed class ActivityGroupMembershipRepository(StudentsDbContext db)
             .Join(Db.Students, m => m.StudentId, s => s.Id, (m, s) => new MembershipDto(
                 m.Id, m.ActivityGroupId, m.StudentId,
                 (s.FirstName + " " + s.LastName).Trim(),
+                m.PeriodId, m.AutoRenew, m.WindowStartDate, m.WindowEndDate,
                 m.JoinedOn, m.ExitedOn, m.Status.ToString(),
                 m.CreatedAt, m.UpdatedAt))
             .ToArrayAsync(cancellationToken);

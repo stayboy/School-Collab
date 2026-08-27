@@ -37,6 +37,37 @@ public class AssignmentTests
     }
 
     [TestMethod]
+    public void Create_SelectedGrades_NullGrade_Throws()
+    {
+        var act = () => Assignment.Create(
+            "Test",
+            null,
+            AssignmentType.Digital,
+            GradingFormat.TeacherGraded,
+            TargetAudienceType.SelectedGrades,
+            TopicId, null, null, null,
+            TeacherId);
+
+        act.Should().Throw<ArgumentException>()
+            .WithParameterName("gradeLevelId")
+            .WithMessage("SelectedGrades assignments require a grade level.*");
+    }
+
+    [TestMethod]
+    public void Update_SelectedGrades_NullGrade_Throws()
+    {
+        var assignment = CreateTestAssignment();
+        var act = () => assignment.Update(
+            "New Title", null, AssignmentType.Digital,
+            GradingFormat.TeacherGraded, TargetAudienceType.SelectedGrades,
+            TopicId, null, null, null, true);
+
+        act.Should().Throw<ArgumentException>()
+            .WithParameterName("gradeLevelId")
+            .WithMessage("SelectedGrades assignments require a grade level.*");
+    }
+
+    [TestMethod]
     public void Update_WithEmptyTopicId_Throws()
     {
         var assignment = CreateTestAssignment();

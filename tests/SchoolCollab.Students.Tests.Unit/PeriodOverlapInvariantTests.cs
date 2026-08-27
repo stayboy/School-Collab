@@ -16,10 +16,10 @@ namespace SchoolCollab.Students.Tests.Unit;
 public class PeriodOverlapInvariantTests
 {
     private static CreatePeriodHandler NewCreate(StudentsTestScope s) =>
-        new(s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
+        new(s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
 
     private static UpdatePeriodHandler NewUpdate(StudentsTestScope s) =>
-        new(s.Periods, s.Cache, NullLogger<UpdatePeriodHandler>.Instance);
+        new(s.Periods, s.Cache, new StubAcademicYearDivisionProvider("Terms"), NullLogger<UpdatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) =>
         new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);

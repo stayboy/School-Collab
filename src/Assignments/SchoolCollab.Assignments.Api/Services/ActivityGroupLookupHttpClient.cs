@@ -38,7 +38,7 @@ public sealed class ActivityGroupLookupHttpClient(
             }
 
             if (group is not null)
-                result.Add(new ActivityGroupRefDto(group.Id, group.Name, group.Status));
+                result.Add(new ActivityGroupRefDto(group.Id, group.Name, group.IsActive));
         }
 
         return result.ToArray();
@@ -64,7 +64,7 @@ public sealed class ActivityGroupLookupHttpClient(
                 logger.LogWarning(ex, "Failed to look up activity group {Id}", id);
                 continue;
             }
-            if (group is null || group.Status == "Archived")
+            if (group is null || !group.IsActive)
                 continue;
 
             MembershipDto[] members;

@@ -40,6 +40,8 @@ public sealed class GetPeriodByIdHandler(
                     period.StartDate,
                     period.EndDate,
                     period.Status.ToString(),
+                    period.PeriodType.ToString(),
+                    period.ParentPeriodId,
                     period.NextPeriodId,
                     period.CreatedAt,
                     period.UpdatedAt);

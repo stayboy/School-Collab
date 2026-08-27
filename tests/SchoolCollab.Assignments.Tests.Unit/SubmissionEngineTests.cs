@@ -138,6 +138,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+            new FakeTopicAssignmentLookup(),
             TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -166,6 +167,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+            new FakeTopicAssignmentLookup(),
             TenantProvider(), new FakeBroadcaster(), new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -293,6 +295,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+            new FakeTopicAssignmentLookup(),
             TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
@@ -386,6 +389,7 @@ public class SubmissionEngineTests
         var handler = new PublishAssignmentCommandHandler(
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
+            new FakeTopicAssignmentLookup(),
             TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         // Select only the guardian contact (spec §8).
@@ -521,6 +525,15 @@ public class SubmissionEngineTests
         public Task<Guid[]> GetActiveMemberIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default)
             => Task.FromResult(Array.Empty<Guid>());
     }
+
+    private sealed class FakeTopicAssignmentLookup : SchoolCollab.Assignments.Core.Services.ITopicAssignmentLookup
+    {
+        public bool Result = true;
+        public Task<bool> IsTopicAssignedAsync(Guid? gradeLevelId, IReadOnlyList<Guid> activityGroupIds,
+            Guid topicId, DateOnly effectiveDate, CancellationToken ct = default)
+            => Task.FromResult(Result);
+    }
+
 
     private sealed class FakeLinkRepository : IAssignmentActivityGroupRepository
     {

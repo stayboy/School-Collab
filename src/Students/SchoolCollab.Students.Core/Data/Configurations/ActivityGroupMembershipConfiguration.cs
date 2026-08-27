@@ -27,6 +27,12 @@ internal sealed class ActivityGroupMembershipConfiguration : TenantEntityTypeCon
 
         builder.Property(x => x.ActivityGroupId).IsRequired();
         builder.Property(x => x.StudentId).IsRequired();
+        builder.Property(x => x.PeriodId).IsRequired(false);
+        builder.Property(x => x.AutoRenew)
+            .IsRequired()
+            .HasDefaultValue(true);
+        builder.Property(x => x.WindowStartDate).IsRequired(false);
+        builder.Property(x => x.WindowEndDate).IsRequired(false);
         builder.Property(x => x.JoinedOn).IsRequired();
         builder.Property(x => x.ExitedOn).IsRequired(false);
 
@@ -48,12 +54,29 @@ internal sealed class ActivityGroupMembershipConfiguration : TenantEntityTypeCon
             .HasForeignKey(x => x.StudentId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        // FR-10: partial unique index — at most one ACTIVE membership per
-        // (tenant, student, group). Re-joining after exit creates a new Active
-        // row without violating the constraint (the old row is Exited/Removed).
+        // Rev. 2 FR-7/10: optional period scope FK → periods.id (SetNull when the
+        // period is removed — the membership loses its period scope, not the student).
+        builder.HasOne<Period>()
+            .WithMany()
+            .HasForeignKey(x => x.PeriodId)
+            .IsRequired(false)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        // FR-10 (Rev. 2 §8.2): at most one ACTIVE membership per
+        // (tenant, student, group). Split into two partial unique indexes to
+        // dodge the Postgres NULL-distinct pitfall: period-scoped memberships
+        // (period_id NOT NULL) are unique per (tenant, student, group, period);
+        // window-scoped (period_id NULL) are unique per (tenant, student, group).
+        // Re-joining after exit creates a new Active row without violating the
+        // constraint (the old row is Exited/Removed).
+        builder.HasIndex(x => new { x.TenantId, x.StudentId, x.ActivityGroupId, x.PeriodId })
+            .IsUnique()
+            .HasFilter("status = 0 AND period_id IS NOT NULL")
+            .HasDatabaseName("ix_agm_tenant_student_group_period_active");
+
         builder.HasIndex(x => new { x.TenantId, x.StudentId, x.ActivityGroupId })
             .IsUnique()
-            .HasFilter("status = 0")
+            .HasFilter("status = 0 AND period_id IS NULL")
             .HasDatabaseName("ix_agm_tenant_student_group_active");
 
         // NFR-3 hot paths (tenant_id leading).

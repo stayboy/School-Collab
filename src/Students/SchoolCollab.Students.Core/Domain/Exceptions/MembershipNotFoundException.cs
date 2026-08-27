@@ -18,4 +18,9 @@ public sealed class MembershipNotFoundException : Exception
         ActivityGroupId = activityGroupId;
         StudentId = studentId;
     }
+
+    /// <summary>Used when only the membership id is known (e.g. AutoRenew update).</summary>
+    public MembershipNotFoundException(Guid membershipId)
+        : base($"No membership found with id '{membershipId}'.")
+        => StudentId = membershipId;
 }

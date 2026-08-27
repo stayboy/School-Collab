@@ -18,8 +18,12 @@ public sealed class UpdateActivityGroupHandler(
         var group = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new ActivityGroupNotFoundException(command.Id);
 
-        group.Update(command.Name, command.Description, command.Category,
-            command.PeriodId, command.Capacity);
+        group.Update(command.Name, command.Description, command.Category, command.Capacity,
+            command.EnrollmentStartDate, command.EnrollmentEndDate, command.AutoRenewDefault);
+
+        // Rev. 2 FR-39/40: replace-set the eligible grades.
+        if (command.EligibleGradeIds is not null)
+            await repository.SetEligibleGradesAsync(group.Id, command.EligibleGradeIds, cancellationToken);
 
         await repository.UpdateAsync(group, cancellationToken);
         await cache.RemoveByTagAsync("students", cancellationToken);
