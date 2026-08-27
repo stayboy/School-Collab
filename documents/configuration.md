@@ -306,7 +306,25 @@ but is **superseded** by the two-kind model above.
 | Flag | Default | Notes |
 | :--- | :--- | :--- |
 | `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
-| `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
+| `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. The global default remains OFF; the migration service additionally seeds a `TenantFeatureFlagOverride` turning the flag ON for the pilot tenant `Hydeson School` only (Phase 6.1 — see below). |
+
+### Pilot-tenant override (Phase 6.1)
+
+`FEATURE:EnableActivityGroups` is enabled for exactly one pilot tenant at seed
+time via a `TenantFeatureFlagOverride` row, without changing the global default.
+
+- **Mechanism:** a `TenantFeatureFlagOverride` row (`IsEnabled = true`,
+  `EffectiveFrom`/`EffectiveTo` null → always in effect) is seeded idempotently
+  by `SchoolCollab.MigrationService` after the tenant + flag seeds.
+- **Pilot tenant:** `Hydeson School` (configurable via
+  `PilotActivityGroupFlagOverrideSeeder.PilotTenantName`).
+- **Traceability:** a `FlagAuditEntry` with `ChangeKind = OverrideCreated`, actor
+  `system:migrator` / "Migration Service", is written with the override.
+- **Effect:** `ConfigFeatureFlagService` (`ResolveFlagsForTenantHandler`) resolves
+  the flag to ON for the pilot tenant and to the global OFF default for every
+  other tenant. To turn the pilot off, delete the override row via the admin
+  `/config-flags` tenant-override surface (or run the `DeleteTenantFlagOverride`
+  command).
 
 ### Historical AppHost-`Parameters:` model (superseded)
 
