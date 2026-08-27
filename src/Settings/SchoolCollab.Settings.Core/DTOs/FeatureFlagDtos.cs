@@ -40,6 +40,8 @@ public sealed record FlagAuditEntryDto(
     string ChangeKind,
     bool? PreviousIsEnabled,
     bool? NewIsEnabled,
+    string? PreviousValue,
+    string? NewValue,
     string? Reason,
     string ActorId,
     string ActorDisplayName,

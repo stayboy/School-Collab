@@ -7,8 +7,6 @@ using SchoolCollab.Settings.Core.Data;
 using SchoolCollab.Settings.Core.Domain;
 using SchoolCollab.Settings.Core.DTOs;
 using SchoolCollab.Settings.Core.Services;
-using SchoolCollab.Core.CQRS;
-using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.Settings.Core.CQRS.FeatureFlags.Commands;
 
@@ -29,7 +27,8 @@ public sealed class CreateFeatureFlagHandler(
         var flag = FeatureFlag.Create(command.Key, command.Name, command.Description, command.IsEnabled);
         db.FeatureFlags.Add(flag);
         auditor.Record(db, tenantId: null, flag.Id, flag.Key, FlagChangeKind.Created,
-            previousIsEnabled: null, newIsEnabled: flag.IsEnabled, command.Reason);
+            previousIsEnabled: null, newIsEnabled: flag.IsEnabled, command.Reason,
+            previousValue: null, newValue: flag.Value);
         await publisher.EnqueueAsync(new FeatureFlagChanged(
             flag.Id, flag.Key, TenantId: null, nameof(FlagChangeKind.Created), flag.IsEnabled, flag.CreatedAt), ct);
 
@@ -169,6 +168,7 @@ public sealed class UpsertTenantFlagOverrideHandler(
 
         FlagChangeKind kind = default;
         bool? previous = null;
+        string? previousValue = null;
 
         // FR-6: the override row is owned by command.TenantId, which may differ from the
         // ambient (admin) context. Run the write under the target tenant so the save-guard
@@ -186,12 +186,14 @@ public sealed class UpsertTenantFlagOverrideHandler(
             else
             {
                 previous = existing.IsEnabled;
+                previousValue = existing.Value;
                 existing.Update(command.IsEnabled, command.Value, command.Reason, command.EffectiveFrom, command.EffectiveTo);
                 kind = FlagChangeKind.OverrideUpdated;
             }
 
             auditor.Record(db, command.TenantId, flag.Id, flag.Key, kind,
-                previousIsEnabled: previous, newIsEnabled: command.IsEnabled, command.Reason);
+                previousIsEnabled: previous, newIsEnabled: command.IsEnabled, command.Reason,
+                previousValue: previousValue, newValue: command.Value);
 
             // Enqueue BEFORE save: atomic commit with the override. The explicit
             // null tenant stamp keeps the outbox row GLOBAL (feature-flag changes
@@ -227,6 +229,7 @@ public sealed class DeleteTenantFlagOverrideHandler(
             ?? throw new KeyNotFoundException($"Tenant override for flag '{key}' and tenant {command.TenantId} not found.");
 
         var previous = existing.IsEnabled;
+        var previousValue = existing.Value;
 
         // FR-6: the override row is owned by command.TenantId (possibly != ambient context).
         // Run the soft-delete under the target tenant so the save-guard accepts it.
@@ -234,7 +237,8 @@ public sealed class DeleteTenantFlagOverrideHandler(
         {
             existing.MarkAsDeleted();
             auditor.Record(db, command.TenantId, flag.Id, flag.Key, FlagChangeKind.OverrideDeleted,
-                previousIsEnabled: previous, newIsEnabled: null, command.Reason);
+                previousIsEnabled: previous, newIsEnabled: null, command.Reason,
+                previousValue: previousValue, newValue: null);
 
             // Enqueue BEFORE save: atomic with the removal; explicit null stamp keeps
             // the outbox row global (see UpsertTenantFlagOverrideHandler).

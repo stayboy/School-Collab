@@ -18,6 +18,13 @@ public sealed class FlagAuditEntry : IEntity, IAuditableEntity
     public FlagChangeKind ChangeKind { get; private set; }
     public bool? PreviousIsEnabled { get; private set; }
     public bool? NewIsEnabled { get; private set; }
+
+    /// <summary>Before/after string value for a value-valued (string) flag. Null
+    /// for boolean flags (their state lives in <see cref="PreviousIsEnabled"/>
+    /// / <see cref="NewIsEnabled"/>).</summary>
+    public string? PreviousValue { get; private set; }
+    public string? NewValue { get; private set; }
+
     public string? Reason { get; private set; }
     public string ActorId { get; private set; } = default!;
     public string ActorDisplayName { get; private set; } = default!;
@@ -34,7 +41,9 @@ public sealed class FlagAuditEntry : IEntity, IAuditableEntity
         bool? newIsEnabled,
         string? reason,
         string actorId,
-        string actorDisplayName)
+        string actorDisplayName,
+        string? previousValue = null,
+        string? newValue = null)
     {
         var now = DateTimeOffset.UtcNow;
         return new FlagAuditEntry
@@ -46,6 +55,8 @@ public sealed class FlagAuditEntry : IEntity, IAuditableEntity
             ChangeKind = changeKind,
             PreviousIsEnabled = previousIsEnabled,
             NewIsEnabled = newIsEnabled,
+            PreviousValue = previousValue,
+            NewValue = newValue,
             Reason = reason,
             ActorId = actorId,
             ActorDisplayName = actorDisplayName,

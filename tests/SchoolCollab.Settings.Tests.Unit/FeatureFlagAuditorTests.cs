@@ -42,5 +42,26 @@ public class FeatureFlagAuditorTests : IDisposable
         entry.FeatureFlagKey.Should().Be("FEATURE:X");
     }
 
+    [TestMethod]
+    public async Task Record_adds_audit_row_with_previous_and_new_value()
+    {
+        var auditor = new FeatureFlagAuditor(new SystemActorAccessor("system:test", "Test"));
+        var flag = FeatureFlag.Create("FEATURE:DIV", "Division", null, true,
+            kind: FlagKind.String, value: "None");
+
+        _db.FeatureFlags.Add(flag);
+        auditor.Record(_db, tenantId: null, flag.Id, flag.Key,
+            FlagChangeKind.OverrideUpdated, previousIsEnabled: null, newIsEnabled: null, reason: "set terms",
+            previousValue: "None", newValue: "Terms");
+        await _db.SaveChangesAsync();
+
+        _db.FlagAuditEntries.Should().ContainSingle();
+        var entry = _db.FlagAuditEntries.Single();
+        entry.PreviousValue.Should().Be("None");
+        entry.NewValue.Should().Be("Terms");
+        entry.PreviousIsEnabled.Should().BeNull();
+        entry.NewIsEnabled.Should().BeNull();
+    }
+
     public void Dispose() => _db.Dispose();
 }

@@ -88,6 +88,55 @@ public class ConfigApiTests
     }
 
     [TestMethod]
+    public async Task PUT_UpsertStringOverride_WritesValueAuditRow()
+    {
+        // Create a FlagKind.String flag directly (the CreateFeatureFlag command
+        // only makes boolean flags; string flags are seeded by the migration
+        // service, which the test factory does not run).
+        var key = $"FEATURE:STR{Guid.NewGuid():N}".ToUpperInvariant();
+        Guid flagId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SettingsDbContext>();
+            var flag = SchoolCollab.Settings.Core.Domain.FeatureFlag.Create(
+                key, "String flag", null, isEnabled: true,
+                kind: SchoolCollab.Settings.Core.Domain.FlagKind.String,
+                value: "None");
+            db.FeatureFlags.Add(flag);
+            await db.SaveChangesAsync();
+            flagId = flag.Id;
+        }
+
+        // Upsert an override with a string value (None → Terms).
+        var upsert1 = await _client.PutAsJsonAsync(
+            $"/api/config/flags/{key}/overrides/{ApiFactory.TestTenant}",
+            new { IsEnabled = (bool?)null, Value = "Terms", Reason = "set terms", EffectiveFrom = (DateTimeOffset?)null, EffectiveTo = (DateTimeOffset?)null });
+        upsert1.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var audit1 = await _client.GetFromJsonAsync<FlagAuditEntryDto[]>(
+            $"/api/config/audit?key={key}&skip=0&take=50");
+        audit1.Should().Contain(a =>
+            a.FeatureFlagKey == key &&
+            a.PreviousValue == null &&
+            a.NewValue == "Terms" &&
+            a.PreviousIsEnabled == null &&
+            a.NewIsEnabled == null);
+
+        // Upsert again (Terms → Semesters) — the before value is captured.
+        var upsert2 = await _client.PutAsJsonAsync(
+            $"/api/config/flags/{key}/overrides/{ApiFactory.TestTenant}",
+            new { IsEnabled = (bool?)null, Value = "Semesters", Reason = "set semesters", EffectiveFrom = (DateTimeOffset?)null, EffectiveTo = (DateTimeOffset?)null });
+        upsert2.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var audit2 = await _client.GetFromJsonAsync<FlagAuditEntryDto[]>(
+            $"/api/config/audit?key={key}&skip=0&take=50");
+        audit2.Should().Contain(a =>
+            a.FeatureFlagKey == key &&
+            a.PreviousValue == "Terms" &&
+            a.NewValue == "Semesters");
+    }
+
+    [TestMethod]
     public async Task Resolve_Global_ReturnsDefault_And_TenantOverrideWins()
     {
         var key = await CreateFlagAsync(enabled: true);
@@ -161,7 +210,7 @@ public class ConfigApiTests
 
     // Local DTO mirrors of the API response shapes (JSON property names).
     private sealed record FeatureFlagDto(string Key, string Name, bool IsEnabled, int OverrideCount);
-    private sealed record FlagAuditEntryDto(string FeatureFlagKey, bool? PreviousIsEnabled, bool? NewIsEnabled, string? Reason, string ActorId);
+    private sealed record FlagAuditEntryDto(string FeatureFlagKey, bool? PreviousIsEnabled, bool? NewIsEnabled, string? PreviousValue, string? NewValue, string? Reason, string ActorId);
     private sealed record ResolvedFlagDto(string Key, bool IsEnabled, string Source);
     private sealed record TenantFlagOverrideDto(Guid TenantId);
 }

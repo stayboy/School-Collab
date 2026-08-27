@@ -168,6 +168,12 @@
                     <TemplateColumn Title="Before -> After">
                         @(FormatBool(context.PreviousIsEnabled)) -> @(FormatBool(context.NewIsEnabled))
                     </TemplateColumn>
+                    @if (_flag is not null && _flag.Kind == FlagKindDto.String)
+                    {
+                        <TemplateColumn Title="Value">
+                            @(context.PreviousValue ?? "—") -> @(context.NewValue ?? "—")
+                        </TemplateColumn>
+                    }
                     <PropertyColumn Title="Reason" Property="@(a => a.Reason)" />
                 </FluentDataGrid>
             </FluentCard>

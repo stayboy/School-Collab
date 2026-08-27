@@ -260,6 +260,7 @@
         public Guid AssignmentId { get; init; }
         public string Name { get; init; } = string.Empty;
         public string? Code { get; init; }
+        public Guid? PeriodId { get; init; }
     }
 
     private TopicDto[] _unassignedTopics =>
@@ -332,6 +333,7 @@
                     AssignmentId = a.Id,
                     Name = _catalog.TryGetValue(a.TopicId, out var t) ? t.Name : a.TopicId.ToString()[..8],
                     Code = _catalog.TryGetValue(a.TopicId, out var tc) ? tc.Code : null,
+                    PeriodId = a.PeriodId,
                 })
                 .OrderBy(t => t.Name)
                 .ToList();
@@ -671,9 +673,32 @@
                 { GradeTopicsDialog.RemoveKey, new Func<Guid, Task>(RemoveTopicAsync) },
                 { GradeTopicsDialog.AssignKey, new Func<Guid, Task>(AssignTopicAsync) },
                 { GradeTopicsDialog.OnChangedKey, new Func<Task>(ReloadAssignedTopicsAsync) },
+                { GradeTopicsDialog.AssignmentByKeyKey, _assignedTopics.ToDictionary(a => a.TopicId, a => new GradeTopicsDialog.AssignedTopicRef(a.TopicId, a.AssignmentId, a.PeriodId)) },
+                { GradeTopicsDialog.EditPeriodKey, new Func<Guid, Task>(EditAssignmentPeriodAsync) },
             },
             DialogSize.Medium);
         if (_disposed) return;
+        await ReloadAssignedTopicsAsync();
+    }
+
+    private async Task EditAssignmentPeriodAsync(Guid assignmentId)
+    {
+        if (_disposed) return;
+        var assignment = _assignedTopics.FirstOrDefault(a => a.AssignmentId == assignmentId);
+        if (assignment is null) return;
+        var result = await DialogService.ShowShellDialogAsync<
+            TopicAssignmentPeriodEditDialog,
+            TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditModel,
+            TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditResult>(
+            new TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditModel
+            {
+                AssignmentId = assignment.AssignmentId,
+                GradeLevelId = Id,
+                CurrentPeriodId = assignment.PeriodId,
+            },
+            "Edit subject period",
+            DialogSize.Medium);
+        if (_disposed || result is null) return;
         await ReloadAssignedTopicsAsync();
     }
 
@@ -707,6 +732,7 @@
                 AssignmentId = a.Id,
                 Name = _catalog.TryGetValue(a.TopicId, out var t) ? t.Name : a.TopicId.ToString()[..8],
                 Code = _catalog.TryGetValue(a.TopicId, out var tc) ? tc.Code : null,
+                PeriodId = a.PeriodId,
             })
             .OrderBy(t => t.Name)
             .ToList();

@@ -32,6 +32,8 @@ internal sealed class FlagAuditEntryConfiguration : EntityTypeConfigurationBase<
 
         builder.Property(x => x.PreviousIsEnabled);
         builder.Property(x => x.NewIsEnabled);
+        builder.Property(x => x.PreviousValue).HasMaxLength(200);
+        builder.Property(x => x.NewValue).HasMaxLength(200);
         builder.Property(x => x.Reason).HasMaxLength(1000);
 
         builder.Property(x => x.ActorId)
