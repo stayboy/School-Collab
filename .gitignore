@@ -500,3 +500,4 @@ int*.err.txt
 _tresult/
 testerr.txt
 testout.txt
+ci-artifacts/
