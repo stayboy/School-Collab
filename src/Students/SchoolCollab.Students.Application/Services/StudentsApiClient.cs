@@ -1266,7 +1266,14 @@ public sealed class StudentsApiClient : IContactsClient
     {
         var response = await _http.GetAsync("/students/periods/active-academic-year", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"GetActiveAcademicYear failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         return await response.Content.ReadFromJsonAsync<PeriodDto>(ct);
     }
 
@@ -1274,7 +1281,14 @@ public sealed class StudentsApiClient : IContactsClient
     {
         var response = await _http.GetAsync("/students/periods/active-sub-period", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"GetActiveSubPeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         return await response.Content.ReadFromJsonAsync<PeriodDto>(ct);
     }
 

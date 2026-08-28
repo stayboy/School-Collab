@@ -13,10 +13,11 @@
    page; they know which student they're enrolling).
 
    The period is NOT a user-pickable dropdown. Enrollments are
-   always against the tenant's CURRENT GLOBAL PERIOD (the single
-   <PeriodStatus.Active> period for the current tenant; derived
-   client-side by listing periods and filtering by Status == "Active",
-   the same approach <ActiveTermToolbar> uses for the toolbar).
+   always against the tenant's ACTIVE ACADEMIC YEAR (grade enrollment
+   is year-scoped, FR-H9), resolved via the dedicated hierarchy-aware
+   endpoint <StudentsApiClient.GetActiveAcademicYearAsync> rather than
+   deriving an arbitrary active period from the flat list (which can
+   hold two active rows — one year + one sub-period).
    The server enforces this too: <EnrollStudentHandler> resolves
    <IActivePeriodProvider.GetActivePeriodAsync()> and throws
    <PeriodNotOpenException> if the request's PeriodId does not match
@@ -172,10 +173,11 @@
         <EditForm Model="_formModel" OnValidSubmit="HandleSubmitAsync">
             <FluentStack Orientation="Orientation.Vertical" Spacing="3">
                 <FormRow Label="Period">
-                    @* The period is the tenant's CURRENT GLOBAL period
-                       (Status == "Active"). It is read-only — the
-                       server's <EnrollStudentHandler> enforces the
-                       active period, so the user has no choice to make.
+                    @* The period is the tenant's ACTIVE ACADEMIC YEAR
+                       (grade enrollment is year-scoped, FR-H9). It is
+                       read-only — the server's <EnrollStudentHandler>
+                       enforces the active period, so the user has no
+                       choice to make.
                        The row is rendered as a FormRow (not a free
                        <div>) so its label "Period" lines up with the
                        other fields' labels down the form.
@@ -399,9 +401,9 @@
     /// is true AND the tenant has opted in to the inline setup path.</summary>
     private bool IsNewEnrollment => Model.SuggestedGradeLevelId is null;
 
-    /// <summary>The tenant's current global period (Status == "Active").
-    /// Derived client-side from <see cref="StudentsApiClient.ListPeriodsAsync"/>
-    /// (same approach the <c>ActiveTermToolbar</c> uses). The server's
+    /// <summary>The tenant's active AcademicYear (grade enrollment is
+    /// year-scoped, FR-H9), resolved via
+    /// <see cref="StudentsApiClient.GetActiveAcademicYearAsync"/>. The server's
     /// <c>EnrollStudentHandler</c> enforces this same invariant via
     /// <c>IActivePeriodProvider.GetActivePeriodAsync()</c> and rejects
     /// any enrollment whose PeriodId does not match. The dialog's UI
@@ -433,9 +435,8 @@
     /// <summary>The CodedValueId selected in the grade <see cref="CodedValueDropdown"/>.
     /// Bound two-way to the dropdown (the dropdown's native id field) via
     /// <see cref="EnrollStudentFormModel.GradeCodedValueId"/> on the form model.
-    /// Resolved to a <see cref="GradeLevelDto"/> via
-    /// <see cref="OnGradeCodedValueChanged"/> for the actual enroll
-    /// submission.</summary>
+    /// A grade pick clears the stream selection via <see cref="OnGradePicked"/>;
+    /// it does not resolve the grade for submission.</summary>
     // (field lives on _formModel.GradeCodedValueId)
 
     /// <summary>Reference to the grade <see cref="CodedValueDropdown"/>.
@@ -476,27 +477,20 @@
         }
     }
 
-    /// <summary>Selection state for the flag-OFF GradeLevel dropdown (the
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            // Load periods (to derive the active one). No student load - the
-            // dialog intentionally does NOT render a "Student" row (the caller
-            // already shows the student context on the page; re-stating it
-            // here would be redundant). The grade <CodedValueDropdown> loads
-            // its own GRADE coded values internally (via the shared widget's
+            // Grade enrollment is year-scoped (FR-H9): resolve the active
+            // AcademicYear via the dedicated hierarchy-aware endpoint rather than
+            // deriving an arbitrary active period from the flat list (which can
+            // hold two active rows — one year + one sub-period). No student load -
+            // the dialog intentionally does NOT render a "Student" row (the caller
+            // already shows the student context on the page; re-stating it here
+            // would be redundant). The grade <CodedValueDropdown> loads its own
+            // GRADE coded values internally (via the shared widget's
             // GetChildrenByParentCodeAsync call) - no grade-level list load.
-            var periods = await Api.ListPeriodsAsync(CancellationToken.None)
-                ?? Array.Empty<PeriodDto>();
-            // The current global period = the single period with
-            // Status == "Active". The "at most one Active per tenant"
-            // invariant is enforced by the server's Period domain +
-            // activation flow (see PeriodRoutes). If a tenant ever
-            // has more than one (data drift), we fall back to the
-            // first match - the server is still the final authority.
-            _activePeriod = periods.FirstOrDefault(p =>
-                string.Equals(p.Status, "Active", StringComparison.OrdinalIgnoreCase));
+            _activePeriod = await Api.GetActiveAcademicYearAsync(CancellationToken.None);
 
             // Pre-select the grade + stream the caller suggested (the student's
             // current active-enrollment values, if any). The grade suggestion is a

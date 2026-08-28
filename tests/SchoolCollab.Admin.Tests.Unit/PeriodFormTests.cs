@@ -65,6 +65,7 @@ public class PeriodFormTests : BunitContext
         var cv = new CodedValuesApiClient(http);
         Services.AddSingleton(cv);
         Services.AddSingleton(new StudentsApiClient(http, NullLogger<StudentsApiClient>.Instance, cv));
+        Services.AddSingleton(new ConfigFlagsApiClient(http));
         Services.AddSingleton(NullLogger<PeriodForm>.Instance);
     }
 
@@ -139,5 +140,45 @@ public class PeriodFormTests : BunitContext
             cut.Markup.Should().Contain("Select a parent academic year for this period."));
         handler.Calls.Should().NotContain(c => c.Method == "POST" && c.Url == "/students/periods",
             "the parent guard must block the create POST");
+    }
+
+    /// <summary>
+    /// G4: a Terms division hides the Semester option (only Term sub-periods are
+    /// allowed), keeping client-side validation in sync with the server's 422 gate.
+    /// </summary>
+    [TestMethod]
+    public void PeriodForm_TermsDivision_HidesSemesterOption()
+    {
+        var handler = new ScriptedHandler();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/api/config/flags/academic_year_division", HttpStatusCode.OK,
+            "{\"value\":\"Terms\",\"source\":\"GlobalDefault\"}");
+        Register(handler);
+
+        var cut = Render<PeriodForm>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Period type"));
+
+        cut.Markup.Should().Contain("Term", "Terms division allows Term sub-periods");
+        cut.Markup.Should().NotContain("Semester", "Terms division hides the Semester option");
+    }
+
+    /// <summary>
+    /// G4: a None division hides both sub-period options (only Academic Year is
+    /// allowed), matching the server's PeriodFrameworkMismatchException gate.
+    /// </summary>
+    [TestMethod]
+    public void PeriodForm_NoneDivision_HidesSubPeriodOptions()
+    {
+        var handler = new ScriptedHandler();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/api/config/flags/academic_year_division", HttpStatusCode.OK,
+            "{\"value\":\"None\",\"source\":\"GlobalDefault\"}");
+        Register(handler);
+
+        var cut = Render<PeriodForm>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Period type"));
+
+        cut.Markup.Should().NotContain("Term", "None division hides the Term option");
+        cut.Markup.Should().NotContain("Semester", "None division hides the Semester option");
     }
 }

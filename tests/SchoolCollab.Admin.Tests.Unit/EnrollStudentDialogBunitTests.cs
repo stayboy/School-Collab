@@ -148,23 +148,23 @@ public class EnrollStudentDialogBunitTests : BunitContext
             var path = request.RequestUri?.AbsolutePath ?? string.Empty;
             var query = request.RequestUri?.Query ?? string.Empty;
 
-            // GET /students/periods — the dialog derives the active period from here.
-            if (path.Contains("/students/periods", StringComparison.OrdinalIgnoreCase)
+            // GET /students/periods/active-academic-year — the dialog resolves the
+            // active academic year (grade enrollment is year-scoped, FR-H9) from here.
+            if (path.Equals("/students/periods/active-academic-year", StringComparison.OrdinalIgnoreCase)
                 && HttpMethod.Get.Equals(request.Method))
             {
                 if (PeriodsError)
                     return new HttpResponseMessage(HttpStatusCode.InternalServerError)
                     { Content = new StringContent("periods boom") };
 
-                var periods = NoActivePeriod
-                    ? Array.Empty<PeriodDto>()
-                    : new PeriodDto[]
-                    {
-                        new(PeriodId, "2025/2026",
-                            new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31),
-                            "Active", "AcademicYear", null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
-                    };
-                return Json(HttpStatusCode.OK, periods);
+                if (NoActivePeriod)
+                    return new HttpResponseMessage(HttpStatusCode.NotFound)
+                    { Content = new StringContent("no active academic year") };
+
+                return Json(HttpStatusCode.OK, new PeriodDto(
+                    PeriodId, "2025/2026",
+                    new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31),
+                    "Active", "AcademicYear", null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
             }
 
             // GET /students/grade-levels/{id} — the suggested-grade lookup
@@ -447,7 +447,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
     [TestMethod]
     public void LoadError_ShowsErrorMessageBar_WithTracingDetail()
     {
-        // When ListPeriodsAsync fails (500), the dialog surfaces the FULL
+        // When GetActiveAcademicYearAsync fails (500), the dialog surfaces the FULL
         // tracing detail (status code + response body) in an error MessageBar —
         // not just the generic "One or more errors occurred." This is the
         // "trace data-load errors to API" fix; the inner-exception unwrap in
@@ -458,7 +458,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
         {
-            cut.Markup.Should().Contain("ListPeriods failed", "the error bar surfaces the failed-operation name");
+            cut.Markup.Should().Contain("GetActiveAcademicYear failed", "the error bar surfaces the failed-operation name");
             cut.Markup.Should().Contain("500", "the error bar surfaces the status code");
             cut.Markup.Should().Contain("periods boom", "the error bar surfaces the response body — the whole point of the body-read pattern");
             cut.FindAll("form").Count.Should().Be(0, "the form must NOT render when the load failed — there is no data to enrol against");
