@@ -53,17 +53,17 @@
 
 ## Phase H5 — Wire to activity-group enrollment
 
-- [ ] **H5.1** After the activity-group Rev. 2/3 migration lands, enable `Termly`/`Semester`/`WholeAcademicYear` activity-group enrollment to attach memberships to the matching typed period of the active academic year. — *AC-H9, activity-group FR-43*
-- [ ] **H5.2** Integration test: create `Termly` group → add membership → attaches to an Active `Term` of the active AcademicYear; `WholeAcademicYear` → AcademicYear period. — *AC-H9*
-- [ ] **H5.3** E2E/Playwright (seeded): open academic year → open term → create Termly activity group → enrol a student → verify membership `period_id` = the term. — *AC-H9*
+- [x] **H5.1** After the activity-group Rev. 2/3 migration lands, enable `Termly`/`Semester`/`WholeAcademicYear` activity-group enrollment to attach memberships to the matching typed period of the active academic year. — *AC-H9, activity-group FR-43* (verified shipped in Phase 10; membership tests for all three spans)
+- [x] **H5.2** Integration test: create `Termly` group → add membership → attaches to an Active `Term` of the active AcademicYear; `WholeAcademicYear` → AcademicYear period. — *AC-H9* (extended with Semester + provided-PeriodId + no-active-term tests)
+- [ ] **H5.3** E2E/Playwright (seeded): open academic year → open term → create Termly activity group → enrol a student → verify membership `period_id` = the term. — *AC-H9* (deferred to Phase 6.2 — needs AppHost + seeded data)
 
 ---
 
 ## Cross-cutting / don't-forget
 
-- [ ] **Back-compat** — `AcademicYearDivision = None` tenants (no sub-periods) must be byte-identical in behavior to the shipped flow (one active academic-year period, year-level grade enrollment, year-to-year promotion). Regression test. — *NFR-H4, EC-H5*
-- [ ] **Tenancy** — Period + tenant-setting reads/writes strict-tenant; verify with `StudentsStrictTenancyTests`-style tests for sub-periods and the framework setting. — *NFR-H2*
-- [ ] **Cache invalidation** — `IActivePeriodProvider`'s `HybridCache` ("students" tag) keys cover the new active-academic-year / active-sub-period lookups; Activate/Complete handlers already invalidate by tag — confirm no stale sub-period lookups. — *active-period-per-tenancy §4.6/§10*
+- [x] **Back-compat** — `AcademicYearDivision = None` tenants (no sub-periods) must be byte-identical in behavior to the shipped flow (one active academic-year period, year-level grade enrollment, year-to-year promotion). Regression test. — *NFR-H4, EC-H5* (`AcademicYearDivisionNoneBackCompatTests`, 4 tests)
+- [x] **Tenancy** — Period + tenant-setting reads/writes strict-tenant; verify with `StudentsStrictTenancyTests`-style tests for sub-periods and the framework setting. — *NFR-H2* (3 sub-period tests in `StudentsStrictTenancyTests` + 2 Settings integration tests in `AcademicYearDivisionTenancyTests`)
+- [x] **Cache invalidation** — `IActivePeriodProvider`'s `HybridCache` ("students" tag) keys cover the new active-academic-year / active-sub-period lookups; Activate/Complete handlers already invalidate by tag — confirm no stale sub-period lookups. — *active-period-per-tenancy §4.6/§10* (5 new tests in `ActivePeriodProviderTests`)
 - [ ] **Open questions** — §12.1 RESOLVED (reuse feature-flag machinery — extend `FlagKind` + `Value` columns, no new table); §12.2 (cross-type auto-close) and §12.3 (sub-period `NextPeriodId`) are confirmed out of scope.
 
 ---
@@ -72,3 +72,4 @@
 
 - _Checklist generated from `period-hierarchy-terms-semesters.md` (draft 2026-08-26). Source of truth: that spec._
 - _Dependency direction: this spec's Phase H5 unblocks `activity-group-enrollment.md` Rev. 3 FR-43 (termly/semester/whole-year spans). The activity-group `OpenEnded`/`DateRange` spans do not depend on this spec._
+- _Phase H5 verification round (see `plan-phase-h5.md`): H5.1 verified shipped (Phase 10); H5.2 extended with Semester + provided-PeriodId + no-active-term tests; None back-compat, sub-period/framework-setting strict-tenancy, and active-year/sub-period cache invalidation covered by new tests. H5.3 E2E deferred to Phase 6.2._

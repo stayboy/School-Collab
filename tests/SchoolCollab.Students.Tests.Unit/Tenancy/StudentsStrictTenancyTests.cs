@@ -3,9 +3,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.CQRS.GradeLevels.Commands.GetOrCreateGradeLevel;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.ActivatePeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Tests.Unit.Tenancy;
@@ -112,6 +116,84 @@ public class StudentsStrictTenancyTests
 
         var act = async () => await h.HandleAsync(
             new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
+        await act.Should().ThrowAsync<TenantContextRequiredException>();
+        (await s.Db.Periods.IgnoreQueryFilters(["Tenant"]).CountAsync()).Should().Be(0);
+    }
+
+    // NFR-H2 (period-hierarchy-terms-semesters.md): sub-periods are strict
+    // tenant-scoped — created rows are isolated per tenant and per-tenant
+    // creatable with the same names/dates.
+    [TestMethod]
+    public async Task AC_H2_SubPeriod_IsTenantScoped_AndPerTenantCreatable()
+    {
+        using var s = new StudentsTestScope("strict-subperiod");
+        var h = new CreatePeriodHandler(
+            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+
+        // Tenant A creates a year + term.
+        AsTenant(s, TenantA);
+        var ayA = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        await h.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            PeriodType.Term, ParentPeriodId: ayA));
+
+        // Tenant B sees no periods (filter isolation).
+        AsTenant(s, TenantB);
+        (await s.Db.Periods.CountAsync()).Should().Be(0, "B sees no A-owned periods");
+
+        // Tenant B creates its own year + term with the same names/dates.
+        var ayB = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        await h.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            PeriodType.Term, ParentPeriodId: ayB));
+        (await s.Db.Periods.CountAsync()).Should().Be(2, "B sees only its own year + term");
+
+        // Two years + two terms exist total.
+        (await s.Db.Periods.IgnoreQueryFilters(["Tenant"]).CountAsync()).Should().Be(4,
+            "one year + one term per tenant");
+    }
+
+    // NFR-H2: activating a sub-period owned by another tenant is rejected — the
+    // tenant-filtered GetAsync cannot see the foreign row.
+    [TestMethod]
+    public async Task AC_H2_SubPeriod_Activation_IsTenantScoped()
+    {
+        using var s = new StudentsTestScope("strict-subperiod-act");
+        var create = new CreatePeriodHandler(
+            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+        var activate = new ActivatePeriodHandler(
+            s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
+
+        // Tenant A creates + activates a year + term.
+        AsTenant(s, TenantA);
+        var ayA = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        await activate.HandleAsync(new ActivatePeriod(ayA));
+        var termA = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            PeriodType.Term, ParentPeriodId: ayA));
+        await activate.HandleAsync(new ActivatePeriod(termA));
+
+        // Tenant B cannot activate A's term (not visible through the filter).
+        AsTenant(s, TenantB);
+        var act = async () => await activate.HandleAsync(new ActivatePeriod(termA));
+        await act.Should().ThrowAsync<PeriodNotFoundException>(
+            "B cannot see or activate A's sub-period");
+
+        // A's term remains Active.
+        AsTenant(s, TenantA);
+        (await s.Db.Periods.SingleAsync(p => p.Id == termA)).Status.Should().Be(PeriodStatus.Active);
+    }
+
+    // FR-4: creating a sub-period under the default (Guid.Empty) tenant is rejected
+    // before any write.
+    [TestMethod]
+    public async Task FR4_CreateSubPeriod_UnderDefaultTenant_ThrowsBeforeAnyWrite()
+    {
+        using var s = new StudentsTestScope("strict-fr4-subperiod");
+        AsDefault(s);
+        var h = new CreatePeriodHandler(
+            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+
+        var act = async () => await h.HandleAsync(
+            new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+                PeriodType.Term, ParentPeriodId: Guid.NewGuid()));
         await act.Should().ThrowAsync<TenantContextRequiredException>();
         (await s.Db.Periods.IgnoreQueryFilters(["Tenant"]).CountAsync()).Should().Be(0);
     }

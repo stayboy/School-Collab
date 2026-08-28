@@ -25,8 +25,11 @@ public class ActivityGroupPeriodAlignedSpanTests
 {
     private static DateOnly D(int y, int m, int d) => new(y, m, d);
 
-    private static CreatePeriodHandler NewCreatePeriod(StudentsTestScope s) => new(
-        s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"),
+    private static CreatePeriodHandler NewCreatePeriod(StudentsTestScope s) =>
+        NewCreatePeriod(s, "Terms");
+
+    private static CreatePeriodHandler NewCreatePeriod(StudentsTestScope s, string division) => new(
+        s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider(division),
         NullLogger<CreatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) => new(
@@ -51,6 +54,17 @@ public class ActivityGroupPeriodAlignedSpanTests
             "T1", D(2026, 9, 1), D(2026, 12, 31), PeriodType.Term, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(termId));
         return (yearId, termId);
+    }
+
+    private static async Task<(Guid yearId, Guid semesterId)> SeedYearAndSemesterAsync(StudentsTestScope s)
+    {
+        var create = NewCreatePeriod(s, "Semesters");
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31)));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+        var semesterId = await create.HandleAsync(new CreatePeriod(
+            "S1", D(2026, 9, 1), D(2027, 1, 31), PeriodType.Semester, ParentPeriodId: yearId));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(semesterId));
+        return (yearId, semesterId);
     }
 
     private static async Task<Guid> SeedStudentAsync(StudentsTestScope s, string number)
@@ -129,6 +143,54 @@ public class ActivityGroupPeriodAlignedSpanTests
 
         var id = await h.HandleAsync(new CreateActivityGroup("Term Club", Span: EnrollmentSpan.Termly));
         (await s.ActivityGroups.GetAsync(id))!.Span.Should().Be(EnrollmentSpan.Termly);
+    }
+
+    // FR-43 (H5.2): Semester membership resolves the active Semester period.
+    [TestMethod]
+    public async Task Add_Semester_AttachesToActiveSemester()
+    {
+        using var s = new StudentsTestScope("pasp-sem-" + Guid.NewGuid());
+        var (_, semesterId) = await SeedYearAndSemesterAsync(s);
+        var group = ActivityGroup.Create("Sem Club", span: EnrollmentSpan.Semester);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+        var sid = await SeedStudentAsync(s, "P005");
+
+        var id = await NewAdd(s).HandleAsync(new AddMembership(group.Id, sid));
+        (await s.Memberships.GetAsync(id))!.PeriodId.Should().Be(semesterId);
+    }
+
+    // FR-43 (H5.2): a provided Term PeriodId of the right type + parent is accepted.
+    [TestMethod]
+    public async Task Add_Termly_WithProvidedTermId_Succeeds()
+    {
+        using var s = new StudentsTestScope("pasp-provided-" + Guid.NewGuid());
+        var (_, termId) = await SeedYearAndTermAsync(s);
+        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+        var sid = await SeedStudentAsync(s, "P006");
+
+        var id = await NewAdd(s).HandleAsync(new AddMembership(group.Id, sid, PeriodId: termId));
+        (await s.Memberships.GetAsync(id))!.PeriodId.Should().Be(termId);
+    }
+
+    // FR-43 (H5.2): a Termly membership with no active Term in the active year is rejected.
+    [TestMethod]
+    public async Task Add_Termly_NoActiveTerm_Throws()
+    {
+        using var s = new StudentsTestScope("pasp-no-term-" + Guid.NewGuid());
+        var create = NewCreatePeriod(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31)));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+        // No Term is created under the active year.
+        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+        var sid = await SeedStudentAsync(s, "P007");
+
+        await FluentActions.Awaiting(() => NewAdd(s).HandleAsync(new AddMembership(group.Id, sid)))
+            .Should().ThrowAsync<EnrollmentSpanMismatchException>();
     }
 
     // FR-50/51: period-aligned rollover re-enrols AutoRenew members into the active term.
