@@ -162,7 +162,9 @@ public class ActivityGroupsPageTests : BunitContext
     [TestMethod]
     public void ListPage_RendersGroupsFromApi()
     {
-        RegisterWith(("/activity-groups", HttpStatusCode.OK, GroupsJson()));
+        RegisterWith(
+            ("/activity-groups", HttpStatusCode.OK, GroupsJson()),
+            ("/students/grade-levels/landing", HttpStatusCode.OK, "[]"));
 
         var cut = Render<ActivityGroups>();
         cut.WaitForState(() => cut.Markup.Contains("Chess Club"), TimeSpan.FromSeconds(2));
@@ -171,6 +173,30 @@ public class ActivityGroupsPageTests : BunitContext
         cut.Markup.Should().Contain("Games");
         cut.Markup.Should().Contain("Active");
         cut.Markup.Should().Contain("3"); // member count
+        // AC-1c: a successful load renders with no error bar.
+        cut.Markup.Should().NotContain("Could not load activity groups");
+    }
+
+    /// <summary>
+    /// AC-1a/1b: when the list API fails (404 here), the page shows the red
+    /// error message (via LandingPage Error), the empty-state bar reads "Could
+    /// not load activity groups.", and the loading spinner stops (no
+    /// fluent-progress-ring) instead of spinning forever.
+    /// </summary>
+    [TestMethod]
+    public void ListPage_ApiFailure_ShowsErrorAndStopsSpinner()
+    {
+        // No mapped URL: GET /activity-groups returns 404 → GetFromJsonAsync
+        // throws → the ReloadAsync catch path runs. /students/grade-levels/landing
+        // is never reached.
+        RegisterWith();
+
+        var cut = Render<ActivityGroups>();
+        cut.WaitForState(() => cut.Markup.Contains("Could not load activity groups"), TimeSpan.FromSeconds(2));
+
+        cut.Markup.Should().Contain("Could not load activity groups.", "AC-1b: empty state reads as a failure, not an empty list");
+        cut.Markup.Should().Contain("404", "AC-1a: the rendered error text includes the failure (HttpRequestException message)");
+        cut.Markup.Should().NotContain("fluent-progress-ring", "AC-1b: the loading spinner stops on failure");
     }
 
     [TestMethod]

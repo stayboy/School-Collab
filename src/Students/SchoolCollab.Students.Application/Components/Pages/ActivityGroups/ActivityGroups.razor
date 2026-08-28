@@ -24,6 +24,7 @@
                  EmptyMessage="@CurrentEmptyMessage"
                  Items="@_filteredItems"
                  Loading="@(_items is null)"
+                 Error="@_error"
                  GridSettings="@_gridSettings"
                  SearchText="@_searchText"
                  SearchTextChanged="@OnSearchValueChanged"
@@ -116,9 +117,11 @@
     private string CurrentEmptyMessage =>
         !_isRealTenant
             ? "Select a tenant to manage activity groups."
-            : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
-                ? $"No activity groups match '{_searchText}'."
-                : "No activity groups yet. Create one to get started.");
+            : !string.IsNullOrWhiteSpace(_error)
+                ? "Could not load activity groups."
+                : (!string.IsNullOrWhiteSpace(_searchText) && _filteredItems.Length == 0
+                    ? $"No activity groups match '{_searchText}'."
+                    : "No activity groups yet. Create one to get started.");
 
     private static Appearance StatusBadge(bool isActive) => isActive ? Appearance.Accent : Appearance.Neutral;
 
@@ -129,6 +132,7 @@
 
     private async Task ReloadAsync()
     {
+        _error = null;
         _loadCts = new CancellationTokenSource();
         var token = _loadCts.Token;
 
@@ -160,6 +164,8 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load activity groups");
             _error = ex.Message;
+            _items = []; // stop the loading spinner; show the empty-state + error bars
+            StateHasChanged();
         }
     }
 
@@ -248,6 +254,7 @@
         {
             if (_disposed) return;
             _error = ex.Message;
+            StateHasChanged();
         }
     }
 
