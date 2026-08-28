@@ -29,11 +29,30 @@ public sealed class GetActiveSubPeriodHandler(
             static async (state, ct) =>
             {
                 var (db, tenantId) = state;
-                var period = await db.Periods
+                // Resolve the active academic year first, then scope the sub-period
+                // lookup to it. A tenant can have one active year AND one active
+                // sub-period (Term/Semester) at the same time, so the sub-period
+                // must be parent-scoped to the year to be unambiguous.
+                var activeYearId = await db.Periods
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(p => p.TenantId == tenantId
                         && p.Status == PeriodStatus.Active
+                        && p.PeriodType == PeriodType.AcademicYear)
+                    .Select(p => (Guid?)p.Id)
+                    .FirstOrDefaultAsync(ct);
+                if (activeYearId is null) return null;
+
+                // Deterministic: prefer Term over Semester (PeriodType order), then
+                // earliest start date, so the result is stable when both a Term and
+                // a Semester are active under the same year.
+                var period = await db.Periods
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(p => p.TenantId == tenantId
+                        && p.ParentPeriodId == activeYearId
+                        && p.Status == PeriodStatus.Active
                         && p.PeriodType != PeriodType.AcademicYear)
+                    .OrderBy(p => p.PeriodType)
+                    .ThenBy(p => p.StartDate)
                     .AsNoTracking()
                     .FirstOrDefaultAsync(ct);
 

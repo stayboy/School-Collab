@@ -144,6 +144,8 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         if (PeriodType != PeriodType.AcademicYear)
             throw new InvalidOperationException(
                 "Only AcademicYear periods can have a NextPeriodId; sub-periods are date-ordered within their year (FR-H11).");
+        if (nextPeriodId == Id)
+            throw new InvalidOperationException("A period cannot be its own next period.");
         NextPeriodId = nextPeriodId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }

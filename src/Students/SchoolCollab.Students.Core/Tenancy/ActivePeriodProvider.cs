@@ -69,11 +69,30 @@ public sealed class ActivePeriodProvider(
             static async (state, token) =>
             {
                 var (db, tenantId) = state;
-                var period = await db.Periods
+                // Resolve the active academic year first, then scope the sub-period
+                // lookup to it. A tenant can have one active year AND one active
+                // sub-period (Term/Semester) at the same time, so the sub-period
+                // must be parent-scoped to the year to be unambiguous.
+                var activeYearId = await db.Periods
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(p => p.TenantId == tenantId
                         && p.Status == PeriodStatus.Active
+                        && p.PeriodType == PeriodType.AcademicYear)
+                    .Select(p => (Guid?)p.Id)
+                    .FirstOrDefaultAsync(token);
+                if (activeYearId is null) return null;
+
+                // Deterministic: prefer Term over Semester (PeriodType order), then
+                // earliest start date, so the result is stable when both a Term and
+                // a Semester are active under the same year.
+                var period = await db.Periods
+                    .IgnoreQueryFilters(["Tenant"])
+                    .Where(p => p.TenantId == tenantId
+                        && p.ParentPeriodId == activeYearId
+                        && p.Status == PeriodStatus.Active
                         && p.PeriodType != PeriodType.AcademicYear)
+                    .OrderBy(p => p.PeriodType)
+                    .ThenBy(p => p.StartDate)
                     .AsNoTracking()
                     .FirstOrDefaultAsync(token);
                 return period is null ? null : ToActivePeriod(period);
@@ -93,9 +112,18 @@ public sealed class ActivePeriodProvider(
             static async (state, token) =>
             {
                 var (db, tenantId, today) = state;
+                // "Current" = the active period containing today. Prefer the more
+                // specific sub-period (Term/Semester) over the AcademicYear when both
+                // contain today, then Term over Semester, then earliest start — so the
+                // display is deterministic under the two-active-rows hierarchy.
                 var period = await db.Periods
                     .IgnoreQueryFilters(["Tenant"])
-                    .Where(p => p.TenantId == tenantId && p.StartDate <= today && p.EndDate >= today)
+                    .Where(p => p.TenantId == tenantId
+                        && p.Status == PeriodStatus.Active
+                        && p.StartDate <= today && p.EndDate >= today)
+                    .OrderBy(p => p.PeriodType == PeriodType.AcademicYear ? 1 : 0)
+                    .ThenBy(p => p.PeriodType)
+                    .ThenBy(p => p.StartDate)
                     .AsNoTracking()
                     .FirstOrDefaultAsync(token);
                 return period is null ? null : ToActivePeriod(period);

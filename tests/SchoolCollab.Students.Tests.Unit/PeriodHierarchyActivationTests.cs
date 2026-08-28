@@ -141,4 +141,13 @@ public class PeriodHierarchyActivationTests
         var act = () => term.SetNextPeriod(Guid.NewGuid());
         act.Should().Throw<InvalidOperationException>();
     }
+
+    [TestMethod]
+    public void SetNextPeriod_OnSelf_Throws()
+    {
+        var year = Period.Create("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31));
+
+        var act = () => year.SetNextPeriod(year.Id);
+        act.Should().Throw<InvalidOperationException>("a period cannot be its own next period");
+    }
 }
