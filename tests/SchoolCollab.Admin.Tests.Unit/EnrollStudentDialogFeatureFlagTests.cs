@@ -468,23 +468,22 @@ public class EnrollStudentDialogFeatureFlagTests
     }
 
     [TestMethod]
-    public void EnrollDialog_Derives_ActivePeriod_From_ListPeriodsAsync()
+    public void EnrollDialog_Derives_ActivePeriod_From_GetActiveAcademicYearAsync()
     {
-        // The dialog must derive the active period from
-        // ListPeriodsAsync (filtered by Status == "Active") and use
-        // that as the submitted period. The same approach
-        // ActiveTermToolbar uses for the toolbar's "current period"
-        // link. The server's IActivePeriodProvider.GetActivePeriodAsync()
-        // is the authoritative implementation; the dialog just mirrors
-        // it client-side so it can show the period name + dates in
-        // the read-only "Period" row.
+        // The dialog must resolve the active academic year via the dedicated
+        // hierarchy-aware endpoint (grade enrollment is year-scoped, FR-H9)
+        // rather than deriving an arbitrary active period from the flat list
+        // (which can hold two active rows — one year + one sub-period). The
+        // server's IActivePeriodProvider.GetActivePeriodAsync() is the
+        // authoritative implementation; the dialog just mirrors it client-side
+        // so it can show the period name + dates in the read-only "Period" row.
         var src = Load(DialogPath);
-        src.Should().Contain("ListPeriodsAsync",
-            "the dialog MUST call ListPeriodsAsync to derive the current global period (Status == Active)");
-        src.Should().Contain("Status",
-            "the dialog MUST filter periods by Status when deriving the active one (Status == \"Active\")");
+        src.Should().Contain("GetActiveAcademicYearAsync",
+            "the dialog MUST call GetActiveAcademicYearAsync to resolve the active academic year (grade enrollment is year-scoped)");
+        src.Should().NotContain("ListPeriodsAsync",
+            "the dialog MUST NOT derive the active period from the flat ListPeriodsAsync list (which can hold two active rows)");
         src.Should().Contain("_activePeriod",
-            "the dialog MUST hold the derived active period in a _activePeriod field that the submit + read-only display consume");
+            "the dialog MUST hold the resolved active period in a _activePeriod field that the submit + read-only display consume");
         // The submit must use _activePeriod.Id (NOT a user-picked
         // _selectedPeriod.Id) because there is no picker.
         src.Should().Contain("_activePeriod.Id",

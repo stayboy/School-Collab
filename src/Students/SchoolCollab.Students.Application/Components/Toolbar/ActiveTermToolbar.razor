@@ -20,9 +20,9 @@
             {
                 <span class="active-term-muted">Loading term…</span>
             }
-            else if (_activePeriod is not null)
+            else if (DisplayName is not null)
             {
-                <span class="active-term-name">@_activePeriod.Name</span>
+                <span class="active-term-name">@DisplayName</span>
             }
             else
             {
@@ -47,7 +47,8 @@ else
 }
 
 @code {
-    private PeriodDto? _activePeriod;
+    private PeriodDto? _activeYear;
+    private PeriodDto? _activeSubPeriod;
     private bool _loading = true;
     private bool _isRealTenant;
     private CancellationTokenSource? _cts;
@@ -75,16 +76,19 @@ else
             _isRealTenant = scope.IsRealTenant;
             if (!_isRealTenant)
             {
-                _activePeriod = null;
+                _activeYear = null;
+                _activeSubPeriod = null;
                 await InvokeAsync(StateHasChanged);
                 return;
             }
 
-            var periods = await Api.ListPeriodsAsync(ct) ?? [];
+            var year = await Api.GetActiveAcademicYearAsync(ct);
+            var sub = await Api.GetActiveSubPeriodAsync(ct);
             if (_disposed) return;
-            _activePeriod = periods.FirstOrDefault(p => p.Status == "Active");
-            _title = _activePeriod is not null
-                ? $"Active term: {_activePeriod.Name} ({_activePeriod.StartDate:d} – {_activePeriod.EndDate:d}). View, open or close periods."
+            _activeYear = year;
+            _activeSubPeriod = sub;
+            _title = DisplayName is not null
+                ? $"Active period: {DisplayName}. View, open or close periods."
                 : "No active academic period. View or open a period.";
             await InvokeAsync(StateHasChanged);
         }
@@ -93,12 +97,29 @@ else
         {
             if (_disposed) return;
             Logger.LogWarning(ex, "Failed to load active period for toolbar");
-            _activePeriod = null;
+            _activeYear = null;
+            _activeSubPeriod = null;
             await InvokeAsync(StateHasChanged);
         }
         finally
         {
             if (!_disposed) _loading = false;
+        }
+    }
+
+    /// <summary>
+    /// Renders both hierarchy layers: the active AcademicYear plus the optional
+    /// active sub-period (Term/Semester), e.g. "2025–2026 · Term 1". Falls back
+    /// to whichever layer is present when the other is null.
+    /// </summary>
+    private string? DisplayName
+    {
+        get
+        {
+            if (_activeYear is null && _activeSubPeriod is null) return null;
+            if (_activeYear is null) return _activeSubPeriod!.Name;
+            if (_activeSubPeriod is null) return _activeYear.Name;
+            return $"{_activeYear.Name} · {_activeSubPeriod.Name}";
         }
     }
 

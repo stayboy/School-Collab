@@ -104,30 +104,20 @@
         var result = await dialog.Result;
         if (result.Cancelled) return;
 
-        var idx = Array.FindIndex(_items, x => x.Id == id);
-        if (idx < 0) return;
-
-        var previous = _items[idx];
-        _items[idx] = previous with { Status = "Active" };
-        _items = _items.ToArray();
-        StateHasChanged();
-
         Logger.LogInformation("Activating period {Id}", id);
         try
         {
             await Api.ActivatePeriodAsync(id);
             _error = null;
+            // Re-fetch the list so server-side cascade completions (the prior
+            // active year/siblings are closed by ActivatePeriodHandler) are
+            // reflected without a manual refresh.
+            await ReloadAsync();
         }
         catch (Exception ex)
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to activate period {Id}", id);
-            if (_items is not null)
-            {
-                var i = Array.FindIndex(_items, x => x.Id == id);
-                if (i >= 0) _items[i] = previous;
-                _items = _items.ToArray();
-            }
             _error = ex.Message;
             StateHasChanged();
         }
@@ -144,30 +134,41 @@
         var result = await dialog.Result;
         if (result.Cancelled) return;
 
-        var idx = Array.FindIndex(_items, x => x.Id == id);
-        if (idx < 0) return;
-
-        var previous = _items[idx];
-        _items[idx] = previous with { Status = "Completed" };
-        _items = _items.ToArray();
-        StateHasChanged();
-
         Logger.LogInformation("Completing period {Id}", id);
         try
         {
             await Api.CompletePeriodAsync(id);
             _error = null;
+            await ReloadAsync();
         }
         catch (Exception ex)
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to complete period {Id}", id);
-            if (_items is not null)
-            {
-                var i = Array.FindIndex(_items, x => x.Id == id);
-                if (i >= 0) _items[i] = previous;
-                _items = _items.ToArray();
-            }
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Re-fetches the period list after a successful activate/complete so the
+    /// server-side cascade (prior active year/siblings closed by the handler) is
+    /// reflected without a manual refresh.
+    /// </summary>
+    private async Task ReloadAsync()
+    {
+        if (_disposed) return;
+        try
+        {
+            _items = await Api.ListPeriodsAsync(_loadCts?.Token ?? CancellationToken.None);
+            if (_disposed) return;
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reload periods");
             _error = ex.Message;
             StateHasChanged();
         }

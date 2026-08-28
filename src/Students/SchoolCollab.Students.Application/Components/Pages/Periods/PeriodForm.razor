@@ -6,6 +6,7 @@
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Admin.Shared.Constants
 @inject StudentsApiClient Api
+@inject ConfigFlagsApiClient FlagsApi
 @inject NavigationManager Nav
 @inject ILogger<PeriodForm> Logger
 @implements IDisposable
@@ -55,10 +56,20 @@
         <FormRow Label="Period type *" AlignTop>
             <FluentSelect TOption="string" @bind-Value="_periodTypeText" Label="" Style="flex:1; min-width:0">
                 <FluentOption Value="AcademicYear">Academic Year</FluentOption>
-                <FluentOption Value="Term">Term</FluentOption>
-                <FluentOption Value="Semester">Semester</FluentOption>
+                @if (AllowTerm)
+                {
+                    <FluentOption Value="Term">Term</FluentOption>
+                }
+                @if (AllowSemester)
+                {
+                    <FluentOption Value="Semester">Semester</FluentOption>
+                }
             </FluentSelect>
         </FormRow>
+        @if (_division is not null)
+        {
+            <div class="form-hint">@DivisionHint</div>
+        }
 
         @if (_periodTypeText != "AcademicYear")
         {
@@ -157,6 +168,7 @@
     private DateTime? _start;
     private DateTime? _end;
     private string _periodTypeText = "AcademicYear";
+    private string? _division;
     private string _parentPeriodIdText = "";
     private PeriodDto[] _academicYears = [];
     private bool _saving;
@@ -173,6 +185,24 @@
 
     private const string EditHint = "Update the period name and date range.";
 
+    /// <summary>
+    /// Whether the Term option is offered. Null division (flag not loaded / error)
+    /// falls back to allowing both sub-period types so the form is never broken by
+    /// a failed flag read; a known division gates to the matching type only.
+    /// </summary>
+    private bool AllowTerm => _division is null or "Terms";
+
+    private bool AllowSemester => _division is null or "Semesters";
+
+    private string DivisionHint => _division switch
+    {
+        "Terms" => "This tenant's academic year division is Terms — only Term sub-periods are allowed.",
+        "Semesters" => "This tenant's academic year division is Semesters — only Semester sub-periods are allowed.",
+        // Unreachable in practice: the hint renders only when _division is not null;
+        // default kept for switch exhaustiveness.
+        _ => "This tenant's academic year division is None — only Academic Year periods are allowed."
+    };
+
     protected override async Task OnInitializedAsync()
     {
         _cts = new CancellationTokenSource();
@@ -182,6 +212,13 @@
         {
             _loadedPeriods = await Api.ListPeriodsAsync(ct) ?? [];
             _academicYears = _loadedPeriods.Where(p => p.PeriodType == "AcademicYear").ToArray();
+
+            // G4: load the tenant's academic-year division to gate the sub-period
+            // type options, keeping client-side validation in sync with the server's
+            // PeriodFrameworkMismatchException 422 gate.
+            var division = await FlagsApi.GetAcademicYearDivisionAsync(ct);
+            if (_disposed) return;
+            _division = division?.Value;
 
             if (!PeriodId.HasValue && InitialParentPeriodId.HasValue)
             {
@@ -204,6 +241,17 @@
             else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name))
             {
                 SuggestAcademicYearAsync();
+            }
+
+            // G4: if the current sub-period type is disallowed by the division
+            // (e.g. editing a Semester under a Terms division, or a sub-period
+            // under a None division), fall back to AcademicYear. An AcademicYear
+            // must not carry a ParentPeriodId, or the server rejects the save.
+            if ((_periodTypeText == "Term" && !AllowTerm)
+                || (_periodTypeText == "Semester" && !AllowSemester))
+            {
+                _periodTypeText = "AcademicYear";
+                _parentPeriodIdText = "";
             }
         }
         catch (OperationCanceledException) { }
