@@ -202,9 +202,6 @@ checked by a document owner before closing.
   Overreach wastes cycles and muddies the acceptance doc.
 - **Bound the tester-rework loop** (max ~2 rework iterations per round); after
   that surface residuals to the user instead of looping forever.
-- **Name collisions warn and keep the first skill found.** This local skill
-  intentionally mirrors the global `global:orchestrator-worker-reviewer` skill;
-  the repo-local copy wins when working in this repo.
 
 ## Verification
 
