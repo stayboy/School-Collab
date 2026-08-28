@@ -217,6 +217,42 @@ public class TopicCreateDialogTests : BunitContext
     }
 
     /// <summary>
+    /// AC-2a/2b/2c (FR-56): with an ActivityGroup owner, once a group is
+    /// selected the dialog shows a read-only "Enrollment span" badge with the
+    /// group's span value (Termly), coexisting with the filtered period options.
+    /// With no group selected the span display is absent.
+    /// </summary>
+    [TestMethod]
+    public async Task CreateDialog_GroupSelected_ShowsEnrollmentSpanBadge()
+    {
+        var handler = new ScriptedHandler();
+        Register(handler);
+        handler.Map("GET", "/activity-groups", HttpStatusCode.OK, GroupJson("Termly"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", $"/students/subjects/by-group/{GroupId}", HttpStatusCode.OK, "[]");
+
+        var cut = Render<FluentDialogProvider>();
+        var task = DialogService.ShowShellDialogAsync<TopicCreateDialog, TopicCreateDialog.TopicCreateModel, TopicDto>(
+            GroupModel("ActivityGroup"), "Add subject", DialogSize.Large);
+
+        cut.WaitForAssertion(() => cut.Find("form").Should().NotBeNull());
+        // AC-2a: nothing selected yet → no span display.
+        cut.Markup.Should().NotContain("Enrollment span");
+
+        await DriveGroupSelectAsync(cut, GroupId.ToString());
+
+        // AC-2b/2c: span badge shows the group's value, alongside the filtered Term options.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Enrollment span"));
+        cut.Markup.Should().Contain("Termly", "AC-2b: the selected group's span is displayed");
+        cut.Markup.Should().Contain("Term 1", "AC-2c: the span display coexists with the filtered period options");
+
+        // Cleanup: close the dialog.
+        cut.Find("fluent-button[aria-label='Close']").Click();
+        var result = await task.WaitAsync(TimeSpan.FromSeconds(5));
+        result.Should().BeNull("closing the dialog yields no result");
+    }
+
+    /// <summary>
     /// AC-45 (FR-56): a <c>Termly</c> activity group must only offer <c>Term</c>
     /// periods — a <c>Semester</c> period must be impossible to select.
     /// </summary>

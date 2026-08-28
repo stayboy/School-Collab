@@ -87,6 +87,12 @@
                         }
                     </FluentSelect>
                 </FormRow>
+                @if (SelectedGroup is { } selectedGroup)
+                {
+                    <FormRow Label="Enrollment span" For="topic-create-group-span">
+                        <FluentBadge Appearance="Appearance.Neutral">@selectedGroup.Span</FluentBadge>
+                    </FormRow>
+                }
                 @if (_groupDuplicateCodedValue)
                 {
                     <FluentMessageBar Intent="MessageIntent.Warning" class="mb-2">
@@ -162,6 +168,17 @@
     private PeriodDto[] _periods = [];
     private SubjectDto[] _groupExistingTopics = [];
     private Guid? _activeYearId;
+
+    /// <summary>
+    /// The activity group currently selected in the group picker (or null when
+    /// none is selected / the id does not resolve). Used to display the group's
+    /// enrollment span (FR-56) and mirrors <see cref="FilterPeriodsForGroup"/>'s
+    /// lookup.
+    /// </summary>
+    private ActivityGroupDto? SelectedGroup =>
+        Guid.TryParse(_activityGroupIdText, out var id)
+            ? _activityGroups.FirstOrDefault(g => g.Id == id)
+            : null;
 
     /// <summary>
     /// Periods offered to the user, filtered to those valid for the chosen owner
