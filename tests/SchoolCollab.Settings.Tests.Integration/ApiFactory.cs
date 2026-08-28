@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Settings.Core.Data;
+using SchoolCollab.Settings.Core.Services;
 using Testcontainers.PostgreSql;
 using Testcontainers.RabbitMq;
 
@@ -71,6 +72,13 @@ public sealed class ApiFactory : WebApplicationFactory<Program>, IAsyncDisposabl
                 opts.UseNpgsql(_postgres.GetConnectionString()).UseSnakeCaseNamingConvention());
             services.AddDbContextFactory<SettingsDbContext>(opts =>
                 opts.UseNpgsql(_postgres.GetConnectionString()).UseSnakeCaseNamingConvention());
+
+            // Replace the HTTP-backed sub-period count provider with the Core default
+            // so a division value change is testable without a running Students API.
+            // The production fail-closed behavior (indeterminate count rejects the
+            // switch) is preserved by the route; this only removes the network hop.
+            services.RemoveAll<ISubPeriodCountProvider>();
+            services.AddSingleton<ISubPeriodCountProvider>(new DefaultSubPeriodCountProvider());
         });
 
         builder.UseEnvironment("Testing");

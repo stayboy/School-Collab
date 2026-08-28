@@ -1,6 +1,13 @@
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
+using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.ActivatePeriod;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.CompletePeriod;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Tenancy;
 
@@ -71,5 +78,120 @@ public class ActivePeriodProviderTests
         // key is per-tenant (active-period:{tenantId}), so A's cached value is not leaked.
         ((TenantProvider)s.Tenants).SetTenant(new TenantContext(TenantB, "B", TenantType.School));
         (await provider.GetActivePeriodAsync()).Should().BeNull();
+    }
+
+    // ── §4.6/§10: active-sub-period + active-academic-year cache invalidation ──
+
+    private static CreatePeriodHandler NewCreate(StudentsTestScope s) =>
+        new(s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+
+    private static ActivatePeriodHandler NewActivate(StudentsTestScope s) =>
+        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
+
+    private static CompletePeriodHandler NewComplete(StudentsTestScope s) =>
+        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<CompletePeriodHandler>.Instance);
+
+    [TestMethod]
+    public async Task GetActiveSubPeriod_ReturnsActiveSubPeriodForCurrentTenant()
+    {
+        using var s = new StudentsTestScope("active-sub-provider");
+        var create = NewCreate(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+        var termId = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            PeriodType.Term, ParentPeriodId: yearId));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(termId));
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        var sub = await provider.GetActiveSubPeriodAsync();
+
+        sub.Should().NotBeNull();
+        sub!.Id.Should().Be(termId);
+        sub.PeriodType.Should().Be("Term");
+    }
+
+    [TestMethod]
+    public async Task GetActiveSubPeriod_ReturnsNullWhenNoneActive()
+    {
+        using var s = new StudentsTestScope("active-sub-none");
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        (await provider.GetActiveSubPeriodAsync()).Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task GetActiveSubPeriod_IsolatedPerTenant()
+    {
+        using var s = new StudentsTestScope("active-sub-iso");
+        var create = NewCreate(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+        var termId = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            PeriodType.Term, ParentPeriodId: yearId));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(termId));
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        (await provider.GetActiveSubPeriodAsync()).Should().NotBeNull();
+
+        ((TenantProvider)s.Tenants).SetTenant(new TenantContext(TenantB, "B", TenantType.School));
+        (await provider.GetActiveSubPeriodAsync()).Should().BeNull(
+            "the active-sub-period:{tenantId} key never leaks across tenants");
+    }
+
+    [TestMethod]
+    public async Task Activate_SecondTerm_InvalidatesCachedActiveSubPeriod()
+    {
+        using var s = new StudentsTestScope("active-sub-invalidate");
+        var create = NewCreate(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            PeriodType.Term, ParentPeriodId: yearId));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(t1));
+        var t2 = await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30),
+            PeriodType.Term, ParentPeriodId: yearId));
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        (await provider.GetActiveSubPeriodAsync())!.Id.Should().Be(t1, "warm the cache on T1");
+
+        // Activating T2 auto-closes T1 and invalidates the "students" tag.
+        await NewActivate(s).HandleAsync(new ActivatePeriod(t2));
+
+        (await provider.GetActiveSubPeriodAsync())!.Id.Should().Be(t2,
+            "no stale sub-period lookup after Activate invalidates the tag");
+    }
+
+    [TestMethod]
+    public async Task Activate_SecondYear_InvalidatesCachedActiveAcademicYear()
+    {
+        using var s = new StudentsTestScope("active-year-invalidate");
+        var create = NewCreate(s);
+        var ay2025 = await create.HandleAsync(new CreatePeriod("AY2025", new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31)));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(ay2025));
+        var ay2026 = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        (await provider.GetActiveAcademicYearAsync())!.Id.Should().Be(ay2025, "warm the cache on AY2025");
+
+        await NewActivate(s).HandleAsync(new ActivatePeriod(ay2026));
+
+        (await provider.GetActiveAcademicYearAsync())!.Id.Should().Be(ay2026,
+            "no stale active-academic-year lookup after Activate invalidates the tag");
+    }
+
+    [TestMethod]
+    public async Task Complete_AcademicYear_InvalidatesCachedYearLookups()
+    {
+        using var s = new StudentsTestScope("active-year-complete");
+        var create = NewCreate(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        (await provider.GetActiveAcademicYearAsync()).Should().NotBeNull("warm the cache");
+
+        await NewComplete(s).HandleAsync(new CompletePeriod(yearId));
+
+        (await provider.GetActiveAcademicYearAsync()).Should().BeNull(
+            "Complete invalidates the active-academic-year key (tag 'students')");
     }
 }
