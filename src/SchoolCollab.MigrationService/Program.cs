@@ -67,6 +67,7 @@ OutboxMapping.SetFlagsFor<AssignmentsDbContext>(OutboxConfigurationFlags.FromCon
 builder.Services.AddScoped<CodedValueSeeder>();
 builder.Services.AddScoped<TenantSeeder>();
 builder.Services.AddScoped<EntityCodeRuleSeeder>();
+builder.Services.AddScoped<PilotActivityGroupFlagOverrideSeeder>();
 
 using var host = builder.Build();
 var logger = host.Services.GetRequiredService<ILogger<Program>>();
@@ -106,7 +107,13 @@ try
             // tenancy overrides have a target tenant. Idempotent by Name. See
             // documents/specs/grade-level-setup.md §5.5 / PR 1.
             var tenantSeeder = scope.ServiceProvider.GetRequiredService<TenantSeeder>();
-            await tenantSeeder.SeedAsync();
+            var tenantIdsByName = await tenantSeeder.SeedAsync();
+
+            // Phase 6.1: turn FEATURE:EnableActivityGroups ON for the pilot tenant only
+            // (TenantFeatureFlagOverride). Global default stays OFF. Runs AFTER the flag
+            // seed and AFTER the tenant seed. Idempotent. See documents/specs/plan-phase6-1.md.
+            var pilotOverrideSeeder = scope.ServiceProvider.GetRequiredService<PilotActivityGroupFlagOverrideSeeder>();
+            await pilotOverrideSeeder.SeedAsync(tenantIdsByName);
         }
         catch (Exception ex)
         {
