@@ -39,7 +39,7 @@ else if (Kind == NotificationPolicyFieldEditDialog.FieldKind.Int)
 else
 {
     <input type="time" class="time-input" value="@TimeText"
-           @onchange="e => TimeTextChanged.InvokeAsync(e.Value?.ToString())" />
+           @onchange="async e => await TimeTextChanged.InvokeAsync(e.Value?.ToString())" />
 }
 
 <style>
@@ -71,7 +71,7 @@ else
     private static readonly NotificationChannel[] AllChannels =
         [NotificationChannel.Email, NotificationChannel.SMS, NotificationChannel.WhatsApp];
 
-    private void OnToggleChannel(NotificationChannel channel, bool on)
+    private async Task OnToggleChannel(NotificationChannel channel, bool on)
     {
         var updated = new List<NotificationChannel>(Channels);
         if (on)
@@ -82,7 +82,7 @@ else
         {
             updated.Remove(channel);
         }
-        ChannelsChanged.InvokeAsync(updated);
+        await ChannelsChanged.InvokeAsync(updated);
     }
 
     private static string ChannelName(NotificationChannel ch)
