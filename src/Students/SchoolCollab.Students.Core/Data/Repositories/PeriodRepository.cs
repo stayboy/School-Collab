@@ -77,8 +77,15 @@ internal sealed class PeriodRepository(StudentsDbContext db)
     public async Task<Period?> GetCurrentPeriodAsync(CancellationToken cancellationToken = default)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        // "Current" = the active period containing today. Prefer the more specific
+        // sub-period (Term/Semester) over the AcademicYear, then Term over Semester,
+        // then earliest start — deterministic under the two-active-rows hierarchy.
         return await Db.Periods
             .AsNoTracking()
-            .FirstOrDefaultAsync(p => p.StartDate <= today && p.EndDate >= today, cancellationToken);
+            .Where(p => p.Status == PeriodStatus.Active && p.StartDate <= today && p.EndDate >= today)
+            .OrderBy(p => p.PeriodType == PeriodType.AcademicYear ? 1 : 0)
+            .ThenBy(p => p.PeriodType)
+            .ThenBy(p => p.StartDate)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 }

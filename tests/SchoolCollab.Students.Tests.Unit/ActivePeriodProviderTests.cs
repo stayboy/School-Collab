@@ -194,4 +194,101 @@ public class ActivePeriodProviderTests
         (await provider.GetActiveAcademicYearAsync()).Should().BeNull(
             "Complete invalidates the active-academic-year key (tag 'students')");
     }
+
+    // ── B1: deterministic active sub-period under the two-active-rows hierarchy ──
+
+    [TestMethod]
+    public async Task GetActiveSubPeriod_WithTermAndSemesterActive_ReturnsDeterministicOne()
+    {
+        using var s = new StudentsTestScope("active-sub-deterministic");
+        var tenantId = s.Tenants.GetTenantContext().TenantId;
+
+        var year = Period.Create("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31));
+        year.Activate();
+        ((ITenantEntity)year).TenantId = tenantId;
+
+        var term = Period.Create("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            PeriodType.Term, parentPeriodId: year.Id);
+        term.Activate();
+        ((ITenantEntity)term).TenantId = tenantId;
+
+        var semester = Period.Create("S1", new DateOnly(2027, 1, 1), new DateOnly(2027, 5, 31),
+            PeriodType.Semester, parentPeriodId: year.Id);
+        semester.Activate();
+        ((ITenantEntity)semester).TenantId = tenantId;
+
+        s.Db.Periods.AddRange(year, term, semester);
+        await s.Db.SaveChangesAsync();
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        var sub = await provider.GetActiveSubPeriodAsync();
+
+        sub.Should().NotBeNull();
+        sub!.Id.Should().Be(term.Id, "Term (PeriodType=1) is ordered before Semester (PeriodType=2)");
+        sub.PeriodType.Should().Be("Term");
+    }
+
+    // ── B2: GetCurrentPeriodAsync ignores Draft + prefers the sub-period ──
+
+    [TestMethod]
+    public async Task GetCurrentPeriod_IgnoresDraftPeriods()
+    {
+        using var s = new StudentsTestScope("current-period-draft");
+        var tenantId = s.Tenants.GetTenantContext().TenantId;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        // A Draft period spanning today must NOT be returned as the current period.
+        var draft = Period.Create("Draft AY", today.AddDays(-10), today.AddDays(10));
+        ((ITenantEntity)draft).TenantId = tenantId;
+        s.Db.Periods.Add(draft);
+        await s.Db.SaveChangesAsync();
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        (await provider.GetCurrentPeriodAsync()).Should().BeNull(
+            "a Draft period containing today is not the current period");
+    }
+
+    [TestMethod]
+    public async Task GetCurrentPeriod_ReturnsActivePeriodContainingToday()
+    {
+        using var s = new StudentsTestScope("current-period-active");
+        var tenantId = s.Tenants.GetTenantContext().TenantId;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var active = Period.Create("AY2026", today.AddDays(-10), today.AddDays(10));
+        active.Activate();
+        ((ITenantEntity)active).TenantId = tenantId;
+        s.Db.Periods.Add(active);
+        await s.Db.SaveChangesAsync();
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        var current = await provider.GetCurrentPeriodAsync();
+        current.Should().NotBeNull();
+        current!.Id.Should().Be(active.Id);
+    }
+
+    [TestMethod]
+    public async Task GetCurrentPeriod_PrefersSubPeriodOverYear()
+    {
+        using var s = new StudentsTestScope("current-period-sub-pref");
+        var tenantId = s.Tenants.GetTenantContext().TenantId;
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+
+        var year = Period.Create("AY2026", today.AddDays(-10), today.AddDays(10));
+        year.Activate();
+        ((ITenantEntity)year).TenantId = tenantId;
+
+        var term = Period.Create("T1", today.AddDays(-5), today.AddDays(5),
+            PeriodType.Term, parentPeriodId: year.Id);
+        term.Activate();
+        ((ITenantEntity)term).TenantId = tenantId;
+
+        s.Db.Periods.AddRange(year, term);
+        await s.Db.SaveChangesAsync();
+
+        var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
+        var current = await provider.GetCurrentPeriodAsync();
+        current.Should().NotBeNull();
+        current!.Id.Should().Be(term.Id, "the more specific sub-period is preferred over the year");
+    }
 }
