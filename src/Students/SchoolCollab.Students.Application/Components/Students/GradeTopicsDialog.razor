@@ -42,6 +42,7 @@
                             @topic.StrandCount strands
                         </FluentAnchor>
                         <span class="topic-dialog__count" title="@topic.LessonCount lessons">@topic.LessonCount lessons</span>
+                        <span class="topic-dialog__period" title="Delivery period">@PeriodLabel(topic.TopicId)</span>
                     </div>
                     <RowActionsMenu Actions="@BuildRowActions(topic)"
                                     AriaLabel="Topic actions"
@@ -56,6 +57,10 @@
 </div>
 
 @code {
+    /// <summary>Lightweight per-assignment reference passed from the page so the
+    /// dialog can show the delivery period and invoke the period-edit flow.</summary>
+    public sealed record AssignedTopicRef(Guid TopicId, Guid AssignmentId, Guid? PeriodId);
+
     /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
     /// indexer). Exposed so callers set the same keys they read here.</summary>
     public const string TopicsKey = nameof(Topics);
@@ -65,6 +70,8 @@
     public const string RemoveKey = nameof(Remove);
     public const string AssignKey = nameof(Assign);
     public const string OnChangedKey = nameof(OnChanged);
+    public const string AssignmentByKeyKey = nameof(AssignmentByKey);
+    public const string EditPeriodKey = nameof(EditPeriod);
 
     // Read from Content (the DialogParameters indexer) — FluentUI renders dialog
     // content via DynamicComponent with only { "Content": <DialogParameters> } and
@@ -86,6 +93,8 @@
     private Func<Guid, Task>? Remove => Get<Func<Guid, Task>>(RemoveKey);
     private Func<Guid, Task>? Assign => Get<Func<Guid, Task>>(AssignKey);
     private Func<Task>? OnChanged => Get<Func<Task>>(OnChangedKey);
+    private Dictionary<Guid, AssignedTopicRef>? AssignmentByKey => Get<Dictionary<Guid, AssignedTopicRef>>(AssignmentByKeyKey);
+    private Func<Guid, Task>? EditPeriod => Get<Func<Guid, Task>>(EditPeriodKey);
 
     [CascadingParameter] public FluentDialog? Dialog { get; set; }
     [Parameter] public DialogParameters Content { get; set; } = default!;
@@ -114,6 +123,7 @@
         {
             RowAction.Callback("Strands", () => OpenStrandsAsync(topic), FluentIcons.TextBulletList),
             RowAction.Callback("Teachers", () => OpenTeachersAsync(topic), FluentIcons.People),
+            RowAction.Callback("Edit period", () => EditPeriodAsync(topic), FluentIcons.Calendar),
             RowAction.Separator(),
             RowAction.Callback(
                 "Remove",
@@ -122,6 +132,19 @@
                 destructive: true,
                 confirmMessage: $"Remove subject '{topic.Name}' from this grade? The subject stays in the catalog; only this grade's assignment is removed."),
         };
+
+    private string PeriodLabel(Guid topicId)
+    {
+        if (AssignmentByKey is { } map && map.TryGetValue(topicId, out var a) && a.PeriodId is { } pid)
+            return pid.ToString()[..8];
+        return "Year-spanning";
+    }
+
+    private async Task EditPeriodAsync(GradeTopicCurriculumDto topic)
+    {
+        if (EditPeriod is null || AssignmentByKey is not { } map || !map.TryGetValue(topic.TopicId, out var a)) return;
+        await EditPeriod(a.AssignmentId);
+    }
 
     private async Task RemoveAsync(GradeTopicCurriculumDto topic)
     {

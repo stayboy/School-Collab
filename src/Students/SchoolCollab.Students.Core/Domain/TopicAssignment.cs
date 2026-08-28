@@ -118,5 +118,18 @@ public abstract class TopicAssignment : ITenantEntity, IEntity, IAuditableEntity
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    /// <summary>
+    /// Changes the period scope of an existing assignment (Rev. 6 FR-55/56/57).
+    /// Null reverts to the year-spanning (grade) / date-based-window (group)
+    /// delivery. No-op when unchanged. This is the only mutation path for
+    /// <see cref="PeriodId"/> after creation.
+    /// </summary>
+    public void UpdatePeriod(Guid? periodId)
+    {
+        if (PeriodId == periodId) return;
+        PeriodId = periodId;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     public void ClearDomainEvents() => _domainEvents.Clear();
 }

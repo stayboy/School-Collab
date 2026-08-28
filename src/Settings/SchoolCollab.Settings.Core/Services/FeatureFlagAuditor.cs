@@ -19,7 +19,9 @@ public sealed class FeatureFlagAuditor(IActorAccessor actorAccessor)
         FlagChangeKind changeKind,
         bool? previousIsEnabled,
         bool? newIsEnabled,
-        string? reason)
+        string? reason,
+        string? previousValue = null,
+        string? newValue = null)
     {
         db.FlagAuditEntries.Add(FlagAuditEntry.Create(
             tenantId: tenantId,
@@ -30,6 +32,8 @@ public sealed class FeatureFlagAuditor(IActorAccessor actorAccessor)
             newIsEnabled: newIsEnabled,
             reason: reason,
             actorId: actorAccessor.ActorId,
-            actorDisplayName: actorAccessor.ActorDisplayName));
+            actorDisplayName: actorAccessor.ActorDisplayName,
+            previousValue: previousValue,
+            newValue: newValue));
     }
 }

@@ -77,7 +77,8 @@ public sealed class ListAuditEntriesHandler(SettingsDbContext db)
 
         return entries.Select(e => new FlagAuditEntryDto(
             e.Id, e.TenantId, e.FeatureFlagId, e.FeatureFlagKey, e.ChangeKind.ToString(),
-            e.PreviousIsEnabled, e.NewIsEnabled, e.Reason, e.ActorId, e.ActorDisplayName, e.OccurredAt)).ToArray();
+            e.PreviousIsEnabled, e.NewIsEnabled, e.PreviousValue, e.NewValue,
+            e.Reason, e.ActorId, e.ActorDisplayName, e.OccurredAt)).ToArray();
     }
 }
 

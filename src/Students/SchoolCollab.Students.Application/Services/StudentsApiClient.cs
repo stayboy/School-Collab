@@ -149,6 +149,7 @@ public sealed record TopicAssignmentDto(
     DateOnly StartDate,
     DateOnly? EndDate,
     Guid? TopicStrandId,
+    Guid? PeriodId,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -385,6 +386,8 @@ public record AssignActivityGroupTopicRequest(
     DateOnly StartDate,
     DateOnly? EndDate = null,
     Guid? PeriodId = null);
+
+public record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);
 
 public record AssignStudentTopicRequest(
     Guid StudentId,
@@ -1429,6 +1432,10 @@ public sealed class StudentsApiClient : IContactsClient
 
     public async Task RemoveTopicAssignmentAsync(Guid id, CancellationToken ct = default) =>
         (await _http.DeleteAsync($"/students/topic-assignments/{id}", ct)).EnsureSuccessStatusCode();
+
+    public async Task UpdateTopicAssignmentPeriodAsync(Guid id, Guid? periodId, CancellationToken ct = default) =>
+        (await _http.PutAsJsonAsync($"/students/topic-assignments/{id}/period",
+            new UpdateTopicAssignmentPeriodRequest(periodId), ct)).EnsureSuccessStatusCode();
 
     // ── Student Subject Assignments ──────────────────────────────────────────
 

@@ -20,7 +20,16 @@ public sealed class AssignActivityGroupTopicHandler(
 
         // ── Rev. 6 FR-56: the group's EnrollmentSpan dictates whether/which period
         //    a group-owned topic's PeriodId may reference.
-        await ValidatePeriodAsync(command, cancellationToken);
+        await TopicAssignmentPeriodValidator.ValidateGroupPeriodAsync(
+            command.ActivityGroupId, command.PeriodId, groupRepository, periodRepository, cancellationToken);
+
+        // ── Rev. 6: reject a duplicate active (group, topic, period) assignment.
+        //    Period validation runs first so an invalid period still 422s before
+        //    the duplicate guard (which would otherwise 409).
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var active = await repository.ListByActivityGroupAsync(command.ActivityGroupId, today, cancellationToken);
+        if (active.Any(a => a.TopicId == command.TopicId && a.PeriodId == command.PeriodId))
+            throw new DuplicateTopicAssignmentException(command.ActivityGroupId, command.TopicId, command.PeriodId);
 
         var assignment = ActivityGroupTopicAssignment.Create(
             command.ActivityGroupId,
@@ -36,35 +45,5 @@ public sealed class AssignActivityGroupTopicHandler(
 
         logger.LogInformation("ActivityGroupTopicAssignment {Id} created", assignment.Id);
         return assignment.Id;
-    }
-
-    private async Task ValidatePeriodAsync(AssignActivityGroupTopic command, CancellationToken cancellationToken)
-    {
-        if (command.PeriodId is null)
-            return; // null = date-based window (OpenEnded/DateRange, or period-aligned but no period set).
-
-        var group = await groupRepository.GetAsync(command.ActivityGroupId, cancellationToken)
-            ?? throw new ActivityGroupNotFoundException(command.ActivityGroupId);
-
-        // OpenEnded/DateRange carry no period → PeriodId must be null (EC-23).
-        var requiredType = group.Span switch
-        {
-            EnrollmentSpan.Termly => PeriodType.Term,
-            EnrollmentSpan.Semester => PeriodType.Semester,
-            EnrollmentSpan.WholeAcademicYear => PeriodType.AcademicYear,
-            _ => (PeriodType?)null
-        };
-
-        if (requiredType is null)
-            throw new TopicAssignmentPeriodException(
-                $"An {group.Span} activity group topic assignment must not carry a PeriodId.", command.PeriodId);
-
-        var period = await periodRepository.GetAsync(command.PeriodId.Value, cancellationToken)
-            ?? throw new TopicAssignmentPeriodException($"Period '{command.PeriodId}' does not exist.", command.PeriodId);
-
-        if (period.PeriodType != requiredType.Value)
-            throw new TopicAssignmentPeriodException(
-                $"A {group.Span} activity group topic requires a {requiredType} period, but '{command.PeriodId}' is a {period.PeriodType}.",
-                command.PeriodId);
     }
 }

@@ -1,0 +1,77 @@
+@*
+    TopicAssignmentPeriodEditDialog — lets an admin change the delivery period of
+    an existing grade topic assignment (Rev. 6 FR-55/57). Opens from the grade
+    Topics card's "Edit period" row action. Loads the valid periods for the grade
+    owner (active AcademicYear + its active Term/Semester sub-periods, plus a
+    "Year-spanning (no period)" option) and calls
+    PUT /topic-assignments/{id}/period. Surfaces 422 messages from the server.
+*@
+@inherits DialogShellBase<TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditModel, TopicAssignmentPeriodEditDialog.TopicAssignmentPeriodEditResult>
+@using System.ComponentModel.DataAnnotations
+@using SchoolCollab.Students.Application.Services
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <FormRow Label="Delivery period" For="tap-edit-period">
+            <FluentSelect TOption="string" @bind-Value="_periodIdText" Id="tap-edit-period" Style="flex:1; min-width:0">
+                <FluentOption Value="">Year-spanning (no period)</FluentOption>
+                @foreach (var p in _periods)
+                {
+                    <FluentOption Value="@p.Id.ToString()">@p.Name</FluentOption>
+                }
+            </FluentSelect>
+        </FormRow>
+
+        <DialogShellFooter Saving="Saving" Error="Error" SubmitText="Save" SavingText="Saving…" OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    public sealed class TopicAssignmentPeriodEditModel
+    {
+        public Guid AssignmentId { get; set; }
+        public Guid GradeLevelId { get; set; }
+        public Guid? CurrentPeriodId { get; set; }
+    }
+
+    public sealed record TopicAssignmentPeriodEditResult(Guid AssignmentId, Guid? PeriodId);
+
+    private PeriodDto[] _periods = [];
+    private string _periodIdText = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var all = await Api.ListPeriodsAsync() ?? [];
+        var activeYear = await Api.GetActiveAcademicYearAsync();
+        var activeYearId = activeYear?.Id;
+
+        // Grade-owned: AcademicYear, or a Term/Semester within the active year.
+        _periods = all
+            .Where(p => p.PeriodType == "AcademicYear"
+                || (activeYearId.HasValue && p.ParentPeriodId == activeYearId.Value))
+            .OrderBy(p => p.Name)
+            .ToArray();
+
+        if (Model.CurrentPeriodId is { } pid)
+            _periodIdText = pid.ToString();
+    }
+
+    protected override async Task<TopicAssignmentPeriodEditResult?> SubmitAsync(TopicAssignmentPeriodEditModel model)
+    {
+        Guid? periodId = Guid.TryParse(_periodIdText, out var pid) ? pid : null;
+        try
+        {
+            await Api.UpdateTopicAssignmentPeriodAsync(model.AssignmentId, periodId);
+            return new TopicAssignmentPeriodEditResult(model.AssignmentId, periodId);
+        }
+        catch (Exception ex)
+        {
+            Error = ex.Message;
+            return null;
+        }
+    }
+}

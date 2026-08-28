@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.AssignGradeTopic;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.AssignActivityGroupTopic;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.RemoveTopicAssignment;
+using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicAssignmentPeriod;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Commands.UpdateTopicAssignmentTags;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicAssignments;
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListActivityGroupTopicAssignments;
@@ -64,6 +65,7 @@ public static class TopicAssignmentRoutes
             }
             catch (TopicAssignmentPeriodException ex) { return Results.Json(new { ex.Message }, statusCode: 422); }
             catch (ActivityGroupNotFoundException) { return Results.NotFound(); }
+            catch (DuplicateTopicAssignmentException ex) { return Results.Conflict(new { ex.Message }); }
         });
 
         group.MapPut("/topic-assignments/{id:guid}/tags", async (
@@ -80,6 +82,27 @@ public static class TopicAssignmentRoutes
             catch (KeyNotFoundException)
             {
                 return Results.NotFound();
+            }
+        });
+
+        group.MapPut("/topic-assignments/{id:guid}/period", async (
+            Guid id,
+            [FromBody] UpdateTopicAssignmentPeriodRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<UpdateTopicAssignmentPeriod, SchoolCollab.Students.Core.DTOs.TopicAssignmentDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new UpdateTopicAssignmentPeriod(id, req.PeriodId), ct);
+                return Results.Ok(result);
+            }
+            catch (KeyNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (TopicAssignmentPeriodException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 422);
             }
         });
 
@@ -104,3 +127,4 @@ public static class TopicAssignmentRoutes
 }
 
 internal record UpdateTopicAssignmentTagsRequest(Guid? TopicStrandId);
+internal record UpdateTopicAssignmentPeriodRequest(Guid? PeriodId);

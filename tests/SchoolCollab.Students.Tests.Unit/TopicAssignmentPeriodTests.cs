@@ -141,4 +141,90 @@ public class TopicAssignmentPeriodTests
             new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 9, 1), PeriodId: yearId)))
             .Should().ThrowAsync<TopicAssignmentPeriodException>();
     }
+
+    // Rev. 6: duplicate active (group, topic, period) assignment → rejected (409).
+    [TestMethod]
+    public async Task AssignGroup_DuplicateActiveSamePeriod_Throws()
+    {
+        using var s = new StudentsTestScope("tp-dup-period-" + Guid.NewGuid());
+        var (_, termId) = await SeedActiveYearAsync(s);
+        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+
+        // Start date in the past so the assignment is active on today (the guard
+        // checks effectiveness on DateTime.UtcNow).
+        await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2026, 1, 1), PeriodId: termId));
+
+        await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
+            new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 1, 1), PeriodId: termId)))
+            .Should().ThrowAsync<DuplicateTopicAssignmentException>();
+    }
+
+    // Rev. 6: duplicate active (group, topic) with null period → rejected (null == null).
+    [TestMethod]
+    public async Task AssignGroup_DuplicateActiveNullPeriod_Throws()
+    {
+        using var s = new StudentsTestScope("tp-dup-null-" + Guid.NewGuid());
+        await SeedActiveYearAsync(s);
+        var group = ActivityGroup.Create("Open Club", span: EnrollmentSpan.OpenEnded);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+
+        await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2026, 1, 1)));
+
+        await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
+            new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 1, 1))))
+            .Should().ThrowAsync<DuplicateTopicAssignmentException>();
+    }
+
+    // Rev. 6: same (group, topic) with a different period → both succeed.
+    [TestMethod]
+    public async Task AssignGroup_DifferentPeriod_AllowsSecond()
+    {
+        using var s = new StudentsTestScope("tp-diff-period-" + Guid.NewGuid());
+        var (yearId, termId) = await SeedActiveYearAsync(s);
+        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+
+        // A second Term within the active year gives a distinct PeriodId.
+        var create = NewCreatePeriod(s);
+        var term2 = await create.HandleAsync(new CreatePeriod(
+            "T2", D(2027, 1, 1), D(2027, 4, 30), PeriodType.Term, ParentPeriodId: yearId));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(term2));
+
+        await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2026, 1, 1), PeriodId: termId));
+        var second = await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2026, 1, 1), PeriodId: term2));
+        second.Should().NotBeEmpty();
+    }
+
+    // Rev. 6: period validation runs before the duplicate guard (422 wins over 409).
+    [TestMethod]
+    public async Task AssignGroup_InvalidPeriod_Still422BeforeDuplicate()
+    {
+        using var s = new StudentsTestScope("tp-422-before-dup-" + Guid.NewGuid());
+        var (yearId, _) = await SeedActiveYearAsync(s, withTerm: false);
+        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+
+        // First assign with a valid Term.
+        var create = NewCreatePeriod(s);
+        var term = await create.HandleAsync(new CreatePeriod(
+            "T1", D(2026, 9, 1), D(2026, 12, 31), PeriodType.Term, ParentPeriodId: yearId));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(term));
+        await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
+            group.Id, TopicId, D(2026, 1, 1), PeriodId: term));
+
+        // Second assign with the SAME (group, topic) but an INVALID period (year).
+        // The invalid period must 422 (TopicAssignmentPeriodException), not 409.
+        await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
+            new AssignActivityGroupTopic(group.Id, TopicId, D(2026, 1, 1), PeriodId: yearId)))
+            .Should().ThrowAsync<TopicAssignmentPeriodException>();
+    }
 }
