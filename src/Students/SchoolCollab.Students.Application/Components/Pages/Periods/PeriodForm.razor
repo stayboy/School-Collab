@@ -46,67 +46,71 @@
             </FluentStack>
         }
 
-        <FluentStack Orientation="Orientation.Vertical" Spacing="4">
-            @* Division is the single kind selector (plan-drop-periodtype.md). None =
-               a plain top-level academic year; Terms/Semesters on a top-level year
-               (no parent) means the year may contain only that sub-period kind; on a
-               sub-period (parent selected) it is the sub-period's own kind. When the
-               period is a sub-period the division is locked to its parent's division
-               and the parent dropdown is shown. *@
-            <FormRow Label="Division *" AlignTop>
-                <FluentSelect TOption="string"
-                              @bind-Value="_divisionSelect"
-                              Label=""
-                              Disabled="@_isSubPeriod"
-                              Style="flex:1; min-width:0">
-                    <FluentOption Value="None">None (single academic year)</FluentOption>
-                    <FluentOption Value="Terms">Terms</FluentOption>
-                    <FluentOption Value="Semesters">Semesters</FluentOption>
-                </FluentSelect>
-            </FormRow>
-
-            @if (_isSubPeriod)
-            {
-                <FormRow Label="Parent academic year *" AlignTop>
-                    <FluentSelect TOption="string"
-                                  @bind-Value="_parentPeriodIdText"
-                                  Label=""
-                                  Disabled="true"
-                                  Style="flex:1; min-width:0">
-                        <FluentOption Value="">— Select academic year —</FluentOption>
-                        @foreach (var ay in _academicYears)
-                        {
-                            <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
-                        }
-                    </FluentSelect>
-                </FormRow>
-            }
-
-            @* Period name + the Suggest/Backfill buttons. The row contains
-               three controls (text field + two icon buttons) so the label
-               is top-aligned (AlignTop) to sit naturally against the taller
-               cell — matches the pre-FormRow visual. *@
-            <FormRow Label="Period name *" AlignTop For="periodName">
-                <FluentTextField Id="periodName" @bind-Value="_name"
-                                 Label=""
-                                 Placeholder="e.g. 2025–2026 Academic Year"
-                                 Style="flex:1; min-width:0" />
+        @* Shared field set (PeriodFormFields) — identical rows for create and
+           edit. The create-only Suggest/Backfill buttons ride along via the
+           NameActions fragment; the create-only sub-periods section renders
+           below the shared fields. *@
+        <PeriodFormFields Model="_model"
+                          IsSubPeriod="_isSubPeriod"
+                          DivisionLocked="_isSubPeriod"
+                          AcademicYears="_academicYears"
+                          DivisionChanged="OnDivisionChangedAsync">
+            <NameActions>
                 <FluentButton IconStart="@FluentIcons.Calendar"
                               Title="Fill the form with the current academic year (editable template)"
                               OnClick="SuggestAcademicYearAsync" />
                 <FluentButton IconStart="@FluentIcons.ArrowClockwise"
                               Title="Fill the form with the next academic year after the latest period"
                               OnClick="BackfillAsync" />
-            </FormRow>
+            </NameActions>
+        </PeriodFormFields>
 
-            @* Two date pickers side-by-side. AlignTop so the "Dates *" label
-               sits at the top of the row (top-align reads better against a
-               two-input cell than centering). *@
-            <FormRow Label="Dates *" AlignTop>
-                <FluentDatePicker @bind-Value="_start" Label="" Style="flex:1; min-width:0" />
-                <FluentDatePicker @bind-Value="_end"   Label="" Style="flex:1; min-width:0" />
-            </FormRow>
-        </FluentStack>
+        @* Sub-periods section (FR-C5) — shown only when creating a TOP-LEVEL
+           Terms/Semesters academic year so the year and its sub-periods persist
+           atomically in one create. Hidden for None division, for sub-period
+           create (?parent=), and in edit mode. *@
+        @if (ShowSubPeriodsSection)
+        {
+            <div class="sub-periods-section">
+                <div class="sub-periods-header">
+                    <h4>Sub-periods</h4>
+                    <div class="sub-periods-actions">
+                        <FluentButton Appearance="Appearance.Accent"
+                                      OnClick="AutoSplitSubPeriodsAsync"
+                                      Disabled="@(!_hasYearRange)"
+                                      Title="@AutoSplitTitle">
+                            @AutoSplitLabel
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline"
+                                      OnClick="AddSubPeriodAsync">
+                            + Add sub-period
+                        </FluentButton>
+                    </div>
+                </div>
+                <p class="form-hint">Terms/Semesters are created together with this year in a single operation.</p>
+                @if (_subPeriodRows.Count == 0)
+                {
+                    <p class="muted">No sub-periods yet — add rows or use Auto-split.</p>
+                }
+                else
+                {
+                    @for (var rowIndex = 0; rowIndex < _subPeriodRows.Count; rowIndex++)
+                    {
+                        var row = _subPeriodRows[rowIndex];
+                        <div class="sub-period-row">
+                            <FluentTextField Label="" @bind-Value="row.Name"
+                                             Placeholder="Name"
+                                             Style="flex:1; min-width:0" />
+                            <FluentDatePicker Label="" @bind-Value="row.Start" Style="flex:1; min-width:0" />
+                            <FluentDatePicker Label="" @bind-Value="row.End"   Style="flex:1; min-width:0" />
+                            <FluentButton IconStart="@FluentIcons.Dismiss"
+                                          Title="Remove this sub-period"
+                                          OnClick="@(() => RemoveSubPeriodAsync(rowIndex))" />
+                        </div>
+                    }
+                }
+            </div>
+        }
 
         <div class="form-actions">
             @if (ShowCancel)
@@ -180,16 +184,48 @@
     /// </summary>
     [Parameter] public Guid? InitialParentPeriodId { get; set; }
 
-    private string _name = string.Empty;
-    private DateTime? _start;
-    private DateTime? _end;
-    private string _divisionSelect = "None";
-    private string _parentPeriodIdText = "";
+    /// <summary>Form field state shared by the create and edit flows. Bound to
+    /// <see cref="PeriodFormFields"/> via <see cref="PeriodFormFields.IPeriodFormModel"/>
+    /// so both flows render identical fields backed by one model.</summary>
+    private sealed class PeriodFormModel : PeriodFormFields.IPeriodFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string DivisionSelect { get; set; } = "None";
+        public string ParentPeriodIdText { get; set; } = "";
+        public DateTime? Start { get; set; }
+        public DateTime? End { get; set; }
+    }
+
+    private readonly PeriodFormModel _model = new();
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _cts;
     private volatile bool _disposed;
     private PeriodDto[]? _loadedPeriods;
+
+    /// <summary>Sub-period definition rows for the atomic-create section (FR-C5).
+    /// Only populated/shown in top-level Terms/Semesters create mode. Mutable so
+    /// the two-way <c>@bind-Value</c> on the row's fields can write back.</summary>
+    private sealed class SubPeriodRow
+    {
+        public string Name { get; set; } = "";
+        public DateTime? Start { get; set; }
+        public DateTime? End { get; set; }
+    }
+
+    private readonly List<SubPeriodRow> _subPeriodRows = new();
+
+    /// <summary>True when a valid year range is entered, enabling Auto-split (FR-C5).</summary>
+    private bool _hasYearRange => _model.Start is not null && _model.End is not null && _model.End.Value.Date >= _model.Start.Value.Date;
+
+    /// <summary>The Sub-periods section renders only in top-level Terms/Semesters
+    /// create mode (FR-C5): not for None, not for sub-period create (?parent=), and
+    /// not in edit mode (FR-C6).</summary>
+    private bool ShowSubPeriodsSection =>
+        !PeriodId.HasValue && !_isSubPeriod && !ShowBlockedPanel
+        && (_model.DivisionSelect == nameof(AcademicYearDivision.Terms)
+            || _model.DivisionSelect == nameof(AcademicYearDivision.Semesters)
+            || _model.DivisionSelect == "Terms" || _model.DivisionSelect == "Semesters");
 
     /// <summary>True when the current period is a sub-period (has a parent). The
     /// division is locked to the parent's division and the parent dropdown is
@@ -223,7 +259,7 @@
     /// <summary>Top-level academic years whose division matches the selected
     /// division — the valid parents for a sub-period of that kind.</summary>
     private PeriodDto[] _academicYears =>
-        _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _divisionSelect).ToArray() ?? [];
+        _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _model.DivisionSelect).ToArray() ?? [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -240,11 +276,11 @@
             // as an error instead of silently falling back to a top-level year.
             if (!PeriodId.HasValue && InitialParentPeriodId.HasValue)
             {
-                _parentPeriodIdText = InitialParentPeriodId.Value.ToString();
+                _model.ParentPeriodIdText = InitialParentPeriodId.Value.ToString();
                 var parent = _loadedPeriods.FirstOrDefault(p => p.Id == InitialParentPeriodId.Value);
-                _divisionSelect = parent?.Division ?? "None";
+                _model.DivisionSelect = parent?.Division ?? "None";
                 _isSubPeriod = true;
-                if (_divisionSelect == "None")
+                if (_model.DivisionSelect == "None")
                 {
                     // A None-division year cannot host sub-periods — block the form
                     // (P2-5) instead of surfacing a bottom-bar error with no escape.
@@ -257,15 +293,15 @@
                 var p = await Api.GetPeriodByIdAsync(PeriodId.Value, ct);
                 if (p is not null)
                 {
-                    _name = p.Name;
-                    _start = p.StartDate.ToDateTime(TimeOnly.MinValue);
-                    _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
-                    _divisionSelect = p.Division;
-                    _parentPeriodIdText = p.ParentPeriodId?.ToString() ?? "";
+                    _model.Name = p.Name;
+                    _model.Start = p.StartDate.ToDateTime(TimeOnly.MinValue);
+                    _model.End = p.EndDate.ToDateTime(TimeOnly.MinValue);
+                    _model.DivisionSelect = p.Division;
+                    _model.ParentPeriodIdText = p.ParentPeriodId?.ToString() ?? "";
                     _isSubPeriod = p.ParentPeriodId.HasValue;
                 }
             }
-            else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name) && !_parentBlocked)
+            else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_model.Name) && !_parentBlocked)
             {
                 // P2-6: prefill is intentionally skipped in the blocked state (a
                 // None-division parent cannot host sub-periods); the blocked panel
@@ -285,6 +321,12 @@
     private static AcademicYearDivision ParseDivision(string value) =>
         Enum.TryParse<AcademicYearDivision>(value, out var division) ? division : AcademicYearDivision.None;
 
+    /// <summary>Receives the shared field set's Division change so THIS component
+    /// re-renders and re-evaluates ShowSubPeriodsSection (the binding writes into
+    /// <see cref="_model"/> from inside <see cref="PeriodFormFields"/>, which alone
+    /// would only re-render the child).</summary>
+    private Task OnDivisionChangedAsync(string _) => Task.CompletedTask;
+
     private void SuggestAcademicYearAsync()
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
@@ -298,33 +340,131 @@
 
     private void ApplySuggestion((string Name, DateOnly StartDate, DateOnly EndDate) suggestion)
     {
-        _name = suggestion.Name;
-        _start = suggestion.StartDate.ToDateTime(TimeOnly.MinValue);
-        _end = suggestion.EndDate.ToDateTime(TimeOnly.MinValue);
+        _model.Name = suggestion.Name;
+        _model.Start = suggestion.StartDate.ToDateTime(TimeOnly.MinValue);
+        _model.End = suggestion.EndDate.ToDateTime(TimeOnly.MinValue);
+    }
+
+    // ── Sub-periods section (FR-C5) ──────────────────────────────────────────
+
+    private void AddSubPeriodAsync()
+        => _subPeriodRows.Add(new SubPeriodRow());
+
+    private void RemoveSubPeriodAsync(int index)
+    {
+        if (index >= 0 && index < _subPeriodRows.Count)
+            _subPeriodRows.RemoveAt(index);
+    }
+
+    /// <summary>The number of equal spans Auto-split produces for the selected
+    /// division: 2 for Semesters, 3 for Terms (FR-C5). None never shows the
+    /// sub-periods section, so it never reaches the split.</summary>
+    private int AutoSplitCount
+        => ParseDivision(_model.DivisionSelect) == AcademicYearDivision.Semesters ? 2 : 3;
+
+    private string AutoSplitLabel => $"Auto-split into {AutoSplitCount}";
+
+    private string AutoSplitTitle
+        => $"Split the year range into {AutoSplitCount} equal spans";
+
+    /// <summary>Splits the year range into the division-appropriate number of
+    /// equal spans (2 for Semesters, 3 for Terms, within one day of each other)
+    /// and replaces the rows, ready to be edited (FR-C5). Guards against ranges
+    /// too short to split without producing an invalid (inverted) span.</summary>
+    private void AutoSplitSubPeriodsAsync()
+    {
+        if (!_hasYearRange) return;
+        var start = DateOnly.FromDateTime(_model.Start!.Value.Date);
+        var end = DateOnly.FromDateTime(_model.End!.Value.Date);
+        var dayCount = end.DayNumber - start.DayNumber + 1;
+        var splitCount = AutoSplitCount;
+        if (dayCount < splitCount) return;
+
+        var kindName = ParseDivision(_model.DivisionSelect) == AcademicYearDivision.Semesters
+            ? "Semester" : "Term";
+
+        _subPeriodRows.Clear();
+        for (var i = 0; i < splitCount; i++)
+        {
+            var spanStartDay = start.DayNumber + i * dayCount / splitCount;
+            var spanEndDay = start.DayNumber + (i + 1) * dayCount / splitCount - 1;
+            _subPeriodRows.Add(new SubPeriodRow
+            {
+                Name = $"{kindName} {i + 1}",
+                Start = DateOnly.FromDayNumber(spanStartDay).ToDateTime(TimeOnly.MinValue),
+                End = DateOnly.FromDayNumber(spanEndDay).ToDateTime(TimeOnly.MinValue),
+            });
+        }
+    }
+
+    /// <summary>Validates the sub-period rows against FR-C2 and materializes them
+    /// into request definitions. Returns <c>false</c> with an inline error on the
+    /// first violation (whole-request rejection, mirroring the server).</summary>
+    private bool TryBuildSubPeriods(DateOnly startDate, DateOnly endDate, out IReadOnlyList<SubPeriodDefinitionRequest>? definitions, out string error)
+    {
+        definitions = null;
+        error = "";
+        var result = new List<SubPeriodDefinitionRequest>();
+        foreach (var row in _subPeriodRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Name))
+            {
+                error = "Every sub-period needs a name.";
+                return false;
+            }
+            if (row.Start is null || row.End is null)
+            {
+                error = $"Sub-period '{row.Name}' needs a start and end date.";
+                return false;
+            }
+            var s = DateOnly.FromDateTime(row.Start.Value.Date);
+            var e = DateOnly.FromDateTime(row.End.Value.Date);
+            if (e < s)
+            {
+                error = $"Sub-period '{row.Name}' end date must be on or after its start date.";
+                return false;
+            }
+            if (s < startDate || e > endDate)
+            {
+                error = $"Sub-period '{row.Name}' must be contained within the year range.";
+                return false;
+            }
+            foreach (var other in result)
+            {
+                if (s <= other.EndDate && e >= other.StartDate)
+                {
+                    error = $"Sub-period '{row.Name}' overlaps sibling sub-period '{other.Name}'.";
+                    return false;
+                }
+            }
+            result.Add(new SubPeriodDefinitionRequest(row.Name.Trim(), s, e));
+        }
+        definitions = result;
+        return true;
     }
 
     private async Task SubmitAsync()
     {
         _error = null;
 
-        if (string.IsNullOrWhiteSpace(_name))
+        if (string.IsNullOrWhiteSpace(_model.Name))
         {
             _error = "Enter a period name.";
             return;
         }
-        if (_start is null || _end is null)
+        if (_model.Start is null || _model.End is null)
         {
             _error = "Enter a start and end date.";
             return;
         }
-        if (_end.Value.Date < _start.Value.Date)
+        if (_model.End.Value.Date < _model.Start.Value.Date)
         {
             _error = "End date must be on or after the start date.";
             return;
         }
 
-        var division = ParseDivision(_divisionSelect);
-        Guid? parentId = Guid.TryParse(_parentPeriodIdText, out var pid) ? pid : null;
+        var division = ParseDivision(_model.DivisionSelect);
+        Guid? parentId = Guid.TryParse(_model.ParentPeriodIdText, out var pid) ? pid : null;
 
         if (_isSubPeriod && !parentId.HasValue)
         {
@@ -337,21 +477,34 @@
             return;
         }
 
+        // ── Client-side sub-period validation mirrors FR-C2: every row needs a
+        //    name + start/end, end >= start, containment in the year range, and no
+        //    sibling overlap — before the submit is sent.
+        IReadOnlyList<SubPeriodDefinitionRequest>? subPeriods = null;
+        if (ShowSubPeriodsSection)
+        {
+            if (!TryBuildSubPeriods(startDate: DateOnly.FromDateTime(_model.Start.Value.Date), endDate: DateOnly.FromDateTime(_model.End.Value.Date), out subPeriods, out var subError))
+            {
+                _error = subError;
+                return;
+            }
+        }
+
         _saving = true;
         try
         {
-            var startDate = DateOnly.FromDateTime(_start.Value.Date);
-            var endDate = DateOnly.FromDateTime(_end.Value.Date);
+            var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
+            var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
             PeriodDto? saved = null;
 
             if (PeriodId.HasValue)
             {
-                await Api.UpdatePeriodAsync(PeriodId.Value, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, division, parentId));
+                await Api.UpdatePeriodAsync(PeriodId.Value, new UpdatePeriodRequest(_model.Name.Trim(), startDate, endDate, division, parentId));
                 saved = await Api.GetPeriodByIdAsync(PeriodId.Value);
             }
             else
             {
-                var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, parentId));
+                var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(_model.Name.Trim(), startDate, endDate, division, parentId, subPeriods));
                 if (AutoActivateOnCreate)
                 {
                     await Api.ActivatePeriodAsync(id);

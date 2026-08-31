@@ -61,13 +61,13 @@ public static class PeriodRoutes
 
         group.MapPost("/periods", async (
             [FromBody] CreatePeriod command,
-            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<CreatePeriod, Guid> handler,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<CreatePeriod, CreatePeriodResult> handler,
             CancellationToken ct) =>
         {
             try
             {
-                var id = await handler.HandleAsync(command, ct);
-                return Results.Created($"/periods/{id}", new { id });
+                var result = await handler.HandleAsync(command, ct);
+                return Results.Created($"/periods/{result.YearId}", new { id = result.YearId, subPeriodIds = result.SubPeriodIds });
             }
             catch (PeriodFrameworkMismatchException ex)
             {
@@ -138,6 +138,10 @@ public static class PeriodRoutes
             catch (PeriodNotFoundException)
             {
                 return Results.NotFound();
+            }
+            catch (PeriodGuardException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 422);
             }
             catch (ConcurrencyException ex)
             {

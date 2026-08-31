@@ -23,8 +23,8 @@ public class PeriodHierarchyTests
     public async Task Create_TopLevelYear_WithTermsDivision_NoParent()
     {
         using var s = new StudentsTestScope("ph-ay-terms");
-        var id = await NewCreate(s).HandleAsync(
-            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
+        var id = (await NewCreate(s).HandleAsync(
+            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms))).YearId;
 
         var p = await s.Db.Periods.SingleAsync(x => x.Id == id);
         p.Division.Should().Be(AcademicYearDivision.Terms);
@@ -35,9 +35,9 @@ public class PeriodHierarchyTests
     public async Task Create_SubPeriod_WithoutParent_Throws()
     {
         using var s = new StudentsTestScope("ph-term-noparent");
-        var act = async () => await NewCreate(s).HandleAsync(
+        var act = async () => (await NewCreate(s).HandleAsync(
             new CreatePeriod("T1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30),
-                AcademicYearDivision.Terms, ParentPeriodId: Guid.NewGuid()));
+                AcademicYearDivision.Terms, ParentPeriodId: Guid.NewGuid()))).YearId;
 
         await act.Should().ThrowAsync<PeriodNotFoundException>();
     }
@@ -46,9 +46,9 @@ public class PeriodHierarchyTests
     public async Task Create_NoneDivision_WithParent_Throws()
     {
         using var s = new StudentsTestScope("ph-none-parent");
-        var act = async () => await NewCreate(s).HandleAsync(
+        var act = async () => (await NewCreate(s).HandleAsync(
             new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31),
-                AcademicYearDivision.None, ParentPeriodId: Guid.NewGuid()));
+                AcademicYearDivision.None, ParentPeriodId: Guid.NewGuid()))).YearId;
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -58,14 +58,14 @@ public class PeriodHierarchyTests
     {
         using var s = new StudentsTestScope("ph-term-inside");
         var h = NewCreate(s);
-        var ayId = await h.HandleAsync(
-            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
+        var ayId = (await h.HandleAsync(
+            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms))).YearId;
 
         // A sub-period is contained within its parent year's range → the
         // parent is excluded from the no-overlap check (FR-H3).
-        var termId = await h.HandleAsync(
+        var termId = (await h.HandleAsync(
             new CreatePeriod("T1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30),
-                AcademicYearDivision.Terms, ParentPeriodId: ayId));
+                AcademicYearDivision.Terms, ParentPeriodId: ayId))).YearId;
 
         var t = await s.Db.Periods.SingleAsync(x => x.Id == termId);
         t.Division.Should().Be(AcademicYearDivision.Terms);
@@ -77,16 +77,16 @@ public class PeriodHierarchyTests
     {
         using var s = new StudentsTestScope("ph-term-parent-not-year");
         var h = NewCreate(s);
-        var ayId = await h.HandleAsync(
-            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
-        var t1Id = await h.HandleAsync(
+        var ayId = (await h.HandleAsync(
+            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1Id = (await h.HandleAsync(
             new CreatePeriod("T1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30),
-                AcademicYearDivision.Terms, ParentPeriodId: ayId));
+                AcademicYearDivision.Terms, ParentPeriodId: ayId))).YearId;
 
         // Parent must be a top-level year; T1 is a sub-period → rejected.
-        var act = async () => await h.HandleAsync(
+        var act = async () => (await h.HandleAsync(
             new CreatePeriod("T2", new DateOnly(2026, 7, 1), new DateOnly(2026, 12, 31),
-                AcademicYearDivision.Terms, ParentPeriodId: t1Id));
+                AcademicYearDivision.Terms, ParentPeriodId: t1Id))).YearId;
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -96,13 +96,13 @@ public class PeriodHierarchyTests
     {
         using var s = new StudentsTestScope("ph-division-mismatch");
         var h = NewCreate(s);
-        var ayId = await h.HandleAsync(
-            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
+        var ayId = (await h.HandleAsync(
+            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms))).YearId;
 
         // A Semesters sub-period under a Terms year is rejected (one-kind rule).
-        var act = async () => await h.HandleAsync(
+        var act = async () => (await h.HandleAsync(
             new CreatePeriod("S1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30),
-                AcademicYearDivision.Semesters, ParentPeriodId: ayId));
+                AcademicYearDivision.Semesters, ParentPeriodId: ayId))).YearId;
 
         await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
     }
@@ -112,17 +112,17 @@ public class PeriodHierarchyTests
     {
         using var s = new StudentsTestScope("ph-sibling-overlap");
         var h = NewCreate(s);
-        var ayId = await h.HandleAsync(
-            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
+        var ayId = (await h.HandleAsync(
+            new CreatePeriod("AY2026", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms))).YearId;
         await h.HandleAsync(
             new CreatePeriod("T1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30),
                 AcademicYearDivision.Terms, ParentPeriodId: ayId));
 
         // T2 shares June with T1 → sibling overlap rejected (parent AY excluded,
         // but T1 is not).
-        var act = async () => await h.HandleAsync(
+        var act = async () => (await h.HandleAsync(
             new CreatePeriod("T2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31),
-                AcademicYearDivision.Terms, ParentPeriodId: ayId));
+                AcademicYearDivision.Terms, ParentPeriodId: ayId))).YearId;
 
         await act.Should().ThrowAsync<PeriodOverlapException>();
     }

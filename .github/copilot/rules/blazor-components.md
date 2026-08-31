@@ -660,8 +660,22 @@ general Blazor pattern, not just a dialog concern.
    `<XxxFormFields Model="Model" />` inside their `<EditForm>`.
 5. **Form-specific extras stay in the owning form**, below the shared fields
    (e.g. an edit-only strands editor, or a create-only grade picker).
+6. **Child-write re-render trap:** when the shared component's `@bind-Value`
+   writes into a property of the parent's model *object* (not a parameter of
+   the parent), Blazor re-renders only the shared component — the owning form
+   does NOT re-render. Any owning-form logic that depends on a bound value
+   (e.g. a create-only section shown/hidden by a division dropdown selection)
+   will silently go stale. Fix: expose the change with
+   `@bind-Value:after="@( () => SomeChanged.InvokeAsync(...) )"` on the shared
+   component, plus a matching `[Parameter] EventCallback<...>` that the owning
+   form handles (an EventCallback invoke re-renders the receiver).
 
 ### Example (this repo)
+
+The components below are **illustrative, not an exhaustive registry** — do not
+treat the list as the set of adopters. To find all current `*FormFields`
+components (and their model interfaces), search the solution for
+`*FormFields.razor`.
 
 - `src/Students/SchoolCollab.Students.Application/Components/Students/TopicFormFields.razor`
   — shared rows + `ITopicFormModel`.
@@ -670,6 +684,12 @@ general Blazor pattern, not just a dialog concern.
 - `GradeLevelFormFields.razor` — same idea for the routable
   `GradeLevels/Create.razor` / `GradeLevels/Edit.razor` pages (owns the
   `<EditForm>` + validator + action row).
+- `Components/Pages/Periods/PeriodFormFields.razor` — shared rows +
+  `IPeriodFormModel` for the routable `Periods/Create.razor` / `Periods/Edit.razor`
+  pages; the create-only sub-periods section and Suggest/Backfill buttons stay in
+  the owning `PeriodForm` (extras below shared fields), and the division
+  `@bind-Value:after` → `DivisionChanged` callback is a worked example of the
+  step-6 re-render trap.
 
 ### Checklist
 

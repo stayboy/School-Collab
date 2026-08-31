@@ -40,8 +40,11 @@ public class PeriodHierarchyReadTests
     {
         using var s = new StudentsTestScope("read-active-year");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        // Guard (FR-G1): a Terms year needs a Draft sub before it activates.
+        await create.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
         await NewActivate(s).HandleAsync(new ActivatePeriod(ay));
 
         var dto = await NewActiveYear(s).HandleAsync(new GetActiveAcademicYear());
@@ -69,11 +72,11 @@ public class PeriodHierarchyReadTests
     {
         using var s = new StudentsTestScope("active-sub-term");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(ay));
-        var t1 = await create.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
         await NewActivate(s).HandleAsync(new ActivatePeriod(t1));
 
         var dto = await NewActiveSub(s).HandleAsync(new GetActiveSubPeriod());
@@ -88,12 +91,12 @@ public class PeriodHierarchyReadTests
     {
         using var s = new StudentsTestScope("list-sub-periods");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
-        var t2 = await create.HandleAsync(new CreatePeriod(
-            "T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
+        var t2 = (await create.HandleAsync(new CreatePeriod(
+            "T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var result = await NewSubPeriods(s).HandleAsync(new ListSubPeriods(ay));
         result.Select(x => x.Id).Should().BeEquivalentTo([t1, t2]);
@@ -105,10 +108,10 @@ public class PeriodHierarchyReadTests
     {
         using var s = new StudentsTestScope("read-division");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var yearDto = await NewActiveYear(s).HandleAsync(new GetActiveAcademicYear());
         yearDto.Should().BeNull(); // not activated yet

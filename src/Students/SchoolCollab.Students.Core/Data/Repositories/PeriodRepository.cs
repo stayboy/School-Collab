@@ -21,6 +21,12 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         }
     }
 
+    public async Task AddRangeAsync(IReadOnlyList<Period> periods, CancellationToken cancellationToken = default)
+    {
+        await Db.Periods.AddRangeAsync(periods, cancellationToken);
+        await Db.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<PeriodDto[]> ListAsync(CancellationToken cancellationToken = default)
     {
         // Materialize first, then project in memory: the DTO projection uses the

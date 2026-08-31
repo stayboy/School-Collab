@@ -30,11 +30,11 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-term-none");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.None));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
 
-        var act = async () => await h.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var act = async () => (await h.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
         await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
     }
 
@@ -44,10 +44,10 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-term-terms");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
-        var t1 = await h.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await h.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
         (await s.Db.Periods.SingleAsync(p => p.Id == t1)).Division.Should().Be(AcademicYearDivision.Terms);
     }
 
@@ -57,10 +57,10 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-sem-semesters");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Semesters));
-        var sem = await h.HandleAsync(new CreatePeriod(
-            "S1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31), AcademicYearDivision.Semesters, ParentPeriodId: ay));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Semesters))).YearId;
+        var sem = (await h.HandleAsync(new CreatePeriod(
+            "S1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31), AcademicYearDivision.Semesters, ParentPeriodId: ay))).YearId;
         (await s.Db.Periods.SingleAsync(p => p.Id == sem)).Division.Should().Be(AcademicYearDivision.Semesters);
     }
 
@@ -70,11 +70,11 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-sem-terms");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
 
-        var act = async () => await h.HandleAsync(new CreatePeriod(
-            "S1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31), AcademicYearDivision.Semesters, ParentPeriodId: ay));
+        var act = async () => (await h.HandleAsync(new CreatePeriod(
+            "S1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31), AcademicYearDivision.Semesters, ParentPeriodId: ay))).YearId;
         await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
     }
 
@@ -86,11 +86,11 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-term-div");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
 
-        var act = async () => await h.HandleAsync(new CreatePeriod(
-            "S1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Semesters, ParentPeriodId: ay));
+        var act = async () => (await h.HandleAsync(new CreatePeriod(
+            "S1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Semesters, ParentPeriodId: ay))).YearId;
         await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
     }
 
@@ -101,8 +101,8 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-update-term-none");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.None));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
 
         var update = NewUpdate(s);
         var act = async () => await update.HandleAsync(new UpdatePeriod(
@@ -116,8 +116,8 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-div-change-blocked");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
         await create.HandleAsync(new CreatePeriod(
             "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
 
@@ -134,10 +134,10 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-div-change-allowed");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         // Remove the sub-period (no delete API surface — direct row removal in the test).
         s.Db.Periods.Remove(await s.Db.Periods.SingleAsync(p => p.Id == t1));
@@ -157,19 +157,19 @@ public class PeriodHierarchyDivisionGateTests
     {
         using var s = new StudentsTestScope("gate-per-year");
         var h = NewCreate(s);
-        var y1 = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
-        var y2 = await h.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31),
-            Division: AcademicYearDivision.None));
+        var y1 = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        var y2 = (await h.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
 
         // Term under Y1 (Terms) succeeds.
-        var t1 = await h.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: y1));
+        var t1 = (await h.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: y1))).YearId;
         (await s.Db.Periods.SingleAsync(p => p.Id == t1)).Division.Should().Be(AcademicYearDivision.Terms);
 
         // Term under Y2 (None) is rejected.
-        var act = async () => await h.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2027, 9, 1), new DateOnly(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: y2));
+        var act = async () => (await h.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2027, 9, 1), new DateOnly(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: y2))).YearId;
         await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
     }
 }

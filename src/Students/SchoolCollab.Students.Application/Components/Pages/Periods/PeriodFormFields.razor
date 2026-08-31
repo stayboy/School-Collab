@@ -1,0 +1,118 @@
+@*
+    PeriodFormFields — shared period form field set used by BOTH period create
+    and period edit so the two flows render identical fields (create layout is
+    the reference). Mirrors the TopicFormFields pattern:
+
+      • The owning form (PeriodForm) supplies the <EditForm>, the submit/cancel
+        action row, the error bar, the create-only sub-periods section, and the
+        blocked-parent panel.
+      • This component owns only the field rows:
+          Division → Parent academic year (sub-period create only) →
+          Period name (+ optional NameActions) → Dates.
+      • Name / ParentPeriodIdText / DivisionSelect are string-based bindings;
+        the owning form maps them to/from the API DTOs.
+
+    Both the form's create state and its edit state are backed by the same
+    PeriodFormModel, which implements IPeriodFormModel.
+*@
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@* Division is the single kind selector (plan-drop-periodtype.md). None = a
+   plain top-level academic year; Terms/Semesters on a top-level year (no
+   parent) means the year may contain only that sub-period kind; on a
+   sub-period (parent selected) it is the sub-period's own kind. When the
+   period is a sub-period the division is locked to its parent's division
+   and the parent dropdown is shown. *@
+<FormRow Label="Division *" AlignTop>
+    <FluentSelect TOption="string"
+                  @bind-Value="Model.DivisionSelect"
+                  @bind-Value:after="@( () => DivisionChanged.InvokeAsync(Model.DivisionSelect) )"
+                  Label=""
+                  Disabled="@DivisionLocked"
+                  Style="flex:1; min-width:0">
+        <FluentOption Value="None">None (single academic year)</FluentOption>
+        <FluentOption Value="Terms">Terms</FluentOption>
+        <FluentOption Value="Semesters">Semesters</FluentOption>
+    </FluentSelect>
+</FormRow>
+
+@if (IsSubPeriod)
+{
+    <FormRow Label="Parent academic year *" AlignTop>
+        <FluentSelect TOption="string"
+                      @bind-Value="Model.ParentPeriodIdText"
+                      Label=""
+                      Disabled="true"
+                      Style="flex:1; min-width:0">
+            <FluentOption Value="">— Select academic year —</FluentOption>
+            @foreach (var ay in AcademicYears)
+            {
+                <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
+            }
+        </FluentSelect>
+    </FormRow>
+}
+
+@* Period name + optional name-row actions (create mode's Suggest/Backfill
+   buttons). The row contains multiple controls when actions are supplied, so
+   the label is top-aligned (AlignTop) to sit naturally against the taller
+   cell — matches the pre-FormRow visual. *@
+<FormRow Label="Period name *" AlignTop For="periodName">
+    <FluentTextField Id="periodName" @bind-Value="Model.Name"
+                     Label=""
+                     Placeholder="e.g. 2025–2026 Academic Year"
+                     Style="flex:1; min-width:0" />
+    @if (NameActions is not null)
+    {
+        @NameActions
+    }
+</FormRow>
+
+@* Two date pickers side-by-side. AlignTop so the "Dates *" label sits at the
+   top of the row (top-align reads better against a two-input cell than
+   centering). *@
+<FormRow Label="Dates *" AlignTop>
+    <FluentDatePicker @bind-Value="Model.Start" Label="" Style="flex:1; min-width:0" />
+    <FluentDatePicker @bind-Value="Model.End"   Label="" Style="flex:1; min-width:0" />
+</FormRow>
+
+@code {
+    /// <summary>
+    /// The period fields shared by the create and edit flows. The owning
+    /// form's model implements this so the shared form-fields component can
+    /// bind to it without knowing about save/load mechanics.
+    /// </summary>
+    public interface IPeriodFormModel
+    {
+        string Name { get; set; }
+        string DivisionSelect { get; set; }
+        string ParentPeriodIdText { get; set; }
+        DateTime? Start { get; set; }
+        DateTime? End { get; set; }
+    }
+
+    [Parameter, EditorRequired] public IPeriodFormModel Model { get; set; } = default!;
+
+    /// <summary>True when the period is a sub-period (has a parent): the parent
+    /// dropdown is shown and the division is locked to the parent's division.</summary>
+    [Parameter] public bool IsSubPeriod { get; set; }
+
+    /// <summary>Invoked after the Division selection changes. The owning form
+    /// uses this to re-evaluate create-only sections that depend on the division
+    /// (e.g. the atomic-create sub-periods section).</summary>
+    [Parameter] public EventCallback<string> DivisionChanged { get; set; }
+
+    /// <summary>True when the Division selector is disabled (sub-period mode).</summary>
+    [Parameter] public bool DivisionLocked { get; set; }
+
+    /// <summary>Top-level academic years offered as parents for a sub-period.
+    /// Only rendered when <see cref="IsSubPeriod"/> is true.</summary>
+    [Parameter] public IReadOnlyList<PeriodDto> AcademicYears { get; set; } = [];
+
+    /// <summary>Optional extra content rendered inside the Period name row
+    /// after the text field (e.g. the create flow's Suggest/Backfill buttons).</summary>
+    [Parameter] public RenderFragment? NameActions { get; set; }
+}

@@ -85,6 +85,9 @@ instead of duplicating it.
 | Testing (MTP Standard) | `.github/copilot/rules/testing.md` |
 | Configuration documentation | `.github/copilot/rules/configuration-documentation.md` |
 | AI services (`SchoolCollab.AI`, chat clients, tool calls) | `.github/copilot/rules/ai-services.md` |
+| Card-level create / edit dialogs and sections | `.github/copilot/rules/section-card.md` |
+| Shared constants and enums | `.github/copilot/rules/shared-constants.md` |
+| Dialogs (shared form-fields, no nesting) | `.github/skills/dialog-ui/SKILL.md` |
 | Fluent UI icons | `.github/skills/fluentui-icons/SKILL.md` |
 | Fluent UI component props | `.github/skills/fluentui-component-props/SKILL.md` |
 | Bounded context creation | `.github/skills/bounded-context/SKILL.md` |
