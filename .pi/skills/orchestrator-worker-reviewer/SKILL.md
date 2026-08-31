@@ -60,6 +60,67 @@ To use different models, pass the exact `provider/id` in each `runs.run`'s
 different agent definition, pass `agent: "<name>"` (one of the builtin
 `delegate`/`oracle`/`reviewer`/`worker`/`scout`/`researcher`, or a custom agent).
 
+## Provider profiles: pi (default) and Cline
+
+Two providers can drive this workflow. The four roles, their tasks, round-doc
+ownership, and the Procedure stay identical — only the model ids and the spawn
+mechanism differ. **Pick one provider per round; never mix the two mid-round.**
+
+### pi profile (default)
+
+Run via `workflowScript` / `runs.run('...', { agent, model, task })` with the
+Default agents table above. Model ids come from
+`subagent({ action: "models" })` (exact `provider/id` strings).
+
+### Cline profile
+
+Run from a Cline session via its team/teammate machinery: spawn four teammates
+named `orchestrator`, `worker`, `reviewer`, `ui-tester` with the role prompts
+from this skill's role definitions, then execute the Procedure steps in order
+(orchestrator → worker → reviewer → orchestrator-accept → ui-tester → rework
+loop, max ~2 iterations), passing each hand-off text as the next teammate's
+task. If teammate dispatch returns
+`Unauthorized: ... re-authenticate your Cline account`, **stop and
+re-authenticate before rerunning** — a round must not proceed with a dead
+session.
+
+**Provider switch to `clinepass`.** Cline cannot resolve pi's
+`ollama/<id>:cloud` ids. Before starting the round, **switch the Cline
+session's provider to `clinepass`** — the Cline profile that stores the
+equivalent models for this workflow. Every pi default has a direct
+`cline-pass/` equivalent under it:
+
+| Role | pi default | `clinepass` equivalent |
+|---|---|---|
+| Orchestrator | `ollama/glm-5.3-flash:cloud` | `cline-pass/glm-5.3` |
+| Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` |
+| Reviewer | `ollama/kimi-k2.7-code:cloud` | `cline-pass/kimi-k2.7-code` |
+| UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
+
+Other models stored under `clinepass`, usable as substitutes:
+`cline-pass/kimi-k3` (stronger reviewer), `cline-pass/deepseek-v4-pro`
+(stronger worker), `cline-pass/glm-5.2`, `cline-pass/kimi-k2.6`,
+`cline-pass/qwen3.8-max`, `cline-pass/qwen3.7-max`, `cline-pass/qwen3.7-plus`,
+`cline-pass/mimo-v2.5-pro`, `cline-pass/mimo-v2.5`. Substitute within the same
+tier (fast generalist / implementer / deep verifier) only when a listed
+equivalent is unavailable.
+
+**Role prompts for the four Cline teammates** (paste into each teammate's
+system prompt): orchestrator = document owner (writes plan/acceptance docs
+only, no code); worker = implements the plan exactly, runs build + affected
+tests, never edits plan/acceptance docs; reviewer = verifies diff vs plan +
+source specs, runs build/tests independently, includes the
+best-coding-practices check (no overwrites / repo skills honored /
+readability), returns findings inline; ui-tester = adversarial bug hunter
+scoped **verbatim** to the tester-scope handover, returns P1/P2/pass with
+file+line evidence inline.
+
+**Traceability rule (both providers):** record which provider ran the round in
+the acceptance doc header — e.g. `Provider: pi` or
+`Provider: Cline/clinepass (models: cline-pass/glm-5.3, deepseek-v4-flash,
+kimi-k2.7-code, minimax-m3)` — so build/test numbers and findings can be
+traced to the driving models.
+
 ## Round docs location
 
 All per-round working docs this workflow produces — the orchestrator's
