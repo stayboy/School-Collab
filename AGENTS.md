@@ -142,6 +142,10 @@ Whenever a new feature or architectural change is requested:
 | `documents/solution/` | Durable research, decisions, and implementation steps (technical memory — standard above). |
 | `documents/specs/` | Durable feature specs that remain the source of truth. |
 | `documents/rounds/` | **Ephemeral per-round agent docs** (`plan-*`, `review-*`, `acceptance-*`, `ui-tester-*.md`) from the four-agent `orchestrator-worker-reviewer` skill. Never write round docs into `documents/specs/`. The whole folder is safe to bulk-trash once rounds close — rules: `documents/rounds/README.md`. |
+| `documents/runbooks/` | Operational runbooks: recurring procedures and incident/ops behavior. |
+| `documents/ai-prompts/` | Reference archive of AI system-prompt variants — never loaded at runtime. |
+
+Full folder decision rules, precedents, and naming conventions: `documents/README.md`.
 
 ---
 
