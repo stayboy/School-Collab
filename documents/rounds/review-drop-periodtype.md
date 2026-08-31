@@ -1,12 +1,12 @@
 # Review: Drop `PeriodType`, adopt `AcademicYearDivision`
 
 - **Round:** `drop-periodtype`
-- **Plan:** `documents/specs/plan-drop-periodtype.md`
+- **Plan:** `documents/rounds/plan-drop-periodtype.md`
 - **Reviewer agent:** `reviewer` (`kimi-k2.7-code:cloud`) — ran read-only; findings persisted by parent.
 - **Date:** 2026-08-30
 
 ## Verdict
-**PASS with P2 findings.** The P1 item raised by the reviewer was adjudicated as a plan-clarification issue, not an implementation defect (see §P1). The implementation matches the clarified plan and the user's stated intent. UI-tester P2 findings are tracked separately in `documents/specs/ui-tester-drop-periodtype.md` and are addressed in the acceptance pass.
+**PASS with P2 findings.** The P1 item raised by the reviewer was adjudicated as a plan-clarification issue, not an implementation defect (see §P1). The implementation matches the clarified plan and the user's stated intent. UI-tester P2 findings are tracked separately in `documents/rounds/ui-tester-drop-periodtype.md` and are addressed in the acceptance pass.
 
 ## Scope covered by the worker
 The diff removes the `PeriodType` enum, makes `AcademicYearDivision` the single kind field on `Period`, updates the EF model/migration, CQRS handlers, API/client DTOs, most UI labels, and the affected unit tests. Historical migration `.Designer.cs` files still contain the word `PeriodType`, which is expected and immutable.
@@ -32,14 +32,14 @@ The diff removes the `PeriodType` enum, makes `AcademicYearDivision` the single 
 
 **Original concern:** `src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodForm.razor` (lines 42–60 and 220–235) only renders the parent dropdown when `_isSubPeriod` is true (i.e., `?parent=` route or edit mode). A plain create with `Division != "None"` therefore creates a top-level year with that division rather than requiring a parent selection.
 
-**Adjudication:** The user's stated intent is that Division is the single kind field and sub-periods are added from the year's sub-period surfaces. A top-level year with `Division=Terms`/`Semesters` is a valid container year; the form's behavior is therefore correct. The original plan's acceptance criterion was overly prescriptive and has been updated in `documents/specs/plan-drop-periodtype.md` §18 to match this intent. This finding is **downgraded to P2 / plan-clarification** and is not a rework blocker.
+**Adjudication:** The user's stated intent is that Division is the single kind field and sub-periods are added from the year's sub-period surfaces. A top-level year with `Division=Terms`/`Semesters` is a valid container year; the form's behavior is therefore correct. The original plan's acceptance criterion was overly prescriptive and has been updated in `documents/rounds/plan-drop-periodtype.md` §18 to match this intent. This finding is **downgraded to P2 / plan-clarification** and is not a rework blocker.
 
 ## P2 findings
 1. **Scope-adjacent Settings changes** — the working tree also contains Settings/FlagKind cleanup changes. The reviewer could not confirm whether these belong to a separate in-flight round or were widened by the worker. The parent must attribute them before final CLOSE. (Attribution verified separately by parent: these are pre-existing uncommitted work from earlier rounds, not part of this refactor.)
 2. **Stale doc comment** — `tests/SchoolCollab.Admin.Tests.Unit/PeriodEditPageTests.cs:19` still mentions "PeriodType" in a comment. Cosmetic.
 
 ## Best-coding-practices check
-- **No destructive overwrites inside the round scope:** the worker modified only the files needed for the `PeriodType` removal and related consumers. However, the worker also moved/renamed many existing `documents/specs/*` files to `documents/rounds/` — this was **outside the plan's scope**. The parent reverted those moves and restored the docs to `documents/specs/`.
+- **No destructive overwrites inside the round scope:** the worker modified only the files needed for the `PeriodType` removal and related consumers. However, the worker also moved/renamed many existing round docs from the old specs folder to `documents/rounds/` — this was **outside the plan's scope**. The parent reverted those moves and restored the docs to their original specs location.
 - **Repo skills:** the UI changes follow existing repo patterns; the single-selector form is simpler and does not violate the dialog-shell or CSS-isolation skills.
 - **Readability:** the refactor reduces the conceptual surface from two fields (`PeriodType` + `Division`) to one (`Division`), which is a readability/maintainability improvement.
 

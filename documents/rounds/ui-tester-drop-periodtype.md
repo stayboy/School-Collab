@@ -1,8 +1,8 @@
 # UI-tester report: drop PeriodType / adopt AcademicYearDivision
 
 - **Round:** `drop-periodtype`
-- **Plan:** `documents/specs/plan-drop-periodtype.md`
-- **Scope handover source:** `documents/specs/acceptance-drop-periodtype.md` (§8)
+- **Plan:** `documents/rounds/plan-drop-periodtype.md`
+- **Scope handover source:** `documents/rounds/acceptance-drop-periodtype.md` (§8)
 - **Out-of-round observations:** none triggered for this pass; report stays within the handover.
 
 ## Verdict
