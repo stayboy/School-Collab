@@ -96,10 +96,11 @@ public class ActivePeriodProviderTests
     {
         using var s = new StudentsTestScope("active-sub-provider");
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var termId = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
+        // Guard (FR-G1) requires a Draft sub-period before a Terms year activates.
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
-        var termId = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(termId));
 
         var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
@@ -123,10 +124,11 @@ public class ActivePeriodProviderTests
     {
         using var s = new StudentsTestScope("active-sub-iso");
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var termId = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
+        // Guard (FR-G1) requires a Draft sub-period before a Terms year activates.
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
-        var termId = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(termId));
 
         var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
@@ -142,13 +144,14 @@ public class ActivePeriodProviderTests
     {
         using var s = new StudentsTestScope("active-sub-invalidate");
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
+        var t2 = (await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30),
+            AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
+        // Guard (FR-G1) requires a Draft sub-period before a Terms year activates.
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(t1));
-        var t2 = await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30),
-            AcademicYearDivision.Terms, ParentPeriodId: yearId));
 
         var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
         (await provider.GetActiveSubPeriodAsync())!.Id.Should().Be(t1, "warm the cache on T1");
@@ -165,9 +168,15 @@ public class ActivePeriodProviderTests
     {
         using var s = new StudentsTestScope("active-year-invalidate");
         var create = NewCreate(s);
-        var ay2025 = await create.HandleAsync(new CreatePeriod("AY2025", new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms));
+        var ay2025 = (await create.HandleAsync(new CreatePeriod("AY2025", new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var ay2026 = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        // Guard (FR-G1): each Terms year needs a Draft sub before it can activate.
+        await create.HandleAsync(new CreatePeriod("T", new DateOnly(2025, 9, 1), new DateOnly(2026, 1, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay2025));
+        await create.HandleAsync(new CreatePeriod("T", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay2026));
+
         await NewActivate(s).HandleAsync(new ActivatePeriod(ay2025));
-        var ay2026 = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
 
         var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
         (await provider.GetActiveAcademicYearAsync())!.Id.Should().Be(ay2025, "warm the cache on AY2025");
@@ -183,7 +192,10 @@ public class ActivePeriodProviderTests
     {
         using var s = new StudentsTestScope("active-year-complete");
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        await create.HandleAsync(new CreatePeriod("T", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: yearId));
+        // Guard (FR-G1) requires a Draft sub-period before a Terms year activates.
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
 
         var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
@@ -301,8 +313,8 @@ public class ActivePeriodProviderTests
     {
         using var s = new StudentsTestScope("fu1-f1-provider");
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var termId = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var termId = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
 
         var provider = new ActivePeriodProvider(s.Db, s.Tenants, s.Cache);
         (await provider.GetActiveSubPeriodAsync()).Should().BeNull("warm the cache with no active sub-period");

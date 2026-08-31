@@ -66,10 +66,10 @@ public class AcademicYearDivisionNoneBackCompatTests
     {
         using var s = new StudentsTestScope("none-lifecycle-" + Guid.NewGuid());
         var create = NewCreate(s);
-        var ay2025 = await create.HandleAsync(new CreatePeriod("AY2025", D(2025, 9, 1), D(2026, 8, 31),
-            Division: AcademicYearDivision.None));
-        var ay2026 = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.None));
+        var ay2025 = (await create.HandleAsync(new CreatePeriod("AY2025", D(2025, 9, 1), D(2026, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
+        var ay2026 = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
 
         var activate = NewActivate(s);
         await activate.HandleAsync(new ActivatePeriod(ay2025));
@@ -86,8 +86,8 @@ public class AcademicYearDivisionNoneBackCompatTests
     {
         using var s = new StudentsTestScope("none-enroll-" + Guid.NewGuid());
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.None));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
 
         // Seed a GradeLevel so the handler resolves it locally (no coded-values HTTP).
@@ -132,8 +132,8 @@ public class AcademicYearDivisionNoneBackCompatTests
     {
         using var s = new StudentsTestScope("none-groups-" + Guid.NewGuid());
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.None));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         var h = new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
             new ActivePeriodProvider(s.Db, s.Tenants, s.Cache), NullLogger<CreateActivityGroupHandler>.Instance);
@@ -153,8 +153,8 @@ public class AcademicYearDivisionNoneBackCompatTests
     {
         using var s = new StudentsTestScope("none-membership-" + Guid.NewGuid());
         var create = NewCreate(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.None));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
 
         var group = ActivityGroup.Create("Year Club", span: EnrollmentSpan.WholeAcademicYear);

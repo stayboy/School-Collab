@@ -26,12 +26,12 @@ not reintroduce the deprecated `SchoolCollab.Config` HTTP overlay
    - code review
    - `dotnet build`
    - `dotnet test`
-5. Wait for GitHub Actions CI to pass on the PR.
-6. Merge with a squash merge by default:
+7. Wait for GitHub Actions CI to pass on the PR.
+8. Merge with a squash merge by default:
    ```bash
    gh pr merge <pr-number> --squash --delete-branch
    ```
-7. Switch back to `main` and pull the merged result:
+9. Switch back to `main` and pull the merged result:
    ```bash
    git checkout main
    git pull origin main

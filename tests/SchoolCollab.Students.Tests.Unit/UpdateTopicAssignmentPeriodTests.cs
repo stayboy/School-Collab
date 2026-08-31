@@ -50,13 +50,19 @@ public class UpdateTopicAssignmentPeriodTests
     private static async Task<(Guid yearId, Guid? termId)> SeedActiveYearAsync(StudentsTestScope s, bool withTerm = true)
     {
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
         Guid? termId = null;
+        // Guard (FR-G1): seed a Draft term before the Terms year activates. The
+        // year then auto-activates the earliest sub (FR-H4a); activating it again
+        // is a harmless no-op.
         if (withTerm)
         {
-            termId = await create.HandleAsync(new CreatePeriod(
-                "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId));
+            termId = (await create.HandleAsync(new CreatePeriod(
+                "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
+        }
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
+        if (termId is not null)
+        {
             await NewActivate(s).HandleAsync(new ActivatePeriod(termId.Value));
         }
         s.Db.GradeLevels.Add(GradeLevel.Create(GradeId, 1, "Grade 1", 1));
@@ -98,9 +104,9 @@ public class UpdateTopicAssignmentPeriodTests
         using var s = new StudentsTestScope("upd-grade-ec24-" + Guid.NewGuid());
         var (_, _) = await SeedActiveYearAsync(s);
         var create = NewCreatePeriod(s);
-        var otherYear = await create.HandleAsync(new CreatePeriod("AY2027", D(2027, 9, 1), D(2028, 8, 31), Division: AcademicYearDivision.Terms));
-        var otherTerm = await create.HandleAsync(new CreatePeriod(
-            "T9", D(2027, 9, 1), D(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherYear));
+        var otherYear = (await create.HandleAsync(new CreatePeriod("AY2027", D(2027, 9, 1), D(2028, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var otherTerm = (await create.HandleAsync(new CreatePeriod(
+            "T9", D(2027, 9, 1), D(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherYear))).YearId;
         var id = await NewAssignGrade(s).HandleAsync(new AssignGradeTopic(
             GradeId, TopicId, D(2026, 9, 1)));
 

@@ -54,9 +54,9 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("h2-year-term-both");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var activate = NewActivate(s);
         await activate.HandleAsync(new ActivatePeriod(ay));
@@ -73,9 +73,9 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("h2-term-no-year");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         // AY is still Draft → activating its Term must be rejected.
         var act = async () => await NewActivate(s).HandleAsync(new ActivatePeriod(t1));
@@ -87,10 +87,13 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("h2-second-year-cascade");
         var create = NewCreate(s);
-        var ay2025 = await create.HandleAsync(new CreatePeriod("AY2025", new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms));
-        var ay2026 = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2025, 9, 1), new DateOnly(2026, 1, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: ay2025));
+        var ay2025 = (await create.HandleAsync(new CreatePeriod("AY2025", new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var ay2026 = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2025, 9, 1), new DateOnly(2026, 1, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay2025))).YearId;
+        // Guard (FR-G1): AY2026 also needs a Draft sub before it can activate.
+        var t3 = (await create.HandleAsync(new CreatePeriod("T3", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay2026))).YearId;
 
         var activate = NewActivate(s);
         await activate.HandleAsync(new ActivatePeriod(ay2025));
@@ -101,9 +104,11 @@ public class PeriodHierarchyActivationTests
         var ay2025Row = await s.Db.Periods.SingleAsync(p => p.Id == ay2025);
         var t1Row = await s.Db.Periods.SingleAsync(p => p.Id == t1);
         var ay2026Row = await s.Db.Periods.SingleAsync(p => p.Id == ay2026);
+        var t3Row = await s.Db.Periods.SingleAsync(p => p.Id == t3);
         ay2025Row.Status.Should().Be(PeriodStatus.Completed);
         t1Row.Status.Should().Be(PeriodStatus.Completed);
         ay2026Row.Status.Should().Be(PeriodStatus.Active);
+        t3Row.Status.Should().Be(PeriodStatus.Active, "AY2026's earliest Draft sub auto-activated (FR-H4a)");
     }
 
     [TestMethod]
@@ -111,11 +116,11 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("h2-sibling-close");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: ay));
-        var t2 = await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30),
-            AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
+        var t2 = (await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30),
+            AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var activate = NewActivate(s);
         await activate.HandleAsync(new ActivatePeriod(ay));
@@ -133,11 +138,11 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("h2-complete-cascade");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: ay));
-        var t2 = await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30),
-            AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
+        var t2 = (await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30),
+            AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var activate = NewActivate(s);
         await activate.HandleAsync(new ActivatePeriod(ay));
@@ -160,9 +165,9 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("h2-archive-cascade");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
+            AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var activate = NewActivate(s);
         await activate.HandleAsync(new ActivatePeriod(ay));
@@ -203,9 +208,9 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("fu1-f1-earliest");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
-        var t2 = await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
+        var t2 = (await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         await NewActivate(s).HandleAsync(new ActivatePeriod(ay));
 
@@ -222,9 +227,9 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("fu1-f1-event");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
-        var t2 = await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
+        var t2 = (await create.HandleAsync(new CreatePeriod("T2", new DateOnly(2027, 1, 1), new DateOnly(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var publisher = new RecordingPublisher();
         await NewActivateRecording(s, publisher).HandleAsync(new ActivatePeriod(ay));
@@ -240,7 +245,7 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("fu1-f1-none");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.None));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.None))).YearId;
 
         var publisher = new RecordingPublisher();
         await NewActivateRecording(s, publisher).HandleAsync(new ActivatePeriod(ay));
@@ -257,10 +262,10 @@ public class PeriodHierarchyActivationTests
     {
         using var s = new StudentsTestScope("fu1-f1-second-year");
         var create = NewCreate(s);
-        var ay2025 = await create.HandleAsync(new CreatePeriod("AY2025", new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms));
-        var ay2026 = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2025, 9, 1), new DateOnly(2026, 1, 31), AcademicYearDivision.Terms, ParentPeriodId: ay2025));
-        var t3 = await create.HandleAsync(new CreatePeriod("T3", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay2026));
+        var ay2025 = (await create.HandleAsync(new CreatePeriod("AY2025", new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var ay2026 = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2025, 9, 1), new DateOnly(2026, 1, 31), AcademicYearDivision.Terms, ParentPeriodId: ay2025))).YearId;
+        var t3 = (await create.HandleAsync(new CreatePeriod("T3", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay2026))).YearId;
 
         var activate = NewActivate(s);
         await activate.HandleAsync(new ActivatePeriod(ay2025));
@@ -279,7 +284,7 @@ public class PeriodHierarchyActivationTests
     }
 
     [TestMethod]
-    public async Task Activate_Year_WithOnlyCompletedSubPeriods_StaysInGapState()
+    public async Task Activate_Year_WithOnlyCompletedSubPeriods_ThrowsGuard()
     {
         using var s = new StudentsTestScope("fu1-f1-gap");
         var tenantId = s.Tenants.GetTenantContext().TenantId;
@@ -289,17 +294,18 @@ public class PeriodHierarchyActivationTests
         var term = Period.Create("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, parentPeriodId: year.Id);
         ((ITenantEntity)term).TenantId = tenantId;
         term.Activate();
-        term.Complete(); // Completed before the year is activated
+        term.Complete(); // Completed before the year is activated — no Draft candidate (AC-G3)
         s.Db.Periods.AddRange(year, term);
         await s.Db.SaveChangesAsync();
 
         var publisher = new RecordingPublisher();
-        await NewActivateRecording(s, publisher).HandleAsync(new ActivatePeriod(year.Id));
+        var act = async () => await NewActivateRecording(s, publisher).HandleAsync(new ActivatePeriod(year.Id));
+        await act.Should().ThrowAsync<PeriodGuardException>()
+            .WithMessage("*create and activate at least one Terms first*");
 
+        // Guard runs before any mutation: the year stays Draft and no event was enqueued.
         var yearRow = await s.Db.Periods.SingleAsync(p => p.Id == year.Id);
-        yearRow.Status.Should().Be(PeriodStatus.Active);
-        (await s.Db.Periods.CountAsync(p => p.ParentPeriodId == year.Id && p.Status == PeriodStatus.Active)).Should().Be(0,
-            "a year with only Completed sub-periods stays in the zero-active gap state");
-        publisher.Enqueued.OfType<PeriodActivated>().Should().ContainSingle(e => e.Id == year.Id, "only the year's own event");
+        yearRow.Status.Should().Be(PeriodStatus.Draft);
+        publisher.Enqueued.Should().BeEmpty("guard failure happens before any mutation/events");
     }
 }

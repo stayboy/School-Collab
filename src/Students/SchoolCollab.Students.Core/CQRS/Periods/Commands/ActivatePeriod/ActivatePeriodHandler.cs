@@ -24,6 +24,25 @@ public sealed class ActivatePeriodHandler(
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
 
+        // ── Activation guard (period-activation-guard-atomic-create.md FR-G1/G2):
+        //    a top-level academic year divided into Terms/Semesters cannot be
+        //    activated until it has at least one Draft sub-period (a sub-period
+        //    that Activate() can transition). Evaluated BEFORE any state mutation
+        //    so a guard failure leaves zero rows changed (no prior-year close, no
+        //    sibling close, no period.Activate()). None-division years and
+        //    sub-period activations skip the guard entirely (FR-G3/G4).
+        if (period.ParentPeriodId is null && period.Division != AcademicYearDivision.None)
+        {
+            var subPeriods = await repository.GetSubPeriodsAsync(period.Id, cancellationToken);
+            if (!subPeriods.Any(sp => sp.Status == PeriodStatus.Draft))
+            {
+                throw new PeriodGuardException(
+                    $"Cannot activate {period.Division} academic year '{period.Name}': " +
+                    "it has no Draft sub-period. Create and activate at least one " +
+                    $"{period.Division} first.");
+            }
+        }
+
         // ── Hierarchy-aware "at most one active" invariant (FR-H4, FR-H5):
         //    - Activating a top-level academic year closes the prior active year and
         //      cascade-completes its still-Active sub-periods.

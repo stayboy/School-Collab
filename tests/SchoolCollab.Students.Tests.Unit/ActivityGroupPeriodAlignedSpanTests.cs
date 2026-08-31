@@ -8,6 +8,7 @@ using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.AddMembership;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.CreateActivityGroup;
 using SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.RolloverActivityGroup;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.ActivatePeriod;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.CompletePeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
@@ -46,11 +47,12 @@ public class ActivityGroupPeriodAlignedSpanTests
     private static async Task<(Guid yearId, Guid termId)> SeedYearAndTermAsync(StudentsTestScope s)
     {
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        // Guard (FR-G1): seed the Draft term before the Terms year activates.
+        var termId = (await create.HandleAsync(new CreatePeriod(
+            "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
-        var termId = await create.HandleAsync(new CreatePeriod(
-            "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(termId));
         return (yearId, termId);
     }
@@ -58,11 +60,12 @@ public class ActivityGroupPeriodAlignedSpanTests
     private static async Task<(Guid yearId, Guid semesterId)> SeedYearAndSemesterAsync(StudentsTestScope s)
     {
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.Semesters));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Semesters))).YearId;
+        // Guard (FR-G1): seed the Draft semester before the Semesters year activates.
+        var semesterId = (await create.HandleAsync(new CreatePeriod(
+            "S1", D(2026, 9, 1), D(2027, 1, 31), AcademicYearDivision.Semesters, ParentPeriodId: yearId))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
-        var semesterId = await create.HandleAsync(new CreatePeriod(
-            "S1", D(2026, 9, 1), D(2027, 1, 31), AcademicYearDivision.Semesters, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(semesterId));
         return (yearId, semesterId);
     }
@@ -139,8 +142,8 @@ public class ActivityGroupPeriodAlignedSpanTests
     {
         using var s = new StudentsTestScope("pasp-compat-" + Guid.NewGuid());
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.None));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.None))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         var h = new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
             new ActivePeriodProvider(s.Db, s.Tenants, s.Cache), NullLogger<CreateActivityGroupHandler>.Instance);
@@ -155,8 +158,10 @@ public class ActivityGroupPeriodAlignedSpanTests
     {
         using var s = new StudentsTestScope("pasp-compat-ok-" + Guid.NewGuid());
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        await create.HandleAsync(new CreatePeriod(
+            "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         var h = new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
             new ActivePeriodProvider(s.Db, s.Tenants, s.Cache), NullLogger<CreateActivityGroupHandler>.Instance);
@@ -201,10 +206,18 @@ public class ActivityGroupPeriodAlignedSpanTests
     {
         using var s = new StudentsTestScope("pasp-no-term-" + Guid.NewGuid());
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
-            Division: AcademicYearDivision.Terms));
+        var yearId = (await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Terms))).YearId;
+        // Guard (FR-G1): a Terms year needs a Draft sub to activate; activating
+        // auto-activates it (FR-H4a), then we complete it to reach the Active-year
+        // with no Active term gap state this test exercises.
+        var termId = (await create.HandleAsync(new CreatePeriod(
+            "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId))).YearId;
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
-        // No Term is created under the active year.
+        var complete = new CompletePeriodHandler(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache,
+            NullLogger<CompletePeriodHandler>.Instance);
+        await complete.HandleAsync(new CompletePeriod(termId));
+        // No Active Term exists under the active year now.
         var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
         s.Db.ActivityGroups.Add(group);
         await s.Db.SaveChangesAsync();

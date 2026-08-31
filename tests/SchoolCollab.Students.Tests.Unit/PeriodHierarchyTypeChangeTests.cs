@@ -29,7 +29,7 @@ public class PeriodHierarchyTypeChangeTests
     {
         using var s = new StudentsTestScope("fu1-f2-year-to-term");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
         await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
 
         var update = NewUpdate(s);
@@ -44,8 +44,8 @@ public class PeriodHierarchyTypeChangeTests
     {
         using var s = new StudentsTestScope("fu1-f2-unchanged");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var update = NewUpdate(s);
         await update.HandleAsync(new UpdatePeriod(
@@ -60,8 +60,8 @@ public class PeriodHierarchyTypeChangeTests
     {
         using var s = new StudentsTestScope("fu1-f2-childless");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.None));
-        var otherAy = await create.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31), Division: AcademicYearDivision.Terms));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.None))).YearId;
+        var otherAy = (await create.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
 
         var update = NewUpdate(s);
         await update.HandleAsync(new UpdatePeriod(

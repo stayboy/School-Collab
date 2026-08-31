@@ -7,6 +7,15 @@ public interface IPeriodRepository
 {
     Task<Period?> GetAsync(Guid id, CancellationToken cancellationToken = default);
     Task AddAsync(Period period, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists a set of periods (e.g. a top-level academic year plus its
+    /// sub-periods) in a single unit of work — one <c>SaveChanges</c> of the whole
+    /// object graph, so a failure at any point leaves zero rows (FR-C3). Unlike
+    /// <see cref="AddAsync"/>, which saves each item individually.
+    /// </summary>
+    Task AddRangeAsync(IReadOnlyList<Period> periods, CancellationToken cancellationToken = default);
+
     Task UpdateAsync(Period period, CancellationToken cancellationToken = default);
     Task<PeriodDto[]> ListAsync(CancellationToken cancellationToken = default);
     Task<Period[]> GetActivePeriodsEndingBeforeAsync(DateOnly date, CancellationToken cancellationToken = default);

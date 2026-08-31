@@ -347,7 +347,15 @@ public record CreatePeriodRequest(
     DateOnly StartDate,
     DateOnly EndDate,
     AcademicYearDivision Division,
-    Guid? ParentPeriodId = null);
+    Guid? ParentPeriodId = null,
+    IReadOnlyList<SubPeriodDefinitionRequest>? SubPeriods = null);
+
+/// <summary>A sub-period (Term/Semester) definition supplied with an atomic
+/// top-level academic-year create (FR-C1).</summary>
+public record SubPeriodDefinitionRequest(
+    string Name,
+    DateOnly StartDate,
+    DateOnly EndDate);
 
 public record UpdatePeriodRequest(
     string Name,
@@ -1332,7 +1340,7 @@ public sealed class StudentsApiClient : IContactsClient
                 inner: null,
                 statusCode: response.StatusCode);
         }
-        var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
+        var result = await response.Content.ReadFromJsonAsync<CreatePeriodIdResponse>(ct);
         return result!.Id;
     }
 
@@ -1839,6 +1847,10 @@ public sealed class StudentsApiClient : IContactsClient
     // ── Helper ──────────────────────────────────────────────────────────────
 
     private sealed record IdResponse(Guid Id);
+
+    /// <summary>Response shape of the atomic create endpoint (FR-C4): the created
+    /// year id plus the ids of any sub-periods created in the same unit of work.</summary>
+    private sealed record CreatePeriodIdResponse(Guid Id, IReadOnlyList<Guid> SubPeriodIds);
 }
 
 /// <summary>Upsert request for a per-grade notification policy override (all-nullable:

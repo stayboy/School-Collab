@@ -27,9 +27,9 @@ public class PeriodHierarchyContainmentTests
     {
         using var s = new StudentsTestScope("cont-mid");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t = await h.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t = (await h.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
         (await s.Db.Periods.SingleAsync(p => p.Id == t)).Division.Should().Be(AcademicYearDivision.Terms);
     }
 
@@ -38,11 +38,11 @@ public class PeriodHierarchyContainmentTests
     {
         using var s = new StudentsTestScope("cont-outside");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
 
         // Starts after the parent year ends — not contained.
-        var act = async () => await h.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2028, 9, 1), new DateOnly(2028, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var act = async () => (await h.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2028, 9, 1), new DateOnly(2028, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
         await act.Should().ThrowAsync<PeriodContainmentException>();
     }
 
@@ -51,11 +51,11 @@ public class PeriodHierarchyContainmentTests
     {
         using var s = new StudentsTestScope("cont-boundary");
         var h = NewCreate(s);
-        var ay = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
+        var ay = (await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
 
         // End date spills past the parent year end — EC-H3.
-        var act = async () => await h.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2027, 6, 1), new DateOnly(2027, 9, 15), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var act = async () => (await h.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2027, 6, 1), new DateOnly(2027, 9, 15), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
         await act.Should().ThrowAsync<PeriodContainmentException>();
     }
 
@@ -64,9 +64,9 @@ public class PeriodHierarchyContainmentTests
     {
         using var s = new StudentsTestScope("cont-update");
         var create = NewCreate(s);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
-        var t1 = await create.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
 
         var update = NewUpdate(s);
         var act = async () => await update.HandleAsync(new UpdatePeriod(

@@ -86,6 +86,11 @@
     /// so no per-row fetch is needed for the count column.</summary>
     private Dictionary<Guid, int> _subPeriodCounts = new();
 
+    /// <summary>Parent-year → number of <b>Draft</b> sub-period rows, memoized on
+    /// load from the flat list. Used by <see cref="BuildPeriodActions"/> to disable
+    /// Activate for a Terms/Semesters year with zero Draft sub-periods (FR-G6).</summary>
+    private Dictionary<Guid, int> _draftSubPeriodCounts = new();
+
     /// <summary>Parent-year → comma-delimited sub-period names, memoized on load
     /// from the flat list so no per-row fetch is needed for the name column.</summary>
     private Dictionary<Guid, string> _subPeriodNames = new();
@@ -117,6 +122,7 @@
             Logger.LogInformation("Loaded {Count} periods", _items?.Length ?? 0);
             _subPeriodCounts = BuildSubPeriodCounts(_items);
             _subPeriodNames = BuildSubPeriodNames(_items);
+            _draftSubPeriodCounts = BuildDraftSubPeriodCounts(_items);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -232,6 +238,7 @@
             if (_disposed) return;
             _subPeriodCounts = BuildSubPeriodCounts(_items);
             _subPeriodNames = BuildSubPeriodNames(_items);
+            _draftSubPeriodCounts = BuildDraftSubPeriodCounts(_items);
             StateHasChanged();
         }
         catch (OperationCanceledException) { }
@@ -249,7 +256,25 @@
         var actions = new List<RowAction>();
         if (period.Status == "Draft")
         {
-            actions.Add(RowAction.Callback("Activate", () => OnActivateAsync(period.Id), FluentIcons.ArrowExportUp));
+            // FR-G6: activating a top-level Terms/Semesters year requires at least
+            // one Draft sub-period (hard guard, FR-G1). When none exist, disable the
+            // Activate action and use the explanatory label as the tooltip.
+            var guarded =
+                period.ParentPeriodId is null
+                && (period.Division == "Terms" || period.Division == "Semesters")
+                && GetDraftSubPeriodCount(period.Id) == 0;
+            if (guarded)
+            {
+                actions.Add(RowAction.Callback(
+                    "Add a draft Term/Semester to activate",
+                    () => OnActivateAsync(period.Id),
+                    FluentIcons.ArrowExportUp,
+                    disabled: true));
+            }
+            else
+            {
+                actions.Add(RowAction.Callback("Activate", () => OnActivateAsync(period.Id), FluentIcons.ArrowExportUp));
+            }
         }
         else if (period.Status == "Active")
         {
@@ -260,6 +285,21 @@
 
     private int GetSubPeriodCount(Guid yearId)
         => _subPeriodCounts.TryGetValue(yearId, out var count) ? count : 0;
+
+    private int GetDraftSubPeriodCount(Guid yearId)
+        => _draftSubPeriodCounts.TryGetValue(yearId, out var count) ? count : 0;
+
+    private static Dictionary<Guid, int> BuildDraftSubPeriodCounts(PeriodDto[]? items)
+    {
+        var counts = new Dictionary<Guid, int>();
+        if (items is null) return counts;
+        foreach (var p in items)
+        {
+            if (p.ParentPeriodId is not { } parentId || p.Status != "Draft") continue;
+            counts[parentId] = counts.TryGetValue(parentId, out var n) ? n + 1 : 1;
+        }
+        return counts;
+    }
 
     private static Dictionary<Guid, int> BuildSubPeriodCounts(PeriodDto[]? items)
     {

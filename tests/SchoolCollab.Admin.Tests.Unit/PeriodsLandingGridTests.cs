@@ -94,6 +94,12 @@ public class PeriodsLandingGridTests : BunitContext
     private static string PeriodJson(Guid id, string name, string type, string status, Guid? parent, string start = "2026-01-01", string end = "2026-12-31") =>
         $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"{start}\",\"endDate\":\"{end}\",\"status\":\"{status}\",\"periodType\":\"{type}\",\"parentPeriodId\":{(parent is null ? "null" : $"\"{parent}\"")},\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
+    /// <summary>Variants that set the DTO's <c>division</c> field (a real PeriodDto
+    /// property) — used by the FR-G6 activation-guard row-action tests, which key
+    /// off <c>division</c> to decide whether a Draft year's Activate is guarded.</summary>
+    private static string PeriodJsonWithDivision(Guid id, string name, string division, string status, Guid? parent, string start = "2026-01-01", string end = "2026-12-31") =>
+        $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"{start}\",\"endDate\":\"{end}\",\"status\":\"{status}\",\"division\":\"{division}\",\"parentPeriodId\":{(parent is null ? "null" : $"\"{parent}\"")},\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
+
     private static string PeriodsJson() =>
         $"[{PeriodJson(YearId, "2026", "AcademicYear", "Active", null)}," +
         $"{PeriodJson(EmptyYearId, "2025", "AcademicYear", "Completed", null)}," +
@@ -219,6 +225,62 @@ public class PeriodsLandingGridTests : BunitContext
         labels.Should().Contain(new[] { "Activate", "Complete" });
         labels.Should().NotContain("Edit", "the Edit row action is removed (FR-2)");
         labels.Should().NotContain("Sub-periods", "the Sub-periods navigate action is removed (FR-5)");
+    }
+
+    [TestMethod]
+    public void Periods_RowActions_Guard_DisablesActivateForTermsYearNoDraftSub()
+    {
+        // A Terms year (parent null) with Draft status but ZERO Draft subs → the
+        // Activate action is present but disabled with an explanatory label/tooltip (FR-G6).
+        var yearId = Guid.Parse("99999999-9999-9999-9999-999999999999");
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJsonWithDivision(yearId, "2027", "Terms", "Draft", null, "2027-01-01", "2027-12-31") + "]");
+
+        var cut = Render<Periods>();
+
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Any(b => b.GetAttribute("title")?.Contains("Add a draft Term/Semester to activate") == true).Should().BeTrue(
+                "a guarded Terms year shows a disabled Activate with an explanatory title/tooltip"));
+        var btn = cut.FindAll("fluent-button")
+            .First(b => b.GetAttribute("title")?.Contains("Add a draft Term/Semester to activate") == true);
+        btn.GetAttribute("disabled").Should().NotBeNull("the guarded Activate is disabled");
+    }
+
+    [TestMethod]
+    public void Periods_RowActions_TermsYear_WithDraftSub_ActivateEnabled()
+    {
+        // A Terms year with at least one Draft sub → Activate enabled (regression).
+        var yearId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        var draftSub = Guid.Parse("77777777-7777-7777-7777-777777777777");
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJsonWithDivision(yearId, "2027", "Terms", "Draft", null, "2027-01-01", "2027-12-31") + "," +
+            PeriodJsonWithDivision(draftSub, "Term 1", "Terms", "Draft", yearId, "2027-01-01", "2027-06-30") + "]");
+
+        var cut = Render<Periods>();
+
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Any(b => b.GetAttribute("title") == "Activate").Should().BeTrue(
+                "a Terms year with a Draft sub shows an enabled Activate"));
+        var btn = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Activate");
+        btn.GetAttribute("disabled").Should().BeNull("Activate is enabled when a Draft sub exists");
+    }
+
+    [TestMethod]
+    public void Periods_RowActions_NoneDivisionYear_ActivateEnabled()
+    {
+        // A None-division year needs no sub to activate → Activate enabled (FR-G3).
+        var yearId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJsonWithDivision(yearId, "2027", "None", "Draft", null, "2027-01-01", "2027-12-31") + "]");
+
+        var cut = Render<Periods>();
+
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Any(b => b.GetAttribute("title") == "Activate").Should().BeTrue(
+                "a None-division Draft year shows an enabled Activate"));
     }
 
     // ── FR-4 dialog assertions ──────────────────────────────────────────────
