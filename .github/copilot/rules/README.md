@@ -1,7 +1,7 @@
 # Copilot Rule Files
 
 This directory holds specialty instruction files for SchoolCollab. Keep
-`.github/copilot-instructions.md` as the global manifest and move large topic-specific
+`AGENTS.md` (repo root) as the global manifest and move large topic-specific
 guidance into these files.
 
 ## Current specialty rules
@@ -19,7 +19,7 @@ guidance into these files.
 ## How to use
 
 Before working in a topic area, read the matching rule file. Do not duplicate large
-topic-specific sections in `.github/copilot-instructions.md`; link to them instead.
+topic-specific sections in `AGENTS.md`; link to them instead.
 
 ## Related skills
 

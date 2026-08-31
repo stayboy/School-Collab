@@ -12,6 +12,7 @@ using SchoolCollab.Students.Core.CQRS.ActivityGroups.Queries.ListActivityGroups;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.Services;
+using SchoolCollab.Students.Core.Tenancy;
 
 namespace SchoolCollab.Students.Tests.Unit;
 
@@ -25,11 +26,11 @@ public class ActivityGroupHandlerTests
             => Throw ? throw new HttpRequestException("x") : Task.FromResult(Array.Empty<SchoolCollab.Students.Core.DTOs.AssignmentReferenceDto>());
     }
 
-    private static (CreateActivityGroupHandler h, StudentsTestScope s) New(string division = "None")
+    private static (CreateActivityGroupHandler h, StudentsTestScope s) New()
     {
         var s = new StudentsTestScope("ag-" + Guid.NewGuid());
         return (new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
-            new StubAcademicYearDivisionProvider(division),
+            new ActivePeriodProvider(s.Db, s.Tenants, s.Cache),
             NullLogger<CreateActivityGroupHandler>.Instance), s);
     }
 

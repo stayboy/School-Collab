@@ -1,4 +1,10 @@
-# CLINE.md — Cline instructions for the School-Collab repo
+# CLINE.md — Cline memory-graph conventions for the School-Collab repo
+
+> **All repository-wide agent rules live in `AGENTS.md` (repo root)** — the
+> AGENTS.md open standard, which Cline auto-loads as a rule file (visible in
+> the Rules panel). This file covers only Cline-specific memory-graph usage
+> and deliberately contains no general repo rules, so nothing is duplicated
+> between the two files.
 
 This repo is wired with a **Memory MCP server** (`@modelcontextprotocol/server-memory`)
 that maintains a persistent local knowledge graph at `.cline/memory.jsonl`. Use it to
@@ -47,8 +53,4 @@ recall and record structured facts about this codebase across sessions.
 - Repo-local skills in `.github/skills/` (`bounded-context`, `dotnet-best-practices`,
   `coded-values`, `dialog-ui`, `fluentui-component-props`, `fluentui-icons`) encode the
   authoritative conventions; the memory graph is a quick-recall index, not a replacement.
-- **Before any C#/`.razor` code-behind change, read
-  `.github/copilot/rules/dotnet-best-practices.md` (load-bearing rules) and its backing
-  skill `.github/skills/dotnet-best-practices/SKILL.md`.** New C# must follow the repo's
-  CQRS/primary-constructor/factory patterns and be warning-free; the checkable anti-patterns
-  are enforced in CI by `tests/SchoolCollab.ArchitectureTests.Unit`.
+

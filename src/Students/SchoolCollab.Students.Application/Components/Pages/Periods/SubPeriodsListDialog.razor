@@ -1,0 +1,267 @@
+@* Read-only dialog listing an academic year's sub-periods, opened from the
+   Periods landing grid's "Sub-periods" count link (periods-landing-grid-
+   beautify.md FR-4). Loads via StudentsApiClient.ListSubPeriodsAsync and
+   offers inline Activate/Complete per row, then re-fetches both its own list
+   and the parent grid (via OnChanged) so the two stay in sync.
+
+   Not a DialogShellBase (no model/form/result). Mirrors TopicStrandsDialog /
+   GuardianContactsDialog: opened via ShowReadonlyDialogAsync, reads its inputs
+   from Content.TryGet<T>(key), closes via the cascading FluentDialog. See
+   documents/solution/dialog-parameter-binding.md for the FluentUI 4.14.x
+   "does not spread indexer entries onto [Parameter]s" gotcha. *@
+@implements IDisposable
+@implements IDialogContentComponent<DialogParameters>
+@using Microsoft.Extensions.Logging
+@using Microsoft.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<SubPeriodsListDialog> Logger
+@inject IDialogService DialogService
+
+<div class="sub-periods-dialog">
+    @if (_loading)
+    {
+        <div class="spinner-container"><FluentProgressRing /></div>
+    }
+    else if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+    else if (_items is null || _items.Length == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">
+            No sub-periods for this academic year yet.
+        </FluentMessageBar>
+        <FluentAnchor Appearance="Appearance.Lightweight"
+                      Title="New sub-period"
+                      OnClick="CreateSubPeriodAsync">
+            + New sub-period
+        </FluentAnchor>
+    }
+    else
+    {
+        <div class="sub-periods-list" role="table" aria-label="Sub-periods">
+            <div class="sub-periods-row sub-periods-row--head" role="row">
+                <span role="columnheader">Name</span>
+                <span role="columnheader">Type</span>
+                <span role="columnheader">Start</span>
+                <span role="columnheader">End</span>
+                <span role="columnheader">Status</span>
+                <span role="columnheader"></span>
+            </div>
+            @foreach (var p in _items)
+            {
+                <div class="sub-periods-row" role="row">
+                    <span role="cell" class="sub-periods-name">@p.Name</span>
+                    <span role="cell"><FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(p)</FluentBadge></span>
+                    <span role="cell">@p.StartDate.ToString("d")</span>
+                    <span role="cell">@p.EndDate.ToString("d")</span>
+                    <span role="cell"><FluentBadge Appearance="@GetStatusAppearance(p.Status)">@p.Status</FluentBadge></span>
+                    <span role="cell" class="sub-periods-actions">
+                        @if (p.Status == "Draft")
+                        {
+                            <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.ArrowExportUp"
+                                          Title="Activate" OnClick="@(() => ActivateAsync(p.Id))">Activate</FluentButton>
+                        }
+                        else if (p.Status == "Active")
+                        {
+                            <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Checkmark"
+                                          Title="Complete" OnClick="@(() => CompleteAsync(p.Id))">Complete</FluentButton>
+                        }
+                    </span>
+                </div>
+            }
+        </div>
+    }
+
+    @* Footer — a single Close button. The dialog host has no
+       PrimaryAction/SecondaryAction (BuildShellParameters sets both null),
+       so the body owns the close affordance. The top border is the
+       content/actions separator mandated by the dialog-ui skill. *@
+    <div class="dialog-footer">
+        <FluentButton Appearance="Appearance.Accent" Title="Close" OnClick="CloseAsync">Close</FluentButton>
+    </div>
+</div>
+
+@code {
+    /// <summary>Keys used in <see cref="Content"/> (the DialogParameters
+    /// indexer). Exposed so callers set the same keys they read here.</summary>
+    public const string YearIdKey = nameof(YearId);
+    public const string YearNameKey = nameof(YearName);
+    public const string OnChangedKey = nameof(OnChanged);
+
+    /// <summary>The academic year whose sub-periods to list. Required — no
+    /// default. Read from <see cref="Content"/> (see header comment).</summary>
+    private Guid YearId => Content is { } c ? c.TryGet<Guid>(YearIdKey) : Guid.Empty;
+
+    /// <summary>The academic year name, used for the dialog title. Read from
+    /// <see cref="Content"/>.</summary>
+    private string? YearName => Content is { } c ? c.TryGet<string>(YearNameKey) : null;
+
+    /// <summary>Optional callback the parent grid passes so it can refresh
+    /// after this dialog mutates a sub-period. Read from
+    /// <see cref="Content"/>.</summary>
+    private Func<Task>? OnChanged => Content is { } c ? c.TryGet<Func<Task>>(OnChangedKey) : null;
+
+    /// <summary>The hosting <see cref="FluentDialog"/> reference provided by
+    /// the dialog host as a cascading parameter. Nullable so unit tests that
+    /// render the component without a host do not NRE.</summary>
+    [CascadingParameter] public FluentDialog? Dialog { get; set; }
+
+    /// <summary>Required by <c>IDialogContentComponent&lt;DialogParameters&gt;</c>
+    /// for the two-type-arg <c>IDialogService.ShowDialogAsync</c> overload used
+    /// by <c>ShowReadonlyDialogAsync</c>. The dialog reads its inputs from this
+    /// <c>DialogParameters</c> indexer (see header comment).</summary>
+    [Parameter] public DialogParameters Content { get; set; } = default!;
+
+    private PeriodDto[]? _items;
+    private bool _loading;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private Guid? _loadedFor;
+
+    /// <summary>Load the year's sub-periods on open (or whenever YearId
+    /// changes, so a reused instance reloads). Cancellation + disposed
+    /// guards mirror the landing pages.</summary>
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == YearId) return;
+        _loadedFor = YearId;
+
+        _disposed = false;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        var ct = _loadCts.Token;
+
+        _loading = true;
+        _error = null;
+        _items = null;
+        try
+        {
+            _items = await Api.ListSubPeriodsAsync(YearId, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                Logger.LogError(ex, "Failed to load sub-periods for year {YearId}", YearId);
+                _error = $"Couldn't load sub-periods. Try again. ({ex.Message})";
+            }
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    /// <summary>Activate a Draft sub-period, then re-fetch the dialog list AND
+    /// refresh the parent grid via <see cref="OnChanged"/>.</summary>
+    private async Task ActivateAsync(Guid id)
+    {
+        if (_disposed) return;
+        try
+        {
+            await Api.ActivatePeriodAsync(id);
+            await ReloadAsync();
+            if (OnChanged is not null) await OnChanged.Invoke();
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                Logger.LogError(ex, "Failed to activate sub-period {Id}", id);
+                _error = ex.Message;
+                StateHasChanged();
+            }
+        }
+    }
+
+    /// <summary>Complete an Active sub-period (with confirmation, per
+    /// periods-landing-grid-beautify.md FR-4), then re-fetch the dialog list
+    /// AND refresh the parent grid via <see cref="OnChanged"/>.</summary>
+    private async Task CompleteAsync(Guid id)
+    {
+        if (_disposed) return;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            "Complete this period? This will finalize the period.",
+            "Complete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        try
+        {
+            await Api.CompletePeriodAsync(id);
+            await ReloadAsync();
+            if (OnChanged is not null) await OnChanged.Invoke();
+        }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                Logger.LogError(ex, "Failed to complete sub-period {Id}", id);
+                _error = ex.Message;
+                StateHasChanged();
+            }
+        }
+    }
+
+    /// <summary>Re-fetch the dialog's own list after a mutation.</summary>
+    private async Task ReloadAsync()
+    {
+        if (_disposed) return;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _items = await Api.ListSubPeriodsAsync(YearId, ct);
+            if (_disposed) return;
+            StateHasChanged();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!_disposed)
+            {
+                Logger.LogError(ex, "Failed to reload sub-periods for year {YearId}", YearId);
+                _error = ex.Message;
+                StateHasChanged();
+            }
+        }
+    }
+
+    /// <summary>Close the dialog and navigate to the create-sub-period route
+    /// pre-parented to this year.</summary>
+    private async Task CreateSubPeriodAsync()
+    {
+        if (Dialog is not null) await Dialog.CloseAsync();
+        Nav.NavigateTo($"/students/periods/create?parent={YearId}");
+    }
+
+    private Task CloseAsync()
+        => Dialog is null ? Task.CompletedTask : Dialog.CloseAsync();
+
+    private static Appearance GetStatusAppearance(string status) => status switch
+    {
+        "Draft"     => Appearance.Neutral,
+        "Active"    => Appearance.Accent,
+        "Completed" => Appearance.Lightweight,
+        "Archived"  => Appearance.Neutral,
+        _           => Appearance.Neutral
+    };
+
+    private static string GetKindLabel(PeriodDto period)
+        => period.Division == "Semesters" ? "Semester" : "Term";
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

@@ -22,11 +22,36 @@
              GridSettings="@_gridSettings"
              Error="@_error"
              RowActions="@BuildPeriodActions"
+             RowActionsUseMenuService="false"
              RowActionsAriaLabel="Period actions">
     <Columns>
-        <PropertyColumn TGridItem="PeriodDto" TProp="string" Property="@(x => x.Name)" Sortable="true" Title="Name" />
+        <TemplateColumn TGridItem="PeriodDto" Title="Name" Sortable="true" SortBy="@_sortByName">
+            <FluentAnchor Appearance="Appearance.Lightweight"
+                          Href="@($"/students/periods/{context.Id}/edit")"
+                          title="Edit period">@GetDisplayName(context)</FluentAnchor>
+        </TemplateColumn>
         <TemplateColumn TGridItem="PeriodDto" Title="Type">
-            <FluentBadge Appearance="Appearance.Neutral">@context.PeriodType</FluentBadge>
+            <FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(context)</FluentBadge>
+        </TemplateColumn>
+        <TemplateColumn TGridItem="PeriodDto" Title="Sub-periods">
+            @if (context.ParentPeriodId is null)
+            {
+                var count = GetSubPeriodCount(context.Id);
+                if (count > 0)
+                {
+                    <FluentAnchor Appearance="Appearance.Lightweight"
+                                  OnClick="@(() => OpenSubPeriodsDialogAsync(context.Id, context.Name))"
+                                  title="View sub-periods">@count</FluentAnchor>
+                }
+                else
+                {
+                    <span class="muted">0</span>
+                }
+            }
+            else
+            {
+                <span aria-hidden="true">—</span>
+            }
         </TemplateColumn>
         <TemplateColumn TGridItem="PeriodDto" Title="Start Date">
             @context.StartDate.ToString("d")
@@ -37,7 +62,6 @@
         <TemplateColumn TGridItem="PeriodDto" Title="Status">
             <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
         </TemplateColumn>
-        
     </Columns>
 </LandingPage>
 
@@ -51,8 +75,20 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(160px,2fr) 100px 110px 110px 120px auto"
+        GridTemplateColumns = "minmax(160px,2fr) 140px 180px 180px 190px 110px auto"
     };
+
+    private static readonly GridSort<PeriodDto> _sortByName =
+        GridSort<PeriodDto>.ByAscending(x => x.Name);
+
+    /// <summary>Parent-year → number of sub-period rows, memoized on load from
+    /// the flat list (years AND sub-periods) returned by <see cref="ListPeriodsAsync"/>
+    /// so no per-row fetch is needed for the count column.</summary>
+    private Dictionary<Guid, int> _subPeriodCounts = new();
+
+    /// <summary>Parent-year → comma-delimited sub-period names, memoized on load
+    /// from the flat list so no per-row fetch is needed for the name column.</summary>
+    private Dictionary<Guid, string> _subPeriodNames = new();
 
     private string CurrentEmptyMessage =>
         !_isRealTenant
@@ -79,6 +115,8 @@
             _items = await Api.ListPeriodsAsync(token);
             if (_disposed) return;
             Logger.LogInformation("Loaded {Count} periods", _items?.Length ?? 0);
+            _subPeriodCounts = BuildSubPeriodCounts(_items);
+            _subPeriodNames = BuildSubPeriodNames(_items);
         }
         catch (OperationCanceledException) { }
         catch (Exception ex)
@@ -91,6 +129,36 @@
         {
             if (!_disposed) _loading = false;
         }
+    }
+
+    /// <summary>Renders the period kind label from its division + parent: a
+    /// top-level year is "Academic Year"; a Terms/Semesters sub-period is
+    /// "Term"/"Semester".</summary>
+    private static string GetKindLabel(PeriodDto period)
+        => period.ParentPeriodId is null ? "Academic Year" : period.Division == "Terms" ? "Term" : "Semester";
+
+    /// <summary>Renders "PeriodName (sub1, sub2)" for academic years with
+    /// sub-periods; the plain name otherwise.</summary>
+    private string GetDisplayName(PeriodDto period)
+        => period.ParentPeriodId is null
+            && _subPeriodNames.TryGetValue(period.Id, out var subs)
+            && !string.IsNullOrEmpty(subs)
+            ? $"{period.Name} ({subs})"
+            : period.Name;
+
+    private static Dictionary<Guid, string> BuildSubPeriodNames(PeriodDto[]? items)
+    {
+        var names = new Dictionary<Guid, string>();
+        if (items is null) return names;
+        foreach (var p in items)
+        {
+            if (p.ParentPeriodId is null) continue;
+            if (p.ParentPeriodId is not { } parentId) continue;
+            names[parentId] = names.TryGetValue(parentId, out var existing)
+                ? $"{existing}, {p.Name}"
+                : p.Name;
+        }
+        return names;
     }
 
     private async Task OnActivateAsync(Guid id)
@@ -162,6 +230,8 @@
         {
             _items = await Api.ListPeriodsAsync(_loadCts?.Token ?? CancellationToken.None);
             if (_disposed) return;
+            _subPeriodCounts = BuildSubPeriodCounts(_items);
+            _subPeriodNames = BuildSubPeriodNames(_items);
             StateHasChanged();
         }
         catch (OperationCanceledException) { }
@@ -185,19 +255,49 @@
         {
             actions.Add(RowAction.Callback("Complete", () => OnCompleteAsync(period.Id), FluentIcons.Checkmark));
         }
-        if (period.PeriodType == "AcademicYear")
-        {
-            actions.Add(RowAction.Navigate("Sub-periods", $"/students/periods/{period.Id}/sub-periods", FluentIcons.Calendar));
-        }
-        actions.Add(RowAction.Navigate("Edit", $"/students/periods/{period.Id}/edit", FluentIcons.Edit));
         return actions;
+    }
+
+    private int GetSubPeriodCount(Guid yearId)
+        => _subPeriodCounts.TryGetValue(yearId, out var count) ? count : 0;
+
+    private static Dictionary<Guid, int> BuildSubPeriodCounts(PeriodDto[]? items)
+    {
+        var counts = new Dictionary<Guid, int>();
+        if (items is null) return counts;
+        foreach (var p in items)
+        {
+            if (p.ParentPeriodId is null) continue;
+            if (p.ParentPeriodId is not { } parentId) continue;
+            counts[parentId] = counts.TryGetValue(parentId, out var n) ? n + 1 : 1;
+        }
+        return counts;
+    }
+
+    /// <summary>
+    /// Opens the read-only sub-periods list for an academic year in a dialog
+    /// (FR-4). The dialog mutations re-fetch its own list AND invoke
+    /// <see cref="ReloadAsync"/> so the landing grid stays in sync.
+    /// </summary>
+    private async Task OpenSubPeriodsDialogAsync(Guid yearId, string yearName)
+    {
+        if (_disposed) return;
+        await DialogService.ShowReadonlyDialogAsync<SubPeriodsListDialog>(
+            $"Sub-periods — {yearName}",
+            new Dictionary<string, object?>
+            {
+                { SubPeriodsListDialog.YearIdKey, yearId },
+                { SubPeriodsListDialog.YearNameKey, yearName },
+                { SubPeriodsListDialog.OnChangedKey, new Func<Task>(ReloadAsync) },
+            },
+            DialogSize.Medium);
     }
 
     private static Appearance GetStatusAppearance(string status) => status switch
     {
         "Draft"     => Appearance.Neutral,
         "Active"    => Appearance.Accent,
-        "Completed" => Appearance.Outline,
+        "Completed" => Appearance.Lightweight,
         "Archived"  => Appearance.Neutral,
         _           => Appearance.Neutral
     };

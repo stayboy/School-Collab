@@ -92,7 +92,6 @@ public sealed class PilotActivityGroupFlagOverrideSeeder(
                 tenantId: pilotTenantId,
                 featureFlagId: flag.Id,
                 isEnabled: true,
-                value: null,
                 reason: reason,
                 effectiveFrom: null,
                 effectiveTo: null);

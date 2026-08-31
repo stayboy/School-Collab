@@ -5,7 +5,6 @@ using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
-using SchoolCollab.Students.Core.Services;
 
 namespace SchoolCollab.Students.Core.CQRS.ActivityGroups.Commands.CreateActivityGroup;
 
@@ -13,7 +12,7 @@ public sealed class CreateActivityGroupHandler(
     IActivityGroupRepository repository,
     HybridCache cache,
     ITenantProvider tenantProvider,
-    IAcademicYearDivisionProvider divisionProvider,
+    IActivePeriodProvider activePeriodProvider,
     ILogger<CreateActivityGroupHandler> logger) : ICommandHandler<CreateActivityGroup, Guid>
 {
     public async Task<Guid> HandleAsync(CreateActivityGroup command, CancellationToken cancellationToken = default)
@@ -24,10 +23,14 @@ public sealed class CreateActivityGroupHandler(
 
         // ── Rev. 3 FR-45: span/framework compatibility. Termly requires a terms
         //    framework; Semester requires semesters. Others are framework-agnostic.
+        //    The division is read from the ACTIVE AcademicYear's Period.Division
+        //    (Rev. 2 — no cross-context provider). No active year ⇒ fail-closed
+        //    (same semantics as the old fail-open-to-None).
         if (command.Span is EnrollmentSpan.Termly or EnrollmentSpan.Semester)
         {
-            var division = await divisionProvider.GetDivisionAsync(cancellationToken);
-            var required = command.Span == EnrollmentSpan.Termly ? "Terms" : "Semesters";
+            var activeYear = await activePeriodProvider.GetActiveAcademicYearAsync(cancellationToken);
+            var division = activeYear?.Division ?? nameof(AcademicYearDivision.None);
+            var required = command.Span == EnrollmentSpan.Termly ? nameof(AcademicYearDivision.Terms) : nameof(AcademicYearDivision.Semesters);
             if (division != required)
                 throw new EnrollmentSpanIncompatibleException(command.Span.ToString(), required);
         }

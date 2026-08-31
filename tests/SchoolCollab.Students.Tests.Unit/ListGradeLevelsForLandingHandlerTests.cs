@@ -30,7 +30,7 @@ public class ListGradeLevelsForLandingHandlerTests
     private static async Task<Guid> SeedCurrentPeriodAsync(StudentsTestScope s, string name)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var period = Period.Create(name, today.AddDays(-1), today.AddDays(1));
+        var period = Period.Create(name, today.AddDays(-1), today.AddDays(1), AcademicYearDivision.None);
         s.Db.Periods.Add(period);
         await s.Db.SaveChangesAsync();
         return period.Id;

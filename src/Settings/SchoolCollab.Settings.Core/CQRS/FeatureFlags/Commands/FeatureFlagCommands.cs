@@ -32,7 +32,6 @@ public sealed record UpsertTenantFlagOverride(
     string Key,
     Guid TenantId,
     bool? IsEnabled,
-    string? Value,
     string Reason,
     DateTimeOffset? EffectiveFrom,
     DateTimeOffset? EffectiveTo) : ICommand;

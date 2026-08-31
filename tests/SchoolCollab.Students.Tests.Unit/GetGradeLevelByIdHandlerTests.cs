@@ -25,7 +25,7 @@ public class GetGradeLevelByIdHandlerTests
     private static async Task<Guid> SeedCurrentPeriodAsync(StudentsTestScope s, string name = "Term 1")
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var period = Period.Create(name, today.AddDays(-1), today.AddDays(1));
+        var period = Period.Create(name, today.AddDays(-1), today.AddDays(1), AcademicYearDivision.None);
         s.Db.Periods.Add(period);
         await s.Db.SaveChangesAsync();
         return period.Id;

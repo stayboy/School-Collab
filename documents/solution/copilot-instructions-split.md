@@ -95,3 +95,13 @@ Future instruction additions should follow this split:
 - Add agent-triggered, package-specific, or domain-specific guidance to
   `.github/skills/<topic>/SKILL.md`.
 - Avoid duplicating detailed rules in both the main file and specialty files.
+
+## Update — 2026-08-30: entry point moved to `AGENTS.md`
+
+The "global manifest" role described above now belongs to root `AGENTS.md`
+(the [AGENTS.md open standard](https://agents.md), auto-read by Cline, pi,
+GitHub Copilot coding agent, VS Code Copilot, Cursor, Codex, and most other
+agents). `.github/copilot-instructions.md` is now a pointer shim. The
+specialty-file split under `.github/copilot/rules/` and `.github/skills/` is
+unchanged. Rationale, research, and implementation:
+`documents/solution/agents-md-consolidation.md`.

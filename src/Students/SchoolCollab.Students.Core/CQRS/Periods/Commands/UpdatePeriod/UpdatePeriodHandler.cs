@@ -3,15 +3,14 @@ using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Students.Core.Data.Repositories;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
-using SchoolCollab.Students.Core.Services;
 
 namespace SchoolCollab.Students.Core.CQRS.Periods.Commands.UpdatePeriod;
 
 public sealed class UpdatePeriodHandler(
     IPeriodRepository repository,
     HybridCache cache,
-    IAcademicYearDivisionProvider divisionProvider,
     ILogger<UpdatePeriodHandler> logger) : ICommandHandler<UpdatePeriod>
 {
     public async Task HandleAsync(UpdatePeriod command, CancellationToken cancellationToken = default)
@@ -21,49 +20,74 @@ public sealed class UpdatePeriodHandler(
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
 
-        // ── Period hierarchy (FR-H2): if this is a sub-period, its parent must be
-        //    an existing AcademicYear period. The null/required shape is enforced
-        //    by the entity.
-        if (command.PeriodType != Domain.PeriodType.AcademicYear)
+        // ── plan-drop-periodtype.md: a top-level year → sub-period flip must not
+        //    orphan sub-periods. Guarded here (handler) before the entity Update, so
+        //    repo rows are never mutated on rejection.
+        if (period.ParentPeriodId is null && command.ParentPeriodId is not null)
         {
-            if (!command.ParentPeriodId.HasValue)
-                throw new ArgumentException(
-                    $"A {command.PeriodType} period requires a ParentPeriodId.", nameof(command.ParentPeriodId));
+            var children = await repository.GetSubPeriodsAsync(period.Id, cancellationToken);
+            if (children.Length > 0)
+            {
+                throw new PeriodFrameworkMismatchException(
+                    $"Cannot change '{period.Name}' from an academic year to a sub-period: " +
+                    $"{children.Length} sub-period(s) still exist. Remove them first.");
+            }
+        }
 
-            var parent = await repository.GetAsync(command.ParentPeriodId.Value, cancellationToken)
-                ?? throw new PeriodNotFoundException(command.ParentPeriodId.Value);
-
-            if (parent.PeriodType != Domain.PeriodType.AcademicYear)
+        // ── Period hierarchy (plan-drop-periodtype.md): if this is a sub-period, its
+        //    parent must be an existing top-level academic year with the SAME
+        //    division. The null/required shape is enforced by the entity.
+        if (command.ParentPeriodId is { } parentId)
+        {
+            if (command.Division == AcademicYearDivision.None)
                 throw new ArgumentException(
-                    $"A {command.PeriodType} period's ParentPeriodId must reference an AcademicYear period.",
+                    "A sub-period must have a Terms or Semesters division.", nameof(command.Division));
+
+            var parent = await repository.GetAsync(parentId, cancellationToken)
+                ?? throw new PeriodNotFoundException(parentId);
+
+            if (parent.ParentPeriodId is not null)
+                throw new ArgumentException(
+                    "A sub-period's ParentPeriodId must reference a top-level academic year.",
                     nameof(command.ParentPeriodId));
+
+            if (parent.Division != command.Division)
+                throw new PeriodFrameworkMismatchException(
+                    command.Division.ToString(), parent.Division.ToString());
 
             // ── H4.1 (FR-H3): the sub-period's range must be contained within its
             //    parent year. Crossing a year boundary is also rejected here.
             if (command.StartDate < parent.StartDate || command.EndDate > parent.EndDate)
                 throw new PeriodContainmentException(
-                    command.PeriodType.ToString(), parent.Name, parent.StartDate, parent.EndDate);
+                    command.Division.ToString(), parent.Name, parent.StartDate, parent.EndDate);
         }
-
-        // ── H3.4 (FR-H7): gate sub-period type on the tenant's academic-year
-        //    division, mirroring CreatePeriodHandler. Catches the update-bypass
-        //    where an AcademicYear is created then updated to Term/Semester.
-        if (command.PeriodType != Domain.PeriodType.AcademicYear)
+        else
         {
-            var division = await divisionProvider.GetDivisionAsync(cancellationToken);
-            if (command.PeriodType == Domain.PeriodType.Term && division != "Terms")
-                throw new PeriodFrameworkMismatchException(nameof(Domain.PeriodType.Term), division);
-            if (command.PeriodType == Domain.PeriodType.Semester && division != "Semesters")
-                throw new PeriodFrameworkMismatchException(nameof(Domain.PeriodType.Semester), division);
+            // ── plan-drop-periodtype.md: changing a top-level year's division is
+            //    rejected while non-completed sub-periods exist (the operator must
+            //    complete/remove them first).
+            if (command.Division != period.Division)
+            {
+                var subCount = await repository.GetNonCompletedSubPeriodCountAsync(period.Id, cancellationToken);
+                if (subCount > 0)
+                {
+                    throw new PeriodFrameworkMismatchException(
+                        $"Cannot change the division of academic year '{period.Name}' from " +
+                        $"'{period.Division}' to '{command.Division}': {subCount} sub-period(s) still exist. " +
+                        "Complete or remove them first.");
+                }
+            }
         }
 
         // ── No-overlap invariant (§5.6): reject if another period's range
-        //    intersects the new [StartDate, EndDate].
+        //    intersects the new [StartDate, EndDate]. When updating a top-level year,
+        //    its own sub-periods are excluded (they are contained within the year by
+        //    definition — FR-H3); when updating a sub-period, its parent year is
+        //    excluded.
         var overlapping = await repository.GetOverlappingPeriodsAsync(
             command.StartDate, command.EndDate, excludeId: command.Id,
-            excludeParentId: command.PeriodType != Domain.PeriodType.AcademicYear
-                ? command.ParentPeriodId
-                : null,
+            excludeParentId: command.ParentPeriodId,
+            excludeSubPeriodsOfParentId: command.ParentPeriodId is null ? command.Id : null,
             cancellationToken);
         if (overlapping.Length > 0)
         {
@@ -74,7 +98,7 @@ public sealed class UpdatePeriodHandler(
                 $"({overlapping[0].StartDate:O}–{overlapping[0].EndDate:O}).");
         }
 
-        period.Update(command.Name, command.StartDate, command.EndDate, command.PeriodType, command.ParentPeriodId);
+        period.Update(command.Name, command.StartDate, command.EndDate, command.Division, command.ParentPeriodId);
 
         try
         {

@@ -51,9 +51,9 @@ public sealed class ListPeriodsHandler(
                     p.StartDate,
                     p.EndDate,
                     p.Status.ToString(),
-                    p.PeriodType.ToString(),
                     p.ParentPeriodId,
                     p.NextPeriodId,
+                    p.Division.ToString(),
                     p.CreatedAt,
                     p.UpdatedAt)).ToArray();
             },

@@ -11,20 +11,20 @@ namespace SchoolCollab.Students.Core.Domain.Exceptions;
 /// </summary>
 public sealed class PeriodContainmentException : Exception
 {
-    public string PeriodType { get; }
+    public string Division { get; }
     public string ParentName { get; }
     public DateOnly ParentStart { get; }
     public DateOnly ParentEnd { get; }
 
     public PeriodContainmentException(
-        string periodType,
+        string division,
         string parentName,
         DateOnly parentStart,
         DateOnly parentEnd)
-        : base($"A {periodType} period's [StartDate, EndDate] must be contained within its parent " +
+        : base($"A {division} period's [StartDate, EndDate] must be contained within its parent " +
                $"academic year '{parentName}' ({parentStart:O}–{parentEnd:O}).")
     {
-        PeriodType = periodType;
+        Division = division;
         ParentName = parentName;
         ParentStart = parentStart;
         ParentEnd = parentEnd;

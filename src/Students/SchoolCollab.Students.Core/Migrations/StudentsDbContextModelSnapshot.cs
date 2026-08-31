@@ -915,6 +915,12 @@ namespace SchoolCollab.Students.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("created_at");
 
+                    b.Property<int>("Division")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(0)
+                        .HasColumnName("division");
+
                     b.Property<DateOnly>("EndDate")
                         .HasColumnType("date")
                         .HasColumnName("end_date");
@@ -932,12 +938,6 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<Guid?>("ParentPeriodId")
                         .HasColumnType("uuid")
                         .HasColumnName("parent_period_id");
-
-                    b.Property<int>("PeriodType")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer")
-                        .HasDefaultValue(0)
-                        .HasColumnName("period_type");
 
                     b.Property<uint>("RowVersion")
                         .IsConcurrencyToken()
@@ -975,21 +975,21 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.HasIndex("TenantId")
                         .IsUnique()
                         .HasDatabaseName("ix_periods_one_active_year")
-                        .HasFilter("period_type = 0 AND status = 1");
+                        .HasFilter("parent_period_id IS NULL AND status = 1");
+
+                    b.HasIndex("TenantId", "ParentPeriodId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_periods_one_active_sub_period")
+                        .HasFilter("parent_period_id IS NOT NULL AND status = 1");
 
                     b.HasIndex("TenantId", "Status")
                         .HasDatabaseName("ix_periods_tenant_status");
 
-                    b.HasIndex("TenantId", "ParentPeriodId", "PeriodType")
-                        .IsUnique()
-                        .HasDatabaseName("ix_periods_one_active_sub_period")
-                        .HasFilter("status = 1");
+                    b.HasIndex("TenantId", "Division", "Status")
+                        .HasDatabaseName("ix_periods_tenant_division_status");
 
                     b.HasIndex("TenantId", "ParentPeriodId", "Status")
                         .HasDatabaseName("ix_periods_tenant_parent_status");
-
-                    b.HasIndex("TenantId", "PeriodType", "Status")
-                        .HasDatabaseName("ix_periods_tenant_type_status");
 
                     b.ToTable("periods", (string)null);
                 });
@@ -1259,6 +1259,10 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.Property<Guid>("StudentId")
                         .HasColumnType("uuid")
                         .HasColumnName("student_id");
+
+                    b.Property<Guid?>("SubPeriodId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("sub_period_id");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uuid")

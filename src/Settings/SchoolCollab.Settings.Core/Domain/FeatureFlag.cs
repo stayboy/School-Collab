@@ -19,14 +19,6 @@ public sealed class FeatureFlag : IEntity, IAuditableEntity, ISoftDeletableEntit
     public string? Description { get; private set; }
     public FlagKind Kind { get; private set; }
 
-    /// <summary>
-    /// The global (blueprint) value for a value-valued flag (<see cref="FlagKind.String"/>),
-    /// e.g. the default <c>academic_year_division</c> of <c>"None"</c>. Null for
-    /// boolean flags. Tenants inherit this unless a
-    /// <see cref="TenantFeatureFlagOverride.Value"/> is set.
-    /// </summary>
-    public string? Value { get; private set; }
-
     public bool IsEnabled { get; private set; }
     public bool IsArchived { get; private set; }
     public bool IsDeleted { get; private set; }
@@ -40,8 +32,7 @@ public sealed class FeatureFlag : IEntity, IAuditableEntity, ISoftDeletableEntit
         string name,
         string? description,
         bool isEnabled,
-        FlagKind kind = FlagKind.Boolean,
-        string? value = null)
+        FlagKind kind = FlagKind.Boolean)
     {
         var now = DateTimeOffset.UtcNow;
         return new FeatureFlag
@@ -51,19 +42,11 @@ public sealed class FeatureFlag : IEntity, IAuditableEntity, ISoftDeletableEntit
             Name = name.Trim(),
             Description = description,
             Kind = kind,
-            Value = value,
             IsEnabled = isEnabled,
             IsArchived = false,
             CreatedAt = now,
             UpdatedAt = now,
         };
-    }
-
-    /// <summary>Sets the global value of a value-valued flag (default blueprint).</summary>
-    public void SetValue(string? value)
-    {
-        Value = value;
-        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void Rename(string name, string? description)

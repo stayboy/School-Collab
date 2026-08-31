@@ -215,7 +215,8 @@ public class EnrollStudentHandlerTests
         {
             Active = new ActivePeriod(
                 ActivePeriodId, "T1",
-                new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), "Active", "Term", null)
+                new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), "Active", "Term",
+                Guid.NewGuid())
         };
         var publisher = new RecordingPublisher();
         var h = await NewHandler(s, periods, publisher);
@@ -225,7 +226,7 @@ public class EnrollStudentHandlerTests
 
         var ex = (await act.Should().ThrowAsync<PeriodNotOpenException>()).Which.Message;
         ex.Should().Contain("year-level")
-            .And.Contain("Term", "the message names the sub-period type it rejects");
+            .And.Contain("sub-period", "the message names the sub-period it rejects");
         (await s.Db.StudentEnrollments.CountAsync()).Should().Be(0);
         publisher.Enqueued.Should().BeEmpty();
     }

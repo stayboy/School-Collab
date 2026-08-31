@@ -16,10 +16,10 @@ namespace SchoolCollab.Students.Tests.Unit;
 public class PeriodOverlapInvariantTests
 {
     private static CreatePeriodHandler NewCreate(StudentsTestScope s) =>
-        new(s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+        new(s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
     private static UpdatePeriodHandler NewUpdate(StudentsTestScope s) =>
-        new(s.Periods, s.Cache, new StubAcademicYearDivisionProvider("Terms"), NullLogger<UpdatePeriodHandler>.Instance);
+        new(s.Periods, s.Cache, NullLogger<UpdatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) =>
         new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
@@ -30,8 +30,8 @@ public class PeriodOverlapInvariantTests
         using var s = new StudentsTestScope("period-no-overlap");
         var h = NewCreate(s);
 
-        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
-        await h.HandleAsync(new CreatePeriod("H2", new DateOnly(2026, 7, 1), new DateOnly(2026, 12, 31)));
+        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
+        await h.HandleAsync(new CreatePeriod("H2", new DateOnly(2026, 7, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
 
         (await s.Db.Periods.CountAsync()).Should().Be(2);
     }
@@ -41,10 +41,10 @@ public class PeriodOverlapInvariantTests
     {
         using var s = new StudentsTestScope("period-create-overlap");
         var h = NewCreate(s);
-        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
+        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
 
         var act = async () => await h.HandleAsync(
-            new CreatePeriod("H2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31)));
+            new CreatePeriod("H2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms));
 
         await act.Should().ThrowAsync<PeriodOverlapException>();
         (await s.Db.Periods.CountAsync()).Should().Be(1); // second was rejected
@@ -57,10 +57,10 @@ public class PeriodOverlapInvariantTests
         // [Jan 1–Jun 30] and [Jul 1–Aug 31] touch but don't share a day → no overlap.
         using var s = new StudentsTestScope("period-adjacent");
         var h = NewCreate(s);
-        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
+        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
 
         var act = async () => await h.HandleAsync(
-            new CreatePeriod("H2", new DateOnly(2026, 7, 1), new DateOnly(2026, 8, 31)));
+            new CreatePeriod("H2", new DateOnly(2026, 7, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms));
 
         await act.Should().NotThrowAsync();
     }
@@ -70,12 +70,12 @@ public class PeriodOverlapInvariantTests
     {
         using var s = new StudentsTestScope("period-update-overlap");
         var ch = NewCreate(s);
-        var idA = await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
-        var idB = await ch.HandleAsync(new CreatePeriod("B", new DateOnly(2026, 7, 1), new DateOnly(2026, 12, 31)));
+        var idA = await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
+        var idB = await ch.HandleAsync(new CreatePeriod("B", new DateOnly(2026, 7, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
 
         var uh = NewUpdate(s);
         var act = async () => await uh.HandleAsync(
-            new UpdatePeriod(idB, "B2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31)));
+            new UpdatePeriod(idB, "B2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31), AcademicYearDivision.None));
 
         await act.Should().ThrowAsync<PeriodOverlapException>();
     }
@@ -86,10 +86,10 @@ public class PeriodOverlapInvariantTests
         // Excluding itself: updating a period to a range that only "overlaps" itself is fine.
         using var s = new StudentsTestScope("period-update-self");
         var ch = NewCreate(s);
-        var idA = await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
+        var idA = await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
 
         var uh = NewUpdate(s);
-        await uh.HandleAsync(new UpdatePeriod(idA, "A2", new DateOnly(2026, 2, 1), new DateOnly(2026, 5, 15)));
+        await uh.HandleAsync(new UpdatePeriod(idA, "A2", new DateOnly(2026, 2, 1), new DateOnly(2026, 5, 15), AcademicYearDivision.None));
 
         var updated = await s.Db.Periods.SingleAsync();
         updated.Name.Should().Be("A2");
@@ -100,8 +100,8 @@ public class PeriodOverlapInvariantTests
     {
         using var s = new StudentsTestScope("period-activate-overlap");
         var ch = NewCreate(s);
-        var idA = await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
-        var idB = await ch.HandleAsync(new CreatePeriod("B", new DateOnly(2026, 7, 1), new DateOnly(2026, 12, 31)));
+        var idA = await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
+        var idB = await ch.HandleAsync(new CreatePeriod("B", new DateOnly(2026, 7, 1), new DateOnly(2026, 12, 31), Division: AcademicYearDivision.Terms));
 
         await NewActivate(s).HandleAsync(new ActivatePeriod(idA)); // A → Active
 

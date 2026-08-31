@@ -39,7 +39,7 @@ This check is a *publish-time validation refinement*, not a hard gate. If the
 Students API is down, blocking every publish would be a larger availability risk
 than allowing a potentially mismatched assignment to be published. The trade-off
 was accepted during implementation review (see
-`documents/specs/review-phases-completed.md` §4 item 4).
+`documents/rounds/review-phases-completed.md` §4 item 4).
 
 ### Risks and mitigation
 

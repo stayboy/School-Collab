@@ -28,7 +28,6 @@ public static class ConfigEndpoints
         group
             .MapConfigFlagRoutes(requireFlagAdmin)
             .MapConfigTenantOverrideRoutes(requireFlagAdmin)
-            .MapConfigAcademicYearDivisionRoutes(requireFlagAdmin)
             .MapConfigAuditRoutes();
 
         app.MapConfigResolveRoutes(oidcEnabled);

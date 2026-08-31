@@ -2,10 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.Core.Auth;
 using SchoolCollab.Core.Features;
-using SchoolCollab.Core.Http;
 using SchoolCollab.Settings.Api;
 using SchoolCollab.Settings.Api.Auth;
-using SchoolCollab.Settings.Api.Services;
 using SchoolCollab.Settings.Core;
 using SchoolCollab.Settings.Core.Services;
 using Serilog;
@@ -42,16 +40,6 @@ builder.Services.AddSettingsCore(builder.Configuration);
 builder.Services.AddHttpContextAccessor();
 builder.Services.RemoveAll<IActorAccessor>();
 builder.Services.AddSingleton<IActorAccessor, ClaimsPrincipalActorAccessor>();
-
-// FR-H7 (period-hierarchy-terms-semesters.md): the Settings API rejects an
-// academic-year-division switch while Students still has non-completed
-// sub-periods. Override the default (0) provider with an HTTP client that asks
-// Students, forwarding the inbound request's tenant on the service-to-service hop.
-builder.Services.TryAddTransient<TenantForwardingDelegatingHandler>();
-builder.Services.AddCrossModuleHttpClient("students-api", "http://students-api", propagateTenant: false)
-    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
-builder.Services.RemoveAll<ISubPeriodCountProvider>();
-builder.Services.AddScoped<ISubPeriodCountProvider, SubPeriodCountProviderHttpClient>();
 
 // The flag_admin role policy gates write endpoints when OIDC is enabled.
 builder.Services.AddAuthorization(options =>

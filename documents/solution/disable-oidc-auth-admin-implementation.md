@@ -4,7 +4,7 @@
   - `app.UseAuthentication()` and `app.UseAuthorization()` are always called.
   - Razor components always use `.RequireAuthorization()`.
 - `AddAuthAndTenancy` switches to `TestAuthHandler` when `FEATURE:DisableOIDCAuth` is enabled. With this change, the flag is now the **sole** determiner for disabling auth; it is no longer coupled to a specific environment name such as `Testing`.
-- Per `.github/copilot-instructions.md`, authorization requirements on endpoint groups should be conditional based on `IFeatureFlagService`.
+- Per `AGENTS.md`, authorization requirements on endpoint groups should be conditional based on `IFeatureFlagService`.
 - Per `.github/copilot/rules/testing.md`, feature flags that guard auth must be tested for both states: enabled and disabled.
 - The original implementation set the flag via each host's local
   `appsettings.Development.json` (Admin + the three APIs). That has since

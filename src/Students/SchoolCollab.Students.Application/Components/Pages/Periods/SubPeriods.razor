@@ -47,7 +47,7 @@
                 <Columns>
                     <PropertyColumn TGridItem="PeriodDto" TProp="string" Property="@(x => x.Name)" Sortable="true" Title="Name" />
                     <TemplateColumn TGridItem="PeriodDto" Title="Type">
-                        <FluentBadge Appearance="Appearance.Neutral">@context.PeriodType</FluentBadge>
+                        <FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(context)</FluentBadge>
                     </TemplateColumn>
                     <TemplateColumn TGridItem="PeriodDto" Title="Start Date">
                         @context.StartDate.ToString("d")
@@ -118,6 +118,9 @@
         _           => Appearance.Neutral
     };
 
+    private static string GetKindLabel(PeriodDto period)
+        => period.Division == "Semesters" ? "Semester" : "Term";
+
     /// <summary>
     /// Row actions for a sub-period: Edit navigates to the existing edit route;
     /// Activate/Complete call the existing client methods and reload the list.
@@ -133,7 +136,7 @@
                 "Activate",
                 () => OnActivateAsync(row),
                 FluentIcons.ArrowExportUp,
-                disabled: row.Status == "Active"),
+                disabled: row.Status != "Draft"),
             RowAction.Callback(
                 "Complete",
                 () => OnCompleteAsync(row),

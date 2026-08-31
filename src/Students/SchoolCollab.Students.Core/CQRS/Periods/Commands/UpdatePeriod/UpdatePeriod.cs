@@ -8,5 +8,5 @@ public sealed record UpdatePeriod(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    PeriodType PeriodType = PeriodType.AcademicYear,
+    AcademicYearDivision Division,
     Guid? ParentPeriodId = null) : ICommand;

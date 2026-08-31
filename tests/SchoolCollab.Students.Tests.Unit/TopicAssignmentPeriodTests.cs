@@ -25,7 +25,7 @@ public class TopicAssignmentPeriodTests
     private static readonly Guid TopicId = Guid.Parse("aaaaaaa2-2222-2222-2222-222222222222");
 
     private static CreatePeriodHandler NewCreatePeriod(StudentsTestScope s) => new(
-        s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"),
+        s.Periods, s.Cache, s.Tenants,
         NullLogger<CreatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) => new(
@@ -44,13 +44,13 @@ public class TopicAssignmentPeriodTests
     private static async Task<(Guid yearId, Guid? termId)> SeedActiveYearAsync(StudentsTestScope s, bool withTerm = true)
     {
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31)));
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31), Division: AcademicYearDivision.Terms));
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         Guid? termId = null;
         if (withTerm)
         {
             termId = await create.HandleAsync(new CreatePeriod(
-                "T1", D(2026, 9, 1), D(2026, 12, 31), PeriodType.Term, ParentPeriodId: yearId));
+                "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId));
             await NewActivate(s).HandleAsync(new ActivatePeriod(termId.Value));
         }
         s.Db.GradeLevels.Add(GradeLevel.Create(GradeId, 1, "Grade 1", 1));
@@ -88,9 +88,9 @@ public class TopicAssignmentPeriodTests
         var (_, _) = await SeedActiveYearAsync(s);
         // A second, un-activated academic year + term (outside the active year).
         var create = NewCreatePeriod(s);
-        var otherYear = await create.HandleAsync(new CreatePeriod("AY2027", D(2027, 9, 1), D(2028, 8, 31)));
+        var otherYear = await create.HandleAsync(new CreatePeriod("AY2027", D(2027, 9, 1), D(2028, 8, 31), Division: AcademicYearDivision.Terms));
         var otherTerm = await create.HandleAsync(new CreatePeriod(
-            "T9", D(2027, 9, 1), D(2027, 12, 31), PeriodType.Term, ParentPeriodId: otherYear));
+            "T9", D(2027, 9, 1), D(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherYear));
 
         await FluentActions.Awaiting(() => NewAssignGrade(s).HandleAsync(
             new AssignGradeTopic(GradeId, TopicId, D(2027, 9, 1), PeriodId: otherTerm)))
@@ -110,6 +110,26 @@ public class TopicAssignmentPeriodTests
         var id = await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
             group.Id, TopicId, D(2026, 9, 1), PeriodId: termId));
         (await new ActivityGroupTopicAssignmentRepository(s.Db).GetAsync(id))!.PeriodId.Should().Be(termId);
+    }
+
+    // FR-H14 / AC-H13: a Termly group topic with a Term of a NON-active year is rejected.
+    [TestMethod]
+    public async Task AssignGroup_TermlyGroup_TermOfNonActiveYear_Throws()
+    {
+        using var s = new StudentsTestScope("tp-group-fr14-" + Guid.NewGuid());
+        var (_, _) = await SeedActiveYearAsync(s);
+        // A second, un-activated academic year + term (outside the active year).
+        var create = NewCreatePeriod(s);
+        var otherYear = await create.HandleAsync(new CreatePeriod("AY2027", D(2027, 9, 1), D(2028, 8, 31), Division: AcademicYearDivision.Terms));
+        var otherTerm = await create.HandleAsync(new CreatePeriod(
+            "T9", D(2027, 9, 1), D(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherYear));
+        var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);
+        s.Db.ActivityGroups.Add(group);
+        await s.Db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => NewAssignGroup(s).HandleAsync(
+            new AssignActivityGroupTopic(group.Id, TopicId, D(2027, 9, 1), PeriodId: otherTerm)))
+            .Should().ThrowAsync<TopicAssignmentPeriodException>();
     }
 
     // FR-56/EC-23: OpenEnded group topic must not carry a PeriodId.
@@ -193,7 +213,7 @@ public class TopicAssignmentPeriodTests
         // A second Term within the active year gives a distinct PeriodId.
         var create = NewCreatePeriod(s);
         var term2 = await create.HandleAsync(new CreatePeriod(
-            "T2", D(2027, 1, 1), D(2027, 4, 30), PeriodType.Term, ParentPeriodId: yearId));
+            "T2", D(2027, 1, 1), D(2027, 4, 30), AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(term2));
 
         await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
@@ -216,7 +236,7 @@ public class TopicAssignmentPeriodTests
         // First assign with a valid Term.
         var create = NewCreatePeriod(s);
         var term = await create.HandleAsync(new CreatePeriod(
-            "T1", D(2026, 9, 1), D(2026, 12, 31), PeriodType.Term, ParentPeriodId: yearId));
+            "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(term));
         await NewAssignGroup(s).HandleAsync(new AssignActivityGroupTopic(
             group.Id, TopicId, D(2026, 1, 1), PeriodId: term));

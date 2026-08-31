@@ -1,6 +1,13 @@
 @* Reusable kebab (⋮) overflow menu for row actions in a FluentDataGrid.
-   Renders a FluentButton trigger + a FluentMenu anchored to it. Each RowAction
-   in <Actions> becomes a FluentMenuItem (or a FluentDivider when IsSeparator).
+   Landing-grid actions-column pattern:
+     • 0 actions      → renders nothing (no kebab / empty menu);
+     • 1 action       → a labeled FluentButton (Stealth appearance) instead
+                        of the kebab, so the single action is discoverable
+                        without an extra click;
+     • 2+ actions     → the kebab trigger + FluentMenu, one FluentMenuItem
+                        (or FluentDivider) per RowAction.
+   Both renderings share the same invoke path (Href / callback /
+   destructive-confirmation), so behavior is identical.
 
    By default the menu is rendered through FluentMenuProvider (UseMenuService=true)
    — the menu's content is lifted to the document root via the provider so it is
@@ -13,41 +20,78 @@
 @inject IDialogService DialogService
 
 <span class="row-actions-menu">
-    <FluentButton Id="@_buttonId"
+    @if (singleAction is not null)
+    {
+        @* Single-action rows render a labeled FluentButton instead of the
+           kebab menu (landing-grid pattern: one action → button; two or
+           more → kebab). The button reuses the same invoke path as the
+           menu item, so Href / callback / destructive-confirm behavior
+           is identical between the two renderings. *@
+        <FluentButton Appearance="Appearance.Stealth"
+                      Title="@singleAction.Label"
+                      Disabled="@singleAction.Disabled"
+                      OnClick="@(() => InvokeActionAsync(singleAction))">
+            @if (singleAction.Icon is not null)
+            {
+                <FluentIcon Value="@singleAction.Icon" Slot="start" />
+            }
+            @singleAction.Label
+        </FluentButton>
+    }
+    else if (Actions.Count > 0)
+    {
+        @* Rows with an empty action list render nothing (no kebab / empty
+           menu) — e.g. Completed/Archived periods with no actions. *@
+        <FluentButton Id="@_buttonId"
               Appearance="Appearance.Stealth"
               Title="@(AriaLabel ?? "More actions")"
               aria-haspopup="true"
               aria-expanded="@_open"
               OnClick="ToggleMenu">
-    <FluentIcon Value="@(KebabIcon ?? FluentIcons.MoreVertical)" />
-</FluentButton>
+        <FluentIcon Value="@(KebabIcon ?? FluentIcons.MoreVertical)" />
+    </FluentButton>
 
-<FluentMenu Id="@_menuId"
-            Anchor="@_buttonId"
-            UseMenuService="@UseMenuService"
-            @bind-Open="@_open">
-    @foreach (var action in Actions)
-    {
-        @if (action.IsSeparator)
+    <FluentMenu Id="@_menuId"
+                Anchor="@_buttonId"
+                UseMenuService="@UseMenuService"
+                @bind-Open="@_open">
+        @foreach (var action in Actions)
         {
-            <FluentDivider />
+            @if (action.IsSeparator)
+            {
+                <FluentDivider />
+            }
+            else
+            {
+                <FluentMenuItem Label="@action.Label"
+                                Disabled="@action.Disabled"
+                                OnClick="@(async () => await InvokeActionAsync(action))">
+                    @if (action.Icon is not null)
+                    {
+                        <FluentIcon Value="@action.Icon" Slot="start" />
+                    }
+                </FluentMenuItem>
+            }
         }
-        else
-        {
-            <FluentMenuItem Label="@action.Label"
-                            Disabled="@action.Disabled"
-                            OnClick="@(async () => await InvokeActionAsync(action))">
-                @if (action.Icon is not null)
-                {
-                    <FluentIcon Value="@action.Icon" Slot="start" />
-                }
-            </FluentMenuItem>
-        }
+    </FluentMenu>
     }
-</FluentMenu>
 </span>
 
 @code {
+    /// <summary>
+    /// When the action list contains exactly one non-separator action, it is
+    /// rendered as a labeled <c>&lt;FluentButton&gt;</c> instead of the kebab
+    /// menu (landing-grid pattern: one action → button, two or more → kebab).
+    /// </summary>
+    private RowAction? singleAction
+    {
+        get
+        {
+            var nonSeparators = Actions.Where(a => !a.IsSeparator).ToList();
+            return nonSeparators.Count == 1 ? nonSeparators[0] : null;
+        }
+    }
+
     /// <summary>
     /// The ordered list of actions to render. Separator entries render a
     /// <c>&lt;FluentDivider&gt;</c>; all others render a <c>&lt;FluentMenuItem&gt;</c>.

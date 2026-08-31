@@ -118,9 +118,9 @@ public sealed record PeriodDto(
     DateOnly StartDate,
     DateOnly EndDate,
     string Status,
-    string PeriodType,
     Guid? ParentPeriodId,
     Guid? NextPeriodId,
+    string Division,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -346,14 +346,14 @@ public record CreatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    PeriodType PeriodType = PeriodType.AcademicYear,
+    AcademicYearDivision Division,
     Guid? ParentPeriodId = null);
 
 public record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    PeriodType PeriodType = PeriodType.AcademicYear,
+    AcademicYearDivision Division,
     Guid? ParentPeriodId = null);
 
 public record EnrollStudentRequest(
@@ -620,7 +620,14 @@ public sealed class StudentsApiClient : IContactsClient
     {
         var response = await _http.GetAsync($"/students/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"GetStudent failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         return await EnrichSingleAsync(await response.Content.ReadFromJsonAsync<StudentDto>(ct), ct);
     }
 
@@ -628,7 +635,14 @@ public sealed class StudentsApiClient : IContactsClient
     {
         var response = await _http.GetAsync($"/students/by-number/{Uri.EscapeDataString(studentNumber)}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"GetStudentByNumber failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         return await EnrichSingleAsync(await response.Content.ReadFromJsonAsync<StudentDto>(ct), ct);
     }
 
@@ -1296,26 +1310,70 @@ public sealed class StudentsApiClient : IContactsClient
     {
         var response = await _http.GetAsync($"/students/periods/{id}", ct);
         if (response.StatusCode == HttpStatusCode.NotFound) return null;
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"GetPeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         return await response.Content.ReadFromJsonAsync<PeriodDto>(ct);
     }
 
     public async Task<Guid> CreatePeriodAsync(CreatePeriodRequest req, CancellationToken ct = default)
     {
         var response = await _http.PostAsJsonAsync("/students/periods", req, ct);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"CreatePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
         var result = await response.Content.ReadFromJsonAsync<IdResponse>(ct);
         return result!.Id;
     }
 
-    public async Task UpdatePeriodAsync(Guid id, UpdatePeriodRequest req, CancellationToken ct = default) =>
-        (await _http.PutAsJsonAsync($"/students/periods/{id}", req, ct)).EnsureSuccessStatusCode();
+    public async Task UpdatePeriodAsync(Guid id, UpdatePeriodRequest req, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync($"/students/periods/{id}", req, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"UpdatePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+    }
 
-    public async Task ActivatePeriodAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/students/periods/{id}/activate", null, ct)).EnsureSuccessStatusCode();
+    public async Task ActivatePeriodAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync($"/students/periods/{id}/activate", null, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ActivatePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+    }
 
-    public async Task CompletePeriodAsync(Guid id, CancellationToken ct = default) =>
-        (await _http.PostAsync($"/students/periods/{id}/complete", null, ct)).EnsureSuccessStatusCode();
+    public async Task CompletePeriodAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync($"/students/periods/{id}/complete", null, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"CompletePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+    }
 
     // ── Enrollments ───────────────────────────────────────────────────────────
 

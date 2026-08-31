@@ -13,7 +13,8 @@ public sealed record ActivePeriod(
     DateOnly EndDate,
     string Status,
     string PeriodType,
-    Guid? ParentPeriodId);
+    Guid? ParentPeriodId,
+    string? Division = null);
 
 /// <summary>
 /// Resolves the active (or date-derived "current") period for the current

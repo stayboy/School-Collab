@@ -1,0 +1,83 @@
+/* SubPeriodsSection — embedded add/edit list for the Period edit page. */
+
+.subperiods-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.subperiods-head h3 {
+    margin: 0;
+}
+
+.subperiods-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.subperiods-row {
+    display: grid;
+    grid-template-columns: minmax(160px, 2fr) 110px 130px 130px 110px auto;
+    gap: 0.5rem;
+    align-items: center;
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+}
+
+.subperiods-row:nth-child(even) {
+    background: var(--fill-color-rest, #f5f5f5);
+}
+
+.subperiods-row--head {
+    font-weight: 600;
+    border-bottom: 1px solid var(--neutral-stroke-rest, #d1d1d1);
+}
+
+.subperiods-row--editing {
+    outline: 1px solid var(--accent-fill-rest, #0f6cbd);
+}
+
+.subperiods-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.subperiods-actions {
+    display: flex;
+    gap: 0.25rem;
+    justify-content: flex-end;
+}
+
+/* Guardian-style always-visible inline add/edit row. */
+.subperiods-inline-add {
+    display: flex;
+    gap: 0.5rem;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    padding: 0.5rem;
+    border: 1px dashed var(--neutral-stroke-rest, #d1d1d1);
+    border-radius: 4px;
+}
+
+.subperiods-field-name {
+    flex: 2;
+    min-width: 180px;
+}
+
+.subperiods-field-type {
+    flex: 1;
+    min-width: 120px;
+}
+
+.subperiods-field-date {
+    flex: 1;
+    min-width: 140px;
+}
+
+.spinner-container {
+    display: flex;
+    justify-content: center;
+    padding: 1rem 0;
+}

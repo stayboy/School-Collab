@@ -38,8 +38,9 @@ public sealed class ListSubPeriodsHandler(
 
                 return results.Select(p => new PeriodDto(
                     p.Id, p.Name, p.StartDate, p.EndDate,
-                    p.Status.ToString(), p.PeriodType.ToString(),
+                    p.Status.ToString(),
                     p.ParentPeriodId, p.NextPeriodId,
+                    p.Division.ToString(),
                     p.CreatedAt, p.UpdatedAt)).ToArray();
             },
             CacheOptions,

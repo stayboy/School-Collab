@@ -88,52 +88,48 @@ public class ConfigApiTests
     }
 
     [TestMethod]
-    public async Task PUT_UpsertStringOverride_WritesValueAuditRow()
+    public async Task PUT_UpsertOverride_WritesAuditRow()
     {
-        // Create a FlagKind.String flag directly (the CreateFeatureFlag command
-        // only makes boolean flags; string flags are seeded by the migration
-        // service, which the test factory does not run).
-        var key = $"FEATURE:STR{Guid.NewGuid():N}".ToUpperInvariant();
+        // Create a boolean flag directly (the CreateFeatureFlag command makes
+        // boolean flags; the value-valued String kind was removed in Rev. 2).
+        var key = $"FEATURE:OVR{Guid.NewGuid():N}".ToUpperInvariant();
         Guid flagId;
         using (var scope = _factory.Services.CreateScope())
         {
             var db = scope.ServiceProvider.GetRequiredService<SettingsDbContext>();
             var flag = SchoolCollab.Settings.Core.Domain.FeatureFlag.Create(
-                key, "String flag", null, isEnabled: true,
-                kind: SchoolCollab.Settings.Core.Domain.FlagKind.String,
-                value: "None");
+                key, "Boolean flag", null, isEnabled: true);
             db.FeatureFlags.Add(flag);
             await db.SaveChangesAsync();
             flagId = flag.Id;
         }
 
-        // Upsert an override with a string value (None → Terms).
+        // Upsert an override pinning the flag OFF for the tenant.
         var upsert1 = await _client.PutAsJsonAsync(
             $"/api/config/flags/{key}/overrides/{ApiFactory.TestTenant}",
-            new { IsEnabled = (bool?)null, Value = "Terms", Reason = "set terms", EffectiveFrom = (DateTimeOffset?)null, EffectiveTo = (DateTimeOffset?)null });
+            new { IsEnabled = false, Reason = "turn off in test", EffectiveFrom = (DateTimeOffset?)null, EffectiveTo = (DateTimeOffset?)null });
         upsert1.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var audit1 = await _client.GetFromJsonAsync<FlagAuditEntryDto[]>(
             $"/api/config/audit?key={key}&skip=0&take=50");
         audit1.Should().Contain(a =>
             a.FeatureFlagKey == key &&
-            a.PreviousValue == null &&
-            a.NewValue == "Terms" &&
             a.PreviousIsEnabled == null &&
-            a.NewIsEnabled == null);
+            a.NewIsEnabled == false &&
+            a.Reason == "turn off in test");
 
-        // Upsert again (Terms → Semesters) — the before value is captured.
+        // Upsert again (off → on) — the before value is captured.
         var upsert2 = await _client.PutAsJsonAsync(
             $"/api/config/flags/{key}/overrides/{ApiFactory.TestTenant}",
-            new { IsEnabled = (bool?)null, Value = "Semesters", Reason = "set semesters", EffectiveFrom = (DateTimeOffset?)null, EffectiveTo = (DateTimeOffset?)null });
+            new { IsEnabled = true, Reason = "turn on in test", EffectiveFrom = (DateTimeOffset?)null, EffectiveTo = (DateTimeOffset?)null });
         upsert2.StatusCode.Should().Be(HttpStatusCode.OK);
 
         var audit2 = await _client.GetFromJsonAsync<FlagAuditEntryDto[]>(
             $"/api/config/audit?key={key}&skip=0&take=50");
         audit2.Should().Contain(a =>
             a.FeatureFlagKey == key &&
-            a.PreviousValue == "Terms" &&
-            a.NewValue == "Semesters");
+            a.PreviousIsEnabled == false &&
+            a.NewIsEnabled == true);
     }
 
     [TestMethod]

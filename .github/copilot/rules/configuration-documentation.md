@@ -9,7 +9,7 @@ AppHost, the AI service, and the admin host. It is the sibling of
 [`testing.md`](./testing.md) and
 [`ef-migrations.md`](./ef-migrations.md): like those rules, it is enforced
 during the PR pre-flight review (see
-[`.github/copilot-instructions.md`](../../copilot-instructions.md) §"Pre-flight
+[`AGENTS.md`](../../AGENTS.md) §"Pre-flight
 review & PR creation").
 
 ## Why this rule exists

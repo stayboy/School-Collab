@@ -5,7 +5,6 @@ using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
-using SchoolCollab.Students.Core.Services;
 
 namespace SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 
@@ -13,7 +12,6 @@ public sealed class CreatePeriodHandler(
     IPeriodRepository repository,
     HybridCache cache,
     ITenantProvider tenantProvider,
-    IAcademicYearDivisionProvider divisionProvider,
     ILogger<CreatePeriodHandler> logger) : ICommandHandler<CreatePeriod, Guid>
 {
     public async Task<Guid> HandleAsync(CreatePeriod command, CancellationToken cancellationToken = default)
@@ -23,38 +21,32 @@ public sealed class CreatePeriodHandler(
 
         logger.LogDebug("Handling CreatePeriod {Name}", command.Name);
 
-        // ── Period hierarchy (FR-H2): a sub-period's parent must be an existing
-        //    AcademicYear period. The null/required shape is enforced by the entity.
-        if (command.PeriodType != Domain.PeriodType.AcademicYear)
+        // ── Period hierarchy (plan-drop-periodtype.md): a sub-period's parent must
+        //    be an existing top-level academic year with the SAME division. The
+        //    null/required shape is enforced by the entity.
+        if (command.ParentPeriodId is { } parentId)
         {
-            if (!command.ParentPeriodId.HasValue)
+            if (command.Division == AcademicYearDivision.None)
                 throw new ArgumentException(
-                    $"A {command.PeriodType} period requires a ParentPeriodId.", nameof(command.ParentPeriodId));
+                    "A sub-period must have a Terms or Semesters division.", nameof(command.Division));
 
-            var parent = await repository.GetAsync(command.ParentPeriodId.Value, cancellationToken)
-                ?? throw new PeriodNotFoundException(command.ParentPeriodId.Value);
+            var parent = await repository.GetAsync(parentId, cancellationToken)
+                ?? throw new PeriodNotFoundException(parentId);
 
-            if (parent.PeriodType != Domain.PeriodType.AcademicYear)
+            if (parent.ParentPeriodId is not null)
                 throw new ArgumentException(
-                    $"A {command.PeriodType} period's ParentPeriodId must reference an AcademicYear period.",
+                    "A sub-period's ParentPeriodId must reference a top-level academic year.",
                     nameof(command.ParentPeriodId));
+
+            if (parent.Division != command.Division)
+                throw new PeriodFrameworkMismatchException(
+                    command.Division.ToString(), parent.Division.ToString());
 
             // ── H4.1 (FR-H3): the sub-period's range must be contained within its
             //    parent year. Crossing a year boundary is also rejected here.
             if (command.StartDate < parent.StartDate || command.EndDate > parent.EndDate)
                 throw new PeriodContainmentException(
-                    command.PeriodType.ToString(), parent.Name, parent.StartDate, parent.EndDate);
-        }
-
-        // ── H3.4 (FR-H7): gate sub-period creation on the tenant's academic-year
-        //    division. Term requires 'Terms'; Semester requires 'Semesters'.
-        if (command.PeriodType != Domain.PeriodType.AcademicYear)
-        {
-            var division = await divisionProvider.GetDivisionAsync(cancellationToken);
-            if (command.PeriodType == Domain.PeriodType.Term && division != "Terms")
-                throw new PeriodFrameworkMismatchException(nameof(Domain.PeriodType.Term), division);
-            if (command.PeriodType == Domain.PeriodType.Semester && division != "Semesters")
-                throw new PeriodFrameworkMismatchException(nameof(Domain.PeriodType.Semester), division);
+                    command.Division.ToString(), parent.Name, parent.StartDate, parent.EndDate);
         }
 
         // ── No-overlap invariant (§5.6): reject if another period's range
@@ -62,10 +54,8 @@ public sealed class CreatePeriodHandler(
         //    query the repository) rather than the domain entity.
         var overlapping = await repository.GetOverlappingPeriodsAsync(
             command.StartDate, command.EndDate, excludeId: null,
-            excludeParentId: command.PeriodType != Domain.PeriodType.AcademicYear
-                ? command.ParentPeriodId
-                : null,
-            cancellationToken);
+            excludeParentId: command.ParentPeriodId,
+            cancellationToken: cancellationToken);
         if (overlapping.Length > 0)
         {
             throw new PeriodOverlapException(
@@ -78,7 +68,7 @@ public sealed class CreatePeriodHandler(
             command.Name,
             command.StartDate,
             command.EndDate,
-            command.PeriodType,
+            command.Division,
             command.ParentPeriodId)
             .WithTenant(tenantProvider);
 

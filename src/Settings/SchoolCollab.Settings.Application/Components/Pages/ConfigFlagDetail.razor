@@ -31,59 +31,14 @@
                 </div>
             </SectionContent>
 
-            @* ── Academic-year division (FR-H6/H7) ── *@
-            @if (IsDivisionFlag)
-            {
-                <FluentCard class="pa-4 mt-3">
-                    <h2>Academic-year division</h2>
-                    @if (_divisionLoading)
-                    {
-                        <FluentProgressRing />
-                    }
-                    else
-                    {
-                        @if (!string.IsNullOrEmpty(_divisionError))
-                        {
-                            <FluentMessageBar Intent="MessageIntent.Error">@_divisionError</FluentMessageBar>
-                        }
-                        <FluentStack Orientation="Orientation.Horizontal">
-                            <FluentBadge Appearance="@(_divisionSource == "TenantOverride" ? Appearance.Accent : Appearance.Neutral)">
-                                @(_divisionValue ?? "None")
-                            </FluentBadge>
-                            <span class="text-muted">@(_divisionSource == "TenantOverride" ? "TenantOverride" : "GlobalDefault")</span>
-                        </FluentStack>
-                        <FluentStack Orientation="Orientation.Horizontal" class="mt-2">
-                            <FluentSelect TOption="string" Label="Division" @bind-Value="_divisionSelect">
-                                <FluentOption Value="None">None</FluentOption>
-                                <FluentOption Value="Terms">Terms</FluentOption>
-                                <FluentOption Value="Semesters">Semesters</FluentOption>
-                            </FluentSelect>
-                            <FluentTextField Label="Reason (required)" @bind-Value="_divisionReason" Style="min-width:320px;" />
-                            <FluentButton Appearance="Appearance.Accent" Disabled="@(_busy || string.IsNullOrWhiteSpace(_divisionReason))" OnClick="SaveDivisionAsync">Save</FluentButton>
-                        </FluentStack>
-                        <p class="text-muted">Changing the division is rejected while non-completed Term/Semester sub-periods exist.</p>
-                    }
-                </FluentCard>
-            }
-
             @* ── Default toggle ── *@
             <FluentCard class="pa-4 mt-3">
                 <h2>Default state <FluentBadge Appearance="Appearance.Neutral">@_flag.Kind</FluentBadge></h2>
-                @if (_flag.Kind == FlagKindDto.String)
-                {
-                    <FluentStack Orientation="Orientation.Horizontal">
-                        <FluentTextField Label="Value (global default)" Value="@(_flag.Value ?? "—")" Readonly="true" Style="min-width:320px;" />
-                    </FluentStack>
-                    <p class="text-muted">String flags carry a value; tenants override it below. The global default is set at seed time.</p>
-                }
-                else
-                {
-                    <FluentStack Orientation="Orientation.Horizontal">
-                        <FluentSwitch Label="Enabled by default" @bind-Value="_toggleValue" />
-                        <FluentTextField Label="Reason (required for save)" @bind-Value="_toggleReason" Style="min-width:320px;" />
-                        <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="SaveEnabledAsync">Save</FluentButton>
-                    </FluentStack>
-                }
+                <FluentStack Orientation="Orientation.Horizontal">
+                    <FluentSwitch Label="Enabled by default" @bind-Value="_toggleValue" />
+                    <FluentTextField Label="Reason (required for save)" @bind-Value="_toggleReason" Style="min-width:320px;" />
+                    <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="SaveEnabledAsync">Save</FluentButton>
+                </FluentStack>
                 <p class="text-muted">Description: @(_flag.Description ?? "—")</p>
             </FluentCard>
 
@@ -116,12 +71,6 @@
                                 @(context.IsEnabled is true ? "On" : context.IsEnabled is false ? "Off" : "Inherit")
                             </FluentBadge>
                         </TemplateColumn>
-                        @if (_flag.Kind == FlagKindDto.String)
-                        {
-                            <TemplateColumn Title="Value">
-                                @(context.Value ?? "—")
-                            </TemplateColumn>
-                        }
                         <PropertyColumn Title="Reason" Property="@(o => o.Reason)" />
                         <PropertyColumn Title="Effective" Property="@(o => o.EffectiveFrom)" Format="yyyy-MM-dd" />
                         <TemplateColumn Title="Actions">
@@ -137,22 +86,11 @@
                 <h3 class="mt-3">Add override</h3>
                 <FluentStack Orientation="Orientation.Horizontal">
                     <FluentTextField Label="Tenant Id (GUID)" @bind-Value="_newOverrideTenant" Style="min-width:320px;" />
-                    @if (_flag.Kind == FlagKindDto.String)
-                    {
-                        <FluentSelect TOption="string" Label="Value" @bind-Value="_newOverrideValueText">
-                            <FluentOption Value="None">None</FluentOption>
-                            <FluentOption Value="Terms">Terms</FluentOption>
-                            <FluentOption Value="Semesters">Semesters</FluentOption>
-                        </FluentSelect>
-                    }
-                    else
-                    {
-                        <FluentSelect TOption="string" Label="Enabled" @bind-Value="_newOverrideEnabledText">
-                            <FluentOption Value="inherit">Inherit</FluentOption>
-                            <FluentOption Value="on">On</FluentOption>
-                            <FluentOption Value="off">Off</FluentOption>
-                        </FluentSelect>
-                    }
+                    <FluentSelect TOption="string" Label="Enabled" @bind-Value="_newOverrideEnabledText">
+                        <FluentOption Value="inherit">Inherit</FluentOption>
+                        <FluentOption Value="on">On</FluentOption>
+                        <FluentOption Value="off">Off</FluentOption>
+                    </FluentSelect>
                     <FluentTextField Label="Reason (required)" @bind-Value="_newOverrideReason" Style="min-width:320px;" />
                     <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="AddOverrideAsync">Add</FluentButton>
                 </FluentStack>
@@ -168,12 +106,6 @@
                     <TemplateColumn Title="Before -> After">
                         @(FormatBool(context.PreviousIsEnabled)) -> @(FormatBool(context.NewIsEnabled))
                     </TemplateColumn>
-                    @if (_flag is not null && _flag.Kind == FlagKindDto.String)
-                    {
-                        <TemplateColumn Title="Value">
-                            @(context.PreviousValue ?? "—") -> @(context.NewValue ?? "—")
-                        </TemplateColumn>
-                    }
                     <PropertyColumn Title="Reason" Property="@(a => a.Reason)" />
                 </FluentDataGrid>
             </FluentCard>
@@ -199,18 +131,7 @@
     private string _lifecycleReason = "";
     private string _newOverrideTenant = "";
     private string _newOverrideEnabledText = "inherit";
-    private string _newOverrideValueText = "None";
     private string _newOverrideReason = "";
-
-    private bool IsDivisionFlag =>
-        _flag is not null && string.Equals(_flag.Key, FeatureFlagKeys.AcademicYearDivision, StringComparison.OrdinalIgnoreCase);
-
-    private bool _divisionLoading;
-    private string? _divisionValue;
-    private string? _divisionSource;
-    private string _divisionSelect = "None";
-    private string _divisionReason = "";
-    private string? _divisionError;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -225,8 +146,6 @@
             _toggleValue = _flag.IsEnabled;
             _overrides = await Api.ListOverridesAsync(Key);
             _audit = await Api.ListAuditAsync(Key, tenantId: null, from: null, to: null, skip: 0, take: 50);
-            if (IsDivisionFlag)
-                await LoadDivisionAsync();
         }
         catch (OperationCanceledException)
         {
@@ -242,48 +161,6 @@
         {
             _loading = false;
         }
-    }
-
-    private async Task LoadDivisionAsync()
-    {
-        _divisionLoading = true;
-        _divisionError = null;
-        try
-        {
-            var setting = await Api.GetAcademicYearDivisionAsync();
-            _divisionValue = setting?.Value;
-            _divisionSource = setting?.Source;
-            _divisionSelect = setting?.Value ?? "None";
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Load academic-year division failed");
-            _divisionError = $"Failed to load division: {ex.Message}";
-        }
-        finally
-        {
-            _divisionLoading = false;
-        }
-    }
-
-    private async Task SaveDivisionAsync()
-    {
-        if (string.IsNullOrWhiteSpace(_divisionReason)) return;
-        _busy = true;
-        _divisionError = null;
-        try
-        {
-            await Api.SetAcademicYearDivisionAsync(_divisionSelect, _divisionReason);
-            _divisionReason = "";
-            await LoadDivisionAsync();
-            await LoadAsync();
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "Save academic-year division failed");
-            _divisionError = ex.Message;
-        }
-        finally { _busy = false; }
     }
 
     private async Task SaveEnabledAsync()
@@ -326,15 +203,12 @@
     private async Task AddOverrideAsync()
     {
         if (!Guid.TryParse(_newOverrideTenant, out var tenantId) || string.IsNullOrWhiteSpace(_newOverrideReason)) return;
-        bool? enabled = _flag.Kind == FlagKindDto.String
-            ? null
-            : _newOverrideEnabledText switch { "on" => true, "off" => false, _ => null };
-        string? value = _flag.Kind == FlagKindDto.String ? _newOverrideValueText : null;
+        bool? enabled = _newOverrideEnabledText switch { "on" => true, "off" => false, _ => null };
         _busy = true;
         try
         {
             await Api.UpsertOverrideAsync(Key, tenantId,
-                new UpsertOverrideRequest(enabled, value, _newOverrideReason, EffectiveFrom: null, EffectiveTo: null));
+                new UpsertOverrideRequest(enabled, _newOverrideReason, EffectiveFrom: null, EffectiveTo: null));
             _newOverrideTenant = ""; _newOverrideReason = "";
             _overrides = await Api.ListOverridesAsync(Key);
         }

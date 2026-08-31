@@ -26,6 +26,10 @@ internal sealed class StudentTopicAssignmentConfiguration : TenantEntityTypeConf
         builder.Property(x => x.TopicId).IsRequired();
         builder.Property(x => x.PeriodId).IsRequired();
 
+        // Creation stamp (FR-H13): nullable sub_period_id, no FK, no default — a
+        // soft reference to the active sub-period at creation (spec §2.1/EC-H1).
+        builder.Property(x => x.SubPeriodId);
+
         builder.Property(x => x.IsOverride)
             .IsRequired()
             .HasDefaultValue(false);

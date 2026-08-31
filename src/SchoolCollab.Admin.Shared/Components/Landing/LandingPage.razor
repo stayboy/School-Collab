@@ -135,6 +135,10 @@
     /// landing page gets the same dropdown. The page must reserve the trailing
     /// column in its <see cref="LandingGridSettings.GridTemplateColumns"/> (a
     /// trailing <c>auto</c> or fixed width), matching the old inline Actions width.
+    /// <para>Actions-column rendering follows the landing-grid pattern
+    /// (handled inside <see cref="RowActionsMenu"/>; pages don't branch):
+    /// 0 actions → renders nothing; exactly 1 action → a labeled
+    /// <c>FluentButton</c>; 2+ actions → the kebab (⋮) menu.</para>
     /// </summary>
     [Parameter]
     public Func<TItem, IReadOnlyList<RowAction>>? RowActions { get; set; }

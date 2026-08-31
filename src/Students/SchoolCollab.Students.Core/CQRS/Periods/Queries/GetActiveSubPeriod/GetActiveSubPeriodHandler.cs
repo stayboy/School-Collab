@@ -37,29 +37,27 @@ public sealed class GetActiveSubPeriodHandler(
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(p => p.TenantId == tenantId
                         && p.Status == PeriodStatus.Active
-                        && p.PeriodType == PeriodType.AcademicYear)
+                        && p.ParentPeriodId == null)
                     .Select(p => (Guid?)p.Id)
                     .FirstOrDefaultAsync(ct);
                 if (activeYearId is null) return null;
 
-                // Deterministic: prefer Term over Semester (PeriodType order), then
-                // earliest start date, so the result is stable when both a Term and
-                // a Semester are active under the same year.
+                // Deterministic: earliest start date, so the result is stable when
+                // multiple sub-periods are active under the same year.
                 var period = await db.Periods
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(p => p.TenantId == tenantId
                         && p.ParentPeriodId == activeYearId
-                        && p.Status == PeriodStatus.Active
-                        && p.PeriodType != PeriodType.AcademicYear)
-                    .OrderBy(p => p.PeriodType)
-                    .ThenBy(p => p.StartDate)
+                        && p.Status == PeriodStatus.Active)
+                    .OrderBy(p => p.StartDate)
                     .AsNoTracking()
                     .FirstOrDefaultAsync(ct);
 
                 return period is null ? null : new PeriodDto(
                     period.Id, period.Name, period.StartDate, period.EndDate,
-                    period.Status.ToString(), period.PeriodType.ToString(),
+                    period.Status.ToString(),
                     period.ParentPeriodId, period.NextPeriodId,
+                    period.Division.ToString(),
                     period.CreatedAt, period.UpdatedAt);
             },
             CacheOptions,

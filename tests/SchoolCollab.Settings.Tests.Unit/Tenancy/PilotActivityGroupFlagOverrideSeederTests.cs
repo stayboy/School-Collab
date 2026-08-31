@@ -82,7 +82,6 @@ public class PilotActivityGroupFlagOverrideSeederTests
         var row = overrides[0];
         row.TenantId.Should().Be(tenant.Id);
         row.IsEnabled.Should().BeTrue();
-        row.Value.Should().BeNull();
         row.EffectiveFrom.Should().BeNull();
         row.EffectiveTo.Should().BeNull();
         row.Reason.Should().NotBeNullOrWhiteSpace();

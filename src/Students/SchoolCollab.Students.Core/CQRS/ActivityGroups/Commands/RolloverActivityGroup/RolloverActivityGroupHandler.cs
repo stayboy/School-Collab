@@ -62,20 +62,20 @@ public sealed class RolloverActivityGroupHandler(
         }
         else
         {
-            var requiredType = group.Span switch
+            var requiredDivision = group.Span switch
             {
-                EnrollmentSpan.WholeAcademicYear => PeriodType.AcademicYear,
-                EnrollmentSpan.Termly => PeriodType.Term,
-                _ => PeriodType.Semester
+                EnrollmentSpan.WholeAcademicYear => (AcademicYearDivision?)null,
+                EnrollmentSpan.Termly => AcademicYearDivision.Terms,
+                _ => AcademicYearDivision.Semesters
             };
             var activeYear = await periodRepository.GetActiveAcademicYearAsync(
                 cancellationToken: cancellationToken);
-            if (requiredType == PeriodType.AcademicYear)
+            if (group.Span == EnrollmentSpan.WholeAcademicYear)
                 nextPeriodId = activeYear?.Id;
             else if (activeYear is not null)
             {
                 var subs = await periodRepository.GetActiveSubPeriodsAsync(
-                    activeYear.Id, requiredType, cancellationToken: cancellationToken);
+                    activeYear.Id, requiredDivision, cancellationToken: cancellationToken);
                 nextPeriodId = subs.FirstOrDefault()?.Id;
             }
         }

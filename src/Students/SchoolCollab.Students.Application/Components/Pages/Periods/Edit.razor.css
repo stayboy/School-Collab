@@ -1,0 +1,10 @@
+/* Period edit page — composition of the embedded SubPeriodsSection
+   (rendered first) and the year/sub-period PeriodForm (rendered second).
+   The separator visually divides the two regions so the user reads them
+   as distinct sections. */
+
+.period-edit-separator {
+    border: none;
+    border-top: 1px solid var(--neutral-stroke-rest, #d1d1d1);
+    margin: 1.75rem 0 1.5rem;
+}

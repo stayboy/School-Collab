@@ -15,10 +15,10 @@ using SchoolCollab.Students.Application.Services;
 namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
-/// bUnit tests for the <see cref="PeriodForm"/> PeriodType + parent selector
-/// validation (Sprint 6 Round 3, C1-C3). The parent academic-year dropdown
-/// appears only for Term/Semester, and a Term/Semester without a parent is
-/// rejected on submit.
+/// bUnit tests for the <see cref="PeriodForm"/> Division + parent selector
+/// (plan-drop-periodtype.md). A top-level year (no sub-period intent) shows the
+/// Division selector and no parent dropdown; a sub-period intent (?parent=…)
+/// locks the division to the parent's division and shows the parent dropdown.
 /// </summary>
 [TestClass]
 public class PeriodFormTests : BunitContext
@@ -69,116 +69,87 @@ public class PeriodFormTests : BunitContext
         Services.AddSingleton(NullLogger<PeriodForm>.Instance);
     }
 
-    private async Task DrivePeriodTypeAsync(IRenderedComponent<PeriodForm> cut, string periodType)
-    {
-        // The period-type select is the first FluentSelect<string> in the form
-        // (it has no Id attribute). In create mode only the type select exists
-        // until a Term/Semester is chosen, so First() is the type selector.
-        var typeSelect = cut.FindComponents<FluentSelect<string>>().First();
-        await cut.InvokeAsync(() => typeSelect.Instance.ValueChanged.InvokeAsync(periodType));
-    }
+    private static string YearJson(Guid id, string division) =>
+        $"{{\"id\":\"{id}\",\"name\":\"2026\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"division\":\"{division}\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
     /// <summary>
-    /// C1: selecting Term reveals the parent academic-year dropdown.
+    /// A top-level year create (no sub-period intent) shows the Division selector
+    /// and no parent dropdown.
     /// </summary>
     [TestMethod]
-    public async Task PeriodForm_Term_ShowsParentSelector()
+    public void PeriodForm_TopLevelYear_NoParentSelector()
     {
         var handler = new ScriptedHandler();
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
         Register(handler);
 
         var cut = Render<PeriodForm>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Period type"));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Division"));
 
-        // Default is AcademicYear — no parent dropdown.
-        cut.Markup.Should().NotContain("Parent academic year", "AcademicYear has no parent");
-
-        await DrivePeriodTypeAsync(cut, "Term");
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Parent academic year",
-            "a Term period requires a parent academic year"));
+        cut.Markup.Should().NotContain("Parent academic year", "a top-level year has no parent");
     }
 
     /// <summary>
-    /// C2: the default AcademicYear type hides the parent dropdown.
+    /// A sub-period intent (?parent=…) shows the parent dropdown and locks the
+    /// division to the parent's division.
     /// </summary>
     [TestMethod]
-    public void PeriodForm_AcademicYear_HidesParentSelector()
+    public void PeriodForm_SubPeriodIntent_ShowsParentSelector()
     {
+        var parentId = Guid.NewGuid();
         var handler = new ScriptedHandler();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, $"[{YearJson(parentId, "Terms")}]");
         Register(handler);
 
-        var cut = Render<PeriodForm>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Period type"));
-
-        cut.Markup.Should().NotContain("Parent academic year", "AcademicYear has no parent");
-    }
-
-    /// <summary>
-    /// C3: submitting a Term without a parent shows the validation error.
-    /// </summary>
-    [TestMethod]
-    public async Task PeriodForm_Term_NoParent_ShowsError()
-    {
-        var handler = new ScriptedHandler();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
-        Register(handler);
-
-        var cut = Render<PeriodForm>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Period type"));
-
-        await DrivePeriodTypeAsync(cut, "Term");
+        var cut = Render<PeriodForm>(p => p.Add(x => x.InitialParentPeriodId, parentId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Parent academic year"));
 
-        // The submit button is a direct-OnClick FluentButton (not an EditForm
-        // submit), so clicking it is the correct driving approach here.
-        var submit = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Create period"));
-        submit.Click();
+        var divisionSelect = cut.FindComponents<FluentSelect<string>>().First();
+        divisionSelect.Instance.Value.Should().Be("Terms", "division is locked to the parent's division");
+        divisionSelect.Instance.Disabled.Should().BeTrue("the division is locked while the sub-period intent is set");
+    }
 
-        cut.WaitForAssertion(() =>
-            cut.Markup.Should().Contain("Select a parent academic year for this period."));
+    /// <summary>
+    /// A sub-period intent on a None-division year surfaces an explicit
+    /// framework-mismatch error instead of silently rewriting the form.
+    /// </summary>
+    [TestMethod]
+    public void PeriodForm_SubPeriodIntent_NoneDivision_ShowsError()
+    {
+        var parentId = Guid.NewGuid();
+        var handler = new ScriptedHandler();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, $"[{YearJson(parentId, "None")}]");
+        Register(handler);
+
+        var cut = Render<PeriodForm>(p => p.Add(x => x.InitialParentPeriodId, parentId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("sub-periods are not allowed",
+            "None division forbids sub-periods; the user must see an explicit error"));
+
         handler.Calls.Should().NotContain(c => c.Method == "POST" && c.Url == "/students/periods",
-            "the parent guard must block the create POST");
+            "the framework-mismatch must block the create POST");
     }
 
     /// <summary>
-    /// G4: a Terms division hides the Semester option (only Term sub-periods are
-    /// allowed), keeping client-side validation in sync with the server's 422 gate.
+    /// A sub-period intent on a Semesters-division year locks the division to
+    /// Semesters (not a hard-coded Term).
     /// </summary>
     [TestMethod]
-    public void PeriodForm_TermsDivision_HidesSemesterOption()
+    public void PeriodForm_SubPeriodIntent_SemestersDivision_LocksToSemesters()
     {
+        var parentId = Guid.NewGuid();
         var handler = new ScriptedHandler();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
-        handler.Map("GET", "/api/config/flags/academic_year_division", HttpStatusCode.OK,
-            "{\"value\":\"Terms\",\"source\":\"GlobalDefault\"}");
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, $"[{YearJson(parentId, "Semesters")}]");
         Register(handler);
 
-        var cut = Render<PeriodForm>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Period type"));
+        var cut = Render<PeriodForm>(p => p.Add(x => x.InitialParentPeriodId, parentId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Parent academic year"));
 
-        cut.Markup.Should().Contain("Term", "Terms division allows Term sub-periods");
-        cut.Markup.Should().NotContain("Semester", "Terms division hides the Semester option");
-    }
+        var divisionSelect = cut.FindComponents<FluentSelect<string>>().First();
+        divisionSelect.Instance.Value.Should().Be("Semesters",
+            "Semesters division + ?parent=... locks the division to Semesters");
+        divisionSelect.Instance.Disabled.Should().BeTrue("the division is locked while the sub-period intent is set");
 
-    /// <summary>
-    /// G4: a None division hides both sub-period options (only Academic Year is
-    /// allowed), matching the server's PeriodFrameworkMismatchException gate.
-    /// </summary>
-    [TestMethod]
-    public void PeriodForm_NoneDivision_HidesSubPeriodOptions()
-    {
-        var handler = new ScriptedHandler();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
-        handler.Map("GET", "/api/config/flags/academic_year_division", HttpStatusCode.OK,
-            "{\"value\":\"None\",\"source\":\"GlobalDefault\"}");
-        Register(handler);
-
-        var cut = Render<PeriodForm>();
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Period type"));
-
-        cut.Markup.Should().NotContain("Term", "None division hides the Term option");
-        cut.Markup.Should().NotContain("Semester", "None division hides the Semester option");
+        cut.Markup.Should().NotContain("sub-periods are not allowed",
+            "Semesters division allows Semesters — no error should surface");
     }
 }

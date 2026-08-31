@@ -46,8 +46,7 @@ public class FeatureFlagAuditorTests : IDisposable
     public async Task Record_adds_audit_row_with_previous_and_new_value()
     {
         var auditor = new FeatureFlagAuditor(new SystemActorAccessor("system:test", "Test"));
-        var flag = FeatureFlag.Create("FEATURE:DIV", "Division", null, true,
-            kind: FlagKind.String, value: "None");
+        var flag = FeatureFlag.Create("FEATURE:DIV", "Division", null, true);
 
         _db.FeatureFlags.Add(flag);
         auditor.Record(_db, tenantId: null, flag.Id, flag.Key,

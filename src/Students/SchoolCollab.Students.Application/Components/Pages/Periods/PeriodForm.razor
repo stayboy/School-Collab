@@ -1,12 +1,10 @@
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
-@using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components
 @using Microsoft.AspNetCore.Components
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Admin.Shared.Constants
 @inject StudentsApiClient Api
-@inject ConfigFlagsApiClient FlagsApi
 @inject NavigationManager Nav
 @inject ILogger<PeriodForm> Logger
 @implements IDisposable
@@ -34,6 +32,41 @@
     }
 
     <FluentStack Orientation="Orientation.Vertical" Spacing="4">
+        @* Division is the single kind selector (plan-drop-periodtype.md). None =
+           a plain top-level academic year; Terms/Semesters on a top-level year
+           (no parent) means the year may contain only that sub-period kind; on a
+           sub-period (parent selected) it is the sub-period's own kind. When the
+           period is a sub-period the division is locked to its parent's division
+           and the parent dropdown is shown. *@
+        <FormRow Label="Division *" AlignTop>
+            <FluentSelect TOption="string"
+                          @bind-Value="_divisionSelect"
+                          Label=""
+                          Disabled="@_isSubPeriod"
+                          Style="flex:1; min-width:0">
+                <FluentOption Value="None">None (single academic year)</FluentOption>
+                <FluentOption Value="Terms">Terms</FluentOption>
+                <FluentOption Value="Semesters">Semesters</FluentOption>
+            </FluentSelect>
+        </FormRow>
+
+        @if (_isSubPeriod)
+        {
+            <FormRow Label="Parent academic year *" AlignTop>
+                <FluentSelect TOption="string"
+                              @bind-Value="_parentPeriodIdText"
+                              Label=""
+                              Disabled="true"
+                              Style="flex:1; min-width:0">
+                    <FluentOption Value="">— Select academic year —</FluentOption>
+                    @foreach (var ay in _academicYears)
+                    {
+                        <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
+                    }
+                </FluentSelect>
+            </FormRow>
+        }
+
         @* Period name + the Suggest/Backfill buttons. The row contains
            three controls (text field + two icon buttons) so the label
            is top-aligned (AlignTop) to sit naturally against the taller
@@ -50,39 +83,6 @@
                           Title="Fill the form with the next academic year after the latest period"
                           OnClick="BackfillAsync" />
         </FormRow>
-
-        @* Period type + parent academic year. The type selector is always
-           shown; the parent dropdown appears only for Term/Semester. *@
-        <FormRow Label="Period type *" AlignTop>
-            <FluentSelect TOption="string" @bind-Value="_periodTypeText" Label="" Style="flex:1; min-width:0">
-                <FluentOption Value="AcademicYear">Academic Year</FluentOption>
-                @if (AllowTerm)
-                {
-                    <FluentOption Value="Term">Term</FluentOption>
-                }
-                @if (AllowSemester)
-                {
-                    <FluentOption Value="Semester">Semester</FluentOption>
-                }
-            </FluentSelect>
-        </FormRow>
-        @if (_division is not null)
-        {
-            <div class="form-hint">@DivisionHint</div>
-        }
-
-        @if (_periodTypeText != "AcademicYear")
-        {
-            <FormRow Label="Parent academic year *" AlignTop>
-                <FluentSelect TOption="string" @bind-Value="_parentPeriodIdText" Label="" Style="flex:1; min-width:0">
-                    <FluentOption Value="">— Select academic year —</FluentOption>
-                    @foreach (var ay in _academicYears)
-                    {
-                        <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
-                    }
-                </FluentSelect>
-            </FormRow>
-        }
 
         @* Two date pickers side-by-side. AlignTop so the "Dates *" label
            sits at the top of the row (top-align reads better against a
@@ -159,23 +159,26 @@
 
     /// <summary>
     /// When creating a sub-period, pre-selects this parent academic year and
-    /// switches the type selector to Term. Used by the sub-period list's
-    /// "+ New Sub-period" action (route query <c>?parent=…</c>).
+    /// locks the division to the parent's division. Used by the sub-period
+    /// list's "+ New Sub-period" action (route query <c>?parent=…</c>).
     /// </summary>
     [Parameter] public Guid? InitialParentPeriodId { get; set; }
 
     private string _name = string.Empty;
     private DateTime? _start;
     private DateTime? _end;
-    private string _periodTypeText = "AcademicYear";
-    private string? _division;
+    private string _divisionSelect = "None";
     private string _parentPeriodIdText = "";
-    private PeriodDto[] _academicYears = [];
     private bool _saving;
     private string? _error;
     private CancellationTokenSource? _cts;
     private volatile bool _disposed;
     private PeriodDto[]? _loadedPeriods;
+
+    /// <summary>True when the current period is a sub-period (has a parent). The
+    /// division is locked to the parent's division and the parent dropdown is
+    /// shown.</summary>
+    private bool _isSubPeriod;
 
     private string HeaderText => PeriodId.HasValue ? "Edit period" : "New period";
 
@@ -185,23 +188,10 @@
 
     private const string EditHint = "Update the period name and date range.";
 
-    /// <summary>
-    /// Whether the Term option is offered. Null division (flag not loaded / error)
-    /// falls back to allowing both sub-period types so the form is never broken by
-    /// a failed flag read; a known division gates to the matching type only.
-    /// </summary>
-    private bool AllowTerm => _division is null or "Terms";
-
-    private bool AllowSemester => _division is null or "Semesters";
-
-    private string DivisionHint => _division switch
-    {
-        "Terms" => "This tenant's academic year division is Terms — only Term sub-periods are allowed.",
-        "Semesters" => "This tenant's academic year division is Semesters — only Semester sub-periods are allowed.",
-        // Unreachable in practice: the hint renders only when _division is not null;
-        // default kept for switch exhaustiveness.
-        _ => "This tenant's academic year division is None — only Academic Year periods are allowed."
-    };
+    /// <summary>Top-level academic years whose division matches the selected
+    /// division — the valid parents for a sub-period of that kind.</summary>
+    private PeriodDto[] _academicYears =>
+        _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _divisionSelect).ToArray() ?? [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -211,19 +201,22 @@
         try
         {
             _loadedPeriods = await Api.ListPeriodsAsync(ct) ?? [];
-            _academicYears = _loadedPeriods.Where(p => p.PeriodType == "AcademicYear").ToArray();
 
-            // G4: load the tenant's academic-year division to gate the sub-period
-            // type options, keeping client-side validation in sync with the server's
-            // PeriodFrameworkMismatchException 422 gate.
-            var division = await FlagsApi.GetAcademicYearDivisionAsync(ct);
-            if (_disposed) return;
-            _division = division?.Value;
-
+            // Pre-set the parent + lock the division to the parent year's division
+            // when the user came here via ?parent=... (an explicit sub-period
+            // intent). A None-division year cannot host sub-periods — surface that
+            // as an error instead of silently falling back to a top-level year.
             if (!PeriodId.HasValue && InitialParentPeriodId.HasValue)
             {
                 _parentPeriodIdText = InitialParentPeriodId.Value.ToString();
-                _periodTypeText = "Term";
+                var parent = _loadedPeriods.FirstOrDefault(p => p.Id == InitialParentPeriodId.Value);
+                _divisionSelect = parent?.Division ?? "None";
+                _isSubPeriod = true;
+                if (_divisionSelect == "None")
+                {
+                    _error = "This academic year's division is 'None' — sub-periods are not allowed. " +
+                             "Create an Academic Year instead, or change the year's division.";
+                }
             }
 
             if (PeriodId.HasValue)
@@ -234,24 +227,14 @@
                     _name = p.Name;
                     _start = p.StartDate.ToDateTime(TimeOnly.MinValue);
                     _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
-                    _periodTypeText = p.PeriodType;
+                    _divisionSelect = p.Division;
                     _parentPeriodIdText = p.ParentPeriodId?.ToString() ?? "";
+                    _isSubPeriod = p.ParentPeriodId.HasValue;
                 }
             }
-            else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name))
+            else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name) && string.IsNullOrEmpty(_error))
             {
                 SuggestAcademicYearAsync();
-            }
-
-            // G4: if the current sub-period type is disallowed by the division
-            // (e.g. editing a Semester under a Terms division, or a sub-period
-            // under a None division), fall back to AcademicYear. An AcademicYear
-            // must not carry a ParentPeriodId, or the server rejects the save.
-            if ((_periodTypeText == "Term" && !AllowTerm)
-                || (_periodTypeText == "Semester" && !AllowSemester))
-            {
-                _periodTypeText = "AcademicYear";
-                _parentPeriodIdText = "";
             }
         }
         catch (OperationCanceledException) { }
@@ -263,12 +246,8 @@
         }
     }
 
-    private static PeriodType ParsePeriodType(string value) => value switch
-    {
-        "Term" => PeriodType.Term,
-        "Semester" => PeriodType.Semester,
-        _ => PeriodType.AcademicYear
-    };
+    private static AcademicYearDivision ParseDivision(string value) =>
+        Enum.TryParse<AcademicYearDivision>(value, out var division) ? division : AcademicYearDivision.None;
 
     private void SuggestAcademicYearAsync()
     {
@@ -307,9 +286,18 @@
             _error = "End date must be on or after the start date.";
             return;
         }
-        if (_periodTypeText != "AcademicYear" && !Guid.TryParse(_parentPeriodIdText, out _))
+
+        var division = ParseDivision(_divisionSelect);
+        Guid? parentId = Guid.TryParse(_parentPeriodIdText, out var pid) ? pid : null;
+
+        if (_isSubPeriod && !parentId.HasValue)
         {
             _error = "Select a parent academic year for this period.";
+            return;
+        }
+        if (division == AcademicYearDivision.None && parentId.HasValue)
+        {
+            _error = "A None-division period is a top-level academic year and must not have a parent.";
             return;
         }
 
@@ -318,18 +306,16 @@
         {
             var startDate = DateOnly.FromDateTime(_start.Value.Date);
             var endDate = DateOnly.FromDateTime(_end.Value.Date);
-            var periodType = ParsePeriodType(_periodTypeText);
-            Guid? parentId = Guid.TryParse(_parentPeriodIdText, out var pid) ? pid : null;
             PeriodDto? saved = null;
 
             if (PeriodId.HasValue)
             {
-                await Api.UpdatePeriodAsync(PeriodId.Value, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, periodType, parentId));
+                await Api.UpdatePeriodAsync(PeriodId.Value, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, division, parentId));
                 saved = await Api.GetPeriodByIdAsync(PeriodId.Value);
             }
             else
             {
-                var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, periodType, parentId));
+                var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, parentId));
                 if (AutoActivateOnCreate)
                 {
                     await Api.ActivatePeriodAsync(id);

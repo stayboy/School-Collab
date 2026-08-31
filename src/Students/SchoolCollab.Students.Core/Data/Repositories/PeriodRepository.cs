@@ -21,15 +21,22 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         }
     }
 
-    public async Task<PeriodDto[]> ListAsync(CancellationToken cancellationToken = default) =>
-        await Db.Periods
+    public async Task<PeriodDto[]> ListAsync(CancellationToken cancellationToken = default)
+    {
+        // Materialize first, then project in memory: the DTO projection uses the
+        // null-propagating operator (Division?.ToString()), which is not allowed in
+        // an EF expression tree (CS8072).
+        var periods = await Db.Periods
             .AsNoTracking()
             .OrderByDescending(x => x.StartDate)
-            .Select(x => new PeriodDto(
-                x.Id, x.Name, x.StartDate, x.EndDate,
-                x.Status.ToString(), x.PeriodType.ToString(), x.ParentPeriodId, x.NextPeriodId,
-                x.CreatedAt, x.UpdatedAt))
             .ToArrayAsync(cancellationToken);
+
+        return periods.Select(x => new PeriodDto(
+            x.Id, x.Name, x.StartDate, x.EndDate,
+            x.Status.ToString(), x.ParentPeriodId, x.NextPeriodId,
+            x.Division.ToString(),
+            x.CreatedAt, x.UpdatedAt)).ToArray();
+    }
 
     public async Task<Period[]> GetActivePeriodsEndingBeforeAsync(DateOnly date, CancellationToken cancellationToken = default) =>
         await Db.Periods
@@ -41,12 +48,14 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         DateOnly endDate,
         Guid? excludeId = null,
         Guid? excludeParentId = null,
+        Guid? excludeSubPeriodsOfParentId = null,
         CancellationToken cancellationToken = default)
         => await Db.Periods
             .Where(p => p.StartDate <= endDate
                 && p.EndDate >= startDate
                 && (excludeId == null || p.Id != excludeId)
-                && (excludeParentId == null || p.Id != excludeParentId))
+                && (excludeParentId == null || p.Id != excludeParentId)
+                && (excludeSubPeriodsOfParentId == null || p.ParentPeriodId != excludeSubPeriodsOfParentId))
             .ToArrayAsync(cancellationToken);
 
     public async Task<Period?> GetActivePeriodAsync(Guid? excludeId = null, CancellationToken cancellationToken = default)
@@ -58,33 +67,47 @@ internal sealed class PeriodRepository(StudentsDbContext db)
     public async Task<Period?> GetActiveAcademicYearAsync(Guid? excludeId = null, CancellationToken cancellationToken = default)
         => await Db.Periods
             .Where(p => p.Status == PeriodStatus.Active
-                && p.PeriodType == PeriodType.AcademicYear
+                && p.ParentPeriodId == null
                 && (excludeId == null || p.Id != excludeId))
             .FirstOrDefaultAsync(cancellationToken);
 
     public async Task<Period[]> GetActiveSubPeriodsAsync(
         Guid parentPeriodId,
-        PeriodType? periodType = null,
+        AcademicYearDivision? division = null,
         Guid? excludeId = null,
         CancellationToken cancellationToken = default)
         => await Db.Periods
             .Where(p => p.Status == PeriodStatus.Active
                 && p.ParentPeriodId == parentPeriodId
-                && (periodType == null || p.PeriodType == periodType)
+                && (division == null || p.Division == division)
                 && (excludeId == null || p.Id != excludeId))
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<int> GetNonCompletedSubPeriodCountAsync(
+        Guid parentPeriodId,
+        CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .CountAsync(p => p.ParentPeriodId == parentPeriodId
+                && (p.Status == PeriodStatus.Draft || p.Status == PeriodStatus.Active),
+                cancellationToken);
+
+    public async Task<Period[]> GetSubPeriodsAsync(
+        Guid parentPeriodId,
+        CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .Where(p => p.ParentPeriodId == parentPeriodId)
             .ToArrayAsync(cancellationToken);
 
     public async Task<Period?> GetCurrentPeriodAsync(CancellationToken cancellationToken = default)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
         // "Current" = the active period containing today. Prefer the more specific
-        // sub-period (Term/Semester) over the AcademicYear, then Term over Semester,
-        // then earliest start — deterministic under the two-active-rows hierarchy.
+        // sub-period (Term/Semester) over the top-level academic year, then earliest
+        // start — deterministic under the two-active-rows hierarchy.
         return await Db.Periods
             .AsNoTracking()
             .Where(p => p.Status == PeriodStatus.Active && p.StartDate <= today && p.EndDate >= today)
-            .OrderBy(p => p.PeriodType == PeriodType.AcademicYear ? 1 : 0)
-            .ThenBy(p => p.PeriodType)
+            .OrderBy(p => p.ParentPeriodId != null ? 0 : 1)
             .ThenBy(p => p.StartDate)
             .FirstOrDefaultAsync(cancellationToken);
     }

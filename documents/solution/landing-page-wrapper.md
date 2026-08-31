@@ -276,6 +276,30 @@ private StudentDto[] _filteredItems =>
 The wrapper has no `AboveGrid` slot and no knowledge of soft-delete; the merge is
 entirely the page's concern, expressed through `Items` + the column templates.
 
+### 2.6 Row actions — the trailing actions-column pattern
+
+Pages supply an optional `RowActions` builder (`Func<TItem, IReadOnlyList<RowAction>>`)
+plus an optional `RowActionsAriaLabel`; the wrapper appends the trailing
+"Actions" `<TemplateColumn>` (via `EffectiveColumns`) rendered with the shared
+`<RowActionsMenu>` component (`src/SchoolCollab.Admin.Shared/Components/RowActionsMenu.razor`).
+The page must reserve the trailing column in its
+`LandingGridSettings.GridTemplateColumns` (a trailing `auto` or fixed width).
+
+The actions column renders **by action count** (landing-grid pattern, handled
+entirely inside `<RowActionsMenu>` — pages never branch on the count):
+
+| Actions per row | Rendering |
+|---|---|
+| 0 | nothing (no kebab, no empty menu) — e.g. Completed/Archived periods |
+| exactly 1 | a labeled `FluentButton` (`Appearance.Stealth`, leading icon when the `RowAction` has one), so the single action is discoverable without an extra click |
+| 2 or more | the kebab (⋮) trigger + `FluentMenu`, one `FluentMenuItem` per `RowAction` (`FluentDivider` for separators) |
+
+Both renderings share the same invoke path in `<RowActionsMenu>`, so `Href`
+navigation, callbacks, `Disabled` state, and the destructive-action
+confirmation prompt behave identically whether the action appears as a button
+or a menu item. `RowActionsUseMenuService` only affects the kebab rendering
+(the floating menu provider); the single-action button is always inline.
+
 ## 3. Search Strategy — owned by the page, not the wrapper
 
 The three search strategies are too different to collapse into the wrapper
