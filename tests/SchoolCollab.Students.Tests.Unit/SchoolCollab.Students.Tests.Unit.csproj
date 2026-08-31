@@ -14,8 +14,10 @@
     <PackageReference Include="MSTest" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="bunit" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Core\SchoolCollab.Students.Core.csproj" />
+    <ProjectReference Include="..\..\src\Students\SchoolCollab.Students.Application\SchoolCollab.Students.Application.csproj" />
   </ItemGroup>
 </Project>
