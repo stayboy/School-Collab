@@ -60,6 +60,18 @@ To use different models, pass the exact `provider/id` in each `runs.run`'s
 different agent definition, pass `agent: "<name>"` (one of the builtin
 `delegate`/`oracle`/`reviewer`/`worker`/`scout`/`researcher`, or a custom agent).
 
+## Round docs location
+
+All per-round working docs this workflow produces — the orchestrator's
+`plan-*.md` and `acceptance-*.md`, the reviewer's `review-*.md`, and the UI
+tester's `ui-tester-*.md` — MUST live in `documents/rounds/`, NEVER in
+`documents/specs/`. `documents/specs/` is reserved for durable feature
+specs that remain the source of truth; round docs are ephemeral residue.
+Name each doc `<kind>-<round-slug>.md` (e.g. `plan-period-followups-r1.md`).
+`documents/rounds/` is a quarantine folder: it is safe to bulk-trash once a
+round's durable outcomes are folded into the feature spec — see
+`documents/rounds/README.md`.
+
 ## When to Use
 
 Use when a task needs a spec/plan-owned implementation pass with independent
@@ -80,7 +92,8 @@ checked by a document owner before closing.
    the reviewer's acceptance criteria, and state which doc(s) the orchestrator
    owns. Orchestrator output must include (a) the plan, (b) the worker task
    text, (c) the reviewer task text, and (d) the acceptance doc path it will
-   own.
+   own (all round docs — plan/review/acceptance/ui-tester — go in
+   `documents/rounds/`; see **Round docs location** above).
 3. **Author the worker task.** Implement exactly what the orchestrator plan
    specifies; run build + affected tests; do **not** edit the orchestrator's
    plan/acceptance docs. Return a concise changed-files + build/test report.
