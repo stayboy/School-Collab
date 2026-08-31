@@ -121,6 +121,6 @@ Sub-periods are created from the parent year's sub-period surfaces (`SubPeriodsS
 - UI-tester P1 findings: none. P2 findings addressed (or deferred with user consent).
 
 ## Owned documents
-- Plan: `documents/specs/plan-drop-periodtype.md` (this doc).
-- Acceptance/review doc: `documents/specs/review-drop-periodtype.md`.
-- UI-tester report: `documents/specs/ui-tester-drop-periodtype.md`.
+- Plan: `documents/rounds/plan-drop-periodtype.md` (this doc).
+- Acceptance/review doc: `documents/rounds/review-drop-periodtype.md`.
+- UI-tester report: `documents/rounds/ui-tester-drop-periodtype.md`.

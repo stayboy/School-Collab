@@ -15,93 +15,109 @@
         <div class="form-section-header">
             <div>
                 <h3>@HeaderText</h3>
-                <p class="form-hint">@(PeriodId.HasValue ? EditHint : CreateHint)</p>
+                @if (!ShowBlockedPanel)
+                {
+                    <p class="form-hint">@(PeriodId.HasValue ? EditHint : CreateHint)</p>
+                }
             </div>
         </div>
     }
 
-    @if (!PeriodId.HasValue && ShowTip)
+    @if (ShowBlockedPanel)
     {
-        <FluentStack Orientation="Orientation.Horizontal"
-                     HorizontalGap="8"
-                     VerticalAlignment="VerticalAlignment.Top"
-                     class="form-tip">
-            <FluentIcon Icon="@(Icons.Regular.Size20.Calendar)" />
-            <span>@CreateHint</span>
-        </FluentStack>
+        @* P2-5: a None-division parent year cannot host sub-periods. Render an
+           inline warning + a working back affordance instead of the dead-end
+           form (the editable fields and submit row are hidden). *@
+        <FluentMessageBar Intent="MessageIntent.Warning" class="mt-3">@BlockedParentMessage</FluentMessageBar>
+        <div class="mt-3">
+            <FluentButton Appearance="Appearance.Accent" Autofocus="true" OnClick="CancelAsync">Back to periods</FluentButton>
+        </div>
     }
-
-    <FluentStack Orientation="Orientation.Vertical" Spacing="4">
-        @* Division is the single kind selector (plan-drop-periodtype.md). None =
-           a plain top-level academic year; Terms/Semesters on a top-level year
-           (no parent) means the year may contain only that sub-period kind; on a
-           sub-period (parent selected) it is the sub-period's own kind. When the
-           period is a sub-period the division is locked to its parent's division
-           and the parent dropdown is shown. *@
-        <FormRow Label="Division *" AlignTop>
-            <FluentSelect TOption="string"
-                          @bind-Value="_divisionSelect"
-                          Label=""
-                          Disabled="@_isSubPeriod"
-                          Style="flex:1; min-width:0">
-                <FluentOption Value="None">None (single academic year)</FluentOption>
-                <FluentOption Value="Terms">Terms</FluentOption>
-                <FluentOption Value="Semesters">Semesters</FluentOption>
-            </FluentSelect>
-        </FormRow>
-
-        @if (_isSubPeriod)
+    else
+    {
+        @if (!PeriodId.HasValue && ShowTip)
         {
-            <FormRow Label="Parent academic year *" AlignTop>
+            <FluentStack Orientation="Orientation.Horizontal"
+                         HorizontalGap="8"
+                         VerticalAlignment="VerticalAlignment.Top"
+                         class="form-tip">
+                <FluentIcon Icon="@(Icons.Regular.Size20.Calendar)" />
+                <span>@CreateHint</span>
+            </FluentStack>
+        }
+
+        <FluentStack Orientation="Orientation.Vertical" Spacing="4">
+            @* Division is the single kind selector (plan-drop-periodtype.md). None =
+               a plain top-level academic year; Terms/Semesters on a top-level year
+               (no parent) means the year may contain only that sub-period kind; on a
+               sub-period (parent selected) it is the sub-period's own kind. When the
+               period is a sub-period the division is locked to its parent's division
+               and the parent dropdown is shown. *@
+            <FormRow Label="Division *" AlignTop>
                 <FluentSelect TOption="string"
-                              @bind-Value="_parentPeriodIdText"
+                              @bind-Value="_divisionSelect"
                               Label=""
-                              Disabled="true"
+                              Disabled="@_isSubPeriod"
                               Style="flex:1; min-width:0">
-                    <FluentOption Value="">— Select academic year —</FluentOption>
-                    @foreach (var ay in _academicYears)
-                    {
-                        <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
-                    }
+                    <FluentOption Value="None">None (single academic year)</FluentOption>
+                    <FluentOption Value="Terms">Terms</FluentOption>
+                    <FluentOption Value="Semesters">Semesters</FluentOption>
                 </FluentSelect>
             </FormRow>
-        }
 
-        @* Period name + the Suggest/Backfill buttons. The row contains
-           three controls (text field + two icon buttons) so the label
-           is top-aligned (AlignTop) to sit naturally against the taller
-           cell — matches the pre-FormRow visual. *@
-        <FormRow Label="Period name *" AlignTop For="periodName">
-            <FluentTextField Id="periodName" @bind-Value="_name"
-                             Label=""
-                             Placeholder="e.g. 2025–2026 Academic Year"
-                             Style="flex:1; min-width:0" />
-            <FluentButton IconStart="@FluentIcons.Calendar"
-                          Title="Fill the form with the current academic year (editable template)"
-                          OnClick="SuggestAcademicYearAsync" />
-            <FluentButton IconStart="@FluentIcons.ArrowClockwise"
-                          Title="Fill the form with the next academic year after the latest period"
-                          OnClick="BackfillAsync" />
-        </FormRow>
+            @if (_isSubPeriod)
+            {
+                <FormRow Label="Parent academic year *" AlignTop>
+                    <FluentSelect TOption="string"
+                                  @bind-Value="_parentPeriodIdText"
+                                  Label=""
+                                  Disabled="true"
+                                  Style="flex:1; min-width:0">
+                        <FluentOption Value="">— Select academic year —</FluentOption>
+                        @foreach (var ay in _academicYears)
+                        {
+                            <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
+                        }
+                    </FluentSelect>
+                </FormRow>
+            }
 
-        @* Two date pickers side-by-side. AlignTop so the "Dates *" label
-           sits at the top of the row (top-align reads better against a
-           two-input cell than centering). *@
-        <FormRow Label="Dates *" AlignTop>
-            <FluentDatePicker @bind-Value="_start" Label="" Style="flex:1; min-width:0" />
-            <FluentDatePicker @bind-Value="_end"   Label="" Style="flex:1; min-width:0" />
-        </FormRow>
-    </FluentStack>
+            @* Period name + the Suggest/Backfill buttons. The row contains
+               three controls (text field + two icon buttons) so the label
+               is top-aligned (AlignTop) to sit naturally against the taller
+               cell — matches the pre-FormRow visual. *@
+            <FormRow Label="Period name *" AlignTop For="periodName">
+                <FluentTextField Id="periodName" @bind-Value="_name"
+                                 Label=""
+                                 Placeholder="e.g. 2025–2026 Academic Year"
+                                 Style="flex:1; min-width:0" />
+                <FluentButton IconStart="@FluentIcons.Calendar"
+                              Title="Fill the form with the current academic year (editable template)"
+                              OnClick="SuggestAcademicYearAsync" />
+                <FluentButton IconStart="@FluentIcons.ArrowClockwise"
+                              Title="Fill the form with the next academic year after the latest period"
+                              OnClick="BackfillAsync" />
+            </FormRow>
 
-    <div class="form-actions">
-        @if (ShowCancel)
-        {
-            <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
-        }
-        <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@(_saving)">
-            @(_saving ? "Saving…" : SubmitLabel)
-        </FluentButton>
-    </div>
+            @* Two date pickers side-by-side. AlignTop so the "Dates *" label
+               sits at the top of the row (top-align reads better against a
+               two-input cell than centering). *@
+            <FormRow Label="Dates *" AlignTop>
+                <FluentDatePicker @bind-Value="_start" Label="" Style="flex:1; min-width:0" />
+                <FluentDatePicker @bind-Value="_end"   Label="" Style="flex:1; min-width:0" />
+            </FormRow>
+        </FluentStack>
+
+        <div class="form-actions">
+            @if (ShowCancel)
+            {
+                <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+            }
+            <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@(_saving)">
+                @(_saving ? "Saving…" : SubmitLabel)
+            </FluentButton>
+        </div>
+    }
 
     @if (!string.IsNullOrEmpty(_error))
     {
@@ -180,13 +196,29 @@
     /// shown.</summary>
     private bool _isSubPeriod;
 
+    /// <summary>True when a create-from-?parent= intent resolved to a None-division
+    /// parent year, which cannot host sub-periods. The blocked panel replaces the
+    /// editable form (P2-5).</summary>
+    private bool _parentBlocked;
+
     private string HeaderText => PeriodId.HasValue ? "Edit period" : "New period";
+
+    /// <summary>True when a create-from-?parent= intent resolved to a None-division
+    /// parent year, which cannot host sub-periods. The blocked panel replaces the
+    /// editable form (P2-5).</summary>
+    private bool ShowBlockedPanel => !PeriodId.HasValue && _parentBlocked;
 
     private const string CreateHint =
         "Pre-filled with the current academic year (1 Sep – 31 Aug) as an editable template. " +
         "Use the buttons to suggest or backfill, then adjust as needed.";
 
     private const string EditHint = "Update the period name and date range.";
+
+    /// <summary>Shown in the blocked panel when a None-division parent year cannot
+    /// host sub-periods (P2-5).</summary>
+    private const string BlockedParentMessage =
+        "This academic year's division is 'None' — sub-periods are not allowed. " +
+        "Create an Academic Year instead, or change the year's division.";
 
     /// <summary>Top-level academic years whose division matches the selected
     /// division — the valid parents for a sub-period of that kind.</summary>
@@ -214,8 +246,9 @@
                 _isSubPeriod = true;
                 if (_divisionSelect == "None")
                 {
-                    _error = "This academic year's division is 'None' — sub-periods are not allowed. " +
-                             "Create an Academic Year instead, or change the year's division.";
+                    // A None-division year cannot host sub-periods — block the form
+                    // (P2-5) instead of surfacing a bottom-bar error with no escape.
+                    _parentBlocked = true;
                 }
             }
 
@@ -232,8 +265,11 @@
                     _isSubPeriod = p.ParentPeriodId.HasValue;
                 }
             }
-            else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name) && string.IsNullOrEmpty(_error))
+            else if (PrefillAcademicYear && string.IsNullOrWhiteSpace(_name) && !_parentBlocked)
             {
+                // P2-6: prefill is intentionally skipped in the blocked state (a
+                // None-division parent cannot host sub-periods); the blocked panel
+                // replaces the form.
                 SuggestAcademicYearAsync();
             }
         }

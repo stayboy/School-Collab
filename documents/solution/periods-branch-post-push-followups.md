@@ -4,6 +4,8 @@
 - **Status of branch:** `be345f73` on `origin/feat/periods-landing-grid-beautify`; working tree clean; no PR open.
 - **Owner:** parent / orchestrator. To be run before authorizing a PR to `main`.
 
+> **Status update (2026-08-31):** §1 ✅ done, §2 ✅ done (green on post-rework tree), §4 ✅ done (P2-5/P2-6 fixed with tests; P2-3/4/7/8 deferred), §3 ⬜ open (operational, next), §5 ⬜ gated on explicit user instruction. Round docs: `documents/rounds/plan|review|acceptance|ui-tester-period-followups-r1.md`, acceptance CLOSED after 1 UI-tester rework iteration (tester final **PASS**).
+
 ## Context
 
 The branch now carries three interleaved workstreams in one commit:
@@ -23,6 +25,8 @@ trashing it.
 ---
 
 ## 1. Fix stale `documents/specs/` self-references in the drop-periodtype round docs
+
+> **✅ DONE (2026-08-31, round period-followups-r1):** all 15 refs replaced → `documents/rounds/`; §10 false claim reworded; gate grep returns 0. Verified by reviewer + orchestrator-accept.
 
 **Type:** committed-doc correctness (the one real miss found in review).
 **Severity:** low — the four docs are ephemeral round residue, safe to
@@ -50,6 +54,8 @@ be reworded to say the round docs were moved to `documents/rounds/`.
 
 ## 2. Re-verify build + test suites on the committed tree
 
+> **✅ DONE (2026-08-31, parent-run on post-rework tree):** build **0 errors** (6 pre-existing NuGet-audit warnings); Students **364/364** (360 baseline + 4 new), Admin **502/502**, Settings **446/446** — all with 0 failures. Recorded in `documents/rounds/acceptance-period-followups-r1.md` (§'Authoritative §2 numbers'). Prereq for the §5 pre-flight gate is satisfied.
+
 **Type:** verification. The acceptance/review docs record green
 (`dotnet build` 0 errors; Students 360/0, Admin 502/0, Settings 446/0), but
 that state **predates** the landing-grid UI work that was committed on top of
@@ -67,6 +73,8 @@ pre-flight gate before opening a PR (§5).
 ---
 
 ## 3. Dev database drop/recreate (EnsureCreated operational step)
+
+> **⬜ OPEN (2026-08-31):** next operational step — code is now finalised (post-rework green). Parent will run the drop/recreate + runtime verification on user go-ahead.
 
 **Type:** operational. `students-db` (and `settings-db`) are `EnsureCreated` in
 dev; the branch adds **four new migrations** that the current dev schema does
@@ -88,6 +96,8 @@ verification.
 ---
 
 ## 4. Triage the still-open UI-tester P2 findings
+
+> **✅ DONE (2026-08-31, round period-followups-r1):** P2-5/P2-6 fixed with bUnit tests (`_parentBlocked` blocked panel + Back button, `Autofocus`, spacing wrapper; prefill gate now `!_parentBlocked` + explicit comment). Dispositions recorded below; new P2-3-style defensive `CancelAsync` no-op also deferred. UI-tester loop: pass-1 FINDINGS (P1 false create-hint) → rework iteration 1 → tester **PASS**.
 
 **Type:** decision. The UI-tester report (`documents/rounds/ui-tester-drop-periodtype.md`)
 lists P2-1…P2-8. **P2-1 and P2-2 are verified as fixed** in the committed tree
@@ -117,6 +127,8 @@ fixed with a test or explicitly deferred with user consent.
 ---
 
 ## 5. PR pre-flight (only after §2 green and with explicit user instruction)
+
+> **⬜ GATED (2026-08-31):** §2 green. One open parent note before commit: the round's working tree contains an out-of-scope +61-line edit to `.pi/skills/orchestrator-worker-reviewer/SKILL.md` (additive 'Cline provider profile' doc section) — reviewer verdict: revert or quarantine before commit (user to decide). No PR opened.
 
 **Type:** process gate. Per `AGENTS.md` merge policy.
 

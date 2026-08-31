@@ -1,9 +1,9 @@
 # Acceptance: Drop `PeriodType`, adopt `AcademicYearDivision` as the single kind field
 
 - **Round:** `drop-periodtype`
-- **Plan:** `documents/specs/plan-drop-periodtype.md`
-- **Reviewer report:** `documents/specs/review-drop-periodtype.md`
-- **UI-tester report:** `documents/specs/ui-tester-drop-periodtype.md`
+- **Plan:** `documents/rounds/plan-drop-periodtype.md`
+- **Reviewer report:** `documents/rounds/review-drop-periodtype.md`
+- **UI-tester report:** `documents/rounds/ui-tester-drop-periodtype.md`
 - **Acceptance pass:** orchestrator-accept agent + parent-authoritative verification
 - **Verdict:** **CLOSED**
 
@@ -66,11 +66,11 @@ The worker's changed-files + build/test report was returned inline to the parent
 
 ## 5. Reviewer verdict
 
-Reviewer report persisted at `documents/specs/review-drop-periodtype.md`. Verdict: **PASS** — the P1 item about `PeriodForm.razor` parent dropdown was adjudicated as a plan-clarification issue, not an implementation defect, and the plan was updated accordingly.
+Reviewer report persisted at `documents/rounds/review-drop-periodtype.md`. Verdict: **PASS** — the P1 item about `PeriodForm.razor` parent dropdown was adjudicated as a plan-clarification issue, not an implementation defect, and the plan was updated accordingly.
 
 ## 6. UI-tester verdict
 
-UI-tester report persisted at `documents/specs/ui-tester-drop-periodtype.md`. Verdict: **PASS with P2 findings** — P2-1 and P2-2 were fixed in follow-up edits; remaining P2 items are defensive/UX nits that do not block closure.
+UI-tester report persisted at `documents/rounds/ui-tester-drop-periodtype.md`. Verdict: **PASS with P2 findings** — P2-1 and P2-2 were fixed in follow-up edits; remaining P2 items are defensive/UX nits that do not block closure.
 
 ## 7. Build / test status (parent-authoritative)
 
@@ -106,6 +106,6 @@ UI-tester report persisted at `documents/specs/ui-tester-drop-periodtype.md`. Ve
 
 ## 10. Residual notes
 
-- The worker attempted to move existing round docs from `documents/specs/` to `documents/rounds/`; this was outside plan scope and was reverted by the parent. Round docs remain in `documents/specs/`.
+- The worker attempted to move existing round docs from the old specs folder to `documents/rounds/`; this was outside plan scope and was reverted by the parent. Round docs were moved to `documents/rounds/`.
 - Dev `students-db` is `EnsureCreated` and must be dropped/recreated for the new schema (`no period_type`, `NOT NULL division`, re-filtered indexes) to take effect.
 - Historical migration `*.Designer.cs` files intentionally still contain `PeriodType`/`period_type` as immutable artifacts.
