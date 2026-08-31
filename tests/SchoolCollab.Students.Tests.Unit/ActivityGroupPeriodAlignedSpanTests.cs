@@ -12,6 +12,7 @@ using SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 using SchoolCollab.Students.Core.Data.Repositories;
 using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.Domain.Exceptions;
+using SchoolCollab.Students.Core.Tenancy;
 
 namespace SchoolCollab.Students.Tests.Unit;
 
@@ -25,11 +26,8 @@ public class ActivityGroupPeriodAlignedSpanTests
 {
     private static DateOnly D(int y, int m, int d) => new(y, m, d);
 
-    private static CreatePeriodHandler NewCreatePeriod(StudentsTestScope s) =>
-        NewCreatePeriod(s, "Terms");
-
-    private static CreatePeriodHandler NewCreatePeriod(StudentsTestScope s, string division) => new(
-        s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider(division),
+    private static CreatePeriodHandler NewCreatePeriod(StudentsTestScope s) => new(
+        s.Periods, s.Cache, s.Tenants,
         NullLogger<CreatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) => new(
@@ -48,21 +46,23 @@ public class ActivityGroupPeriodAlignedSpanTests
     private static async Task<(Guid yearId, Guid termId)> SeedYearAndTermAsync(StudentsTestScope s)
     {
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31)));
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Terms));
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         var termId = await create.HandleAsync(new CreatePeriod(
-            "T1", D(2026, 9, 1), D(2026, 12, 31), PeriodType.Term, ParentPeriodId: yearId));
+            "T1", D(2026, 9, 1), D(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(termId));
         return (yearId, termId);
     }
 
     private static async Task<(Guid yearId, Guid semesterId)> SeedYearAndSemesterAsync(StudentsTestScope s)
     {
-        var create = NewCreatePeriod(s, "Semesters");
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31)));
+        var create = NewCreatePeriod(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Semesters));
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         var semesterId = await create.HandleAsync(new CreatePeriod(
-            "S1", D(2026, 9, 1), D(2027, 1, 31), PeriodType.Semester, ParentPeriodId: yearId));
+            "S1", D(2026, 9, 1), D(2027, 1, 31), AcademicYearDivision.Semesters, ParentPeriodId: yearId));
         await NewActivate(s).HandleAsync(new ActivatePeriod(semesterId));
         return (yearId, semesterId);
     }
@@ -121,13 +121,29 @@ public class ActivityGroupPeriodAlignedSpanTests
             .Should().ThrowAsync<EnrollmentSpanMismatchException>();
     }
 
+    // FR-45: Termly group requires a Terms framework (no active year ⇒ fail-closed).
+    [TestMethod]
+    public async Task Create_Termly_WhenNoActiveYear_Throws()
+    {
+        using var s = new StudentsTestScope("pasp-compat-none-" + Guid.NewGuid());
+        var h = new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
+            new ActivePeriodProvider(s.Db, s.Tenants, s.Cache), NullLogger<CreateActivityGroupHandler>.Instance);
+
+        await FluentActions.Awaiting(() => h.HandleAsync(new CreateActivityGroup("Term Club", Span: EnrollmentSpan.Termly)))
+            .Should().ThrowAsync<EnrollmentSpanIncompatibleException>();
+    }
+
     // FR-45: Termly group requires a Terms framework.
     [TestMethod]
     public async Task Create_Termly_WhenDivisionNone_Throws()
     {
         using var s = new StudentsTestScope("pasp-compat-" + Guid.NewGuid());
+        var create = NewCreatePeriod(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.None));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         var h = new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
-            new StubAcademicYearDivisionProvider("None"), NullLogger<CreateActivityGroupHandler>.Instance);
+            new ActivePeriodProvider(s.Db, s.Tenants, s.Cache), NullLogger<CreateActivityGroupHandler>.Instance);
 
         await FluentActions.Awaiting(() => h.HandleAsync(new CreateActivityGroup("Term Club", Span: EnrollmentSpan.Termly)))
             .Should().ThrowAsync<EnrollmentSpanIncompatibleException>();
@@ -138,8 +154,12 @@ public class ActivityGroupPeriodAlignedSpanTests
     public async Task Create_Termly_WhenDivisionTerms_Succeeds()
     {
         using var s = new StudentsTestScope("pasp-compat-ok-" + Guid.NewGuid());
+        var create = NewCreatePeriod(s);
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Terms));
+        await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         var h = new CreateActivityGroupHandler(s.ActivityGroups, s.Cache, s.Tenants,
-            new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreateActivityGroupHandler>.Instance);
+            new ActivePeriodProvider(s.Db, s.Tenants, s.Cache), NullLogger<CreateActivityGroupHandler>.Instance);
 
         var id = await h.HandleAsync(new CreateActivityGroup("Term Club", Span: EnrollmentSpan.Termly));
         (await s.ActivityGroups.GetAsync(id))!.Span.Should().Be(EnrollmentSpan.Termly);
@@ -181,7 +201,8 @@ public class ActivityGroupPeriodAlignedSpanTests
     {
         using var s = new StudentsTestScope("pasp-no-term-" + Guid.NewGuid());
         var create = NewCreatePeriod(s);
-        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31)));
+        var yearId = await create.HandleAsync(new CreatePeriod("AY2026", D(2026, 9, 1), D(2027, 8, 31),
+            Division: AcademicYearDivision.Terms));
         await NewActivate(s).HandleAsync(new ActivatePeriod(yearId));
         // No Term is created under the active year.
         var group = ActivityGroup.Create("Term Club", span: EnrollmentSpan.Termly);

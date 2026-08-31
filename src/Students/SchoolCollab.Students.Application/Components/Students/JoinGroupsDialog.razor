@@ -60,7 +60,7 @@
     private List<ActivityGroupDto> _availableGroups = new();
     private bool _loadingGroups = true;
     private HashSet<Guid> _selectedIds = new();
-    private string _activePeriodType = "AcademicYear";
+    private string _activePeriodKind = "AcademicYear";
 
     private IEnumerable<ActivityGroupDto> _filteredGroups =>
         string.IsNullOrWhiteSpace(_search)
@@ -92,11 +92,13 @@
             var current = await Api.ListStudentGroupsAsync(Model.StudentId);
             var currentIds = new HashSet<Guid>(current?.Select(g => g.Id) ?? Array.Empty<Guid>());
 
-            // Resolve the active period type so period-aligned spans can be
+            // Resolve the active period kind so period-aligned spans can be
             // filtered to the currently-open period (spec FR-43).
             var activeSub = await Api.GetActiveSubPeriodAsync();
             var activeYear = await Api.GetActiveAcademicYearAsync();
-            _activePeriodType = activeSub?.PeriodType ?? activeYear?.PeriodType ?? "AcademicYear";
+            _activePeriodKind = activeSub is not null ? KindOf(activeSub)
+                : activeYear is not null ? KindOf(activeYear)
+                : "AcademicYear";
 
             _availableGroups = (all ?? Array.Empty<ActivityGroupDto>())
                 .Where(g => g.IsActive
@@ -116,10 +118,13 @@
         }
     }
 
+    private static string KindOf(PeriodDto p)
+        => p.ParentPeriodId is null ? "AcademicYear" : p.Division == "Semesters" ? "Semester" : "Term";
+
     /// <summary>
     /// Span-aware joinability (spec FR-28..32, FR-40/43/52). OpenEnded is always
     /// joinable; DateRange only while its window is open; period-aligned spans
-    /// only when the active period matches the span's required period type.
+    /// only when the active period matches the span's required period kind.
     /// </summary>
     private bool SpanCompatible(ActivityGroupDto g)
     {
@@ -129,9 +134,9 @@
             "OpenEnded" => true,
             "DateRange" => g.EnrollmentStartDate.HasValue && g.EnrollmentEndDate.HasValue
                 && today >= g.EnrollmentStartDate.Value && today <= g.EnrollmentEndDate.Value,
-            "WholeAcademicYear" => _activePeriodType == "AcademicYear",
-            "Termly" => _activePeriodType == "Term",
-            "Semester" => _activePeriodType == "Semester",
+            "WholeAcademicYear" => _activePeriodKind == "AcademicYear",
+            "Termly" => _activePeriodKind == "Term",
+            "Semester" => _activePeriodKind == "Semester",
             _ => true
         };
     }

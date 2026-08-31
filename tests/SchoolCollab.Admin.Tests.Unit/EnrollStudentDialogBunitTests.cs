@@ -164,7 +164,7 @@ public class EnrollStudentDialogBunitTests : BunitContext
                 return Json(HttpStatusCode.OK, new PeriodDto(
                     PeriodId, "2025/2026",
                     new DateOnly(2025, 9, 1), new DateOnly(2026, 8, 31),
-                    "Active", "AcademicYear", null, null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
+                    "Active", null, null, "None", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow));
             }
 
             // GET /students/grade-levels/{id} — the suggested-grade lookup

@@ -25,9 +25,6 @@ internal sealed class TenantFeatureFlagOverrideConfiguration
 
         builder.Property(x => x.IsEnabled);
 
-        builder.Property(x => x.Value)
-            .HasMaxLength(100);
-
         builder.Property(x => x.Reason)
             .IsRequired()
             .HasMaxLength(1000);

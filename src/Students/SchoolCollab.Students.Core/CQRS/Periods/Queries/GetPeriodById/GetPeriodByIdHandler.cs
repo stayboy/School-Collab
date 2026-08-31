@@ -40,9 +40,9 @@ public sealed class GetPeriodByIdHandler(
                     period.StartDate,
                     period.EndDate,
                     period.Status.ToString(),
-                    period.PeriodType.ToString(),
                     period.ParentPeriodId,
                     period.NextPeriodId,
+                    period.Division.ToString(),
                     period.CreatedAt,
                     period.UpdatedAt);
             },

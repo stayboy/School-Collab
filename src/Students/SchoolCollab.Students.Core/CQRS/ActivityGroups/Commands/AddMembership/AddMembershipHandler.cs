@@ -130,12 +130,12 @@ public sealed class AddMembershipHandler(
 
             default:
                 // WholeAcademicYear/Termly/Semester: period-aligned — resolve the
-                // matching typed period of the active academic year (Rev. 3 FR-43).
-                var requiredType = group.Span switch
+                // matching period of the active academic year (Rev. 3 FR-43).
+                var requiredDivision = group.Span switch
                 {
-                    EnrollmentSpan.WholeAcademicYear => PeriodType.AcademicYear,
-                    EnrollmentSpan.Termly => PeriodType.Term,
-                    _ => PeriodType.Semester
+                    EnrollmentSpan.WholeAcademicYear => (AcademicYearDivision?)null,
+                    EnrollmentSpan.Termly => AcademicYearDivision.Terms,
+                    _ => AcademicYearDivision.Semesters
                 };
 
                 var activeYear = await periodRepository.GetActiveAcademicYearAsync(cancellationToken: cancellationToken);
@@ -148,26 +148,38 @@ public sealed class AddMembershipHandler(
                 {
                     var period = await periodRepository.GetAsync(requestedId, cancellationToken)
                         ?? throw new PeriodNotFoundException(requestedId);
-                    if (period.PeriodType != requiredType)
-                        throw new EnrollmentSpanMismatchException(group.Id, group.Span.ToString(),
-                            $"A {group.Span} membership requires a {requiredType} period.");
-                    if (requiredType != PeriodType.AcademicYear && period.ParentPeriodId != activeYear.Id)
-                        throw new EnrollmentSpanMismatchException(group.Id, group.Span.ToString(),
-                            $"The {requiredType} period must belong to the active academic year.");
+                    if (group.Span == EnrollmentSpan.WholeAcademicYear)
+                    {
+                        if (period.ParentPeriodId is not null)
+                            throw new EnrollmentSpanMismatchException(group.Id, group.Span.ToString(),
+                                $"A {group.Span} membership requires a top-level academic year period.");
+                        if (period.Id != activeYear.Id)
+                            throw new EnrollmentSpanMismatchException(group.Id, group.Span.ToString(),
+                                $"The academic year period must be the active academic year.");
+                    }
+                    else
+                    {
+                        if (period.Division != requiredDivision)
+                            throw new EnrollmentSpanMismatchException(group.Id, group.Span.ToString(),
+                                $"A {group.Span} membership requires a {requiredDivision} period.");
+                        if (period.ParentPeriodId != activeYear.Id)
+                            throw new EnrollmentSpanMismatchException(group.Id, group.Span.ToString(),
+                                $"The {requiredDivision} period must belong to the active academic year.");
+                    }
                     resolvedId = requestedId;
                 }
-                else if (requiredType == PeriodType.AcademicYear)
+                else if (group.Span == EnrollmentSpan.WholeAcademicYear)
                 {
                     resolvedId = activeYear.Id;
                 }
                 else
                 {
                     var activeSubs = await periodRepository.GetActiveSubPeriodsAsync(
-                        activeYear.Id, requiredType, cancellationToken: cancellationToken);
+                        activeYear.Id, requiredDivision, cancellationToken: cancellationToken);
                     var sub = activeSubs.FirstOrDefault();
                     if (sub is null)
                         throw new EnrollmentSpanMismatchException(group.Id, group.Span.ToString(),
-                            $"No active {requiredType} period exists in the active academic year for a {group.Span} membership.");
+                            $"No active {requiredDivision} period exists in the active academic year for a {group.Span} membership.");
                     resolvedId = sub.Id;
                 }
 

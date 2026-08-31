@@ -22,10 +22,12 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
     public DateOnly EndDate { get; private set; }
     public PeriodStatus Status { get; private set; }
 
-    // Period hierarchy (period-hierarchy-terms-semesters.md FR-H1/H2).
-    // An AcademicYear has null ParentPeriodId; a Term/Semester points at its
-    // AcademicYear. Back-filled to AcademicYear for existing rows (additive).
-    public PeriodType PeriodType { get; private set; } = PeriodType.AcademicYear;
+    // Period hierarchy (plan-drop-periodtype.md). The single kind field is
+    // AcademicYearDivision: None = a plain top-level academic year (no
+    // sub-periods); Terms/Semesters on a top-level year (ParentPeriodId == null)
+    // means the year may contain only that sub-period kind; Terms/Semesters on a
+    // sub-period (ParentPeriodId != null) is the sub-period's own kind.
+    public AcademicYearDivision Division { get; private set; }
     public Guid? ParentPeriodId { get; private set; }
 
     public Guid? NextPeriodId { get; private set; }
@@ -39,13 +41,13 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         string name,
         DateOnly startDate,
         DateOnly endDate,
-        PeriodType periodType = PeriodType.AcademicYear,
+        AcademicYearDivision division,
         Guid? parentPeriodId = null)
     {
         if (endDate < startDate)
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
 
-        ValidateHierarchy(periodType, parentPeriodId);
+        ValidateHierarchy(division, parentPeriodId);
 
         var now = DateTimeOffset.UtcNow;
         var period = new Period
@@ -55,7 +57,7 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
             StartDate = startDate,
             EndDate = endDate,
             Status = PeriodStatus.Draft,
-            PeriodType = periodType,
+            Division = division,
             ParentPeriodId = parentPeriodId,
             CreatedAt = now,
             UpdatedAt = now
@@ -69,7 +71,7 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         string name,
         DateOnly startDate,
         DateOnly endDate,
-        PeriodType periodType = PeriodType.AcademicYear,
+        AcademicYearDivision division,
         Guid? parentPeriodId = null)
     {
         if (Status != PeriodStatus.Draft)
@@ -78,35 +80,30 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         if (endDate < startDate)
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
 
-        ValidateHierarchy(periodType, parentPeriodId);
+        ValidateHierarchy(division, parentPeriodId);
 
         Name = name.Trim();
         StartDate = startDate;
         EndDate = endDate;
-        PeriodType = periodType;
+        Division = division;
         ParentPeriodId = parentPeriodId;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new PeriodUpdatedEvent(Id, Name));
     }
 
     /// <summary>
-    /// Enforces the hierarchy shape (FR-H2): an AcademicYear must have a null
-    /// parent; a Term/Semester must have a parent. The referenced parent being an
-    /// existing AcademicYear is validated by the handler (it requires a repo lookup).
+    /// Enforces the hierarchy shape (plan-drop-periodtype.md): a sub-period
+    /// (ParentPeriodId set) must carry a Terms/Semesters division — a None
+    /// division is reserved for top-level academic years. The referenced parent
+    /// being an existing top-level year with the same division is validated by
+    /// the handler (it requires a repo lookup).
     /// </summary>
-    private static void ValidateHierarchy(PeriodType periodType, Guid? parentPeriodId)
+    private static void ValidateHierarchy(AcademicYearDivision division, Guid? parentPeriodId)
     {
-        if (periodType == PeriodType.AcademicYear)
-        {
-            if (parentPeriodId.HasValue)
-                throw new ArgumentException(
-                    "An AcademicYear period must not have a ParentPeriodId.", nameof(parentPeriodId));
-        }
-        else if (!parentPeriodId.HasValue)
-        {
+        if (parentPeriodId.HasValue && division == AcademicYearDivision.None)
             throw new ArgumentException(
-                $"A {periodType} period must have a ParentPeriodId (its AcademicYear).", nameof(parentPeriodId));
-        }
+                "A sub-period must have a Terms or Semesters division; None is reserved for top-level academic years.",
+                nameof(division));
     }
 
     public void Activate()
@@ -141,9 +138,9 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
 
     public void SetNextPeriod(Guid nextPeriodId)
     {
-        if (PeriodType != PeriodType.AcademicYear)
+        if (ParentPeriodId is not null)
             throw new InvalidOperationException(
-                "Only AcademicYear periods can have a NextPeriodId; sub-periods are date-ordered within their year (FR-H11).");
+                "Only top-level academic-year periods can have a NextPeriodId; sub-periods are date-ordered within their year (FR-H11).");
         if (nextPeriodId == Id)
             throw new InvalidOperationException("A period cannot be its own next period.");
         NextPeriodId = nextPeriodId;

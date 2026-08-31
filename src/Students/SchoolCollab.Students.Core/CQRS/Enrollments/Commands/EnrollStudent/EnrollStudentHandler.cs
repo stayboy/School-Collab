@@ -43,14 +43,14 @@ public sealed class EnrollStudentHandler(
                 "Cannot enrol students: no active period is open for this tenant. Open a period before enrolling.");
         }
         // FR-H9 / AC-H8: grade enrollment is year-level. It must attach to the
-        // active AcademicYear, never to a Term/Semester sub-period. Guarded here
-        // (not just by the PeriodId match below) so the invariant holds even if the
-        // active provider were ever to resolve to a sub-period.
-        if (active.PeriodType != PeriodType.AcademicYear.ToString())
+        // active top-level academic year, never to a Term/Semester sub-period.
+        // Guarded here (not just by the PeriodId match below) so the invariant holds
+        // even if the active provider were ever to resolve to a sub-period.
+        if (active.ParentPeriodId is not null)
         {
             throw new PeriodNotOpenException(
-                $"Grade enrollment is year-level: the active period is a {active.PeriodType} period. " +
-                "Enrol students into the active AcademicYear period instead.");
+                $"Grade enrollment is year-level: the active period is a sub-period. " +
+                "Enrol students into the active academic year period instead.");
         }
         if (command.PeriodId != active.Id)
         {

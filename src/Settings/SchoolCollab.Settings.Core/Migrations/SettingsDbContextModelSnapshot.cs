@@ -329,11 +329,6 @@ namespace SchoolCollab.Settings.Core.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
 
-                    b.Property<string>("Value")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("value");
-
                     b.HasKey("Id")
                         .HasName("pk_feature_flags");
 
@@ -658,11 +653,6 @@ namespace SchoolCollab.Settings.Core.Migrations
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("updated_at");
-
-                    b.Property<string>("Value")
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)")
-                        .HasColumnName("value");
 
                     b.HasKey("Id")
                         .HasName("pk_tenant_flag_overrides");

@@ -1,23 +1,32 @@
 namespace SchoolCollab.Students.Core.Domain.Exceptions;
 
 /// <summary>
-/// Thrown when creating or updating a <c>Term</c>/<c>Semester</c> period while
-/// the tenant's academic-year division does not permit it
-/// (period-hierarchy-terms-semesters.md FR-H7). A <c>Term</c> requires
-/// <c>AcademicYearDivision = Terms</c>; a <c>Semester</c> requires
-/// <c>Semesters</c>. <c>AcademicYear</c> creation is always framework-agnostic.
-/// The API maps this to <c>422 Unprocessable Entity</c>.
+/// Thrown when creating or updating a <c>Term</c>/<c>Semester</c> sub-period whose
+/// division does not match its parent academic year's division
+/// (plan-drop-periodtype.md — a sub-period must share its parent's division). The
+/// API maps this to <c>422 Unprocessable Entity</c>.
 /// </summary>
 public sealed class PeriodFrameworkMismatchException : Exception
 {
-    public string PeriodType { get; }
     public string Division { get; }
+    public string ParentDivision { get; }
 
-    public PeriodFrameworkMismatchException(string periodType, string division)
-        : base($"Cannot create a {periodType} period: the tenant's academic-year division is '{division}' " +
-               $"(requires {(periodType == "Term" ? "Terms" : "Semesters")}).")
+    public PeriodFrameworkMismatchException(string division, string parentDivision)
+        : base($"Cannot create a {division} sub-period: the parent academic year's division is '{parentDivision}' " +
+               $"(a sub-period must share its parent's division).")
     {
-        PeriodType = periodType;
         Division = division;
+        ParentDivision = parentDivision;
+    }
+
+    /// <summary>
+    /// Message-only overload for the division-change rejection (plan-drop-periodtype.md):
+    /// changing a top-level year's division while non-completed sub-periods exist.
+    /// </summary>
+    public PeriodFrameworkMismatchException(string message)
+        : base(message)
+    {
+        Division = "AcademicYear";
+        ParentDivision = "";
     }
 }

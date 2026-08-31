@@ -1,0 +1,65 @@
+/* Read-only sub-periods list dialog (periods-landing-grid-beautify.md FR-4).
+   Mirrors GuardianContactsDialog's read-only dialog styling: a simple
+   flex column with a footer separated by a top border (the dialog-ui skill's
+   content/actions split — NOT a <FluentDivider>). */
+
+.sub-periods-dialog {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+
+.sub-periods-list {
+    display: flex;
+    flex-direction: column;
+}
+
+.sub-periods-row {
+    display: grid;
+    grid-template-columns: minmax(140px, 2fr) 110px 90px 90px 110px auto;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+}
+
+.sub-periods-row:first-child {
+    border-top: none;
+    padding-top: 0;
+}
+
+.sub-periods-row--head {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--neutral-foreground-hint);
+}
+
+.sub-periods-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sub-periods-actions {
+    display: inline-flex;
+    justify-content: flex-end;
+    gap: 4px;
+}
+
+/* Footer separator + Close button. The dialog host has no
+   PrimaryAction/SecondaryAction (BuildShellParameters sets both null), so the
+   body owns the close affordance. Top border = content/actions separator. */
+.dialog-footer {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    padding-top: 12px;
+    margin-top: 4px;
+    border-top: 1px solid var(--neutral-stroke-rest, #e0e0e0);
+}
+
+.muted { color: var(--neutral-foreground-hint); }

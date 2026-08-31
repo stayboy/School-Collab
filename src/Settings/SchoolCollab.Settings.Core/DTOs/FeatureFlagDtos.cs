@@ -3,7 +3,6 @@ namespace SchoolCollab.Settings.Core.DTOs;
 public enum FlagKindDto
 {
     Boolean = 0,
-    String = 1,
 }
 
 public sealed record FeatureFlagDto(
@@ -12,7 +11,6 @@ public sealed record FeatureFlagDto(
     string Name,
     string? Description,
     FlagKindDto Kind,
-    string? Value,
     bool IsEnabled,
     bool IsArchived,
     bool IsDeleted,
@@ -25,7 +23,6 @@ public sealed record TenantFlagOverrideDto(
     Guid TenantId,
     Guid FeatureFlagId,
     bool? IsEnabled,
-    string? Value,
     string Reason,
     DateTimeOffset? EffectiveFrom,
     DateTimeOffset? EffectiveTo,
@@ -56,10 +53,3 @@ public sealed record ResolvedFlagDto(
     bool IsEnabled,
     string Source,
     DateTimeOffset ResolvedAt);
-
-/// <summary>
-/// The effective academic-year division for a tenant (period-hierarchy
-/// period-hierarchy-terms-semesters.md FR-H6). <c>Value</c> is one of
-/// <c>None</c> | <c>Terms</c> | <c>Semesters</c>.
-/// </summary>
-public sealed record AcademicYearDivisionDto(string Value, string Source);

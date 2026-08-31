@@ -4,6 +4,7 @@ using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Commands.AssignStu
 using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Commands.RemoveStudentTopic;
 using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListStudentTopicAssignmentsByPeriod;
 using SchoolCollab.Students.Core.CQRS.StudentTopicAssignments.Queries.ListStudentTopicAssignmentsByStudent;
+using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -31,8 +32,19 @@ public static class StudentTopicAssignmentRoutes
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<AssignStudentTopic, Guid> handler,
             CancellationToken ct) =>
         {
-            var id = await handler.HandleAsync(command, ct);
-            return Results.Created($"/student-topics/{id}", new { id });
+            try
+            {
+                var id = await handler.HandleAsync(command, ct);
+                return Results.Created($"/student-topics/{id}", new { id });
+            }
+            catch (TopicAssignmentPeriodException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (PeriodNotOpenException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 409);
+            }
         });
 
         group.MapDelete("/student-topics/{id:guid}", async (

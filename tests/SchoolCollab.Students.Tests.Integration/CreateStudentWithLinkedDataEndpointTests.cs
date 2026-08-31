@@ -243,7 +243,7 @@ public class CreateStudentWithLinkedDataEndpointTests
         return await accessor.RunWithExplicitTenantAsync(tenantId, async _ =>
         {
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
-            var period = Period.Create(name, today.AddDays(-1), today.AddDays(1));
+            var period = Period.Create(name, today.AddDays(-1), today.AddDays(1), AcademicYearDivision.None);
             period.Activate();
             db.Periods.Add(period);
             await db.SaveChangesAsync();

@@ -38,7 +38,7 @@ public class CreateTopicForGradeHandlerTests
     private static async Task<Guid> SeedCurrentPeriodAsync(StudentsTestScope s, string name)
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var period = Period.Create(name, today.AddDays(-1), today.AddDays(1));
+        var period = Period.Create(name, today.AddDays(-1), today.AddDays(1), AcademicYearDivision.None);
         s.Db.Periods.Add(period);
         await s.Db.SaveChangesAsync();
         return period.Id;
@@ -48,11 +48,10 @@ public class CreateTopicForGradeHandlerTests
     {
         var create = new CreatePeriodHandler(
             s.Periods, s.Cache, s.Tenants,
-            new StubAcademicYearDivisionProvider("Terms"),
             NullLogger<CreatePeriodHandler>.Instance);
-        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        var ay = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
         var term = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 1, 31),
-            PeriodType.Term, ParentPeriodId: ay));
+            AcademicYearDivision.Terms, ParentPeriodId: ay));
         var activate = new ActivatePeriodHandler(
             s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache,
             NullLogger<ActivatePeriodHandler>.Instance);
@@ -179,11 +178,10 @@ public class CreateTopicForGradeHandlerTests
         // A second academic year (not active) with a term inside it.
         var create = new CreatePeriodHandler(
             s.Periods, s.Cache, s.Tenants,
-            new StubAcademicYearDivisionProvider("Terms"),
             NullLogger<CreatePeriodHandler>.Instance);
-        var otherAy = await create.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31)));
+        var otherAy = await create.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31), Division: AcademicYearDivision.Terms));
         var otherTerm = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2027, 9, 1), new DateOnly(2028, 1, 31),
-            PeriodType.Term, ParentPeriodId: otherAy));
+            AcademicYearDivision.Terms, ParentPeriodId: otherAy));
         var h = NewHandler(s);
 
         var act = async () => await h.HandleAsync(new CreateTopicForGrade(gradeId, null, "MATH", "Mathematics", 1, PeriodId: otherTerm));

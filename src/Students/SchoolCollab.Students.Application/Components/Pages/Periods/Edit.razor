@@ -1,7 +1,8 @@
 @page "/students/periods/{Id:guid}/edit"
 @using SchoolCollab.Students.Application.Services
-@using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components
+@using Microsoft.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Edit> Logger
@@ -23,7 +24,44 @@
                 else
                 {
                     <section class="page-container">
-                        <PeriodForm PeriodId="Id" CancelRoute="/students/periods" OnSaved="OnSavedAsync" />
+                        @if (!string.IsNullOrEmpty(_loadError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+                        }
+                        @* Sub-periods section is rendered ABOVE the period form
+                           because the children of an academic year are the more
+                           frequently managed content — the parent year metadata
+                           sits below as supporting context.
+
+                           The guard requires BOTH:
+                             • the loaded period is an AcademicYear (sub-periods
+                               are owned by years, not by Term/Semester rows);
+                             • the tenant's academic-year division allows
+                               sub-periods (Terms or Semesters — "None" forbids
+                               Term/Semester creation server-side, so rendering
+                               the section would surface a form that always
+                               fails). The division flag also drives the
+                               SubPeriodsSection's own type-deduction logic;
+                               passing it here keeps the guard and the form in
+                               sync. *@
+                        @if (ShowSubPeriodsSection)
+                        {
+                            <SubPeriodsSection YearId="Id"
+                                               YearName="@_period!.Name"
+                                               OnChanged="OnSubPeriodsChangedAsync" />
+                        }
+
+                        @* Visual separator so the two sections read as
+                           distinct regions. The border-top matches the
+                           dialog-ui skill's content/actions separator pattern. *@
+                        @if (ShowSubPeriodsSection)
+                        {
+                            <hr class="period-edit-separator" aria-hidden="true" />
+                        }
+
+                        <PeriodForm PeriodId="Id"
+                                    CancelRoute="/students/periods"
+                                    OnSaved="OnSavedAsync" />
                     </section>
                 }
             </ChildContent>
@@ -43,13 +81,51 @@
     [Parameter] public Guid Id { get; set; }
 
     private bool _isRealTenant;
+    private PeriodDto? _period;
+
+    /// <summary>Set when the initial period load fails, so the page can render
+    /// a page-level error bar instead of silently showing an empty form.
+    /// Distinct from the embedded PeriodForm's own save-path error surface.</summary>
+    private string? _loadError;
+
+    /// <summary>The loaded AcademicYear's division ("Terms" / "Semesters" /
+    /// "None" / null when unknown). Derived from the period's own
+    /// <c>PeriodDto.Division</c> (Rev. 2 — no tenant flag read). "None" hides
+    /// the sub-period section because no sub-periods are server-allowed;
+    /// "Terms"/"Semesters" show it; null/unknown also show it
+    /// (SubPeriodsSection falls back to an explicit type selector when the
+    /// division is unreadable, so users are never blocked).</summary>
+    private string? _division => _period?.Division;
     private volatile bool _disposed;
+
+    /// <summary>True only when the period is a top-level academic year AND its
+    /// division is not "None". Combining both checks here means the
+    /// SubPeriodsSection is rendered only when its content makes sense —
+    /// sub-periods of an academic year with a sub-period-allowing division.</summary>
+    private bool ShowSubPeriodsSection
+        => _period is { ParentPeriodId: null }
+           && _division is not "None";
 
     protected override async Task OnInitializedAsync()
     {
         var scope = await VisibleTenant.GetScopeAsync();
         _isRealTenant = scope.IsRealTenant;
+
+        try
+        {
+            _period = await Api.GetPeriodByIdAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load period {Id} for edit", Id);
+            _loadError = $"Couldn't load this period. Try again. ({ex.Message})";
+        }
     }
+
+    /// <summary>Hook for the embedded SubPeriodsSection; the landing grid is
+    /// re-fetched on navigation anyway, so nothing extra is needed here.</summary>
+    private Task OnSubPeriodsChangedAsync() => Task.CompletedTask;
 
     private void OnSavedAsync(PeriodDto _) => Nav.NavigateTo("/students/periods");
 

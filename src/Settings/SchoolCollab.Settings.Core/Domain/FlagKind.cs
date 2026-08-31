@@ -1,13 +1,12 @@
 namespace SchoolCollab.Settings.Core.Domain;
 
 /// <summary>
-/// The value type a <see cref="FeatureFlag"/> carries. <see cref="Boolean"/>
-/// is the v1 kind; <see cref="String"/> is added for value-valued tenant
-/// settings (e.g. <c>academic_year_division</c>) — period-hierarchy
-/// period-hierarchy-terms-semesters.md FR-H6.
+/// The value type a <see cref="FeatureFlag"/> carries. Only <see cref="Boolean"/>
+/// remains — the value-valued <c>String</c> kind was removed in Rev. 2 when the
+/// academic-year division moved onto the Students <c>Period</c> entity
+/// (period-hierarchy-terms-semesters.md §8.2).
 /// </summary>
 public enum FlagKind
 {
     Boolean = 0,
-    String = 1,
 }

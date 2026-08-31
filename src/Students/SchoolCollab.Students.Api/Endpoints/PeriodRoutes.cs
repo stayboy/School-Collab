@@ -7,7 +7,6 @@ using SchoolCollab.Students.Core.CQRS.Periods.Commands.UpdatePeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetActiveAcademicYear;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetActiveSubPeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetPeriodById;
-using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetSubPeriodCount;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.ListPeriods;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.ListSubPeriods;
 using SchoolCollab.Students.Core.Domain.Exceptions;
@@ -60,16 +59,6 @@ public static class PeriodRoutes
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListSubPeriods(academicYearId), ct)));
 
-        // H3.5 (FR-H7): non-completed sub-period count, consumed by the Settings
-        // context's division switch-rejection check.
-        group.MapGet("/periods/sub-period-count", async (
-            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<GetSubPeriodCount, SubPeriodCountDto> handler,
-            CancellationToken ct) =>
-        {
-            var result = await handler.HandleAsync(new GetSubPeriodCount(), ct);
-            return Results.Ok(new { count = result.Count });
-        });
-
         group.MapPost("/periods", async (
             [FromBody] CreatePeriod command,
             [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<CreatePeriod, Guid> handler,
@@ -92,6 +81,10 @@ public static class PeriodRoutes
             {
                 return Results.Json(new { ex.Message }, statusCode: 422);
             }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
         });
 
         group.MapPut("/periods/{id:guid}", async (
@@ -103,7 +96,7 @@ public static class PeriodRoutes
             try
             {
                 await handler.HandleAsync(new UpdatePeriod(id, req.Name, req.StartDate,
-                    req.EndDate, req.PeriodType, req.ParentPeriodId), ct);
+                    req.EndDate, req.Division, req.ParentPeriodId), ct);
                 return Results.NoContent();
             }
             catch (PeriodNotFoundException)
@@ -121,6 +114,10 @@ public static class PeriodRoutes
             catch (PeriodOverlapException ex)
             {
                 return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
             }
             catch (ConcurrencyException ex)
             {
@@ -176,5 +173,5 @@ internal record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    PeriodType PeriodType = PeriodType.AcademicYear,
+    AcademicYearDivision Division,
     Guid? ParentPeriodId = null);

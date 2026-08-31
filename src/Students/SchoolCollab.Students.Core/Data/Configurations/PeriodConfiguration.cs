@@ -33,11 +33,13 @@ internal sealed class PeriodConfiguration : TenantEntityTypeConfigurationBase<Pe
             .IsRequired()
             .HasDefaultValue(PeriodStatus.Draft);
 
-        // Period hierarchy (FR-H1/H2). Additive: existing rows default to
-        // AcademicYear with a null parent (back-filled by the migration).
-        builder.Property(x => x.PeriodType)
+        // Period hierarchy (plan-drop-periodtype.md). The single kind field is
+        // AcademicYearDivision (None/Terms/Semesters), non-nullable with a None
+        // default. ParentPeriodId is null for a top-level academic year and set
+        // for a Term/Semester sub-period.
+        builder.Property(x => x.Division)
             .IsRequired()
-            .HasDefaultValue(PeriodType.AcademicYear);
+            .HasDefaultValue(AcademicYearDivision.None);
 
         builder.Property(x => x.ParentPeriodId);
 
@@ -57,23 +59,23 @@ internal sealed class PeriodConfiguration : TenantEntityTypeConfigurationBase<Pe
 
         // NFR-H3 hot paths: active-year/active-sub-period lookups, sub-periods
         // of a year, and overlap checks.
-        builder.HasIndex(x => new { x.TenantId, x.PeriodType, x.Status })
-            .HasDatabaseName("ix_periods_tenant_type_status");
+        builder.HasIndex(x => new { x.TenantId, x.Division, x.Status })
+            .HasDatabaseName("ix_periods_tenant_division_status");
 
         builder.HasIndex(x => new { x.TenantId, x.ParentPeriodId, x.Status })
             .HasDatabaseName("ix_periods_tenant_parent_status");
 
-        // H2.1 (FR-H4): at most one Active AcademicYear per tenant, and at most
-        // one Active sub-period of each type per academic year. PeriodStatus.Active
+        // H2.1 (FR-H4): at most one Active top-level academic year per tenant, and
+        // at most one Active sub-period per parent academic year. PeriodStatus.Active
         // = 1 (the spec §8.1 filter used 0, which is Draft — corrected here).
         builder.HasIndex(x => new { x.TenantId })
             .IsUnique()
-            .HasFilter("period_type = 0 AND status = 1")
+            .HasFilter("parent_period_id IS NULL AND status = 1")
             .HasDatabaseName("ix_periods_one_active_year");
 
-        builder.HasIndex(x => new { x.TenantId, x.ParentPeriodId, x.PeriodType })
+        builder.HasIndex(x => new { x.TenantId, x.ParentPeriodId })
             .IsUnique()
-            .HasFilter("status = 1")
+            .HasFilter("parent_period_id IS NOT NULL AND status = 1")
             .HasDatabaseName("ix_periods_one_active_sub_period");
 
         builder.HasIndex(x => x.StartDate)

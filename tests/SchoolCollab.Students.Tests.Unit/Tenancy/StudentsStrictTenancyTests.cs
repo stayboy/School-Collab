@@ -69,23 +69,23 @@ public class StudentsStrictTenancyTests
     {
         using var s = new StudentsTestScope("strict-period");
         var h = new CreatePeriodHandler(
-            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+            s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
         // Tenant A creates H1 (Jan–Jun 2026).
         AsTenant(s, TenantA);
-        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
+        await h.HandleAsync(new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
         (await s.Db.Periods.CountAsync()).Should().Be(1);
 
         // Tenant B creates a period with the SAME date range — succeeds (the overlap
         // check is scoped per-tenant by the Tenant filter; B has no periods yet).
         AsTenant(s, TenantB);
-        await h.HandleAsync(new CreatePeriod("H1-B", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
+        await h.HandleAsync(new CreatePeriod("H1-B", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
         (await s.Db.Periods.CountAsync()).Should().Be(1, "B sees only its own period");
 
         // Tenant A creates an overlapping period — throws (overlap within A only).
         AsTenant(s, TenantA);
         var act = async () => await h.HandleAsync(
-            new CreatePeriod("H2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31)));
+            new CreatePeriod("H2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31), Division: AcademicYearDivision.Terms));
         await act.Should().ThrowAsync<PeriodOverlapException>(
             "the no-overlap invariant is enforced per-tenant, not globally");
     }
@@ -112,10 +112,10 @@ public class StudentsStrictTenancyTests
         using var s = new StudentsTestScope("strict-fr4-period");
         AsDefault(s);
         var h = new CreatePeriodHandler(
-            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+            s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
         var act = async () => await h.HandleAsync(
-            new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30)));
+            new CreatePeriod("H1", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms));
         await act.Should().ThrowAsync<TenantContextRequiredException>();
         (await s.Db.Periods.IgnoreQueryFilters(["Tenant"]).CountAsync()).Should().Be(0);
     }
@@ -128,22 +128,22 @@ public class StudentsStrictTenancyTests
     {
         using var s = new StudentsTestScope("strict-subperiod");
         var h = new CreatePeriodHandler(
-            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+            s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
         // Tenant A creates a year + term.
         AsTenant(s, TenantA);
-        var ayA = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        var ayA = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
         await h.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            PeriodType.Term, ParentPeriodId: ayA));
+            AcademicYearDivision.Terms, ParentPeriodId: ayA));
 
         // Tenant B sees no periods (filter isolation).
         AsTenant(s, TenantB);
         (await s.Db.Periods.CountAsync()).Should().Be(0, "B sees no A-owned periods");
 
         // Tenant B creates its own year + term with the same names/dates.
-        var ayB = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        var ayB = await h.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
         await h.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            PeriodType.Term, ParentPeriodId: ayB));
+            AcademicYearDivision.Terms, ParentPeriodId: ayB));
         (await s.Db.Periods.CountAsync()).Should().Be(2, "B sees only its own year + term");
 
         // Two years + two terms exist total.
@@ -158,16 +158,16 @@ public class StudentsStrictTenancyTests
     {
         using var s = new StudentsTestScope("strict-subperiod-act");
         var create = new CreatePeriodHandler(
-            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+            s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
         var activate = new ActivatePeriodHandler(
             s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
 
         // Tenant A creates + activates a year + term.
         AsTenant(s, TenantA);
-        var ayA = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31)));
+        var ayA = await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.Terms));
         await activate.HandleAsync(new ActivatePeriod(ayA));
         var termA = await create.HandleAsync(new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-            PeriodType.Term, ParentPeriodId: ayA));
+            AcademicYearDivision.Terms, ParentPeriodId: ayA));
         await activate.HandleAsync(new ActivatePeriod(termA));
 
         // Tenant B cannot activate A's term (not visible through the filter).
@@ -189,11 +189,11 @@ public class StudentsStrictTenancyTests
         using var s = new StudentsTestScope("strict-fr4-subperiod");
         AsDefault(s);
         var h = new CreatePeriodHandler(
-            s.Periods, s.Cache, s.Tenants, new StubAcademicYearDivisionProvider("Terms"), NullLogger<CreatePeriodHandler>.Instance);
+            s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
         var act = async () => await h.HandleAsync(
             new CreatePeriod("T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31),
-                PeriodType.Term, ParentPeriodId: Guid.NewGuid()));
+                AcademicYearDivision.Terms, ParentPeriodId: Guid.NewGuid()));
         await act.Should().ThrowAsync<TenantContextRequiredException>();
         (await s.Db.Periods.IgnoreQueryFilters(["Tenant"]).CountAsync()).Should().Be(0);
     }

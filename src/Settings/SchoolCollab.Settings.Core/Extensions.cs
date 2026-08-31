@@ -54,11 +54,6 @@ public static class Extensions
         // without a direct SettingsDbContext dependency at the DbContext level.
         services.TryAddSingleton<ITenantDirectory, TenantDirectory>();
 
-        // Cross-context sub-period count (period-hierarchy FR-H7): default reports
-        // zero sub-periods (a standalone Settings deployment has none); the Settings
-        // API host overrides with an HTTP client calling the Students API.
-        services.TryAddScoped<ISubPeriodCountProvider, DefaultSubPeriodCountProvider>();
-
         // FeatureFlag aggregate services — default system actor; a host with
         // an authenticated principal (the API) replaces this with a
         // ClaimsPrincipal-backed accessor after AddSettingsCore.

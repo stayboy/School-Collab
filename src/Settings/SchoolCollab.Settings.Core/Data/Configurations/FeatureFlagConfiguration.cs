@@ -44,9 +44,6 @@ internal sealed class FeatureFlagConfiguration : EntityTypeConfigurationBase<Fea
         builder.Property(x => x.IsEnabled)
             .HasDefaultValue(false);
 
-        builder.Property(x => x.Value)
-            .HasMaxLength(100);
-
         builder.Property(x => x.IsArchived)
             .HasDefaultValue(false);
     }

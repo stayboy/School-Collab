@@ -311,9 +311,9 @@
 
     private PeriodDto[] FilterPeriodsForGrade()
     {
-        // Grade-owned: AcademicYear, or a Term/Semester within the active year.
+        // Grade-owned: top-level academic year, or a Term/Semester within the active year.
         return _periods
-            .Where(p => p.PeriodType == "AcademicYear"
+            .Where(p => p.ParentPeriodId is null
                 || (_activeYearId.HasValue && p.ParentPeriodId == _activeYearId.Value))
             .ToArray();
     }
@@ -326,17 +326,25 @@
         if (group is null)
             return [];
 
-        var requiredType = group.Span switch
+        // WholeAcademicYear targets any top-level academic year (any division).
+        if (group.Span == "WholeAcademicYear")
+            return _periods.Where(p => p.ParentPeriodId is null).ToArray();
+
+        var requiredDivision = group.Span switch
         {
-            "Termly" => "Term",
-            "Semester" => "Semester",
-            "WholeAcademicYear" => "AcademicYear",
+            "Termly" => "Terms",
+            "Semester" => "Semesters",
             _ => null // OpenEnded / DateRange carry no period.
         };
-        if (requiredType is null)
+        if (requiredDivision is null)
             return [];
 
-        return _periods.Where(p => p.PeriodType == requiredType).ToArray();
+        // Termly/Semester groups target sub-periods of the active academic year
+        // when the active year is known. Fall back to any matching sub-period if
+        // the active-year lookup fails (degraded state), so the user still sees
+        // options and the server validator is the final gate.
+        return _periods.Where(p => p.Division == requiredDivision
+            && (!_activeYearId.HasValue || p.ParentPeriodId == _activeYearId.Value)).ToArray();
     }
 
     /// <summary>Switches from display mode to edit mode, snapshotting the

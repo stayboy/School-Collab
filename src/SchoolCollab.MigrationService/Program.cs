@@ -96,7 +96,6 @@ try
             await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);
             await SeedEnableEnrollmentValidationAsync(settingsDb, logger);
             await SeedEnableActivityGroupsAsync(settingsDb, logger);
-            await SeedAcademicYearDivisionAsync(settingsDb, logger);
 
             // Seed the default EntityCodeRule blueprints (student/staff/assignment
             // auto-generation rules) — spec §3.7. Idempotent; NULL-tenant shared rows.
@@ -111,7 +110,7 @@ try
 
             // Phase 6.1: turn FEATURE:EnableActivityGroups ON for the pilot tenant only
             // (TenantFeatureFlagOverride). Global default stays OFF. Runs AFTER the flag
-            // seed and AFTER the tenant seed. Idempotent. See documents/specs/plan-phase6-1.md.
+            // seed and AFTER the tenant seed. Idempotent. See documents/rounds/plan-phase6-1.md.
             var pilotOverrideSeeder = scope.ServiceProvider.GetRequiredService<PilotActivityGroupFlagOverrideSeeder>();
             await pilotOverrideSeeder.SeedAsync(tenantIdsByName);
         }
@@ -353,46 +352,4 @@ static async Task SeedEnableActivityGroupsAsync(SettingsDbContext db, Microsoft.
 
     await db.SaveChangesAsync();
     logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
-}
-
-// ── Settings seed: FEATURE:AcademicYearDivision ──
-// Seeds the value-valued tenant setting selecting the academic-calendar
-// subdivision (period-hierarchy-terms-semesters.md FR-H6). Global default =
-// "None" (single AcademicYear periods). Tenants override via the value-valued
-// override surface. Idempotent — re-runs no-op on a pre-existing row.
-static async Task SeedAcademicYearDivisionAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
-{
-    const string actorId = "system:migrator";
-    const string actorName = "Migration Service";
-
-    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.AcademicYearDivision);
-
-    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
-    if (exists)
-    {
-        logger.LogInformation("Seed flag {Key} already present; skipping", key);
-        return;
-    }
-
-    var flag = FeatureFlag.Create(
-        key,
-        "Academic-year division (None | Terms | Semesters)",
-        "Selects the academic-calendar subdivision for activity-group enrollment spans.",
-        isEnabled: true,
-        kind: FlagKind.String,
-        value: nameof(AcademicYearDivision.None));
-    db.FeatureFlags.Add(flag);
-    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
-        tenantId: null,
-        featureFlagId: flag.Id,
-        featureFlagKey: flag.Key,
-        changeKind: FlagChangeKind.Created,
-        previousIsEnabled: null,
-        newIsEnabled: flag.IsEnabled,
-        reason: "Initial seed by migration service",
-        actorId: actorId,
-        actorDisplayName: actorName));
-
-    await db.SaveChangesAsync();
-    logger.LogInformation("Seeded feature flag {Key} (Value={Value})", key, flag.Value);
 }

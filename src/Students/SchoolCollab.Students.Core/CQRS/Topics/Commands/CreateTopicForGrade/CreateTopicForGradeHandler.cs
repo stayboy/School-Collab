@@ -159,14 +159,14 @@ public sealed class CreateTopicForGradeHandler(
         var period = await periodRepository.GetAsync(periodId.Value, cancellationToken)
             ?? throw new TopicAssignmentPeriodException($"Period '{periodId}' does not exist.", periodId);
 
-        if (period.PeriodType == PeriodType.AcademicYear)
-            return; // any academic year is a valid grade-topic period.
+        if (period.ParentPeriodId is null)
+            return; // any top-level academic year is a valid grade-topic period.
 
         // Term/Semester must belong to the tenant's active academic year (FR-57, EC-24).
         var activeYear = await periodRepository.GetActiveAcademicYearAsync(
             cancellationToken: cancellationToken);
         if (activeYear is null || period.ParentPeriodId != activeYear.Id)
             throw new TopicAssignmentPeriodException(
-                $"Grade topic period '{periodId}' is a {period.PeriodType} outside the tenant's active academic year.", periodId);
+                $"Grade topic period '{periodId}' is a {period.Division} sub-period outside the tenant's active academic year.", periodId);
     }
 }

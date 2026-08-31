@@ -78,7 +78,9 @@ public class JoinGroupsDialogTests : BunitContext
         $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"description\":null,\"category\":null,\"capacity\":null,\"isActive\":true,\"span\":\"{span}\",\"enrollmentStartDate\":null,\"enrollmentEndDate\":null,\"autoRenewDefault\":true,\"eligibleGradeIds\":[],\"activeMemberCount\":0,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
     private static string PeriodJson(Guid id, string name, string periodType) =>
-        $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"periodType\":\"{periodType}\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
+        periodType == "Term"
+            ? $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"division\":\"Terms\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}"
+            : $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"division\":\"None\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
     /// <summary>
     /// A7 (AC-36): with no active period (both active-period GETs 404), the

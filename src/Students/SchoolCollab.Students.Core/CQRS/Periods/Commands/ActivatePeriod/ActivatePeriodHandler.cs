@@ -25,19 +25,19 @@ public sealed class ActivatePeriodHandler(
             ?? throw new PeriodNotFoundException(command.Id);
 
         // ── Hierarchy-aware "at most one active" invariant (FR-H4, FR-H5):
-        //    - Activating an AcademicYear closes the prior active AcademicYear and
+        //    - Activating a top-level academic year closes the prior active year and
         //      cascade-completes its still-Active sub-periods.
-        //    - Activating a Term/Semester requires its parent AcademicYear to be
+        //    - Activating a Term/Semester requires its parent academic year to be
         //      Active (else PeriodNotOpenException) and closes the prior active
-        //      sibling sub-period of the same type within that year.
-        if (period.PeriodType == PeriodType.AcademicYear)
+        //      sibling sub-period within that year.
+        if (period.ParentPeriodId is null)
         {
             var priorYear = await repository.GetActiveAcademicYearAsync(
                 excludeId: command.Id, cancellationToken);
             if (priorYear is not null)
             {
                 logger.LogInformation(
-                    "Closing prior active AcademicYear {PriorId} ('{PriorName}') before activating {Id}",
+                    "Closing prior active academic year {PriorId} ('{PriorName}') before activating {Id}",
                     priorYear.Id, priorYear.Name, command.Id);
                 foreach (var sp in await repository.GetActiveSubPeriodsAsync(priorYear.Id, cancellationToken: cancellationToken))
                     sp.Complete();
@@ -46,23 +46,23 @@ public sealed class ActivatePeriodHandler(
         }
         else
         {
-            // Sub-period: its parent AcademicYear must be Active (FR-H5).
+            // Sub-period: its parent academic year must be Active (FR-H5).
             var parent = await repository.GetAsync(period.ParentPeriodId!.Value, cancellationToken)
                 ?? throw new PeriodNotFoundException(period.ParentPeriodId!.Value);
             if (parent.Status != PeriodStatus.Active)
             {
                 throw new PeriodNotOpenException(
-                    $"Cannot activate {period.PeriodType} '{period.Name}': its AcademicYear " +
+                    $"Cannot activate {period.Division} '{period.Name}': its academic year " +
                     $"'{parent.Name}' is not active.");
             }
 
             var priorSiblings = await repository.GetActiveSubPeriodsAsync(
-                parent.Id, period.PeriodType, excludeId: command.Id, cancellationToken);
+                parent.Id, excludeId: command.Id, cancellationToken: cancellationToken);
             foreach (var sibling in priorSiblings)
             {
                 logger.LogInformation(
-                    "Closing prior active {Type} {PriorId} before activating {Id}",
-                    sibling.PeriodType, sibling.Id, command.Id);
+                    "Closing prior active {Division} {PriorId} before activating {Id}",
+                    sibling.Division, sibling.Id, command.Id);
                 sibling.Complete();
             }
         }
@@ -77,6 +77,39 @@ public sealed class ActivatePeriodHandler(
                 period.StartDate,
                 period.EndDate,
                 DateTimeOffset.UtcNow), cancellationToken);
+        }
+
+        // ── FR-H4a: auto-activate the newly activated year's earliest sub-period
+        //    so its current window is immediately available. Convenience, not an
+        //    invariant — zero Active sub-periods stays valid (gap state, FR-H4); a
+        //    None-division year activates none (NFR-H4). The sub-period is tracked
+        //    (loaded via the repository) and persisted by the single SaveChanges
+        //    below; its own PeriodActivated event is enqueued before the save.
+        if (period.ParentPeriodId is null && period.Division != AcademicYearDivision.None)
+        {
+            var candidates = await repository.GetSubPeriodsAsync(period.Id, cancellationToken);
+            var toActivate = candidates
+                .Where(sp => sp.Status != PeriodStatus.Completed && sp.Status != PeriodStatus.Archived)
+                .OrderBy(sp => sp.StartDate)
+                .ThenBy(sp => sp.Id)
+                .FirstOrDefault();
+            if (toActivate is not null)
+            {
+                logger.LogInformation(
+                    "Auto-activating sub-period {SubId} ('{SubName}') for newly activated academic year {Id}",
+                    toActivate.Id, toActivate.Name, period.Id);
+                toActivate.Activate();
+                foreach (var evt in toActivate.DomainEvents.OfType<PeriodActivatedEvent>())
+                {
+                    await publisher.EnqueueAsync(new PeriodActivated(
+                        toActivate.Id,
+                        toActivate.Name,
+                        toActivate.StartDate,
+                        toActivate.EndDate,
+                        DateTimeOffset.UtcNow), cancellationToken);
+                }
+                toActivate.ClearDomainEvents();
+            }
         }
 
         try

@@ -33,14 +33,15 @@ public sealed class GetActiveAcademicYearHandler(
                     .IgnoreQueryFilters(["Tenant"])
                     .Where(p => p.TenantId == tenantId
                         && p.Status == PeriodStatus.Active
-                        && p.PeriodType == PeriodType.AcademicYear)
+                        && p.ParentPeriodId == null)
                     .AsNoTracking()
                     .SingleOrDefaultAsync(ct);
 
                 return period is null ? null : new PeriodDto(
                     period.Id, period.Name, period.StartDate, period.EndDate,
-                    period.Status.ToString(), period.PeriodType.ToString(),
+                    period.Status.ToString(),
                     period.ParentPeriodId, period.NextPeriodId,
+                    period.Division.ToString(),
                     period.CreatedAt, period.UpdatedAt);
             },
             CacheOptions,

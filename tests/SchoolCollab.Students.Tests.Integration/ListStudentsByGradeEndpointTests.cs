@@ -116,7 +116,7 @@ public class ListStudentsByGradeEndpointTests
         => await SeedAsync(tenantId, async db =>
         {
             var today = DateOnly.FromDateTime(DateTime.UtcNow);
-            var period = Period.Create(name, today.AddDays(-1), today.AddDays(1));
+            var period = Period.Create(name, today.AddDays(-1), today.AddDays(1), AcademicYearDivision.None);
             db.Periods.Add(period);
             await db.SaveChangesAsync();
             return period.Id;

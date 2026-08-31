@@ -19,6 +19,13 @@ public sealed class StudentTopicAssignment : ITenantEntity, IEntity, IAuditableE
     public Guid StudentId { get; private set; }
     public Guid TopicId { get; private set; }
     public Guid PeriodId { get; private set; }
+
+    // Creation stamp (period-hierarchy-terms-semesters.md FR-H13, Rev. 3): the
+    // active sub-period (Term/Semester) of the active AcademicYear at creation,
+    // or null in the gap state / a None-division year. Server-resolved by the
+    // AssignStudentTopic handler — never a caller's free choice (§2.1).
+    public Guid? SubPeriodId { get; private set; }
+
     public bool IsOverride { get; private set; }
     public SubjectAssignmentSource SourceType { get; private set; }
     public uint RowVersion { get; private set; }
@@ -32,7 +39,8 @@ public sealed class StudentTopicAssignment : ITenantEntity, IEntity, IAuditableE
         Guid topicId,
         Guid periodId,
         bool isOverride,
-        SubjectAssignmentSource sourceType)
+        SubjectAssignmentSource sourceType,
+        Guid? subPeriodId = null)
     {
         var now = DateTimeOffset.UtcNow;
         var assignment = new StudentTopicAssignment
@@ -41,6 +49,7 @@ public sealed class StudentTopicAssignment : ITenantEntity, IEntity, IAuditableE
             StudentId = studentId,
             TopicId = topicId,
             PeriodId = periodId,
+            SubPeriodId = subPeriodId,
             IsOverride = isOverride,
             SourceType = sourceType,
             CreatedAt = now,

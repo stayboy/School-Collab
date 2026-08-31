@@ -32,7 +32,7 @@ public static class ConfigTenantFlagOverrideRoutes
             try
             {
                 var result = await handler.HandleAsync(
-                    new UpsertTenantFlagOverride(key, tenantId, req.IsEnabled, req.Value, req.Reason, req.EffectiveFrom, req.EffectiveTo), ct);
+                    new UpsertTenantFlagOverride(key, tenantId, req.IsEnabled, req.Reason, req.EffectiveFrom, req.EffectiveTo), ct);
                 return Results.Ok(result);
             }
             catch (KeyNotFoundException) { return Results.NotFound(); }
@@ -54,6 +54,6 @@ public static class ConfigTenantFlagOverrideRoutes
         return group;
     }
 
-    public sealed record UpsertOverrideRequest(bool? IsEnabled, string? Value, string Reason, DateTimeOffset? EffectiveFrom, DateTimeOffset? EffectiveTo);
+    public sealed record UpsertOverrideRequest(bool? IsEnabled, string Reason, DateTimeOffset? EffectiveFrom, DateTimeOffset? EffectiveTo);
     public sealed record DeleteOverrideRequest(string Reason);
 }

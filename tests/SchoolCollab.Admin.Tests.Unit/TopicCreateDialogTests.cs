@@ -198,10 +198,10 @@ public class TopicCreateDialogTests : BunitContext
     private static readonly Guid SemesterId = Guid.Parse("55555555-5555-5555-5555-555555555555");
 
     private static string PeriodsJson() =>
-        $"[{{\"id\":\"{YearId}\",\"name\":\"2026\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"periodType\":\"AcademicYear\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}," +
-        $"{{\"id\":\"{Term1Id}\",\"name\":\"Term 1\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-06-30\",\"status\":\"Active\",\"periodType\":\"Term\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}," +
-        $"{{\"id\":\"{Term2Id}\",\"name\":\"Term 2\",\"startDate\":\"2026-07-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"periodType\":\"Term\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}," +
-        $"{{\"id\":\"{SemesterId}\",\"name\":\"Semester A\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-06-30\",\"status\":\"Active\",\"periodType\":\"Semester\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}]";
+        $"[{{\"id\":\"{YearId}\",\"name\":\"2026\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"division\":\"None\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}," +
+        $"{{\"id\":\"{Term1Id}\",\"name\":\"Term 1\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-06-30\",\"status\":\"Active\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"division\":\"Terms\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}," +
+        $"{{\"id\":\"{Term2Id}\",\"name\":\"Term 2\",\"startDate\":\"2026-07-01\",\"endDate\":\"2026-12-31\",\"status\":\"Active\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"division\":\"Terms\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}," +
+        $"{{\"id\":\"{SemesterId}\",\"name\":\"Semester A\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-06-30\",\"status\":\"Active\",\"parentPeriodId\":\"{YearId}\",\"nextPeriodId\":null,\"division\":\"Semesters\",\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}]";
 
     private static TopicCreateDialog.TopicCreateModel GroupModel(string ownerType) =>
         new() { GradeLevelId = Guid.NewGuid(), OwnerType = ownerType };

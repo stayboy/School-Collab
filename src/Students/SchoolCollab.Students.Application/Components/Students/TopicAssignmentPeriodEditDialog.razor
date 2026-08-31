@@ -49,9 +49,9 @@
         var activeYear = await Api.GetActiveAcademicYearAsync();
         var activeYearId = activeYear?.Id;
 
-        // Grade-owned: AcademicYear, or a Term/Semester within the active year.
+        // Grade-owned: top-level academic year, or a Term/Semester within the active year.
         _periods = all
-            .Where(p => p.PeriodType == "AcademicYear"
+            .Where(p => p.ParentPeriodId is null
                 || (activeYearId.HasValue && p.ParentPeriodId == activeYearId.Value))
             .OrderBy(p => p.Name)
             .ToArray();

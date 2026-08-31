@@ -48,12 +48,4 @@ public static class FeatureFlagKeys
     /// <c>IFeatureFlagService.IsEnabledAsync</c> / <c>&lt;FeatureFlagGate&gt;</c>.
     /// </summary>
     public const string EnableActivityGroups = "FEATURE:EnableActivityGroups";
-
-    /// <summary>
-    /// Value-valued (string) tenant setting selecting the academic-calendar
-    /// subdivision (period-hierarchy-terms-semesters.md FR-H6). Value is one of
-    /// <c>None</c> | <c>Terms</c> | <c>Semesters</c>; tenants override the global
-    /// <c>None</c> default via a <see cref="TenantFeatureFlagOverride"/> carrying the value.
-    /// </summary>
-    public const string AcademicYearDivision = "FEATURE:AcademicYearDivision";
 }

@@ -1,0 +1,282 @@
+@* Embedded sub-period add + edit section for the Period edit page, mimicking
+   the GuardianSection pattern inside the student form:
+
+     • An ALWAYS-VISIBLE inline add row (Name + Start + End) that adds a
+       sub-period directly to the list — no nested dialog, no separate form
+       component instance, no "Period type" selector. The type is deduced:
+       the parent is always the academic year, and the tenant's academic-year
+       division setting decides Term vs Semester. Only when the division is
+       unknown (flag not loaded / error) does a compact Term/Semester select
+       appear so the form is never blocked.
+     • Per-row Edit swaps the same fields into edit mode (prefilled) with
+       Save / Cancel; Save issues the update and returns to add mode.
+
+   Activation / completion of sub-periods deliberately lives in the
+   SubPeriodsListDialog (kept as-is); this section only lists, adds, edits. *@
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Students.Core.Domain
+@using SchoolCollab.Students.Core.Contracts
+@using Microsoft.AspNetCore.Components
+@using Microsoft.AspNetCore.Components.Web
+@using Microsoft.Extensions.Logging
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject StudentsApiClient Api
+@inject ILogger<SubPeriodsSection> Logger
+@implements IDisposable
+
+<div class="subperiods-section">
+    <div class="subperiods-head">
+        <div>
+            <h3>Sub-periods</h3>
+            <p class="form-hint">@HeadHint</p>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+
+    @if (_loading)
+    {
+        <div class="spinner-container"><FluentProgressRing /></div>
+    }
+    else if (_subs.Length == 0 && _editingId is null)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">
+            No sub-periods yet. Add terms or semesters below.
+        </FluentMessageBar>
+    }
+    else
+    {
+        <div class="subperiods-list" role="table" aria-label="Sub-periods">
+            <div class="subperiods-row subperiods-row--head" role="row">
+                <span role="columnheader">Name</span>
+                <span role="columnheader">Type</span>
+                <span role="columnheader">Start</span>
+                <span role="columnheader">End</span>
+                <span role="columnheader">Status</span>
+                <span role="columnheader"></span>
+            </div>
+            @foreach (var p in _subs)
+            {
+                <div class="subperiods-row @(p.Id == _editingId ? "subperiods-row--editing" : null)" role="row">
+                    <span role="cell" class="subperiods-name">@p.Name</span>
+                    <span role="cell"><FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(p)</FluentBadge></span>
+                    <span role="cell">@p.StartDate.ToString("d")</span>
+                    <span role="cell">@p.EndDate.ToString("d")</span>
+                    <span role="cell"><FluentBadge Appearance="@GetStatusAppearance(p.Status)">@p.Status</FluentBadge></span>
+                    <span role="cell" class="subperiods-actions">
+                        @if (p.Id == _editingId)
+                        {
+                            <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Dismiss"
+                                          Title="Cancel editing" OnClick="CancelEdit">Cancel</FluentButton>
+                        }
+                        else
+                        {
+                            <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Edit"
+                                          Title="Edit sub-period" OnClick="@(() => StartEdit(p))">Edit</FluentButton>
+                        }
+                    </span>
+                </div>
+            }
+        </div>
+    }
+
+    @* Always-visible inline add row (or the edit row when editing). No
+       "Period type" selector — the type is deduced from the tenant division,
+       matching the parent year's framework. *@
+    <div class="subperiods-inline-add">
+        <FluentTextField @bind-Value="_name"
+                         Placeholder="@(_editingId is null ? "New sub-period name (e.g. Term 1)" : "Sub-period name")"
+                         class="subperiods-field-name" />
+        @if (_division is null)
+        {
+            <FluentSelect TOption="string" @bind-Value="_typeText" class="subperiods-field-type">
+                <FluentOption Value="Term">Term</FluentOption>
+                <FluentOption Value="Semester">Semester</FluentOption>
+            </FluentSelect>
+        }
+        <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
+        <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
+        <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+                      Title="@(_editingId is null ? "Add sub-period" : "Save sub-period")">
+            @(_saving ? "Saving…" : _editingId is null ? "Add" : "Save")
+        </FluentButton>
+    </div>
+@code {
+    /// <summary>The academic year that owns these sub-periods.</summary>
+    [Parameter, EditorRequired] public Guid YearId { get; set; }
+
+    /// <summary>Year display name used in the header hint.</summary>
+    [Parameter] public string? YearName { get; set; }
+
+    /// <summary>Optional callback fired after any sub-period change so the
+    /// host page can stay in sync.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private PeriodDto[] _subs = [];
+    private bool _loading;
+    private bool _saving;
+    private string? _error;
+
+    /// <summary>Tenant academic-year division ("Terms" / "Semesters" / null
+    /// when unknown). When known, the sub-period type is deduced from it and
+    /// no type selector is rendered.</summary>
+    private string? _division;
+
+    private Guid? _editingId;
+    private string _name = string.Empty;
+    private DateTime? _start;
+    private DateTime? _end;
+    private string _typeText = "Term";
+    private volatile bool _disposed;
+
+    private string HeadHint =>
+        $"Terms or semesters within {(string.IsNullOrWhiteSpace(YearName) ? "this academic year" : YearName)}. " +
+        "Each must fit inside the year's date range. Activate them from the Periods list.";
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Rev. 2: the division is a property of the parent AcademicYear period
+        // (no tenant flag read). Load the year to deduce the sub-period type.
+        try
+        {
+            var year = await Api.GetPeriodByIdAsync(YearId);
+            if (_disposed) return;
+            _division = year?.Division;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to load academic-year division; falling back to explicit type selection");
+        }
+
+        await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        if (_disposed) return;
+        _loading = true;
+        try
+        {
+            _subs = await Api.ListSubPeriodsAsync(YearId) ?? [];
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load sub-periods for {YearId}", YearId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    private void StartEdit(PeriodDto p)
+    {
+        _editingId = p.Id;
+        _name = p.Name;
+        _start = p.StartDate.ToDateTime(TimeOnly.MinValue);
+        _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
+        _typeText = p.Division == "Semesters" ? "Semester" : "Term";
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        ResetFields();
+    }
+
+    private void ResetFields()
+    {
+        _name = string.Empty;
+        _start = null;
+        _end = null;
+        _typeText = "Term";
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            _error = "Enter a sub-period name.";
+            return;
+        }
+        if (_start is null || _end is null)
+        {
+            _error = "Enter a start and end date.";
+            return;
+        }
+        if (_end.Value.Date < _start.Value.Date)
+        {
+            _error = "End date must be on or after the start date.";
+            return;
+        }
+
+        var division = DeduceDivision();
+        var startDate = DateOnly.FromDateTime(_start.Value.Date);
+        var endDate = DateOnly.FromDateTime(_end.Value.Date);
+
+        _saving = true;
+        try
+        {
+            if (_editingId is { } editId)
+            {
+                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, division, YearId));
+            }
+            else
+            {
+                await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, YearId));
+            }
+
+            if (_disposed) return;
+            ResetFields();
+            _editingId = null;
+            await ReloadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save sub-period for year {YearId}", YearId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    /// <summary>Deduces the sub-period division: the parent is the academic year,
+    /// so the tenant's division setting decides Terms vs Semesters. Only when
+    /// the division is unknown does the inline selector's value apply.</summary>
+    private AcademicYearDivision DeduceDivision() => _division switch
+    {
+        "Terms" => AcademicYearDivision.Terms,
+        "Semesters" => AcademicYearDivision.Semesters,
+        _ => _typeText == "Semester" ? AcademicYearDivision.Semesters : AcademicYearDivision.Terms
+    };
+
+    private static string GetKindLabel(PeriodDto period)
+        => period.Division == "Semesters" ? "Semester" : "Term";
+
+    private static Appearance GetStatusAppearance(string status) => status switch
+    {
+        "Draft"     => Appearance.Neutral,
+        "Active"    => Appearance.Accent,
+        "Completed" => Appearance.Lightweight,
+        "Archived"  => Appearance.Neutral,
+        _           => Appearance.Neutral
+    };
+
+    public void Dispose() => _disposed = true;
+}
+</div>
+
