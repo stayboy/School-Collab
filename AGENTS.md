@@ -1,0 +1,349 @@
+# AGENTS.md — single point of entry for AI coding agents
+
+This repository follows the [AGENTS.md open standard](https://agents.md): all
+repository-wide agent instructions live here, **once**. Tool-specific entry
+files are compatibility shims, not copies:
+
+- `CLINE.md` — Cline's memory-graph (MCP) conventions plus a pointer here.
+- `.github/copilot-instructions.md` — a pointer here, kept only because some
+  Copilot surfaces (VS Code Copilot custom instructions, GitHub Copilot
+  coding agent) auto-load that path by name. It deliberately contains no
+  rules of its own.
+
+pi, Cline, GitHub Copilot coding agent, VS Code Copilot, Cursor, OpenAI
+Codex, Gemini CLI, Amp, Windsurf, and other agents auto-discover this file.
+If your agent does not, read it manually before starting work.
+
+---
+
+## Communication style
+
+Be concise. Do not over-explain, apologize repeatedly, or include large
+unchanged code blocks in responses. For every change:
+
+1. State what you changed and why in one or two sentences.
+2. List the affected file paths.
+3. Show only the relevant diff snippet or minimal example, not the whole file.
+4. Report build/test results in a compact table.
+
+When a user reports a symptom (e.g., "an error pops on config-flags landing
+page"), focus on diagnosing and fixing it. Avoid verbose step-by-step
+narration of every tool call. If the fix is straightforward, present the
+result, not the journey.
+
+Do not emit empty shell commands or placeholder comments as output.
+
+---
+
+## Skill discovery (read first)
+
+When you need a skill — for code review, PR description, testing, deployment,
+documentation, design review, etc. — **always start at one of these two
+canonical catalogs** before any other source:
+
+1. **[https://awesome-copilot.github.com/skills/](https://awesome-copilot.github.com/skills/)**
+   — community-curated Copilot skills (Skill `name`/description metadata, with a
+   machine-readable `llms.txt` at
+   [https://awesome-copilot.github.com/llms.txt](https://awesome-copilot.github.com/llms.txt)).
+   Skills live at
+   `https://raw.githubusercontent.com/github/awesome-copilot/main/skills/<skill-name>/SKILL.md`.
+2. **[https://github.com/microsoft/skills](https://github.com/microsoft/skills)**
+   — Microsoft-authored skills, MCP servers, and tools. Use this catalog when
+   looking for first-party Microsoft patterns (Aspire, Azure SDKs, .NET,
+   TypeScript/JS, etc.) or for the official Microsoft MCP / tool
+   implementations that ship alongside a service.
+
+Workflow:
+
+- Pick the catalog that best matches the source: **awesome-copilot** for
+  community/third-party patterns, **microsoft/skills** for first-party
+  Microsoft/Microsoft-owned tooling.
+- Search the chosen catalog (use `llms.txt` for awesome-copilot when doing bulk
+  discovery). For microsoft/skills, browse the repo's `skills/`, `mcp/`, and
+  `tools/` directories.
+- If a suitable skill exists, use it (or install it via the documented install
+  command) before falling back to ad-hoc authoring.
+- If the catalog has nothing relevant, say so explicitly, then propose a
+  custom approach. Do not silently swap in a different source (e.g.
+  `awesome-skills`, `kevintsengtw/*`, etc.) without an explicit user
+  request.
+
+---
+
+## Specialty instructions
+
+Read the relevant specialty rule file before changing code in that area. Keep
+`AGENTS.md` for repository-wide rules and link to topic-specific guidance
+instead of duplicating it.
+
+| Area | File |
+|---|---|
+| Blazor components, Fluent UI, and styling | `.github/copilot/rules/blazor-components.md` |
+| CSS isolation and styling | `.github/copilot/rules/blazor-components.md#blazor-css-isolation-and-styling` |
+| Entity Framework Core migrations | `.github/copilot/rules/ef-migrations.md` |
+| Logging and Aspire observability | `.github/copilot/rules/logging-aspire.md` |
+| Testing (MTP Standard) | `.github/copilot/rules/testing.md` |
+| Configuration documentation | `.github/copilot/rules/configuration-documentation.md` |
+| AI services (`SchoolCollab.AI`, chat clients, tool calls) | `.github/copilot/rules/ai-services.md` |
+| Fluent UI icons | `.github/skills/fluentui-icons/SKILL.md` |
+| Fluent UI component props | `.github/skills/fluentui-component-props/SKILL.md` |
+| Bounded context creation | `.github/skills/bounded-context/SKILL.md` |
+| Coded values domain | `.github/skills/coded-values/SKILL.md` |
+| Azure AI OpenAI .NET | `.github/skills/azure-ai-openai-dotnet/SKILL.md` |
+| **.NET/C# best practices (all C# changes)** | `.github/copilot/rules/dotnet-best-practices.md` + `.github/skills/dotnet-best-practices/SKILL.md` |
+
+**Default rule for C#:** For **any** change that touches a `.cs` or `.razor` code-behind, read
+`.github/copilot/rules/dotnet-best-practices.md` (and its backing skill
+`.github/skills/dotnet-best-practices/SKILL.md`) **before** writing code. This is not
+optional-on-demand — it applies to every C# edit in this repo, and the rule's "Never" list is
+enforced in CI by `SchoolCollab.ArchitectureTests.Unit`.
+
+**Feature/fix implementation — ask before starting:** Before beginning a feature or fix
+implementation, **ask the user whether to go solo or use the 4-agent
+`orchestrator-worker-reviewer` skill** (orchestrator plans + owns docs, worker implements,
+reviewer verifies, orchestrator accepts, UI tester bug-hunts delivered UI). Do not default
+to one approach; the user wants to choose explicitly. All round docs that workflow produces
+go in `documents/rounds/` — see "Repository docs layout" below.
+
+## Tenancy & Operational Standards
+
+### Tenancy Patterns
+The repository follows two distinct tenancy patterns based on the data type:
+
+1. **Override Pattern (Reference Data)**: 
+   Used for system-wide blueprints (e.g., Coded Values). Implements a `Global Value` $\rightarrow$ `Tenant Override` $\rightarrow$ `Resolved Value` flow.
+   - **Pattern Guide**: See `.skills/tenancy-override-pattern/SKILL.md`.
+   - **Key Component**: `CodedValueResolver` logic.
+
+2. **Direct Tenancy (Operational Data)**: 
+   Used for tenant-created entities (e.g., Students, Assignments). Entities inherit from `BaseTenantEntity` and are filtered directly by `TenantId`.
+   - **Restriction**: Do not use the override pattern for operational data. Use a Permissions/ACL system for specialized access.
+
+### Implementation Rule
+Any new auditable entity or feature requiring tenancy **must** follow the patterns defined in `SchoolCollab.Core/Tenancy` and the corresponding skill documentation. Always verify implementations with:
+- `dotnet build` (zero errors).
+- Unit tests covering the merge/resolution logic.
+- Tenant-isolated cache keys.
+
+## Documentation & Knowledge Management
+
+All research, architectural decisions, and implementation steps must be documented in `documents/solution/`.
+
+### The "Finding $\rightarrow$ Implementation" Standard
+Whenever a new feature or architectural change is requested:
+1. **Research Phase**: Document "Findings" (the research, alternatives analyzed, and the chosen "why") in a `.md` file.
+2. **Implementation Phase**: Document "Implementation Steps" (the *how*, the code changes, and the verification results) in the same or a related file.
+3. **Outcome**: The `documents/solution/` folder must act as the project's technical memory, allowing any developer to trace *why* a decision was made before seeing *how* it was executed.
+
+### Repository docs layout
+
+| Folder | Purpose |
+|---|---|
+| `documents/solution/` | Durable research, decisions, and implementation steps (technical memory — standard above). |
+| `documents/specs/` | Durable feature specs that remain the source of truth. |
+| `documents/rounds/` | **Ephemeral per-round agent docs** (`plan-*`, `review-*`, `acceptance-*`, `ui-tester-*.md`) from the four-agent `orchestrator-worker-reviewer` skill. Never write round docs into `documents/specs/`. The whole folder is safe to bulk-trash once rounds close — rules: `documents/rounds/README.md`. |
+
+---
+
+## Build verification (during development)
+
+This rule applies **inside a coding session**, every time production or test code
+is changed — distinct from the PR-time `dotnet build` check in the pre-flight
+section below.
+
+- **Run `dotnet build` after every code change** (every `edit` / `write` that
+  touches a `.cs`, `.razor`, `.csproj`, `Directory.Packages.props`,
+  `Directory.Build.props`, or `appsettings*.json`). Build before reporting the
+  change as done.
+- **Fix compiler errors before continuing.** If the build fails, treat the
+  failures as the next task — do not move on to feature work, do not mark the
+  step complete, and do not commit.
+- **Targets:** run `dotnet build SchoolCollab.sln` from the repo root. Tests
+  aren't required for the in-session check unless the change touches test
+  files directly.
+- **Locks (MSB3021 / MSB3027).** `dotnet build` can fail because a previous
+  `dotnet run` (AppHost, API, or worker) is still holding output binaries.
+  When this happens: stop the running service (close the terminal that
+  launched it, or `Get-Process dotnet` / `pkill dotnet` from a new shell),
+  then rerun the build. Don't retry the build in a loop — surface the lock to
+  the user and let them choose how to stop the offending process.
+
+## Central Package Management (CPM)
+
+All NuGet package versions are managed centrally in **`Directory.Packages.props`** at the
+repository root. This prevents version drift across the 10-project solution.
+
+### How it works
+
+`Directory.Build.props` sets `<ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>`.
+All `<PackageReference>` elements in `.csproj` files **must not** include a `Version`
+attribute — the version is resolved from `Directory.Packages.props`.
+
+### Adding a new package
+
+1. Add a `<PackageVersion>` entry in `Directory.Packages.props` under the appropriate
+   label group:
+   ```xml
+   <PackageVersion Include="My.New.Package" Version="1.2.3" />
+   ```
+
+2. Add `<PackageReference Include="My.New.Package" />` (no `Version`) in the target
+   `.csproj`.
+
+3. **Never** add `Version="..."` directly to a `<PackageReference>` — CPM will raise
+   NU1008 / NU1009 errors at build time if you do.
+
+### Updating a package version
+
+Change the version only in `Directory.Packages.props`. The update applies to every
+project that references it automatically.
+
+### Exceptions
+
+- `PrivateAssets="all"` (and other metadata attributes like `IncludeAssets`, `ExcludeAssets`)
+  **stay** in the `<PackageReference>` element inside the `.csproj` — they are not version
+  metadata and are not moved to `Directory.Packages.props`.
+  ```xml
+  <!-- csproj -->
+  <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+  ```
+
+- `<Sdk Name="..." Version="..." />` at the top of a `.csproj` (e.g. `Aspire.AppHost.Sdk`)
+  is an **MSBuild SDK reference**, not a NuGet package — CPM does not manage it, leave the
+  `Version` attribute in place.
+
+## Target framework
+
+All projects target **net10.0**. Do not downgrade to net9.0 or earlier.
+
+## Architecture reminders
+
+- No direct project references between bounded contexts — use MassTransit contracts.
+- No MediatR — CQRS is implemented via `ICommandHandler<T>` / `IQueryHandler<T,R>` with
+  Scrutor assembly scanning.
+- Domain entities use PostgreSQL `xmin` (row version) for optimistic concurrency.
+- **API Endpoint Grouping**: All API endpoints must be grouped using an extension method (e.g., `MapStudentEndpoints(this WebApplication app, IFeatureFlagService featureFlags)`). Do not define routes inline in `Program.cs`. Authorization requirements on these groups should be conditional based on `IFeatureFlagService` (e.g., `FEATURE:DisableOIDCAuth`).
+- **Feature Flags**: Feature flags are centralized in the AppHost's `Parameters:` block (see `src/AppHost/SchoolCollab.AppHost/appsettings.json`) and fanned out to consumers via `WithEnvironment("FeatureFlags__FEATURE__...", param)`. Each flag should also be mapped onto the consumer sites in `documents/configuration.md` §2. Do not scatter flag values across individual service `appsettings.json` files or rely on the `SchoolCollab.Config` HTTP overlay (it was removed — see `documents/solution/centralized-feature-flags-implementation.superseded.md`).
+
+---
+
+## Pre-flight review & PR creation
+
+Before creating **any** pull request, the following pre-flight checks must pass:
+
+### 1. Run pre-flight code review
+
+Execute a code-review pass on the branch changes **before** pushing or creating a PR.
+This catches issues early and avoids back-and-forth on the PR.
+
+```
+# Use the code-review skill or agent to review staged/unstaged changes
+# Focus on: bugs, security vulnerabilities, logic errors, missing tests
+```
+
+### 2. Verify tests exist for the feature
+
+- Every new feature, service, or behavioural class added on the branch **must** have
+  corresponding unit tests (see `.github/copilot/rules/testing.md`).
+- If the PR introduces new behavioural code without tests, **do not create the PR** —
+  write the tests first.
+
+### 3. Run tests and confirm they pass
+
+```bash
+dotnet test
+```
+
+- `dotnet test` must complete with **0 failures** before the PR is created.
+- If any test fails, fix the issue in the same branch before proceeding.
+
+### 4. Build must succeed
+
+```bash
+dotnet build
+```
+
+- Zero errors. Warnings are acceptable but should be reviewed.
+
+### Checklist (before `gh pr create`)
+
+| Check | Command | Must be |
+|-------|---------|---------|
+| Code review | Review branch changes for bugs/security/logic | No issues found |
+| Tests exist | New behavioural code has corresponding test files | Yes |
+| Tests pass | `dotnet test` | 0 failures |
+| Build succeeds | `dotnet build` | 0 errors |
+
+**Do not skip these checks.** If any check fails, fix the issue on the branch before
+creating the PR.
+
+---
+
+## Main branch merge policy
+
+`main` is a protected delivery branch in process. Do not push or merge directly to
+`main` from ad-hoc work.
+
+Required workflow (every commit/push/PR/merge action is gated — "create a
+branch" or "fix X" authorizes only the local change, not committing,
+pushing, opening a PR, or merging; each of those needs its own explicit
+user instruction):
+
+1. Create a feature or fix branch from `main`.
+2. Add/update tests for behavioural changes.
+3. Commit locally on the branch only after the user explicitly says
+   "commit" — do not commit automatically after steps 1–2.
+4. Push only after the user explicitly instructs to push:
+   ```bash
+   SCHOOLCOLLAB_ALLOW_PUSH=1 git push -u origin <branch-name>
+   ```
+5. Open a PR targeting `main` only after the user asks to open/create a PR.
+6. Wait for the GitHub Actions `Build & Test` check to pass.
+7. Merge with squash merge by default only after the user asks to merge:
+   ```bash
+   gh pr merge <pr-number> --squash --delete-branch
+   ```
+8. Switch to `main` and pull the merged result:
+   ```bash
+   git checkout main
+   git pull origin main
+   ```
+
+**Local commit/push hold (the enforcement layer for commits):** Do not
+commit, push, open a PR, or merge without an explicit user instruction
+("commit", "push", "open a PR", "merge"). When the user asks to commit,
+create the commit and STOP — do not push unless they then explicitly ask
+to push. Keep working-tree changes uncommitted by default. The
+`.githooks/pre-push` hook enforces the push half mechanically; this
+instruction is the enforcement layer for the commit half, since commits
+are local and cannot be blocked server-side.
+
+**User reviews local changes before each commit:** When the user says
+"commit" (or any variant — "commit changes", "commit it", "commit the
+changes"), and the working tree has uncommitted changes, the agent must
+**first show the change set** (`git status --short` + `git diff --stat`,
+or `git diff <path>` for the relevant files) and **wait for the user to
+confirm the change set to be committed** before running `git commit`. The
+agent does not commit whatever happens to be in the working tree on the
+user's behalf. If the user has already named the change set ("commit
+src/Foo.cs", "commit the rule file"), the agent may commit exactly that
+and report. The default is: keep working-tree changes uncommitted by
+default; the user reviews and authorises each commit explicitly.
+
+Do not merge a PR while required status checks are still running or failing. If
+CI fails, fix the branch and wait for a green workflow before merging.
+
+The repository includes `.github/merge-policy.md` for the full policy and
+`.githooks/pre-push` as a local convenience guard that holds all pushes until
+the user explicitly allows them and still blocks direct pushes to `main`. GitHub
+branch protection or rulesets should be enabled in repository settings where
+available to enforce the same rule server-side.
+
+---
+
+## Cline memory graph
+
+This repo wires a **Memory MCP server** for cross-session recall. Cline (and any
+agent using that MCP server) follows the recall/recording conventions in
+`CLINE.md` — that file covers only memory-graph usage, so it stays separate
+from this manifest.
