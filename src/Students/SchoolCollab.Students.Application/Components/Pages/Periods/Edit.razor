@@ -52,8 +52,7 @@
                             <PeriodFormFields Model="_model"
                                               IsSubPeriod="_isSubPeriod"
                                               DivisionLocked="true"
-                                              AcademicYears="_academicYears"
-                                              DivisionChanged="OnDivisionChangedAsync" />
+                                              AcademicYears="_academicYears" />
 
                             <PeriodSubPeriodsEditor @ref="_subPeriodEditor"
                                                     Show="@ShowSubPeriodsEditor"
@@ -134,7 +133,7 @@
     private sealed class PeriodFormModel : PeriodFormFields.IPeriodFormModel
     {
         public string Name { get; set; } = string.Empty;
-        public string DivisionSelect { get; set; } = "None";
+        public AcademicYearDivision Division { get; set; } = AcademicYearDivision.None;
         public string ParentPeriodIdText { get; set; } = "";
         public DateTime? Start { get; set; }
         public DateTime? End { get; set; }
@@ -152,7 +151,7 @@
     private bool _isSubPeriod => _period is { ParentPeriodId: not null };
 
     private PeriodDto[] _academicYears =>
-        _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _model.DivisionSelect).ToArray() ?? [];
+        _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _model.Division.ToString()).ToArray() ?? [];
 
     /// <summary>The sub-periods section renders only for a top-level academic year
     /// whose division allows sub-periods (Terms/Semesters — "None" forbids them).</summary>
@@ -175,7 +174,9 @@
                 _model.Name = _period.Name;
                 _model.Start = _period.StartDate.ToDateTime(TimeOnly.MinValue);
                 _model.End = _period.EndDate.ToDateTime(TimeOnly.MinValue);
-                _model.DivisionSelect = _period.Division;
+                _model.Division = Enum.TryParse<AcademicYearDivision>(_period.Division, out var division)
+                    ? division
+                    : AcademicYearDivision.None;
                 _model.ParentPeriodIdText = _period.ParentPeriodId?.ToString() ?? "";
 
                 // Clear any prior load error only on the success path: a 404
@@ -195,8 +196,6 @@
             _loadError = $"Couldn't load this period. Try again. ({ex.Message})";
         }
     }
-
-    private Task OnDivisionChangedAsync(string _) => Task.CompletedTask;
 
     /// <summary>After an edit-mode sub-period CRUD the page stays as-is (the landing
     /// grid re-fetches on navigation).</summary>
