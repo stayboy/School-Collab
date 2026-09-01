@@ -36,6 +36,7 @@ public class PeriodEditPageTests : BunitContext
     private sealed class ScriptedHandler : HttpMessageHandler
     {
         public readonly Dictionary<(string Method, string Url), (HttpStatusCode Status, string Body)> Responses = new();
+        public readonly List<(string Method, string Url)> Calls = new();
 
         public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
         {
@@ -46,6 +47,7 @@ public class PeriodEditPageTests : BunitContext
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var url = request.RequestUri!.PathAndQuery;
+            Calls.Add((request.Method.Method.ToUpperInvariant(), url));
             if (Responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var exact))
                 return Task.FromResult(new HttpResponseMessage(exact.Status)
                 {
@@ -234,6 +236,34 @@ public class PeriodEditPageTests : BunitContext
         var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Add sub-period\""));
+    }
+
+    /// <summary>
+    /// In-cell editing (round subperiods-incell-grid): clicking Edit on a sub-period
+    /// row switches that row to in-cell inputs (Save/Cancel appear), and Save persists
+    /// via PUT /students/periods/{id}.
+    /// </summary>
+    [TestMethod]
+    public void SubPeriodsSection_InCellEdit_SaveCallsUpdate()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("Terms"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
+            $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)}]");
+        handler.Map("PUT", $"/students/periods/{DraftSub1Id}", HttpStatusCode.NoContent, "");
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Edit sub-period\""));
+
+        cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Edit sub-period").Click();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Save sub-period\""));
+        cut.Markup.Should().Contain("title=\"Cancel editing\"", "in-cell editing shows a Cancel affordance");
+
+        cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Save sub-period").Click();
+
+        cut.WaitForAssertion(() => handler.Calls.Should().Contain(("PUT", $"/students/periods/{DraftSub1Id}")));
     }
 
     // ── Draft-period delete danger zone (period-draft-delete.md FR-D10) ──

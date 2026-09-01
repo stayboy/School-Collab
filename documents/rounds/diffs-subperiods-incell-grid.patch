@@ -1,0 +1,284 @@
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor b/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor
+index 3b3fc2ae..1b63f40b 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor
+@@ -65,7 +65,7 @@
+         }
+         else
+         {
+-            @* ── Edit mode: live list + inline add/edit ─────────────────────── *@
++            @* ── Edit mode: live list (FluentDataGrid in-cell editing) + add row ── *@
+             @if (!string.IsNullOrEmpty(_error))
+             {
+                 <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+@@ -83,64 +83,103 @@
+             }
+             else
+             {
+-                <div class="subperiods-list" role="table" aria-label="Sub-periods">
+-                    <div class="subperiods-row subperiods-row--head" role="row">
+-                        <span role="columnheader">Name</span>
+-                        <span role="columnheader">Type</span>
+-                        <span role="columnheader">Start</span>
+-                        <span role="columnheader">End</span>
+-                        <span role="columnheader">Status</span>
+-                        <span role="columnheader"></span>
+-                    </div>
+-                    @foreach (var p in _subs)
+-                    {
+-                        <div class="subperiods-row @(p.Id == _editingId ? "subperiods-row--editing" : null)" role="row">
+-                            <span role="cell" class="subperiods-name">@p.Name</span>
+-                            <span role="cell"><FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(p)</FluentBadge></span>
+-                            <span role="cell">@p.StartDate.ToString("d")</span>
+-                            <span role="cell">@p.EndDate.ToString("d")</span>
+-                            <span role="cell"><FluentBadge Appearance="@GetStatusAppearance(p.Status)">@p.Status</FluentBadge></span>
+-                            <span role="cell" class="subperiods-actions">
+-                                @if (p.Id == _editingId)
+-                                {
+-                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Dismiss"
+-                                                  Title="Cancel editing" OnClick="CancelEdit">Cancel</FluentButton>
+-                                }
+-                                else
++                <FluentDataGrid TGridItem="PeriodDto"
++                                Items="_subs.AsQueryable()"
++                                GenerateHeader="GenerateHeaderOption.Default"
++                                RowClass="@(p => p.Id == _editingId ? "subperiods-row--editing" : null)"
++                                GridTemplateColumns="minmax(160px,2fr) 110px 130px 130px 110px auto">
++                    <TemplateColumn TGridItem="PeriodDto" Title="Name">
++                        @if (context.Id == _editingId)
++                        {
++                            <FluentTextField @bind-Value="_name" class="subperiods-cell-name" />
++                        }
++                        else
++                        {
++                            <span class="subperiods-name">@context.Name</span>
++                        }
++                    </TemplateColumn>
++                    <TemplateColumn TGridItem="PeriodDto" Title="Type">
++                        @if (context.Id == _editingId && string.IsNullOrEmpty(Kind))
++                        {
++                            <FluentSelect TOption="string" @bind-Value="_typeText" class="subperiods-cell-type">
++                                <FluentOption Value="Term">Term</FluentOption>
++                                <FluentOption Value="Semester">Semester</FluentOption>
++                            </FluentSelect>
++                        }
++                        else
++                        {
++                            <FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(context)</FluentBadge>
++                        }
++                    </TemplateColumn>
++                    <TemplateColumn TGridItem="PeriodDto" Title="Start">
++                        @if (context.Id == _editingId)
++                        {
++                            <FluentDatePicker @bind-Value="_start" class="subperiods-cell-date" />
++                        }
++                        else
++                        {
++                            @context.StartDate.ToString("d")
++                        }
++                    </TemplateColumn>
++                    <TemplateColumn TGridItem="PeriodDto" Title="End">
++                        @if (context.Id == _editingId)
++                        {
++                            <FluentDatePicker @bind-Value="_end" class="subperiods-cell-date" />
++                        }
++                        else
++                        {
++                            @context.EndDate.ToString("d")
++                        }
++                    </TemplateColumn>
++                    <TemplateColumn TGridItem="PeriodDto" Title="Status">
++                        <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
++                    </TemplateColumn>
++                    <TemplateColumn TGridItem="PeriodDto" Title="Actions">
++                        <div class="subperiods-actions">
++                            @if (context.Id == _editingId)
++                            {
++                                <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
++                                              Title="Save sub-period">Save</FluentButton>
++                                <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Dismiss"
++                                              Title="Cancel editing" OnClick="CancelEdit">Cancel</FluentButton>
++                            }
++                            else
++                            {
++                                <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Edit"
++                                              Title="Edit sub-period" OnClick="@(() => StartEdit(context))">Edit</FluentButton>
++                                @if (context.Status == "Draft")
+                                 {
+-                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Edit"
+-                                                  Title="Edit sub-period" OnClick="@(() => StartEdit(p))">Edit</FluentButton>
+-                                    @if (p.Status == "Draft")
+-                                    {
+-                                        <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Delete"
+-                                                      Title="Delete sub-period" OnClick="@(() => OnDeleteAsync(p))">Delete</FluentButton>
+-                                    }
++                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Delete"
++                                                  Title="Delete sub-period" OnClick="@(() => OnDeleteAsync(context))">Delete</FluentButton>
+                                 }
+-                            </span>
++                            }
+                         </div>
++                    </TemplateColumn>
++                </FluentDataGrid>
++            }
++
++            @* Always-visible inline add row (hidden while an in-cell edit is active). *@
++            @if (_editingId is null)
++            {
++                <div class="subperiods-inline-add">
++                    <FluentTextField @bind-Value="_name"
++                                     Placeholder="New sub-period name (e.g. Term 1)"
++                                     class="subperiods-field-name" />
++                    @if (string.IsNullOrEmpty(Kind))
++                    {
++                        <FluentSelect TOption="string" @bind-Value="_typeText" class="subperiods-field-type">
++                            <FluentOption Value="Term">Term</FluentOption>
++                            <FluentOption Value="Semester">Semester</FluentOption>
++                        </FluentSelect>
+                     }
++                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
++                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
++                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
++                                  Title="Add sub-period">
++                        @(_saving ? "Saving…" : "Add")
++                    </FluentButton>
+                 </div>
+             }
+-
+-            @* Always-visible inline add row (or the edit row when editing). *@
+-            <div class="subperiods-inline-add">
+-                <FluentTextField @bind-Value="_name"
+-                                 Placeholder="@(_editingId is null ? "New sub-period name (e.g. Term 1)" : "Sub-period name")"
+-                                 class="subperiods-field-name" />
+-                @if (string.IsNullOrEmpty(Kind))
+-                {
+-                    <FluentSelect TOption="string" @bind-Value="_typeText" class="subperiods-field-type">
+-                        <FluentOption Value="Term">Term</FluentOption>
+-                        <FluentOption Value="Semester">Semester</FluentOption>
+-                    </FluentSelect>
+-                }
+-                <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
+-                <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
+-                <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+-                              Title="@(_editingId is null ? "Add sub-period" : "Save sub-period")">
+-                    @(_saving ? "Saving…" : _editingId is null ? "Add" : "Save")
+-                </FluentButton>
+-            </div>
+         }
+     </div>
+ }
+diff --git a/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor.css b/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor.css
+index a4ee2921..4490c38d 100644
+--- a/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor.css
++++ b/src/Students/SchoolCollab.Students.Application/Components/Pages/Periods/PeriodSubPeriodsEditor.razor.css
+@@ -40,32 +40,7 @@
+     margin-top: 0.5rem;
+ }
+ 
+-/* ── Edit-mode list (former SubPeriodsSection) ──────────────────────────── */
+-
+-.subperiods-list {
+-    display: flex;
+-    flex-direction: column;
+-    gap: 2px;
+-    margin-top: 0.5rem;
+-}
+-
+-.subperiods-row {
+-    display: grid;
+-    grid-template-columns: minmax(160px, 2fr) 110px 130px 130px 110px auto;
+-    gap: 0.5rem;
+-    align-items: center;
+-    padding: 0.35rem 0.5rem;
+-    border-radius: 4px;
+-}
+-
+-.subperiods-row:nth-child(even) {
+-    background: var(--fill-color-rest, #f5f5f5);
+-}
+-
+-.subperiods-row--head {
+-    font-weight: 600;
+-    border-bottom: 1px solid var(--neutral-stroke-rest, #d1d1d1);
+-}
++/* ── Edit-mode list (FluentDataGrid in-cell editing) ─────────────────── */
+ 
+ .subperiods-row--editing {
+     outline: 1px solid var(--accent-fill-rest, #0f6cbd);
+@@ -83,7 +58,20 @@
+     justify-content: flex-end;
+ }
+ 
+-/* Guardian-style always-visible inline add/edit row. */
++/* In-cell editing inputs fill their grid cell. */
++.subperiods-cell-name {
++    width: 100%;
++}
++
++.subperiods-cell-type {
++    width: 100%;
++}
++
++.subperiods-cell-date {
++    width: 100%;
++}
++
++/* Guardian-style always-visible inline add row (hidden while an in-cell edit is active). */
+ .subperiods-inline-add {
+     display: flex;
+     gap: 0.5rem;
+diff --git a/tests/SchoolCollab.Admin.Tests.Unit/PeriodEditPageTests.cs b/tests/SchoolCollab.Admin.Tests.Unit/PeriodEditPageTests.cs
+index 12610423..5c4d8715 100644
+--- a/tests/SchoolCollab.Admin.Tests.Unit/PeriodEditPageTests.cs
++++ b/tests/SchoolCollab.Admin.Tests.Unit/PeriodEditPageTests.cs
+@@ -36,6 +36,7 @@ public class PeriodEditPageTests : BunitContext
+     private sealed class ScriptedHandler : HttpMessageHandler
+     {
+         public readonly Dictionary<(string Method, string Url), (HttpStatusCode Status, string Body)> Responses = new();
++        public readonly List<(string Method, string Url)> Calls = new();
+ 
+         public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
+         {
+@@ -46,6 +47,7 @@ public class PeriodEditPageTests : BunitContext
+         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+         {
+             var url = request.RequestUri!.PathAndQuery;
++            Calls.Add((request.Method.Method.ToUpperInvariant(), url));
+             if (Responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var exact))
+                 return Task.FromResult(new HttpResponseMessage(exact.Status)
+                 {
+@@ -236,6 +238,34 @@ public class PeriodEditPageTests : BunitContext
+         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Add sub-period\""));
+     }
+ 
++    /// <summary>
++    /// In-cell editing (round subperiods-incell-grid): clicking Edit on a sub-period
++    /// row switches that row to in-cell inputs (Save/Cancel appear), and Save persists
++    /// via PUT /students/periods/{id}.
++    /// </summary>
++    [TestMethod]
++    public void SubPeriodsSection_InCellEdit_SaveCallsUpdate()
++    {
++        var handler = Register();
++        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("Terms"));
++        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
++        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
++            $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)}]");
++        handler.Map("PUT", $"/students/periods/{DraftSub1Id}", HttpStatusCode.NoContent, "");
++
++        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Edit sub-period\""));
++
++        cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Edit sub-period").Click();
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Save sub-period\""));
++        cut.Markup.Should().Contain("title=\"Cancel editing\"", "in-cell editing shows a Cancel affordance");
++
++        cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Save sub-period").Click();
++
++        cut.WaitForAssertion(() => handler.Calls.Should().Contain(("PUT", $"/students/periods/{DraftSub1Id}")));
++    }
++
+     // ── Draft-period delete danger zone (period-draft-delete.md FR-D10) ──
+ 
+     private static string DraftYearJson(string? division = null) =>

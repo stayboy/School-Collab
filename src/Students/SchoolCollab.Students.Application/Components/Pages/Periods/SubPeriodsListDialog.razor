@@ -41,38 +41,39 @@
     }
     else
     {
-        <div class="sub-periods-list" role="table" aria-label="Sub-periods">
-            <div class="sub-periods-row sub-periods-row--head" role="row">
-                <span role="columnheader">Name</span>
-                <span role="columnheader">Type</span>
-                <span role="columnheader">Start</span>
-                <span role="columnheader">End</span>
-                <span role="columnheader">Status</span>
-                <span role="columnheader"></span>
-            </div>
-            @foreach (var p in _items)
-            {
-                <div class="sub-periods-row" role="row">
-                    <span role="cell" class="sub-periods-name">@p.Name</span>
-                    <span role="cell"><FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(p)</FluentBadge></span>
-                    <span role="cell">@p.StartDate.ToString("d")</span>
-                    <span role="cell">@p.EndDate.ToString("d")</span>
-                    <span role="cell"><FluentBadge Appearance="@GetStatusAppearance(p.Status)">@p.Status</FluentBadge></span>
-                    <span role="cell" class="sub-periods-actions">
-                        @if (p.Status == "Draft")
-                        {
-                            <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.ArrowExportUp"
-                                          Title="Activate" OnClick="@(() => ActivateAsync(p.Id))">Activate</FluentButton>
-                        }
-                        else if (p.Status == "Active")
-                        {
-                            <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Checkmark"
-                                          Title="Complete" OnClick="@(() => CompleteAsync(p.Id))">Complete</FluentButton>
-                        }
-                    </span>
+        <FluentDataGrid TGridItem="PeriodDto"
+                        Items="_items.AsQueryable()"
+                        GenerateHeader="GenerateHeaderOption.Default"
+                        GridTemplateColumns="minmax(140px,2fr) 90px 90px 110px auto"
+                        Class="sub-periods-grid"
+                        AriaLabel="Sub-periods">
+            <TemplateColumn TGridItem="PeriodDto" Title="Name">
+                <span class="sub-periods-name">@context.Name</span>
+            </TemplateColumn>
+            <TemplateColumn TGridItem="PeriodDto" Title="Start">
+                @context.StartDate.ToString("d")
+            </TemplateColumn>
+            <TemplateColumn TGridItem="PeriodDto" Title="End">
+                @context.EndDate.ToString("d")
+            </TemplateColumn>
+            <TemplateColumn TGridItem="PeriodDto" Title="Status">
+                <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
+            </TemplateColumn>
+            <TemplateColumn TGridItem="PeriodDto" Title="">
+                <div class="sub-periods-actions">
+                    @if (context.Status == "Draft")
+                    {
+                        <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.ArrowExportUp"
+                                      Title="Activate" OnClick="@(() => ActivateAsync(context.Id))">Activate</FluentButton>
+                    }
+                    else if (context.Status == "Active")
+                    {
+                        <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Checkmark"
+                                      Title="Complete" OnClick="@(() => CompleteAsync(context.Id))">Complete</FluentButton>
+                    }
                 </div>
-            }
-        </div>
+            </TemplateColumn>
+        </FluentDataGrid>
     }
 
     @* Footer — a single Close button. The dialog host has no
@@ -253,9 +254,6 @@
         "Archived"  => Appearance.Neutral,
         _           => Appearance.Neutral
     };
-
-    private static string GetKindLabel(PeriodDto period)
-        => period.Division == "Semesters" ? "Semester" : "Term";
 
     public void Dispose()
     {
