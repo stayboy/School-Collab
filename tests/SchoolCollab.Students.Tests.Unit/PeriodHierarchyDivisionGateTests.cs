@@ -106,49 +106,8 @@ public class PeriodHierarchyDivisionGateTests
 
         var update = NewUpdate(s);
         var act = async () => await update.HandleAsync(new UpdatePeriod(
-            ay, "AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+            ay, "AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), ParentPeriodId: ay));
         await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
-    }
-
-    // EC-H2: changing a year's division is rejected while non-completed sub-periods exist.
-    [TestMethod]
-    public async Task Update_AcademicYear_DivisionChange_WhileSubPeriodsExist_Throws()
-    {
-        using var s = new StudentsTestScope("gate-div-change-blocked");
-        var create = NewCreate(s);
-        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms))).YearId;
-        await create.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
-
-        var update = NewUpdate(s);
-        var act = async () => await update.HandleAsync(new UpdatePeriod(
-            ay, "AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.None));
-        await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
-    }
-
-    // EC-H2: once the sub-periods are removed, the division change is allowed.
-    [TestMethod]
-    public async Task Update_AcademicYear_DivisionChange_AfterSubPeriodsRemoved_Succeeds()
-    {
-        using var s = new StudentsTestScope("gate-div-change-allowed");
-        var create = NewCreate(s);
-        var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.Terms))).YearId;
-        var t1 = (await create.HandleAsync(new CreatePeriod(
-            "T1", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
-
-        // Remove the sub-period (no delete API surface — direct row removal in the test).
-        s.Db.Periods.Remove(await s.Db.Periods.SingleAsync(p => p.Id == t1));
-        await s.Db.SaveChangesAsync();
-
-        var update = NewUpdate(s);
-        await update.HandleAsync(new UpdatePeriod(
-            ay, "AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31),
-            Division: AcademicYearDivision.None));
-
-        (await s.Db.Periods.SingleAsync(p => p.Id == ay)).Division.Should().Be(AcademicYearDivision.None);
     }
 
     // AC-H8: per-year division independence — Y1 (Terms) allows a Term, Y2 (None) rejects it.

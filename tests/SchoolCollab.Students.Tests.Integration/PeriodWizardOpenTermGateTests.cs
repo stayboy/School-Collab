@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
+using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
 using SchoolCollab.Students.Core.Tenancy;
 
@@ -73,7 +74,7 @@ public class PeriodWizardOpenTermGateTests
 
         // ...then the user "opens a term" -> CreatePeriodHandler.
         var create = await PostAsync("/students/periods", ApiFactory.TestTenantA,
-            new CreatePeriod("Term 2025", new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31)));
+            new CreatePeriod("Term 2025", new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31), AcademicYearDivision.None));
         create.StatusCode.Should().Be(HttpStatusCode.Created);
 
         // Gate now surfaces the existing term (confirmation card).
@@ -93,7 +94,7 @@ public class PeriodWizardOpenTermGateTests
     {
         // Tenant A already has a period.
         var aCreate = await PostAsync("/students/periods", ApiFactory.TestTenantA,
-            new CreatePeriod("Term A", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31)));
+            new CreatePeriod("Term A", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.None));
         aCreate.StatusCode.Should().Be(HttpStatusCode.Created);
 
         // Tenant B queries the same logical list first (cold cache for B).
@@ -123,7 +124,7 @@ public class PeriodWizardOpenTermGateTests
             {
                 new PeriodDto(
                     Guid.NewGuid(), "STALE FAKE", new DateOnly(2000, 1, 1), new DateOnly(2000, 12, 31),
-                    "Draft", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+                    "Draft", null, null, "None", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
             };
             // Tagged "students" so the handler's RemoveByTagAsync("students") clears it.
             await cache.SetAsync(
@@ -141,7 +142,7 @@ public class PeriodWizardOpenTermGateTests
 
         // Opening a real term must invalidate the cached list (regression guard).
         var create = await PostAsync("/students/periods", ApiFactory.TestTenantA,
-            new CreatePeriod("Real Term", new DateOnly(2027, 1, 1), new DateOnly(2027, 12, 31)));
+            new CreatePeriod("Real Term", new DateOnly(2027, 1, 1), new DateOnly(2027, 12, 31), AcademicYearDivision.None));
         create.StatusCode.Should().Be(HttpStatusCode.Created);
 
         var after = (await (await GetAsync("/students/periods", ApiFactory.TestTenantA)).Content
@@ -160,21 +161,19 @@ public class PeriodWizardOpenTermGateTests
     {
         // Tenant A opens Term A covering all of 2025.
         var a1 = await PostAsync("/students/periods", ApiFactory.TestTenantA,
-            new CreatePeriod("Term A", new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31)));
+            new CreatePeriod("Term A", new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31), AcademicYearDivision.None));
         a1.StatusCode.Should().Be(HttpStatusCode.Created);
 
-        // A second, overlapping term for the SAME tenant is rejected. The API
-        // surfaces the unhandled PeriodOverlapException to the caller (TestServer
-        // rethrows the server exception), so the request throws rather than
-        // returning a success status.
-        Func<Task> sameTenantOverlap = () => PostAsync("/students/periods", ApiFactory.TestTenantA,
-            new CreatePeriod("Term A2", new DateOnly(2025, 6, 1), new DateOnly(2025, 7, 31)));
-        await sameTenantOverlap.Should().ThrowAsync<Exception>(
-            "overlapping a period within the same tenant must be rejected");
+        // A second, overlapping term for the SAME tenant is rejected with 422 (the
+        // route maps PeriodOverlapException to UnprocessableEntity).
+        var sameTenantOverlap = await PostAsync("/students/periods", ApiFactory.TestTenantA,
+            new CreatePeriod("Term A2", new DateOnly(2025, 6, 1), new DateOnly(2025, 7, 31), AcademicYearDivision.None));
+        sameTenantOverlap.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+            "overlapping a period within the same tenant must be rejected (422)");
 
         // The SAME dates for a DIFFERENT tenant are accepted (per-tenant overlap check).
         var bSame = await PostAsync("/students/periods", ApiFactory.TestTenantB,
-            new CreatePeriod("Term B", new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31)));
+            new CreatePeriod("Term B", new DateOnly(2025, 1, 1), new DateOnly(2025, 12, 31), AcademicYearDivision.None));
         bSame.StatusCode.Should().Be(HttpStatusCode.Created);
     }
 
@@ -187,10 +186,14 @@ public class PeriodWizardOpenTermGateTests
     [TestMethod]
     public async Task ActivePeriodProvider_TenantScoped_CurrentPeriod()
     {
-        // Seed a period covering "today" (2026-07-11) for Tenant A only.
+        // Seed a period covering "today" (2026-07-11) for Tenant A only, then activate
+        // it so the active-period provider resolves it.
         var create = await PostAsync("/students/periods", ApiFactory.TestTenantA,
-            new CreatePeriod("Current A", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31)));
+            new CreatePeriod("Current A", new DateOnly(2026, 1, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.None));
         create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var id = (await create.Content.ReadFromJsonAsync<CreatePeriodIdResponse>())!.Id;
+        var activate = await PostAsync($"/students/periods/{id}/activate", ApiFactory.TestTenantA, null);
+        activate.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
         using var scope = _factory.Services.CreateScope();
         var accessor = scope.ServiceProvider.GetRequiredService<ITenantContextAccessor>();
@@ -229,4 +232,6 @@ public class PeriodWizardOpenTermGateTests
 
         return await _client.SendAsync(request);
     }
+
+    private sealed record CreatePeriodIdResponse(Guid Id);
 }

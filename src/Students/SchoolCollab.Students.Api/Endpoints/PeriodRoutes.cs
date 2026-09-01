@@ -1,8 +1,11 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.ActivatePeriod;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.ArchivePeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.CompletePeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.DeactivatePeriod;
+using SchoolCollab.Students.Core.CQRS.Periods.Commands.DeletePeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Commands.UpdatePeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetActiveAcademicYear;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetActiveSubPeriod;
@@ -10,7 +13,6 @@ using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetPeriodById;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.ListPeriods;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.ListSubPeriods;
 using SchoolCollab.Students.Core.Domain.Exceptions;
-using SchoolCollab.Students.Core.Domain;
 using SchoolCollab.Students.Core.DTOs;
 
 namespace SchoolCollab.Students.Api.Endpoints;
@@ -96,7 +98,7 @@ public static class PeriodRoutes
             try
             {
                 await handler.HandleAsync(new UpdatePeriod(id, req.Name, req.StartDate,
-                    req.EndDate, req.Division, req.ParentPeriodId), ct);
+                    req.EndDate, req.ParentPeriodId), ct);
                 return Results.NoContent();
             }
             catch (PeriodNotFoundException)
@@ -169,6 +171,78 @@ public static class PeriodRoutes
             }
         });
 
+        group.MapPost("/periods/{id:guid}/deactivate", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<DeactivatePeriod> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new DeactivatePeriod(id), ct);
+                return Results.NoContent();
+            }
+            catch (PeriodNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (PeriodNotDeactivatableException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (ConcurrencyException)
+            {
+                // NFR-E2: an already-gone / concurrently-deactivated period resolves to a
+                // 404 (idempotent), never a 409.
+                return Results.NotFound();
+            }
+        });
+
+        group.MapDelete("/periods/{id:guid}", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<DeletePeriod> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new DeletePeriod(id), ct);
+                return Results.NoContent();
+            }
+            catch (PeriodNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (PeriodNotDeletableException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (ConcurrencyException)
+            {
+                // EC-3 / NFR-D2: delete-after-delete or concurrent-edit delete is an
+                // idempotent 404 — delete routes never return 409.
+                return Results.NotFound();
+            }
+        });
+
+        group.MapPost("/periods/{id:guid}/archive", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<ArchivePeriod> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new ArchivePeriod(id), ct);
+                return Results.NoContent();
+            }
+            catch (PeriodNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ConcurrencyException)
+            {
+                return Results.NotFound();
+            }
+        });
+
         return group;
     }
 }
@@ -177,5 +251,4 @@ internal record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    AcademicYearDivision Division,
     Guid? ParentPeriodId = null);

@@ -43,6 +43,12 @@ public class PeriodsLandingGridTests : BunitContext
         /// test assert that a cancelled confirmation never fired the API call.</summary>
         public int PostCount { get; private set; }
 
+        /// <summary>Count of DELETE requests served (period delete).</summary>
+        public int DeleteCount { get; private set; }
+
+        /// <summary>Count of GET requests served (list reloads).</summary>
+        public int GetCount { get; private set; }
+
         public ScriptedHandler Map(string method, string url, HttpStatusCode status, string body)
         {
             _responses[(method.ToUpperInvariant(), url)] = (status, body);
@@ -52,6 +58,8 @@ public class PeriodsLandingGridTests : BunitContext
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request.Method == HttpMethod.Post) PostCount++;
+            if (request.Method == HttpMethod.Delete) DeleteCount++;
+            if (request.Method == HttpMethod.Get) GetCount++;
             var url = request.RequestUri!.PathAndQuery;
             if (_responses.TryGetValue((request.Method.Method.ToUpperInvariant(), url), out var exact))
                 return Task.FromResult(new HttpResponseMessage(exact.Status)
@@ -201,12 +209,12 @@ public class PeriodsLandingGridTests : BunitContext
 
         var cut = Render<Periods>();
 
-        // Single-action rows render a labeled FluentButton (title = the action
-        // label); rows with 2+ actions render a kebab + FluentMenu. Collect the
-        // union of action labels from BOTH surfaces and assert it contains only
-        // Activate (Draft) / Complete (Active) — never Edit or Sub-periods.
-        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
-            .Any(b => b.GetAttribute("title") is "Activate" or "Complete").Should().BeTrue());
+        // r2 (period-edit-parity-deactivate.md): every action-bearing row now carries
+        // 2 actions (Draft = Activate + Delete; Active = Complete + Deactivate), so
+        // they ALL render as a kebab + FluentMenu. Collect the union of action labels
+        // from the menu items and assert it contains Activate + Complete — never Edit
+        // or Sub-periods.
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
 
         var labels = cut.FindAll("fluent-button")
             .Select(b => b.GetAttribute("title"))
@@ -231,7 +239,8 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_RowActions_Guard_DisablesActivateForTermsYearNoDraftSub()
     {
         // A Terms year (parent null) with Draft status but ZERO Draft subs → the
-        // Activate action is present but disabled with an explanatory label/tooltip (FR-G6).
+        // Activate action is present but disabled with an explanatory label (FR-G6).
+        // Draft rows now carry Activate + Delete, so they render as a kebab menu.
         var yearId = Guid.Parse("99999999-9999-9999-9999-999999999999");
         var handler = RegisterClient();
         handler.Map("GET", "/students/periods", HttpStatusCode.OK,
@@ -239,18 +248,21 @@ public class PeriodsLandingGridTests : BunitContext
 
         var cut = Render<Periods>();
 
-        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
-            .Any(b => b.GetAttribute("title")?.Contains("Add a draft Term/Semester to activate") == true).Should().BeTrue(
-                "a guarded Terms year shows a disabled Activate with an explanatory title/tooltip"));
-        var btn = cut.FindAll("fluent-button")
-            .First(b => b.GetAttribute("title")?.Contains("Add a draft Term/Semester to activate") == true);
-        btn.GetAttribute("disabled").Should().NotBeNull("the guarded Activate is disabled");
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button[title='Period actions']").First().Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Any(m => m.TextContent.Contains("Add a draft Term/Semester to activate")).Should().BeTrue(
+                "a guarded Terms year shows a disabled Activate with an explanatory label"));
+        var item = cut.FindAll("fluent-menu-item")
+            .First(m => m.TextContent.Contains("Add a draft Term/Semester to activate"));
+        item.GetAttribute("disabled").Should().NotBeNull("the guarded Activate is disabled");
     }
 
     [TestMethod]
     public void Periods_RowActions_TermsYear_WithDraftSub_ActivateEnabled()
     {
         // A Terms year with at least one Draft sub → Activate enabled (regression).
+        // Draft rows now carry Activate + Delete, so they render as a kebab menu.
         var yearId = Guid.Parse("88888888-8888-8888-8888-888888888888");
         var draftSub = Guid.Parse("77777777-7777-7777-7777-777777777777");
         var handler = RegisterClient();
@@ -260,17 +272,20 @@ public class PeriodsLandingGridTests : BunitContext
 
         var cut = Render<Periods>();
 
-        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
-            .Any(b => b.GetAttribute("title") == "Activate").Should().BeTrue(
-                "a Terms year with a Draft sub shows an enabled Activate"));
-        var btn = cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Activate");
-        btn.GetAttribute("disabled").Should().BeNull("Activate is enabled when a Draft sub exists");
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button[title='Period actions']").First().Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Any(m => m.TextContent.Trim() == "Activate").Should().BeTrue(
+                "a Terms year with a Draft sub offers an enabled Activate"));
+        var item = cut.FindAll("fluent-menu-item").First(m => m.TextContent.Trim() == "Activate");
+        item.GetAttribute("disabled").Should().BeNull("Activate is enabled when a Draft sub exists");
     }
 
     [TestMethod]
     public void Periods_RowActions_NoneDivisionYear_ActivateEnabled()
     {
         // A None-division year needs no sub to activate → Activate enabled (FR-G3).
+        // Draft rows now carry Activate + Delete, so they render as a kebab menu.
         var yearId = Guid.Parse("66666666-6666-6666-6666-666666666666");
         var handler = RegisterClient();
         handler.Map("GET", "/students/periods", HttpStatusCode.OK,
@@ -278,9 +293,11 @@ public class PeriodsLandingGridTests : BunitContext
 
         var cut = Render<Periods>();
 
-        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
-            .Any(b => b.GetAttribute("title") == "Activate").Should().BeTrue(
-                "a None-division Draft year shows an enabled Activate"));
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button[title='Period actions']").First().Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Any(m => m.TextContent.Trim() == "Activate").Should().BeTrue(
+                "a None-division Draft year offers an enabled Activate"));
     }
 
     // ── FR-4 dialog assertions ──────────────────────────────────────────────
@@ -449,5 +466,182 @@ public class PeriodsLandingGridTests : BunitContext
 
         cut.WaitForAssertion(() => cut.FindAll("fluent-anchor")
             .Any(a => a.GetAttribute("title") == "New sub-period").Should().BeTrue());
+    }
+
+    // ── Draft-period delete (period-draft-delete.md FR-D9 / NFR-D3 / AC-D8/D9) ──
+
+    private static readonly Guid DraftYearId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+    private static readonly Guid DraftSub1Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static readonly Guid DraftSub2Id = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    private static Mock<IDialogService> ConfirmationDialog(StringBuilder? capturedMessage = null)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object>(null!)));
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string, string, string>((msg, _, __, ___) => capturedMessage?.Append(msg))
+            .ReturnsAsync(dialogRef.Object);
+        return dialogMock;
+    }
+
+    /// <summary>AC-D8 + NFR-D3: a Draft row offers an enabled Delete action in the
+    /// kebab (a real tab stop, not a disabled tooltip).</summary>
+    [TestMethod]
+    public void Periods_RowActions_DraftRow_OffersDelete()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "None", "Draft", null) + "]");
+
+        var cut = Render<Periods>();
+
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button[title='Period actions']").First().Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Any(m => m.TextContent.Contains("Delete")).Should().BeTrue(
+                "a Draft row offers a Delete action (AC-D8)"));
+        var item = cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete"));
+        item.GetAttribute("disabled").Should().BeNull(
+            "the Delete action is enabled and keyboard-reachable (NFR-D3)");
+    }
+
+    /// <summary>AC-D8: non-Draft rows expose no Delete action.</summary>
+    [TestMethod]
+    public void Periods_RowActions_NonDraft_NoDelete()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+
+        var cut = Render<Periods>();
+
+        // r2: action-bearing rows render as kebab menus (2 actions each), never a
+        // single labeled action button.
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button").Any(b => b.GetAttribute("title") == "Delete").Should().BeFalse(
+            "Active/Completed rows offer no labeled Delete (AC-D8)");
+        cut.FindAll("fluent-menu-item").Any(m => m.TextContent.Contains("Delete")).Should().BeFalse(
+            "Active/Completed rows offer no Delete menu item (AC-D8)");
+    }
+
+    /// <summary>FR-D9: confirming the delete fires the DELETE call and reloads the list.</summary>
+    [TestMethod]
+    public void Periods_Delete_Confirm_CallsApiAndReloads()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "None", "Draft", null) + "]");
+        handler.Map("DELETE", $"/students/periods/{DraftYearId}", HttpStatusCode.NoContent, "");
+        Services.AddSingleton(ConfirmationDialog().Object);
+
+        var cut = Render<Periods>();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button[title='Period actions']").First().Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Any(m => m.TextContent.Contains("Delete")).Should().BeTrue());
+        var beforeGets = handler.GetCount;
+
+        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).Click();
+
+        cut.WaitForAssertion(() => handler.DeleteCount.Should().Be(1, "the confirmed delete fires the DELETE call"));
+        handler.GetCount.Should().BeGreaterThan(beforeGets, "the list is re-fetched after a successful delete (FR-D9)");
+    }
+
+    /// <summary>FR-D9: cancelling the confirmation never fires the API call.</summary>
+    [TestMethod]
+    public void Periods_Delete_Cancelled_DoesNotCallApi()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "None", "Draft", null) + "]");
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .ReturnsAsync(dialogRef.Object);
+        Services.AddSingleton(dialogMock.Object);
+
+        var cut = Render<Periods>();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button[title='Period actions']").First().Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Any(m => m.TextContent.Contains("Delete")).Should().BeTrue());
+
+        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).Click();
+
+        handler.DeleteCount.Should().Be(0, "cancelling the confirmation must not fire the DELETE call");
+    }
+
+    /// <summary>FR-D9: the year confirmation names the period and the memoized Draft sub count.</summary>
+    [TestMethod]
+    public void Periods_Delete_YearConfirmation_NamesPeriodAndDraftSubCount()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "Terms", "Draft", null) + "," +
+            PeriodJsonWithDivision(DraftSub1Id, "Term 1", "Terms", "Draft", DraftYearId) + "," +
+            PeriodJsonWithDivision(DraftSub2Id, "Term 2", "Terms", "Draft", DraftYearId) + "]");
+        var captured = new StringBuilder();
+        Services.AddSingleton(ConfirmationDialog(captured).Object);
+
+        var cut = Render<Periods>();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button[title='Period actions']").Any().Should().BeTrue());
+        cut.FindAll("fluent-button[title='Period actions']").First().Click();
+        cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
+            .Any(m => m.TextContent.Contains("Delete")).Should().BeTrue());
+
+        cut.FindAll("fluent-menu-item").First(m => m.TextContent.Contains("Delete")).Click();
+
+        cut.WaitForAssertion(() => captured.ToString().Should().Contain("2026"));
+        captured.ToString().Should().Contain("2 draft sub-periods",
+            "the year confirmation names the memoized Draft sub count (FR-D9)");
+    }
+
+    // ── FR-X5/X9 (period-edit-parity-deactivate.md AC-E7) ────────────────────
+
+    private static readonly Guid DeactivatedYearId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
+
+    /// <summary>AC-E7 + FR-X9: a Deactivated row exposes a single Archive action.
+    /// Single-action rows render as a labeled button (not a kebab menu).</summary>
+    [TestMethod]
+    public void Periods_RowActions_DeactivatedRow_OffersArchive()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJson(DeactivatedYearId, "2025-archived", "AcademicYear", "Deactivated", null) + "]");
+
+        var cut = Render<Periods>();
+
+        cut.WaitForAssertion(() => cut.FindAll("fluent-button")
+            .Any(b => b.TextContent.Contains("Archive")).Should().BeTrue(
+                "a Deactivated row offers an Archive action (FR-X5/X9)"));
+        cut.FindAll("fluent-button[title='Period actions']").Should().BeEmpty(
+            "a Deactivated row has a single action so it never renders as a kebab");
+    }
+
+    /// <summary>AC-E7: a Deactivated row offers NO Delete, NO Activate, NO Complete,
+    /// and NO Deactivate action — only the cleanup Archive path (FR-X5/X9).</summary>
+    [TestMethod]
+    public void Periods_RowActions_DeactivatedRow_NoLifecycleActions()
+    {
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
+            "[" + PeriodJson(DeactivatedYearId, "2025-archived", "AcademicYear", "Deactivated", null) + "]");
+
+        var cut = Render<Periods>();
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Deactivated"));
+        cut.FindAll("fluent-button").Any(b => b.TextContent.Contains("Delete")).Should().BeFalse(
+            "AC-E7: Delete is not exposed on Deactivated rows");
+        cut.FindAll("fluent-button").Any(b => b.TextContent.Contains("Activate")).Should().BeFalse(
+            "AC-E7: Activate is not exposed on Deactivated rows (re-activation out of scope)");
+        cut.FindAll("fluent-button").Any(b => b.TextContent.Contains("Complete")).Should().BeFalse(
+            "AC-E7: Complete is not exposed on Deactivated rows");
+        cut.FindAll("fluent-button").Any(b => b.TextContent.Contains("Deactivate")).Should().BeFalse(
+            "AC-E7: Deactivate is not exposed on a row that is already Deactivated");
+        cut.FindAll("fluent-menu-item").Any(m => m.TextContent.Contains("Delete")).Should().BeFalse(
+            "AC-E7: no Delete menu item on Deactivated rows");
     }
 }

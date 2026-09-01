@@ -224,6 +224,98 @@
         }
     }
 
+    private async Task OnDeleteAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+
+        var period = _items.First(p => p.Id == id);
+        // FR-D9: a top-level year names the memoized Draft sub-period count; a
+        // sub-period names its kind. GetDraftSubPeriodCount counts only Draft subs,
+        // exactly the confirmation semantics.
+        var message = period.ParentPeriodId is null
+            ? PeriodDeletePrompts.YearMessage(period.Name, GetDraftSubPeriodCount(period.Id))
+            : PeriodDeletePrompts.SubPeriodMessage(period.Name, GetKindLabel(period));
+
+        var dialog = await DialogService.ShowConfirmationAsync(message, "Delete", "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        Logger.LogInformation("Deleting period {Id}", id);
+        try
+        {
+            await Api.DeletePeriodAsync(id);
+            _error = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete period {Id}", id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>FR-X9: deactivates an Active period, freeing its date range so a
+    /// corrected period can be created. Confirmation wording shared via
+    /// <see cref="PeriodDeactivatePrompts"/> (FR-X9/X10).</summary>
+    private async Task OnDeactivateAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+
+        var period = _items.First(p => p.Id == id);
+        var dialog = await DialogService.ShowConfirmationAsync(
+            PeriodDeactivatePrompts.DeactivateMessage(period.Name),
+            "Deactivate",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        Logger.LogInformation("Deactivating period {Id}", id);
+        try
+        {
+            await Api.DeactivatePeriodAsync(id);
+            _error = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to deactivate period {Id}", id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>FR-X5/X9: archives a Deactivated row (cleanup path).</summary>
+    private async Task OnArchiveAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+
+        var period = _items.First(p => p.Id == id);
+        var dialog = await DialogService.ShowConfirmationAsync(
+            PeriodDeactivatePrompts.ArchiveMessage(period.Name),
+            "Archive",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        Logger.LogInformation("Archiving period {Id}", id);
+        try
+        {
+            await Api.ArchivePeriodAsync(id);
+            _error = null;
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to archive period {Id}", id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
     /// <summary>
     /// Re-fetches the period list after a successful activate/complete so the
     /// server-side cascade (prior active year/siblings closed by the handler) is
@@ -275,10 +367,26 @@
             {
                 actions.Add(RowAction.Callback("Activate", () => OnActivateAsync(period.Id), FluentIcons.ArrowExportUp));
             }
+
+            // FR-D9: Draft rows offer Delete. Draft rows have two actions (Activate +
+            // Delete), so the shared RowActionsMenu renders them as a kebab menu; the
+            // Delete item keeps its Title and is reachable via the kebab trigger's tab
+            // stop + menu keyboard navigation (NFR-D3, AC-D9). Non-Draft statuses never
+            // reach this branch (AC-D8).
+            actions.Add(RowAction.Callback("Delete", () => OnDeleteAsync(period.Id), FluentIcons.Delete));
         }
         else if (period.Status == "Active")
         {
+            // FR-X9: Active rows offer Complete AND Deactivate — the shared
+            // RowActionsMenu renders them as a kebab (2+ actions).
             actions.Add(RowAction.Callback("Complete", () => OnCompleteAsync(period.Id), FluentIcons.Checkmark));
+            actions.Add(RowAction.Callback("Deactivate", () => OnDeactivateAsync(period.Id), FluentIcons.Dismiss));
+        }
+        else if (period.Status == "Deactivated")
+        {
+            // FR-X5/X9: Deactivated rows are not deletable and not re-activatable, but
+            // they can be archived (cleanup path). Single action → labeled button.
+            actions.Add(RowAction.Callback("Archive", () => OnArchiveAsync(period.Id), FluentIcons.Book));
         }
         return actions;
     }
@@ -339,6 +447,7 @@
         "Active"    => Appearance.Accent,
         "Completed" => Appearance.Lightweight,
         "Archived"  => Appearance.Neutral,
+        "Deactivated" => Appearance.Neutral,
         _           => Appearance.Neutral
     };
 

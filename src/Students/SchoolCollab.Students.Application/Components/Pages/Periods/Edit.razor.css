@@ -1,10 +1,64 @@
-/* Period edit page — composition of the embedded SubPeriodsSection
-   (rendered first) and the year/sub-period PeriodForm (rendered second).
-   The separator visually divides the two regions so the user reads them
-   as distinct sections. */
+/* Period edit page — the owning form (period-edit-parity-deactivate.md FR-E7,
+   Topic pattern: the page supplies the <EditForm>, PeriodFormFields renders the
+   shared field rows, and PeriodSubPeriodsEditor owns the sub-periods section).
+   Form-level styles moved here from the deleted PeriodForm.razor.css, plus the
+   page's own danger/deactivate/separator styles. */
 
+.period-form {
+    max-width: 680px;
+}
+
+.form-section-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.form-section-header h3 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.form-hint {
+    color: var(--neutral-foreground-hint);
+    font-size: 0.85rem;
+    margin: 0.15rem 0 0;
+    line-height: 1.4;
+}
+
+.form-actions {
+    margin-top: 1.1rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--neutral-stroke-rest, #eee);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+/* Visual separator so the form and the danger/deactivate regions read as
+   distinct sections. */
 .period-edit-separator {
     border: none;
     border-top: 1px solid var(--neutral-stroke-rest, #d1d1d1);
     margin: 1.75rem 0 1.5rem;
+}
+
+/* FR-D10 danger zone — Draft-period delete affordance; also reused for the
+   Active-period deactivate section (FR-X9). Minimal, isolated to this page. */
+.period-edit-danger {
+    border: 1px solid var(--error, #d13438);
+    border-radius: 4px;
+    padding: 1rem 1.25rem;
+    margin-top: 1.5rem;
+}
+
+.period-edit-danger h3 {
+    margin: 0 0 0.25rem;
+    font-size: 1rem;
+}
+
+.period-edit-danger .form-hint {
+    margin: 0 0 0.75rem;
 }

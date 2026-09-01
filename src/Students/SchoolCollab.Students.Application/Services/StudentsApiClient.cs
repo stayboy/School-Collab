@@ -357,11 +357,12 @@ public record SubPeriodDefinitionRequest(
     DateOnly StartDate,
     DateOnly EndDate);
 
+/// <summary>Update payload for a period. No Division: it is immutable at creation
+/// (period-edit-parity-deactivate.md FR-E1), so it is never sent on update.</summary>
 public record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    AcademicYearDivision Division,
     Guid? ParentPeriodId = null);
 
 public record EnrollStudentRequest(
@@ -1378,6 +1379,52 @@ public sealed class StudentsApiClient : IContactsClient
             var body = await response.Content.ReadAsStringAsync(ct);
             throw new HttpRequestException(
                 $"CompletePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+    }
+
+    public async Task DeletePeriodAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.DeleteAsync($"/students/periods/{id}", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"DeletePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+    }
+
+    /// <summary>Deactivates an Active period (period-edit-parity-deactivate.md FR-X8),
+    /// freeing its date range so a corrected new period can be created. Mirrors
+    /// <see cref="ActivatePeriodAsync"/> error surfacing: a 422 becomes an
+    /// <see cref="HttpRequestException"/> with the server message inline.</summary>
+    public async Task DeactivatePeriodAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync($"/students/periods/{id}/deactivate", null, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"DeactivatePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+    }
+
+    /// <summary>Archives a period (cleanup path for a Deactivated row,
+    /// period-edit-parity-deactivate.md FR-X5/X9; Open B). Mirrors
+    /// <see cref="CompletePeriodAsync"/> error surfacing.</summary>
+    public async Task ArchivePeriodAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.PostAsync($"/students/periods/{id}/archive", null, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ArchivePeriod failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
                 inner: null,
                 statusCode: response.StatusCode);
         }

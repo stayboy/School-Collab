@@ -215,7 +215,7 @@ public class TopicsByGradeEndpointErrorMappingTests
         var accessor = scope.ServiceProvider.GetRequiredService<SchoolCollab.Core.Tenancy.ITenantContextAccessor>();
         return await accessor.RunWithExplicitTenantAsync(tenantId, async _ =>
         {
-            var period = Period.Create(name, start, end);
+            var period = Period.Create(name, start, end, AcademicYearDivision.None);
             db.Periods.Add(period);
             await db.SaveChangesAsync();
             return period.Id;

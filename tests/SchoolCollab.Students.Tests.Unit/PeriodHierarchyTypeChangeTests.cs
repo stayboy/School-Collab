@@ -11,8 +11,9 @@ namespace SchoolCollab.Students.Tests.Unit;
 
 /// <summary>
 /// Hierarchy-change orphan guard on update (plan-drop-periodtype.md). A top-level
-/// year → sub-period flip must not orphan sub-periods. Unchanged updates and
-/// orphan-free changes still succeed.
+/// year → sub-period flip must not orphan sub-periods. Division is immutable
+/// (period-edit-parity-deactivate.md FR-E1), so a None-division year can no longer
+/// be re-framed as a sub-period. Unchanged updates and orphan-free changes succeed.
 /// </summary>
 [TestClass]
 public class PeriodHierarchyTypeChangeTests
@@ -34,7 +35,7 @@ public class PeriodHierarchyTypeChangeTests
 
         var update = NewUpdate(s);
         var act = async () => await update.HandleAsync(new UpdatePeriod(
-            ay, "AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+            ay, "AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), ParentPeriodId: ay));
         await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
     }
 
@@ -49,26 +50,24 @@ public class PeriodHierarchyTypeChangeTests
 
         var update = NewUpdate(s);
         await update.HandleAsync(new UpdatePeriod(
-            t1, "T1 renamed", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+            t1, "T1 renamed", new DateOnly(2026, 9, 1), new DateOnly(2026, 12, 31), ParentPeriodId: ay));
 
         (await s.Db.Periods.SingleAsync(p => p.Id == t1)).Name.Should().Be("T1 renamed");
     }
 
-    // Guard is narrowly scoped to orphaning: a childless year can be flipped to a sub-period.
+    // Division is immutable (period-edit-parity-deactivate.md FR-E1): a None-division
+    // academic year cannot be re-framed as a Term/Semester sub-period on update.
     [TestMethod]
-    public async Task Update_ChildlessYear_FlipToSubPeriod_Succeeds()
+    public async Task Update_NoneYear_FlipToSubPeriod_Throws()
     {
-        using var s = new StudentsTestScope("fu1-f2-childless");
+        using var s = new StudentsTestScope("fu1-f2-immutable-flip");
         var create = NewCreate(s);
         var ay = (await create.HandleAsync(new CreatePeriod("AY2026", new DateOnly(2026, 9, 1), new DateOnly(2027, 8, 31), Division: AcademicYearDivision.None))).YearId;
         var otherAy = (await create.HandleAsync(new CreatePeriod("AY2027", new DateOnly(2027, 9, 1), new DateOnly(2028, 8, 31), Division: AcademicYearDivision.Terms))).YearId;
 
         var update = NewUpdate(s);
-        await update.HandleAsync(new UpdatePeriod(
-            ay, "AY2026", new DateOnly(2027, 9, 1), new DateOnly(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: otherAy));
-
-        var row = await s.Db.Periods.SingleAsync(p => p.Id == ay);
-        row.Division.Should().Be(AcademicYearDivision.Terms);
-        row.ParentPeriodId.Should().Be(otherAy);
+        var act = async () => await update.HandleAsync(new UpdatePeriod(
+            ay, "AY2026", new DateOnly(2027, 9, 1), new DateOnly(2027, 12, 31), ParentPeriodId: otherAy));
+        await act.Should().ThrowAsync<PeriodFrameworkMismatchException>();
     }
 }

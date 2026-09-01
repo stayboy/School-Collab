@@ -2,7 +2,11 @@
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Admin.Shared.Services
 @using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Students.Core.Domain
 @using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 @inject StudentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
@@ -24,7 +28,67 @@
                 else
                 {
                     <section class="page-container">
-                        <PeriodForm CancelRoute="/students/periods" OnSaved="OnSavedAsync" InitialParentPeriodId="@_initialParent" />
+                        <div class="period-form">
+                            <div class="form-section-header">
+                                <div>
+                                    <h3>New period</h3>
+                                    <p class="form-hint">@CreateHint</p>
+                                </div>
+                            </div>
+
+                            @if (_parentBlocked)
+                            {
+                                @* P2-5: a None-division parent year cannot host sub-periods. Inline
+                                   warning + back affordance instead of a dead-end form. *@
+                                <FluentMessageBar Intent="MessageIntent.Warning" class="mt-3">@BlockedParentMessage</FluentMessageBar>
+                                <div class="mt-3">
+                                    <FluentButton Appearance="Appearance.Accent" Autofocus="true" OnClick="CancelAsync">Back to periods</FluentButton>
+                                </div>
+                            }
+                            else
+                            {
+                                <FluentStack Orientation="Orientation.Horizontal"
+                                             HorizontalGap="8"
+                                             VerticalAlignment="VerticalAlignment.Top"
+                                             class="form-tip">
+                                    <FluentIcon Icon="@(Icons.Regular.Size20.Calendar)" />
+                                    <span>@CreateHint</span>
+                                </FluentStack>
+
+                                <PeriodFormFields Model="_model"
+                                                  IsSubPeriod="_isSubPeriod"
+                                                  DivisionLocked="_isSubPeriod"
+                                                  AcademicYears="_academicYears"
+                                                  DivisionChanged="OnDivisionChangedAsync">
+                                    <NameActions>
+                                        <FluentButton IconStart="@FluentIcons.Calendar"
+                                                      Title="Fill the form with the current academic year (editable template)"
+                                                      OnClick="SuggestAcademicYearAsync" />
+                                        <FluentButton IconStart="@FluentIcons.ArrowClockwise"
+                                                      Title="Fill the form with the next academic year after the latest period"
+                                                      OnClick="BackfillAsync" />
+                                    </NameActions>
+                                </PeriodFormFields>
+
+                                <PeriodSubPeriodsEditor @ref="_subPeriodEditor"
+                                                        Show="@ShowSubPeriodsSection"
+                                                        Division="@_model.DivisionSelect"
+                                                        YearStart="@_model.Start"
+                                                        YearEnd="@_model.End" />
+
+                                <div class="form-actions">
+                                    <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+                                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@(_saving)">
+                                        @(_saving ? "Saving…" : "Create period")
+                                    </FluentButton>
+                                </div>
+                            }
+
+                            @if (!string.IsNullOrEmpty(_error))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                            }
+                        </div>
                     </section>
                 }
             </ChildContent>
@@ -41,9 +105,43 @@
 </ErrorBoundary>
 
 @code {
+    private PeriodSubPeriodsEditor? _subPeriodEditor;
     private bool _isRealTenant;
     private Guid? _initialParent;
+    private bool _saving;
+    private string? _error;
     private volatile bool _disposed;
+
+    private sealed class PeriodFormModel : PeriodFormFields.IPeriodFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        public string DivisionSelect { get; set; } = "None";
+        public string ParentPeriodIdText { get; set; } = "";
+        public DateTime? Start { get; set; }
+        public DateTime? End { get; set; }
+    }
+
+    private readonly PeriodFormModel _model = new();
+    private PeriodDto[]? _loadedPeriods;
+    private bool _isSubPeriod;
+    private bool _parentBlocked;
+
+    private const string CreateHint =
+        "Pre-filled with the current academic year (1 Sep – 31 Aug) as an editable template. " +
+        "Use the buttons to suggest or backfill, then adjust as needed.";
+
+    private const string BlockedParentMessage =
+        "This academic year's division is 'None' — sub-periods are not allowed. " +
+        "Create an Academic Year instead, or change the year's division.";
+
+    private PeriodDto[] _academicYears =>
+        _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _model.DivisionSelect).ToArray() ?? [];
+
+    /// <summary>Create mode: the sub-periods section shows for a top-level
+    /// Terms/Semesters year that is not a sub-period and not a blocked parent.</summary>
+    private bool ShowSubPeriodsSection =>
+        !_isSubPeriod && !_parentBlocked
+        && (_model.DivisionSelect == "Terms" || _model.DivisionSelect == "Semesters");
 
     protected override async Task OnInitializedAsync()
     {
@@ -55,9 +153,131 @@
         {
             _initialParent = parentId;
         }
+
+        try
+        {
+            _loadedPeriods = await Api.ListPeriodsAsync() ?? [];
+
+            if (_initialParent is { } pid)
+            {
+                _model.ParentPeriodIdText = pid.ToString();
+                var parent = _loadedPeriods.FirstOrDefault(p => p.Id == pid);
+                _model.DivisionSelect = parent?.Division ?? "None";
+                _isSubPeriod = true;
+                if (_model.DivisionSelect == "None")
+                {
+                    _parentBlocked = true;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(_model.Name) && !_parentBlocked)
+            {
+                SuggestAcademicYearAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to initialize period create form");
+            _error = ex.Message;
+        }
     }
 
-    private void OnSavedAsync(PeriodDto _) => Nav.NavigateTo("/students/periods");
+    private Task OnDivisionChangedAsync(string _) => Task.CompletedTask;
 
-    public void Dispose() => _disposed = true;
+    private static AcademicYearDivision ParseDivision(string value) =>
+        Enum.TryParse<AcademicYearDivision>(value, out var division) ? division : AcademicYearDivision.None;
+
+    private void SuggestAcademicYearAsync()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        ApplySuggestion(AcademicYearSuggestion.ForDate(today));
+    }
+
+    private void BackfillAsync() => ApplySuggestion(AcademicYearSuggestion.BackfillFrom(_loadedPeriods));
+
+    private void ApplySuggestion((string Name, DateOnly StartDate, DateOnly EndDate) suggestion)
+    {
+        _model.Name = suggestion.Name;
+        _model.Start = suggestion.StartDate.ToDateTime(TimeOnly.MinValue);
+        _model.End = suggestion.EndDate.ToDateTime(TimeOnly.MinValue);
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_model.Name))
+        {
+            _error = "Enter a period name.";
+            return;
+        }
+        if (_model.Start is null || _model.End is null)
+        {
+            _error = "Enter a start and end date.";
+            return;
+        }
+        if (_model.End.Value.Date < _model.Start.Value.Date)
+        {
+            _error = "End date must be on or after the start date.";
+            return;
+        }
+
+        var division = ParseDivision(_model.DivisionSelect);
+        Guid? parentId = Guid.TryParse(_model.ParentPeriodIdText, out var pid) ? pid : null;
+
+        if (_isSubPeriod && !parentId.HasValue)
+        {
+            _error = "Select a parent academic year for this period.";
+            return;
+        }
+        if (division == AcademicYearDivision.None && parentId.HasValue)
+        {
+            _error = "A None-division period is a top-level academic year and must not have a parent.";
+            return;
+        }
+
+        // Client-side sub-period validation mirrors FR-C2 (names/dates/containment/
+        // sibling overlap) before the submit is sent.
+        IReadOnlyList<SubPeriodDefinitionRequest>? subPeriods = null;
+        if (ShowSubPeriodsSection && _subPeriodEditor is not null)
+        {
+            if (!_subPeriodEditor.TryBuildDefinitions(out subPeriods, out var subError))
+            {
+                _error = subError;
+                return;
+            }
+        }
+
+        _saving = true;
+        try
+        {
+            var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
+            var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
+            var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(
+                _model.Name.Trim(), startDate, endDate, division, parentId, subPeriods));
+            var saved = await Api.GetPeriodByIdAsync(id);
+
+            if (_disposed) return;
+            Logger.LogInformation("Period created {Id}", saved?.Id);
+            Nav.NavigateTo("/students/periods");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create period");
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    private void CancelAsync() => Nav.NavigateTo("/students/periods");
+
+    public void Dispose()
+    {
+        _disposed = true;
+    }
 }

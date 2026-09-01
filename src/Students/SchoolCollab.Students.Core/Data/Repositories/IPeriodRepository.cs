@@ -17,6 +17,23 @@ public interface IPeriodRepository
     Task AddRangeAsync(IReadOnlyList<Period> periods, CancellationToken cancellationToken = default);
 
     Task UpdateAsync(Period period, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Hard-deletes a period (period-draft-delete.md FR-D1). Inherited from
+    /// <see cref="RepositoryBase{TEntity,TContext}"/> — <c>Set.Remove</c> + one
+    /// <c>SaveChanges</c>. For a top-level year, sub-period rows go with it via the
+    /// declared <c>OnDelete(DeleteBehavior.Cascade)</c> on the self-referencing
+    /// <c>ParentPeriodId</c> FK (FR-D3) — no per-row removal is implemented here.
+    /// </summary>
+    Task DeleteAsync(Period period, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-D6 defensive housekeeping: surviving DRAFT periods whose NextPeriodId
+    /// points at the given (just-deleted) period id. Tracked, so clearing the link
+    /// and the delete itself persist in one SaveChanges (NFR-D1). Non-Draft links
+    /// stay untouched (EC-2: historical records).
+    /// </summary>
+    Task<Period[]> GetDraftPeriodsLinkedToAsync(Guid nextPeriodId, CancellationToken cancellationToken = default);
     Task<PeriodDto[]> ListAsync(CancellationToken cancellationToken = default);
     Task<Period[]> GetActivePeriodsEndingBeforeAsync(DateOnly date, CancellationToken cancellationToken = default);
 
@@ -63,22 +80,10 @@ public interface IPeriodRepository
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns the count of non-completed (Draft or Active) Term/Semester
-    /// sub-periods of the given academic year. Used by the Update handler to
-    /// reject a top-level year's division change while sub-periods exist
-    /// (plan-drop-periodtype.md — the operator must complete/remove them first).
-    /// </summary>
-    Task<int> GetNonCompletedSubPeriodCountAsync(
-        Guid parentPeriodId,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
     /// Returns ALL sub-periods (Term/Semester) of the given academic year, ANY
     /// status. Used by <c>ActivatePeriodHandler</c> (FR-H4a) to pick the earliest
-    /// activatable sub-period of a newly activated year, and by
-    /// <c>UpdatePeriodHandler</c> to reject a top-level year → sub-period flip that
-    /// would orphan sub-periods. Tracked — the chosen sub-period is mutated and
-    /// persisted by the handler's single SaveChanges.
+    /// activatable sub-period of a newly activated year. Tracked — the chosen
+    /// sub-period is mutated and persisted by the handler's single SaveChanges.
     /// </summary>
     Task<Period[]> GetSubPeriodsAsync(
         Guid parentPeriodId,

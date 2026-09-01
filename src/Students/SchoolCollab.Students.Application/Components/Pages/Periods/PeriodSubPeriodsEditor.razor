@@ -1,0 +1,526 @@
+@* PeriodSubPeriodsEditor — the single sub-period surface shared by period create
+   and edit (period-edit-parity-deactivate.md FR-E3/E4/E7). Replaces the old
+   in-form section of PeriodForm (create mode: in-memory rows persisted atomically
+   with the year) and the retired SubPeriodsSection (edit mode: live add/edit/delete
+   on existing sub-periods). The Auto-split button is visible in BOTH modes (FR-E4).
+
+   Create mode (YearId == null): the host page calls <see cref="TryBuildDefinitions"/>
+   at submit to collect the validated in-memory rows for the atomic year create.
+
+   Edit mode (YearId != null): performs live CRUD via the API and fires OnChanged.
+   Auto-split is enabled only when the year range is valid AND all existing
+   sub-periods are Draft or none exist (FR-E5); replacing Draft sub-periods requires
+   confirmation; any non-Draft sub-period disables the button with a tooltip. *@
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
+@using Microsoft.AspNetCore.Components
+@using Microsoft.Extensions.Logging
+@using Microsoft.FluentUI.AspNetCore.Components
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+
+@if (Show)
+{
+    <div class="sub-periods-editor">
+        <div class="sub-periods-header">
+            <h4>Sub-periods</h4>
+            <div class="sub-periods-actions">
+                <FluentButton Appearance="Appearance.Accent"
+                              OnClick="AutoSplitAsync"
+                              Disabled="@(!CanAutoSplit)"
+                              Title="@AutoSplitTitle">
+                    @AutoSplitLabel
+                </FluentButton>
+                @if (YearId is null)
+                {
+                    <FluentButton Appearance="Appearance.Outline" OnClick="AddCreateRowAsync">+ Add sub-period</FluentButton>
+                }
+            </div>
+        </div>
+
+        @if (YearId is null)
+        {
+            @* ── Create mode: in-memory definition rows ─────────────────────── *@
+            <p class="form-hint">Terms/Semesters are created together with this year in a single operation.</p>
+            @if (_createRows.Count == 0)
+            {
+                <p class="muted">No sub-periods yet — add rows or use Auto-split.</p>
+            }
+            else
+            {
+                @for (var rowIndex = 0; rowIndex < _createRows.Count; rowIndex++)
+                {
+                    var row = _createRows[rowIndex];
+                    <div class="sub-period-row">
+                        <FluentTextField Label="" @bind-Value="row.Name"
+                                         Placeholder="Name"
+                                         Style="flex:1; min-width:0" />
+                        <FluentDatePicker Label="" @bind-Value="row.Start" Style="flex:1; min-width:0" />
+                        <FluentDatePicker Label="" @bind-Value="row.End"   Style="flex:1; min-width:0" />
+                        <FluentButton IconStart="@FluentIcons.Dismiss"
+                                      Title="Remove this sub-period"
+                                      OnClick="@(() => RemoveCreateRowAsync(rowIndex))" />
+                    </div>
+                }
+            }
+        }
+        else
+        {
+            @* ── Edit mode: live list + inline add/edit ─────────────────────── *@
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+            }
+
+            @if (_loading)
+            {
+                <div class="spinner-container"><FluentProgressRing /></div>
+            }
+            else if (_subs.Length == 0 && _editingId is null)
+            {
+                <FluentMessageBar Intent="MessageIntent.Info">
+                    No sub-periods yet. Add terms or semesters below.
+                </FluentMessageBar>
+            }
+            else
+            {
+                <div class="subperiods-list" role="table" aria-label="Sub-periods">
+                    <div class="subperiods-row subperiods-row--head" role="row">
+                        <span role="columnheader">Name</span>
+                        <span role="columnheader">Type</span>
+                        <span role="columnheader">Start</span>
+                        <span role="columnheader">End</span>
+                        <span role="columnheader">Status</span>
+                        <span role="columnheader"></span>
+                    </div>
+                    @foreach (var p in _subs)
+                    {
+                        <div class="subperiods-row @(p.Id == _editingId ? "subperiods-row--editing" : null)" role="row">
+                            <span role="cell" class="subperiods-name">@p.Name</span>
+                            <span role="cell"><FluentBadge Appearance="Appearance.Neutral">@GetKindLabel(p)</FluentBadge></span>
+                            <span role="cell">@p.StartDate.ToString("d")</span>
+                            <span role="cell">@p.EndDate.ToString("d")</span>
+                            <span role="cell"><FluentBadge Appearance="@GetStatusAppearance(p.Status)">@p.Status</FluentBadge></span>
+                            <span role="cell" class="subperiods-actions">
+                                @if (p.Id == _editingId)
+                                {
+                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Dismiss"
+                                                  Title="Cancel editing" OnClick="CancelEdit">Cancel</FluentButton>
+                                }
+                                else
+                                {
+                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Edit"
+                                                  Title="Edit sub-period" OnClick="@(() => StartEdit(p))">Edit</FluentButton>
+                                    @if (p.Status == "Draft")
+                                    {
+                                        <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Delete"
+                                                      Title="Delete sub-period" OnClick="@(() => OnDeleteAsync(p))">Delete</FluentButton>
+                                    }
+                                }
+                            </span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @* Always-visible inline add row (or the edit row when editing). *@
+            <div class="subperiods-inline-add">
+                <FluentTextField @bind-Value="_name"
+                                 Placeholder="@(_editingId is null ? "New sub-period name (e.g. Term 1)" : "Sub-period name")"
+                                 class="subperiods-field-name" />
+                @if (string.IsNullOrEmpty(Kind))
+                {
+                    <FluentSelect TOption="string" @bind-Value="_typeText" class="subperiods-field-type">
+                        <FluentOption Value="Term">Term</FluentOption>
+                        <FluentOption Value="Semester">Semester</FluentOption>
+                    </FluentSelect>
+                }
+                <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
+                <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
+                <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+                              Title="@(_editingId is null ? "Add sub-period" : "Save sub-period")">
+                    @(_saving ? "Saving…" : _editingId is null ? "Add" : "Save")
+                </FluentButton>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    /// <summary>The academic year id in edit mode; null in create mode.</summary>
+    [Parameter] public Guid? YearId { get; set; }
+
+    /// <summary>True when this section should render (top-level Terms/Semesters year).</summary>
+    [Parameter] public bool Show { get; set; }
+
+    /// <summary>The year's division ("Terms"/"Semesters"/"None"/null). Drives the
+    /// Auto-split span count + the sub-period kind label.</summary>
+    [Parameter] public string? Division { get; set; }
+
+    /// <summary>The year's date range (create: from the form; edit: editable).</summary>
+    [Parameter] public DateTime? YearStart { get; set; }
+
+    /// <summary>The year's date range (create: from the form; edit: editable).</summary>
+    [Parameter] public DateTime? YearEnd { get; set; }
+
+    /// <summary>Fired after an edit-mode CRUD change so the host page stays in sync.</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    [Inject] private StudentsApiClient Api { get; set; } = default!;
+    [Inject] private IDialogService DialogService { get; set; } = default!;
+    [Inject] private ILogger<PeriodSubPeriodsEditor> Logger { get; set; } = default!;
+
+    private sealed class SubPeriodRow
+    {
+        public string Name { get; set; } = "";
+        public DateTime? Start { get; set; }
+        public DateTime? End { get; set; }
+    }
+
+    private readonly List<SubPeriodRow> _createRows = new();
+    private PeriodDto[] _subs = [];
+    private bool _loading;
+    private bool _saving;
+    private string? _error;
+    private Guid? _editingId;
+    private string _name = string.Empty;
+    private DateTime? _start;
+    private DateTime? _end;
+    private string _typeText = "Term";
+    private volatile bool _disposed;
+
+    /// <summary>The sub-period kind label for edit-mode rows / splits.</summary>
+    private string Kind => Division switch
+    {
+        "Terms" => "Term",
+        "Semesters" => "Semester",
+        _ => _typeText == "Semester" ? "Semester" : "Term"
+    };
+
+    private bool HasYearRange =>
+        YearStart is not null && YearEnd is not null && YearEnd.Value.Date >= YearStart.Value.Date;
+
+    private int SplitCount => Division == "Semesters" ? 2 : 3;
+
+    private string AutoSplitLabel => $"Auto-split into {SplitCount}";
+
+    /// <summary>
+    /// Auto-split is enabled (FR-E5) only when the year has a valid range AND every
+    /// existing sub-period (edit mode) is Draft or there are none.
+    /// </summary>
+    private bool CanAutoSplit
+        => HasYearRange
+           && (YearId is null || _subs.All(sp => sp.Status == "Draft"));
+
+    private string AutoSplitTitle
+    {
+        get
+        {
+            if (!HasYearRange)
+                return "Enter the year's date range to auto-split";
+            if (YearId is not null && _subs.Any(sp => sp.Status != "Draft"))
+                return "Cannot auto-split while non-Draft sub-periods exist. Deactivate or complete them first.";
+            return $"Split the year range into {SplitCount} equal spans";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (YearId is { } yearId)
+        {
+            await ReloadAsync(yearId);
+        }
+    }
+
+    private async Task ReloadAsync(Guid yearId)
+    {
+        if (_disposed) return;
+        _loading = true;
+        try
+        {
+            _subs = await Api.ListSubPeriodsAsync(yearId) ?? [];
+            _error = null;
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load sub-periods for {YearId}", yearId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    // ── Create-mode rows ────────────────────────────────────────────────────
+
+    private void AddCreateRowAsync() => _createRows.Add(new SubPeriodRow());
+
+    private void RemoveCreateRowAsync(int index)
+    {
+        if (index >= 0 && index < _createRows.Count)
+            _createRows.RemoveAt(index);
+    }
+
+    /// <summary>
+    /// Validates the create-mode in-memory rows against FR-C2 and materializes them
+    /// into request definitions. Called by the host page at submit. Returns
+    /// <c>false</c> with an inline error on the first violation.
+    /// </summary>
+    public bool TryBuildDefinitions(out IReadOnlyList<SubPeriodDefinitionRequest>? definitions, out string error)
+    {
+        definitions = null;
+        error = "";
+        var result = new List<SubPeriodDefinitionRequest>();
+        if (YearId is not null) return true; // edit mode has no in-memory definitions
+        var startYear = DateOnly.FromDateTime((YearStart ?? DateTime.Today).Date);
+        var endYear = DateOnly.FromDateTime((YearEnd ?? DateTime.Today).Date);
+        foreach (var row in _createRows)
+        {
+            if (string.IsNullOrWhiteSpace(row.Name))
+            {
+                error = "Every sub-period needs a name.";
+                return false;
+            }
+            if (row.Start is null || row.End is null)
+            {
+                error = $"Sub-period '{row.Name}' needs a start and end date.";
+                return false;
+            }
+            var s = DateOnly.FromDateTime(row.Start.Value.Date);
+            var e = DateOnly.FromDateTime(row.End.Value.Date);
+            if (e < s)
+            {
+                error = $"Sub-period '{row.Name}' end date must be on or after its start date.";
+                return false;
+            }
+            if (s < startYear || e > endYear)
+            {
+                error = $"Sub-period '{row.Name}' must be contained within the year range.";
+                return false;
+            }
+            foreach (var other in result)
+            {
+                if (s <= other.EndDate && e >= other.StartDate)
+                {
+                    error = $"Sub-period '{row.Name}' overlaps sibling sub-period '{other.Name}'.";
+                    return false;
+                }
+            }
+            result.Add(new SubPeriodDefinitionRequest(row.Name.Trim(), s, e));
+        }
+        definitions = result;
+        return true;
+    }
+
+    // ── Auto-split (both modes) ─────────────────────────────────────────────
+
+    private async Task AutoSplitAsync()
+    {
+        if (!CanAutoSplit || !HasYearRange) return;
+
+        var start = DateOnly.FromDateTime(YearStart!.Value.Date);
+        var end = DateOnly.FromDateTime(YearEnd!.Value.Date);
+        var dayCount = end.DayNumber - start.DayNumber + 1;
+        if (dayCount < SplitCount) return;
+
+        var spans = BuildSpans(start, end, SplitCount, Kind);
+
+        if (YearId is { } yearId)
+        {
+            // Edit mode: confirm before replacing any existing Draft sub-periods, then
+            // delete the Drafts and create the split spans live.
+            if (_subs.Any() && !_disposed)
+            {
+                var draftCount = _subs.Count(sp => sp.Status == "Draft");
+                if (draftCount > 0)
+                {
+                    var dialog = await DialogService.ShowConfirmationAsync(
+                        $"Auto-split will replace {draftCount} existing draft sub-period{(draftCount == 1 ? "" : "s")} " +
+                        "with new equal spans. Continue?",
+                        "Auto-split",
+                        "Cancel");
+                    var result = await dialog.Result;
+                    if (result.Cancelled) return;
+                }
+            }
+
+            _saving = true;
+            try
+            {
+                foreach (var draft in _subs.Where(sp => sp.Status == "Draft").ToArray())
+                    await Api.DeletePeriodAsync(draft.Id);
+                var division = DeduceDivision();
+                foreach (var span in spans)
+                    await Api.CreatePeriodAsync(new CreatePeriodRequest(span.Name, span.StartDate, span.EndDate, division, yearId));
+
+                if (_disposed) return;
+                ResetInlineFields();
+                await ReloadAsync(yearId);
+                await OnChanged.InvokeAsync();
+            }
+            catch (Exception ex)
+            {
+                if (_disposed) return;
+                Logger.LogError(ex, "Failed to auto-split sub-periods for year {YearId}", yearId);
+                _error = ex.Message;
+            }
+            finally
+            {
+                if (!_disposed) _saving = false;
+            }
+        }
+        else
+        {
+            _createRows.Clear();
+            foreach (var span in spans)
+                _createRows.Add(new SubPeriodRow { Name = span.Name, Start = span.StartDate.ToDateTime(TimeOnly.MinValue), End = span.EndDate.ToDateTime(TimeOnly.MinValue) });
+        }
+    }
+
+    private static (string Name, DateOnly StartDate, DateOnly EndDate)[] BuildSpans(
+        DateOnly start, DateOnly end, int splitCount, string kindName)
+    {
+        var dayCount = end.DayNumber - start.DayNumber + 1;
+        var spans = new (string, DateOnly, DateOnly)[splitCount];
+        for (var i = 0; i < splitCount; i++)
+        {
+            var spanStartDay = start.DayNumber + i * dayCount / splitCount;
+            var spanEndDay = start.DayNumber + (i + 1) * dayCount / splitCount - 1;
+            spans[i] = ($"{kindName} {i + 1}",
+                DateOnly.FromDayNumber(spanStartDay),
+                DateOnly.FromDayNumber(spanEndDay));
+        }
+        return spans;
+    }
+
+    // ── Edit-mode inline add/edit ───────────────────────────────────────────
+
+    private void StartEdit(PeriodDto p)
+    {
+        _editingId = p.Id;
+        _name = p.Name;
+        _start = p.StartDate.ToDateTime(TimeOnly.MinValue);
+        _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
+        _typeText = p.Division == "Semesters" ? "Semester" : "Term";
+        _error = null;
+    }
+
+    private void CancelEdit()
+    {
+        _editingId = null;
+        ResetInlineFields();
+    }
+
+    private void ResetInlineFields()
+    {
+        _name = string.Empty;
+        _start = null;
+        _end = null;
+        _typeText = "Term";
+    }
+
+    /// <summary>FR-D12: deletes a Draft sub-period row, sharing the grid's wording.</summary>
+    private async Task OnDeleteAsync(PeriodDto p)
+    {
+        if (_disposed || YearId is null) return;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            PeriodDeletePrompts.SubPeriodMessage(p.Name, GetKindLabel(p)),
+            "Delete",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        Logger.LogInformation("Deleting sub-period {Id} of year {YearId}", p.Id, YearId.Value);
+        try
+        {
+            await Api.DeletePeriodAsync(p.Id);
+            if (_disposed) return;
+            await ReloadAsync(YearId.Value);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to delete sub-period {Id} of year {YearId}", p.Id, YearId.Value);
+            _error = ex.Message;
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (YearId is null) return;
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_name))
+        {
+            _error = "Enter a sub-period name.";
+            return;
+        }
+        if (_start is null || _end is null)
+        {
+            _error = "Enter a start and end date.";
+            return;
+        }
+        if (_end.Value.Date < _start.Value.Date)
+        {
+            _error = "End date must be on or after the start date.";
+            return;
+        }
+
+        var division = DeduceDivision();
+        var startDate = DateOnly.FromDateTime(_start.Value.Date);
+        var endDate = DateOnly.FromDateTime(_end.Value.Date);
+
+        _saving = true;
+        try
+        {
+            if (_editingId is { } editId)
+            {
+                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, YearId.Value));
+            }
+            else
+            {
+                await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, YearId.Value));
+            }
+
+            if (_disposed) return;
+            ResetInlineFields();
+            _editingId = null;
+            await ReloadAsync(YearId.Value);
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save sub-period for year {YearId}", YearId.Value);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    private AcademicYearDivision DeduceDivision() => Division switch
+    {
+        "Terms" => AcademicYearDivision.Terms,
+        "Semesters" => AcademicYearDivision.Semesters,
+        _ => _typeText == "Semester" ? AcademicYearDivision.Semesters : AcademicYearDivision.Terms
+    };
+
+    private static string GetKindLabel(PeriodDto period)
+        => period.Division == "Semesters" ? "Semester" : "Term";
+
+    private static Appearance GetStatusAppearance(string status) => status switch
+    {
+        "Draft"     => Appearance.Neutral,
+        "Active"    => Appearance.Accent,
+        "Completed" => Appearance.Lightweight,
+        "Archived"  => Appearance.Neutral,
+        _           => Appearance.Neutral
+    };
+
+    public void Dispose() => _disposed = true;
+}

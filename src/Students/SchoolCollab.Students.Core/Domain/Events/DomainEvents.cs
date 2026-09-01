@@ -14,6 +14,8 @@ public sealed record PeriodCreatedEvent(Guid PeriodId, string Name) : IDomainEve
 public sealed record PeriodUpdatedEvent(Guid PeriodId, string Name) : IDomainEvent;
 public sealed record PeriodActivatedEvent(Guid PeriodId, string Name) : IDomainEvent;
 public sealed record PeriodCompletedEvent(Guid PeriodId, string Name) : IDomainEvent;
+public sealed record PeriodDeletedEvent(Guid PeriodId, string Name) : IDomainEvent;
+public sealed record PeriodDeactivatedEvent(Guid PeriodId, string Name) : IDomainEvent;
 
 public sealed record StudentEnrolledEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid GradeLevelId, Guid? StreamCodedValueId) : IDomainEvent;
 public sealed record StudentTransferredEvent(Guid EnrollmentId, Guid StudentId, Guid PeriodId, Guid NewGradeLevelId, Guid? NewStreamCodedValueId) : IDomainEvent;
