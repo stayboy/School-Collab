@@ -9,13 +9,15 @@
       • This component owns only the field rows:
           Division → Parent academic year (sub-period create only) →
           Period name (+ optional NameActions) → Dates.
-      • Name / ParentPeriodIdText / DivisionSelect are string-based bindings;
-        the consuming page maps them to/from the API DTOs.
+      • Name / ParentPeriodIdText are string-based bindings; Division is
+        enum-bound (AcademicYearDivision) directly on the model. The
+        consuming page maps them to/from the API DTOs.
 
     Both the form's create state and its edit state are backed by the same
     PeriodFormModel, which implements IPeriodFormModel.
 *@
 @using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Admin.Shared.Components
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
@@ -25,34 +27,29 @@
    parent) means the year may contain only that sub-period kind; on a
    sub-period (parent selected) it is the sub-period's own kind. When the
    period is a sub-period the division is locked to its parent's division
-   and the parent dropdown is shown. *@
+   and the parent dropdown is shown.
+
+   The Division selector uses the shared DropdownForEnum wrapper bound to the
+   AcademicYearDivision enum directly on the form model — no string adapter,
+   no change callback (the consuming pages had no side-effects on change). *@
 <FormRow Label="Division *" AlignTop>
-    <FluentSelect TOption="string"
-                  @bind-Value="Model.DivisionSelect"
-                  @bind-Value:after="@( () => DivisionChanged.InvokeAsync(Model.DivisionSelect) )"
-                  Label=""
-                  Disabled="@DivisionLocked"
-                  Style="flex:1; min-width:0">
-        <FluentOption Value="None">None (single academic year)</FluentOption>
-        <FluentOption Value="Terms">Terms</FluentOption>
-        <FluentOption Value="Semesters">Semesters</FluentOption>
-    </FluentSelect>
+    <DropdownForEnum TEnum="AcademicYearDivision"
+                     @bind-SelectedValue="Model.Division"
+                     Disabled="@DivisionLocked"
+                     Width="FieldWidth.W9" />
 </FormRow>
 
 @if (IsSubPeriod)
 {
     <FormRow Label="Parent academic year *" AlignTop>
-        <FluentSelect TOption="string"
-                      @bind-Value="Model.ParentPeriodIdText"
-                      Label=""
-                      Disabled="true"
-                      Style="flex:1; min-width:0">
-            <FluentOption Value="">— Select academic year —</FluentOption>
-            @foreach (var ay in AcademicYears)
-            {
-                <FluentOption Value="@ay.Id.ToString()">@ay.Name</FluentOption>
-            }
-        </FluentSelect>
+        <DropdownComponent TItem="PeriodDto" TValue="string"
+                           Items="@AcademicYears"
+                           @bind-SelectedValue="Model.ParentPeriodIdText"
+                           OptionText="@(ay => ay.Name)"
+                           OptionValue="@(ay => ay.Id.ToString())"
+                           Disabled="true"
+                           Placeholder="— Select academic year —"
+                           Width="FieldWidth.W9" />
     </FormRow>
 }
 
@@ -88,7 +85,7 @@
     public interface IPeriodFormModel
     {
         string Name { get; set; }
-        string DivisionSelect { get; set; }
+        AcademicYearDivision Division { get; set; }
         string ParentPeriodIdText { get; set; }
         DateTime? Start { get; set; }
         DateTime? End { get; set; }
@@ -99,11 +96,6 @@
     /// <summary>True when the period is a sub-period (has a parent): the parent
     /// dropdown is shown and the division is locked to the parent's division.</summary>
     [Parameter] public bool IsSubPeriod { get; set; }
-
-    /// <summary>Invoked after the Division selection changes. The owning form
-    /// uses this to re-evaluate create-only sections that depend on the division
-    /// (e.g. the atomic-create sub-periods section).</summary>
-    [Parameter] public EventCallback<string> DivisionChanged { get; set; }
 
     /// <summary>True when the Division selector is disabled (sub-period mode).</summary>
     [Parameter] public bool DivisionLocked { get; set; }
