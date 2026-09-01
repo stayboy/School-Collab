@@ -21,7 +21,7 @@
 @if (Show)
 {
     <div class="sub-periods-editor">
-        <div class="sub-periods-header">
+        <div class="sub-periods-header mb-3">
             <h4>Sub-periods</h4>
             <div class="sub-periods-actions">
                 <FluentButton Appearance="Appearance.Accent"
@@ -66,6 +66,27 @@
         else
         {
             @* ── Edit mode: live list (FluentDataGrid in-cell editing) + add row ── *@
+
+            @* Always-visible inline add row (hidden while an in-cell edit is active).
+               Placed directly beneath the "Sub-periods" header, before the grid. *@
+            @if (_editingId is null)
+            {
+                <FluentStack Orientation="Orientation.Horizontal"
+                             HorizontalGap="8"
+                             VerticalAlignment="VerticalAlignment.Bottom"
+                             class="subperiods-inline-add">
+                    <FluentTextField @bind-Value="_name"
+                                     Placeholder="New sub-period name (e.g. Term 1)"
+                                     Style="flex: 2; min-width: 160px" />
+                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" Style="width: 130px" />
+                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   Style="width: 130px" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+                                  Title="Add sub-period">
+                        @(_saving ? "Saving…" : "Add")
+                    </FluentButton>
+                </FluentStack>
+            }
+
             @if (!string.IsNullOrEmpty(_error))
             {
                 <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
@@ -146,22 +167,6 @@
                     </TemplateColumn>
                 </FluentDataGrid>
             }
-
-            @* Always-visible inline add row (hidden while an in-cell edit is active). *@
-            @if (_editingId is null)
-            {
-                <div class="subperiods-inline-add">
-                    <FluentTextField @bind-Value="_name"
-                                     Placeholder="New sub-period name (e.g. Term 1)"
-                                     class="subperiods-field-name" />
-                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
-                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
-                                  Title="Add sub-period">
-                        @(_saving ? "Saving…" : "Add")
-                    </FluentButton>
-                </div>
-            }
         }
     </div>
 }
@@ -223,10 +228,6 @@
     private int SplitCount => Division == "Semesters" ? 2 : 3;
 
     private string AutoSplitLabel => $"Auto-split into {SplitCount}";
-
-    /// <summary>
-    /// Auto-split is enabled (FR-E5) only when the year has a valid range AND every
-    /// existing sub-period (edit mode) is Draft or there are none.
     /// </summary>
     private bool CanAutoSplit
         => HasYearRange
@@ -474,10 +475,6 @@
         _start = null;
         _end = null;
     }
-
-    /// <summary>FR-D12: deletes a Draft sub-period row. The destructive confirm is
-    /// enforced once by the shared <c>RowActionsMenu</c> (the kebab that owns this
-    /// action); this method only performs the delete, so a page-level confirm here
     /// would double-prompt.</summary>
     private async Task OnDeleteAsync(PeriodDto p)
     {
@@ -529,11 +526,11 @@
         {
             if (_editingId is { } editId)
             {
-                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, YearId.Value));
+                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, YearId.Value, null));
             }
             else
             {
-                await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, YearId.Value));
+                await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, YearId.Value, null, null));
             }
 
             if (_disposed) return;

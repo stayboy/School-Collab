@@ -40,7 +40,7 @@ public sealed class ListSubPeriodsHandler(
                     p.Id, p.Name, p.StartDate, p.EndDate,
                     p.Status.ToString(),
                     p.ParentPeriodId, p.NextPeriodId,
-                    p.Division.ToString(),
+                    p.Division.ToString(), p.ActivationToleranceDays,
                     p.CreatedAt, p.UpdatedAt)).ToArray();
             },
             CacheOptions,

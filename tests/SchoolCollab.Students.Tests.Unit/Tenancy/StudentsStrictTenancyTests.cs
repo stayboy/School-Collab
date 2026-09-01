@@ -160,7 +160,7 @@ public class StudentsStrictTenancyTests
         var create = new CreatePeriodHandler(
             s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
         var activate = new ActivatePeriodHandler(
-            s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
+            s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
         // Tenant A creates + activates a year + term. The Draft term is seeded
         // before the Terms year activates (guard FR-G1).

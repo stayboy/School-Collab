@@ -33,7 +33,7 @@ public class ActivityGroupPeriodAlignedSpanTests
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) => new(
         s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache,
-        NullLogger<ActivatePeriodHandler>.Instance);
+        NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     private static AddMembershipHandler NewAdd(StudentsTestScope s) => new(
         s.ActivityGroups, s.Memberships, s.Students,

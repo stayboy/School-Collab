@@ -43,6 +43,10 @@ internal sealed class PeriodConfiguration : TenantEntityTypeConfigurationBase<Pe
 
         builder.Property(x => x.ParentPeriodId);
 
+        // Activation-window tolerance override (period-activation-window-auto-activation.md
+        // FR-W3): nullable int; null = inherit the global default.
+        builder.Property(x => x.ActivationToleranceDays);
+
         // Self-referencing hierarchy FK: deleting an AcademicYear cascades its
         // sub-periods (EC-H1). A sub-period still cannot be hard-deleted while
         // activity-group memberships reference it (membership FK is RESTRICT).

@@ -30,7 +30,7 @@ public class PeriodGuardAndAtomicCreateTests
         new(s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) =>
-        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
+        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     // ── Activation guard (FR-G1..G4 / AC-G1..G4) ─────────────────────────────
 

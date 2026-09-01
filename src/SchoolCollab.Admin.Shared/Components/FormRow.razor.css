@@ -33,6 +33,9 @@
 .form-row {
     display: flex;
     align-items: center;
+    /* Vertical rhythm between consecutive rows. 0.75rem (12px) is the
+       repo's standard field gap; without it stacked FormRows are flush. */
+    margin-bottom: 0.75rem;
     /* No min-height here — the input cell's tallest child defines the
        row height, and the label cell stretches to match (align-items
        center positions the label text within that height). */

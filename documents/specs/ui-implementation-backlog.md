@@ -320,6 +320,14 @@
 
 ---
 
+## Follow-ups — Period Activation Window (period-activation-window-auto-activation.md)
+
+- [ ] **P2** Expose per-period `ActivationToleranceDays` in the period create/edit UI
+  (year + sub-periods). Backend (entity, DTO, create/update commands, API) is shipped;
+  only the form field is missing. *Source:* `period-activation-window-auto-activation.md` FR-W3.
+
+---
+
 ## Dependency Graph
 
 ```

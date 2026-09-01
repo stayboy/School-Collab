@@ -106,7 +106,7 @@ public static class PeriodRoutes
             try
             {
                 await handler.HandleAsync(new UpdatePeriod(id, req.Name, req.StartDate,
-                    req.EndDate, req.ParentPeriodId), ct);
+                    req.EndDate, req.ParentPeriodId, req.ActivationToleranceDays), ct);
                 return Results.NoContent();
             }
             catch (PeriodNotFoundException)
@@ -150,6 +150,10 @@ public static class PeriodRoutes
                 return Results.NotFound();
             }
             catch (PeriodGuardException ex)
+            {
+                return Results.Json(new { ex.Message }, statusCode: 422);
+            }
+            catch (PeriodActivationWindowException ex)
             {
                 return Results.Json(new { ex.Message }, statusCode: 422);
             }
@@ -259,4 +263,5 @@ internal record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    Guid? ParentPeriodId = null);
+    Guid? ParentPeriodId = null,
+    int? ActivationToleranceDays = null);

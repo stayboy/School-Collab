@@ -25,5 +25,6 @@ public sealed record PeriodDto(
     Guid? ParentPeriodId,
     Guid? NextPeriodId,
     string Division,
+    int? ActivationToleranceDays,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

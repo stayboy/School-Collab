@@ -119,6 +119,7 @@
         public string ParentPeriodIdText { get; set; } = "";
         public DateTime? Start { get; set; }
         public DateTime? End { get; set; }
+        public int? ActivationToleranceDays { get; set; }
     }
 
     private readonly PeriodFormModel _model = new();
@@ -253,7 +254,7 @@
             var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
             var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
             var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(
-                _model.Name.Trim(), startDate, endDate, division, parentId, subPeriods));
+                _model.Name.Trim(), startDate, endDate, division, parentId, subPeriods, _model.ActivationToleranceDays));
             var saved = await Api.GetPeriodByIdAsync(id);
 
             if (_disposed) return;

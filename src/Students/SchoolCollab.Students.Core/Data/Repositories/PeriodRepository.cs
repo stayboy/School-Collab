@@ -40,7 +40,7 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         return periods.Select(x => new PeriodDto(
             x.Id, x.Name, x.StartDate, x.EndDate,
             x.Status.ToString(), x.ParentPeriodId, x.NextPeriodId,
-            x.Division.ToString(),
+            x.Division.ToString(), x.ActivationToleranceDays,
             x.CreatedAt, x.UpdatedAt)).ToArray();
     }
 

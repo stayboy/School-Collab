@@ -11,4 +11,5 @@ public sealed record UpdatePeriod(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    Guid? ParentPeriodId = null) : ICommand;
+    Guid? ParentPeriodId = null,
+    int? ActivationToleranceDays = null) : ICommand;

@@ -43,6 +43,7 @@ public sealed class GetPeriodByIdHandler(
                     period.ParentPeriodId,
                     period.NextPeriodId,
                     period.Division.ToString(),
+                    period.ActivationToleranceDays,
                     period.CreatedAt,
                     period.UpdatedAt);
             },

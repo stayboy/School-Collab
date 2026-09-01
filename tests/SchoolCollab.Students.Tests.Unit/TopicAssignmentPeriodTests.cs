@@ -30,7 +30,7 @@ public class TopicAssignmentPeriodTests
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) => new(
         s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache,
-        NullLogger<ActivatePeriodHandler>.Instance);
+        NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     private static AssignGradeTopicHandler NewAssignGrade(StudentsTestScope s) => new(
         s.GradeTopicAssignments, s.Periods, s.Cache, NullLogger<AssignGradeTopicHandler>.Instance);

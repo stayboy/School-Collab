@@ -31,6 +31,11 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
     public AcademicYearDivision Division { get; private set; }
     public Guid? ParentPeriodId { get; private set; }
 
+    // Activation-window tolerance (period-activation-window-auto-activation.md FR-W3):
+    // null = inherit the global default (Students:PeriodActivationToleranceDays); a
+    // non-null value overrides it for this period's activation window.
+    public int? ActivationToleranceDays { get; private set; }
+
     public Guid? NextPeriodId { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
@@ -43,11 +48,13 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         DateOnly startDate,
         DateOnly endDate,
         AcademicYearDivision division,
-        Guid? parentPeriodId = null)
+        Guid? parentPeriodId = null,
+        int? activationToleranceDays = null)
     {
         if (endDate < startDate)
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
 
+        ValidateActivationTolerance(activationToleranceDays);
         ValidateHierarchy(division, parentPeriodId);
 
         var now = DateTimeOffset.UtcNow;
@@ -60,6 +67,7 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
             Status = PeriodStatus.Draft,
             Division = division,
             ParentPeriodId = parentPeriodId,
+            ActivationToleranceDays = activationToleranceDays,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -79,7 +87,8 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         string name,
         DateOnly startDate,
         DateOnly endDate,
-        Guid? parentPeriodId = null)
+        Guid? parentPeriodId = null,
+        int? activationToleranceDays = null)
     {
         if (Status != PeriodStatus.Draft)
             throw new InvalidOperationException("Only draft periods can be updated.");
@@ -87,10 +96,13 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         if (endDate < startDate)
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
 
+        ValidateActivationTolerance(activationToleranceDays);
+
         Name = name.Trim();
         StartDate = startDate;
         EndDate = endDate;
         ParentPeriodId = parentPeriodId;
+        ActivationToleranceDays = activationToleranceDays;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new PeriodUpdatedEvent(Id, Name));
     }
@@ -109,6 +121,45 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
                 "A sub-period must have a Terms or Semesters division; None is reserved for top-level academic years.",
                 nameof(division));
     }
+
+    private static void ValidateActivationTolerance(int? activationToleranceDays)
+    {
+        if (activationToleranceDays is < 0)
+            throw new ArgumentException(
+                "Activation tolerance must be null or a non-negative number of days.",
+                nameof(activationToleranceDays));
+    }
+
+    /// <summary>
+    /// Effective tolerance for this period's activation window: its own override
+    /// (<see cref="ActivationToleranceDays"/>), else the parent's override
+    /// (sub-periods inherit their parent's tolerance), else the global default.
+    /// </summary>
+    public int ResolveEffectiveTolerance(int? parentToleranceDays, int defaultToleranceDays)
+        => ActivationToleranceDays ?? parentToleranceDays ?? defaultToleranceDays;
+
+    /// <summary>
+    /// True when <paramref name="today"/> falls inside this period's activation window
+    /// <c>[StartDate − tol, EndDate + tol]</c>, where tol is the effective tolerance
+    /// (FR-W2 + sub-period inheritance): this period's override, else its parent's
+    /// override, else the global default. Boundaries are inclusive (FR-W1/W2).
+    /// </summary>
+    public bool IsWithinActivationWindow(DateOnly today, int? parentToleranceDays, int defaultToleranceDays)
+    {
+        var tolerance = ResolveEffectiveTolerance(parentToleranceDays, defaultToleranceDays);
+        return today >= StartDate.AddDays(-tolerance) && today <= EndDate.AddDays(tolerance);
+    }
+
+    /// <summary>
+    /// True when <paramref name="today"/> falls inside this period's activation window
+    /// <c>[StartDate − tol, EndDate + tol]</c>, where tol = <see cref="ActivationToleranceDays"/>
+    /// (per-period override) or <paramref name="defaultToleranceDays"/> (global default).
+    /// Top-level periods have no parent, so this is equivalent to
+    /// <see cref="IsWithinActivationWindow(DateOnly, int?, int)"/> with a null parent.
+    /// Boundaries are inclusive (period-activation-window-auto-activation.md FR-W1/W2).
+    /// </summary>
+    public bool IsWithinActivationWindow(DateOnly today, int defaultToleranceDays)
+        => IsWithinActivationWindow(today, parentToleranceDays: null, defaultToleranceDays);
 
     public void Activate()
     {

@@ -121,6 +121,7 @@ public sealed record PeriodDto(
     Guid? ParentPeriodId,
     Guid? NextPeriodId,
     string Division,
+    int? ActivationToleranceDays,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
@@ -363,14 +364,16 @@ public record CreatePeriodRequest(
     DateOnly EndDate,
     AcademicYearDivision Division,
     Guid? ParentPeriodId = null,
-    IReadOnlyList<SubPeriodDefinitionRequest>? SubPeriods = null);
+    IReadOnlyList<SubPeriodDefinitionRequest>? SubPeriods = null,
+    int? ActivationToleranceDays = null);
 
 /// <summary>A sub-period (Term/Semester) definition supplied with an atomic
 /// top-level academic-year create (FR-C1).</summary>
 public record SubPeriodDefinitionRequest(
     string Name,
     DateOnly StartDate,
-    DateOnly EndDate);
+    DateOnly EndDate,
+    int? ActivationToleranceDays = null);
 
 /// <summary>Update payload for a period. No Division: it is immutable at creation
 /// (period-edit-parity-deactivate.md FR-E1), so it is never sent on update.</summary>
@@ -378,7 +381,8 @@ public record UpdatePeriodRequest(
     string Name,
     DateOnly StartDate,
     DateOnly EndDate,
-    Guid? ParentPeriodId = null);
+    Guid? ParentPeriodId = null,
+    int? ActivationToleranceDays = null);
 
 public record EnrollStudentRequest(
     Guid StudentId,

@@ -89,7 +89,7 @@ public sealed class UpdatePeriodHandler(
                 $"({overlapping[0].StartDate:O}–{overlapping[0].EndDate:O}).");
         }
 
-        period.Update(command.Name, command.StartDate, command.EndDate, command.ParentPeriodId);
+        period.Update(command.Name, command.StartDate, command.EndDate, command.ParentPeriodId, command.ActivationToleranceDays);
 
         try
         {
