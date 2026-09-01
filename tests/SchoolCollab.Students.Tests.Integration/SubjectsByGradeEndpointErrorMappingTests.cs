@@ -131,17 +131,19 @@ public class TopicsByGradeEndpointErrorMappingTests
     public async Task WithExplicitEffectiveDate_FiltersToThatDate()
     {
         // Arrange: one assignment effective from today (open-ended). An explicit
-        // effectiveDate in the far future has no matching assignment and must
-        // return 200 + empty, not 500.
+        // effectiveDate before the assignment's StartDate has no matching
+        // assignment and must return 200 + empty, not 500. (The assignment is
+        // open-ended — EndDate null — so it is in effect on every date from its
+        // StartDate onward, including the far future; only earlier dates miss.)
         var gradeLevelId = await SeedGradeLevelAsync(ApiFactory.TestTenantA, "Grade 1");
         await SeedTopicAndAssignmentAsync(ApiFactory.TestTenantA,
             gradeLevelId, "MATH", "Mathematics");
 
-        var futureEffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(3650));
+        var pastEffectiveDate = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-1));
 
         // Act
         var response = await SendAsync(HttpMethod.Get,
-            $"/students/topics/by-grade/{gradeLevelId}?effectiveDate={futureEffectiveDate:yyyy-MM-dd}",
+            $"/students/topics/by-grade/{gradeLevelId}?effectiveDate={pastEffectiveDate:yyyy-MM-dd}",
             ApiFactory.TestTenantA);
 
         // Assert
