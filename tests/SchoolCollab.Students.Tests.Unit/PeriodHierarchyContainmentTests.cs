@@ -70,7 +70,7 @@ public class PeriodHierarchyContainmentTests
 
         var update = NewUpdate(s);
         var act = async () => await update.HandleAsync(new UpdatePeriod(
-            t1, "T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 12, 31), AcademicYearDivision.Terms, ParentPeriodId: ay));
+            t1, "T1", new DateOnly(2026, 9, 1), new DateOnly(2027, 12, 31), ParentPeriodId: ay));
         await act.Should().ThrowAsync<PeriodContainmentException>();
     }
 }

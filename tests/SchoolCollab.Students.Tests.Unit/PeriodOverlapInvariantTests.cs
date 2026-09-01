@@ -75,7 +75,7 @@ public class PeriodOverlapInvariantTests
 
         var uh = NewUpdate(s);
         var act = async () => await uh.HandleAsync(
-            new UpdatePeriod(idB, "B2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31), AcademicYearDivision.None));
+            new UpdatePeriod(idB, "B2", new DateOnly(2026, 6, 1), new DateOnly(2026, 8, 31)));
 
         await act.Should().ThrowAsync<PeriodOverlapException>();
     }
@@ -89,7 +89,7 @@ public class PeriodOverlapInvariantTests
         var idA = (await ch.HandleAsync(new CreatePeriod("A", new DateOnly(2026, 1, 1), new DateOnly(2026, 6, 30), Division: AcademicYearDivision.Terms))).YearId;
 
         var uh = NewUpdate(s);
-        await uh.HandleAsync(new UpdatePeriod(idA, "A2", new DateOnly(2026, 2, 1), new DateOnly(2026, 5, 15), AcademicYearDivision.None));
+        await uh.HandleAsync(new UpdatePeriod(idA, "A2", new DateOnly(2026, 2, 1), new DateOnly(2026, 5, 15)));
 
         var updated = await s.Db.Periods.SingleAsync();
         updated.Name.Should().Be("A2");

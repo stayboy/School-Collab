@@ -1,6 +1,7 @@
 using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain.Events;
+using SchoolCollab.Students.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Students.Core.Domain;
 
@@ -67,11 +68,17 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         return period;
     }
 
+    /// <summary>
+    /// Updates the mutable fields only. <see cref="Division"/> is immutable — set at
+    /// creation (period-edit-parity-deactivate.md FR-E1) — and is never mutated here,
+    /// because changing a period's framework after the fact would orphan its hierarchy.
+    /// The identity/None-as-sub-period shape is enforced by the Update handler, which has
+    /// repository access; the entity only enforces the date ordering here.
+    /// </summary>
     public void Update(
         string name,
         DateOnly startDate,
         DateOnly endDate,
-        AcademicYearDivision division,
         Guid? parentPeriodId = null)
     {
         if (Status != PeriodStatus.Draft)
@@ -80,12 +87,9 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         if (endDate < startDate)
             throw new ArgumentException("End date must be on or after start date.", nameof(endDate));
 
-        ValidateHierarchy(division, parentPeriodId);
-
         Name = name.Trim();
         StartDate = startDate;
         EndDate = endDate;
-        Division = division;
         ParentPeriodId = parentPeriodId;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new PeriodUpdatedEvent(Id, Name));
@@ -128,11 +132,61 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
         _domainEvents.Add(new PeriodCompletedEvent(Id, Name));
     }
 
+    /// <summary>Archives any non-Archived status (Active/Completed, or Deactivated).
+    /// Deactivated → Archived is the cleanup path for a deactivated period whose record
+    /// should be retired (period-edit-parity-deactivate.md FR-X5).</summary>
     public void Archive()
     {
         if (Status == PeriodStatus.Archived) return;
 
         Status = PeriodStatus.Archived;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
+    /// Transitions Active → Deactivated (period-edit-parity-deactivate.md FR-X1).
+    /// Only Active periods can be deactivated; any other status throws
+    /// <see cref="PeriodNotDeactivatableException"/> (mapped to 422 in the API).
+    /// Unlike <see cref="Complete"/> there is no idempotent early-return: deactivating
+    /// an already-Deactivated period is a 422, not a no-op (AC-E8). Raises
+    /// <see cref="PeriodDeactivatedEvent"/> (FR-X6) for observability parity.
+    /// </summary>
+    public void Deactivate()
+    {
+        if (Status != PeriodStatus.Active)
+            throw new PeriodNotDeactivatableException(
+                $"Period '{Name}' cannot be deactivated while its status is {Status}. " +
+                "Only Active periods can be deactivated.");
+
+        Status = PeriodStatus.Deactivated;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new PeriodDeactivatedEvent(Id, Name));
+    }
+
+    /// <summary>
+    /// Guards this period as deletable (Draft-only, period-draft-delete.md FR-D2):
+    /// Active/Completed/Archived periods are referenced by operational data and
+    /// follow Complete -> Archive instead. Raises <see cref="PeriodDeletedEvent"/>
+    /// (FR-D7) for observability parity with PeriodCompletedEvent. Unlike
+    /// Activate/Complete there is no idempotent early-return: a deleted row is gone.
+    /// </summary>
+    public void Delete()
+    {
+        if (Status != PeriodStatus.Draft)
+            throw new PeriodNotDeletableException(
+                $"Period '{Name}' cannot be deleted while its status is {Status}. " +
+                "Only Draft periods can be deleted.");
+
+        _domainEvents.Add(new PeriodDeletedEvent(Id, Name));
+    }
+
+    /// <summary>Defensive housekeeping (FR-D6): clears a dangling NextPeriodId link
+    /// left behind when the linked period was hard-deleted. No domain event — silent
+    /// hygiene; the link is future-proofing only (no handler sets it today).</summary>
+    public void ClearNextPeriod()
+    {
+        if (NextPeriodId is null) return;
+        NextPeriodId = null;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

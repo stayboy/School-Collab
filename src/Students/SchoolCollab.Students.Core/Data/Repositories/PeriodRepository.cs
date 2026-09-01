@@ -59,6 +59,7 @@ internal sealed class PeriodRepository(StudentsDbContext db)
         => await Db.Periods
             .Where(p => p.StartDate <= endDate
                 && p.EndDate >= startDate
+                && p.Status != PeriodStatus.Deactivated
                 && (excludeId == null || p.Id != excludeId)
                 && (excludeParentId == null || p.Id != excludeParentId)
                 && (excludeSubPeriodsOfParentId == null || p.ParentPeriodId != excludeSubPeriodsOfParentId))
@@ -89,19 +90,16 @@ internal sealed class PeriodRepository(StudentsDbContext db)
                 && (excludeId == null || p.Id != excludeId))
             .ToArrayAsync(cancellationToken);
 
-    public async Task<int> GetNonCompletedSubPeriodCountAsync(
-        Guid parentPeriodId,
-        CancellationToken cancellationToken = default)
-        => await Db.Periods
-            .CountAsync(p => p.ParentPeriodId == parentPeriodId
-                && (p.Status == PeriodStatus.Draft || p.Status == PeriodStatus.Active),
-                cancellationToken);
-
     public async Task<Period[]> GetSubPeriodsAsync(
         Guid parentPeriodId,
         CancellationToken cancellationToken = default)
         => await Db.Periods
             .Where(p => p.ParentPeriodId == parentPeriodId)
+            .ToArrayAsync(cancellationToken);
+
+    public async Task<Period[]> GetDraftPeriodsLinkedToAsync(Guid nextPeriodId, CancellationToken cancellationToken = default)
+        => await Db.Periods
+            .Where(p => p.NextPeriodId == nextPeriodId && p.Status == PeriodStatus.Draft)
             .ToArrayAsync(cancellationToken);
 
     public async Task<Period?> GetCurrentPeriodAsync(CancellationToken cancellationToken = default)

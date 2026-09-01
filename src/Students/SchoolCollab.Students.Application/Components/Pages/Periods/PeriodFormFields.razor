@@ -3,14 +3,14 @@
     and period edit so the two flows render identical fields (create layout is
     the reference). Mirrors the TopicFormFields pattern:
 
-      • The owning form (PeriodForm) supplies the <EditForm>, the submit/cancel
-        action row, the error bar, the create-only sub-periods section, and the
-        blocked-parent panel.
+      • The CONSUMING PAGE (Create.razor / Edit.razor) supplies the <EditForm>,
+        the submit/cancel action row, the error bar, the (create-only) blocked-
+        parent panel, and the (create+edit) sub-periods section.
       • This component owns only the field rows:
           Division → Parent academic year (sub-period create only) →
           Period name (+ optional NameActions) → Dates.
       • Name / ParentPeriodIdText / DivisionSelect are string-based bindings;
-        the owning form maps them to/from the API DTOs.
+        the consuming page maps them to/from the API DTOs.
 
     Both the form's create state and its edit state are backed by the same
     PeriodFormModel, which implements IPeriodFormModel.

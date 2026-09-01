@@ -149,8 +149,7 @@ public class EnrollWithStreamEndpointTests
             var gradeLevel = GradeLevel.Create(GradeCodedValueId, 1, "Grade 7", 1);
             db.GradeLevels.Add(gradeLevel);
 
-            var period = Period.Create("Term 1", DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1),
-                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1));
+            var period = Period.Create("Term 1", DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1), AcademicYearDivision.None);
             period.Activate();
             db.Periods.Add(period);
 
@@ -220,8 +219,7 @@ public class EnrollWithStreamEndpointTests
             var gradeLevel = GradeLevel.Create(otherGradeCodedValueId, 1, "Grade 8", 1);
             db.GradeLevels.Add(gradeLevel);
 
-            var period = Period.Create("Term 1", DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1),
-                DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1));
+            var period = Period.Create("Term 1", DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-1), DateOnly.FromDateTime(DateTime.UtcNow).AddDays(1), AcademicYearDivision.None);
             period.Activate();
             db.Periods.Add(period);
 

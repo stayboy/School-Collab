@@ -2,11 +2,13 @@ using System.Net;
 using System.Text;
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using Moq;
 using SchoolCollab.Admin.Shared.Services;
 using SchoolCollab.Students.Application.Components.Pages.Periods;
 using SchoolCollab.Students.Application.Services;
@@ -65,6 +67,11 @@ public class PeriodEditPageTests : BunitContext
     }
 
     private static readonly Guid YearId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+    private static readonly Guid DraftSub1Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static readonly Guid DraftSub2Id = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+
+    private static string PeriodJson(Guid id, string name, string type, string status, Guid? parent, string start = "2026-01-01", string end = "2026-12-31") =>
+        $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"{start}\",\"endDate\":\"{end}\",\"status\":\"{status}\",\"periodType\":\"{type}\",\"parentPeriodId\":{(parent is null ? "null" : $"\"{parent}\"")},\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
     private ScriptedHandler Register()
     {
@@ -104,12 +111,14 @@ public class PeriodEditPageTests : BunitContext
         cut.WaitForState(() => cut.Markup.Contains("Sub-periods"), TimeSpan.FromSeconds(5));
         cut.WaitForState(() => cut.Markup.Contains("Edit period"), TimeSpan.FromSeconds(5));
 
-        // Section header precedes the form header in the markup.
+        // r2 (period-edit-parity-deactivate.md FR-E3): the sub-periods section now
+        // lives INSIDE the unified edit form (matching create), so its header follows
+        // the form header in the markup.
         var sectionPos = cut.Markup.IndexOf("Sub-periods", StringComparison.Ordinal);
         var formPos = cut.Markup.IndexOf("Edit period", StringComparison.Ordinal);
         sectionPos.Should().BeGreaterThanOrEqualTo(0, "the sub-periods section is rendered");
-        formPos.Should().BeGreaterThan(sectionPos,
-            "the sub-periods section sits ABOVE the edit form on the page");
+        sectionPos.Should().BeGreaterThan(formPos,
+            "the sub-periods section sits within the edit form (after the form header)");
     }
 
     /// <summary>
@@ -173,7 +182,7 @@ public class PeriodEditPageTests : BunitContext
 
     /// <summary>
     /// G5: when the division flag is unreadable (404 → null), the guard
-    /// treats it as "unknown" and still shows the section — SubPeriodsSection
+    /// treats it as "unknown" and still shows the section — PeriodSubPeriodsEditor
     /// falls back to an explicit type selector so the user is never blocked
     /// by a failed flag read.
     /// </summary>
@@ -225,5 +234,94 @@ public class PeriodEditPageTests : BunitContext
         var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Add sub-period\""));
+    }
+
+    // ── Draft-period delete danger zone (period-draft-delete.md FR-D10) ──
+
+    private static string DraftYearJson(string? division = null) =>
+        $"{{\"id\":\"{YearId}\",\"name\":\"2026\",\"startDate\":\"2026-01-01\",\"endDate\":\"2026-12-31\",\"status\":\"Draft\",\"periodType\":\"AcademicYear\",\"parentPeriodId\":null,\"nextPeriodId\":null,\"division\":{(division is null ? "null" : $"\"{division}\"")},\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
+
+    private static Mock<IDialogService> ConfirmationDialog(StringBuilder? capturedMessage = null)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object>(null!)));
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowConfirmationAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>()))
+            .Callback<string, string, string, string>((msg, _, __, ___) => capturedMessage?.Append(msg))
+            .ReturnsAsync(dialogRef.Object);
+        return dialogMock;
+    }
+
+    /// <summary>FR-D10: a Draft period renders the danger-zone Delete affordance.</summary>
+    [TestMethod]
+    public void Edit_DraftPeriod_RendersDangerZoneDelete()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, DraftYearJson("None"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Danger zone"));
+        cut.Markup.Should().Contain("title=\"Delete period\"",
+            "the danger zone offers a Delete affordance (FR-D10)");
+    }
+
+    /// <summary>FR-D10: a non-Draft period renders no danger zone.</summary>
+    [TestMethod]
+    public void Edit_NonDraftPeriod_HasNoDangerZone()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("None"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+
+        cut.WaitForState(() => cut.Markup.Contains("Edit period"), TimeSpan.FromSeconds(5));
+        cut.Markup.Should().NotContain("Danger zone",
+            "a non-Draft period has no delete danger zone (FR-D10)");
+    }
+
+    /// <summary>FR-D10: confirming the delete fires the DELETE call and navigates to the list.</summary>
+    [TestMethod]
+    public void Edit_Delete_Confirm_NavigatesToPeriods()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, DraftYearJson("None"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
+        handler.Map("DELETE", $"/students/periods/{YearId}", HttpStatusCode.NoContent, "");
+        Services.AddSingleton(ConfirmationDialog().Object);
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Delete period\""));
+
+        cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Delete period").Click();
+
+        cut.WaitForAssertion(() => Services.GetRequiredService<NavigationManager>().Uri.Should().EndWith("/students/periods"));
+    }
+
+    /// <summary>FR-D10/D9: the edit-page year confirmation shares the grid's wording
+    /// (names the period and the Draft sub count).</summary>
+    [TestMethod]
+    public void Edit_Delete_YearConfirmation_Wording_MatchesGrid()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, DraftYearJson("Terms"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
+            $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)},{PeriodJson(DraftSub2Id, "Term 2", "Term", "Draft", YearId)}]");
+        var captured = new StringBuilder();
+        Services.AddSingleton(ConfirmationDialog(captured).Object);
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Delete period\""));
+
+        cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Delete period").Click();
+
+        cut.WaitForAssertion(() => captured.ToString().Should().Contain("2026"));
+        captured.ToString().Should().Contain("2 draft sub-periods",
+            "the edit-page year confirmation matches the grid wording (FR-D9/D10)");
     }
 }
