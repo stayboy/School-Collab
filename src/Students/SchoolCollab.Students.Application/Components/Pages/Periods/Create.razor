@@ -11,6 +11,7 @@
 @inject NavigationManager Nav
 @inject ILogger<Create> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <PageTitle>New Period</PageTitle>
@@ -257,6 +258,9 @@
 
             if (_disposed) return;
             Logger.LogInformation("Period created {Id}", saved?.Id);
+            // Success toast fires before navigation; the FluentToastProvider
+            // (root layout) survives the route change.
+            Toast.ShowSuccess($"Period '{_model.Name.Trim()}' created.");
             Nav.NavigateTo("/students/periods");
         }
         catch (Exception ex)

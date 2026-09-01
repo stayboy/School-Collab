@@ -1,0 +1,14 @@
+/* Active tenant academic-year indicator chip above the Periods grid. */
+.period-active-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 1rem;
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+}
+
+.period-active-chip__label {
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}

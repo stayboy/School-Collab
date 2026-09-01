@@ -2,6 +2,7 @@
    fragments) that cannot be expressed with the @<> syntax from a .cs file.
    The .cs test class toggles the bool flags / arrays and asserts on markup. *@
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Admin.Shared.Components
 @using Microsoft.FluentUI.AspNetCore.Components
 @using Microsoft.AspNetCore.Components
 @using Microsoft.AspNetCore.Components.Sections
@@ -24,7 +25,10 @@
              SearchEnabled="@SearchEnabled"
              CreateEnabled="@CreateEnabled"
              SearchPlaceholder="Search widgets…"
-             SearchTextChanged="@SearchTextChanged">
+             SearchTextChanged="@SearchTextChanged"
+             RowActions="@RowActions"
+             RowActionsAriaLabel="Widget actions"
+             RowActionsUseMenuService="@RowActionsUseMenuService">
     <ToolbarFilters>
         @if (ShowFilters)
         {
@@ -68,4 +72,6 @@
     [Parameter] public bool ShowActions { get; set; }
     [Parameter] public bool ShowFooter { get; set; }
     [Parameter] public EventCallback<string> SearchTextChanged { get; set; }
+    [Parameter] public Func<Widget, IReadOnlyList<RowAction>>? RowActions { get; set; }
+    [Parameter] public bool RowActionsUseMenuService { get; set; }
 }

@@ -9,6 +9,13 @@
    Both renderings share the same invoke path (Href / callback /
    destructive-confirmation), so behavior is identical.
 
+   Grid-level consistency (repo convention): when a grid contains any row that
+   qualifies for the kebab (2+ non-separator actions), the grid owner passes
+   ForceKebab="true" so EVERY row with at least one action renders the kebab —
+   no row shows a lone labeled button while a sibling shows the kebab. Rows
+   with 0 actions still render nothing. Use <see cref="HasKebabActions"/> to
+   compute the grid-level flag from a row-action builder.
+
    By default the menu is rendered through FluentMenuProvider (UseMenuService=true)
    — the menu's content is lifted to the document root via the provider so it is
    never clipped by the grid's scroll container. The trigger button's Id and the
@@ -20,13 +27,16 @@
 @inject IDialogService DialogService
 
 <span class="row-actions-menu">
-    @if (singleAction is not null)
+    @if (!ForceKebab && singleAction is not null)
     {
         @* Single-action rows render a labeled FluentButton instead of the
            kebab menu (landing-grid pattern: one action → button; two or
-           more → kebab). The button reuses the same invoke path as the
-           menu item, so Href / callback / destructive-confirm behavior
-           is identical between the two renderings. *@
+           more → kebab). When ForceKebab is true the grid owner has decided
+           that a sibling row qualifies for the kebab, so this row renders
+           the kebab too for visual consistency. The button reuses the same
+           invoke path as the menu item, so Href / callback /
+           destructive-confirm behavior is identical between the two
+           renderings. *@
         <FluentButton Appearance="Appearance.Stealth"
                       Title="@singleAction.Label"
                       Disabled="@singleAction.Disabled"
@@ -117,6 +127,26 @@
     /// <summary>Icon for the kebab trigger button. Defaults to MoreVertical (⋮).</summary>
     [Parameter]
     public Icon? KebabIcon { get; set; }
+
+    /// <summary>
+    /// When true, every row with at least one action renders the kebab (⋮)
+    /// menu instead of the single-action labeled button. The grid owner sets
+    /// this when any row in the grid qualifies for the kebab (2+ non-separator
+    /// actions) so all rows render consistently. Rows with 0 actions still
+    /// render nothing. Default false preserves the per-row behavior.
+    /// </summary>
+    [Parameter]
+    public bool ForceKebab { get; set; }
+
+    /// <summary>
+    /// True when <paramref name="actions"/> contains 2+ non-separator actions —
+    /// i.e. the row qualifies for the kebab (⋮) menu rather than a single-action
+    /// labeled button. Grid owners use this to compute the grid-level
+    /// <see cref="ForceKebab"/> flag: if any row qualifies, force the kebab on
+    /// every row for visual consistency.
+    /// </summary>
+    public static bool HasKebabActions(IReadOnlyList<RowAction> actions)
+        => actions.Count(a => !a.IsSeparator) >= 2;
 
     private string _buttonId = string.Empty;
     private string _menuId = string.Empty;

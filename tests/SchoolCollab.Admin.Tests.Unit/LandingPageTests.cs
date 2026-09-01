@@ -4,6 +4,8 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
+using SchoolCollab.Admin.Shared.Components;
+using SchoolCollab.Admin.Shared.Constants;
 
 namespace SchoolCollab.Admin.Tests.Unit;
 
@@ -32,7 +34,9 @@ public class LandingPageTests : BunitContext
         bool showFilters = false,
         bool showActions = false,
         bool showFooter = false,
-        EventCallback<string>? searchChanged = null)
+        bool rowActionsUseMenuService = false,
+        EventCallback<string>? searchChanged = null,
+        Func<TestLandingPage.Widget, IReadOnlyList<RowAction>>? rowActions = null)
     {
         return Render<TestLandingPage>(p => p
             .Add(x => x.Items, items)
@@ -43,7 +47,9 @@ public class LandingPageTests : BunitContext
             .Add(x => x.ShowFilters, showFilters)
             .Add(x => x.ShowActions, showActions)
             .Add(x => x.ShowFooter, showFooter)
-            .Add(x => x.SearchTextChanged, searchChanged ?? EventCallback<string>.Empty));
+            .Add(x => x.RowActionsUseMenuService, rowActionsUseMenuService)
+            .Add(x => x.SearchTextChanged, searchChanged ?? EventCallback<string>.Empty)
+            .Add(x => x.RowActions, rowActions));
     }
 
     [TestMethod]
@@ -170,5 +176,45 @@ public class LandingPageTests : BunitContext
         var cut = RenderWrapper(items: [], showFooter: true);
 
         cut.Markup.Should().Contain("chat-launcher");
+    }
+
+    [TestMethod]
+    public void RowActions_AllSingleAction_RendersLabeledButton_NotKebab()
+    {
+        // Every row has exactly one action → each renders a labeled button,
+        // never the kebab (⋮). No row qualifies for the kebab, so ForceKebab
+        // stays false.
+        var cut = RenderWrapper(
+            items: [new(Guid.NewGuid(), "W1"), new(Guid.NewGuid(), "W2")],
+            rowActions: w => new List<RowAction> { RowAction.Callback("Edit", () => { }, FluentIcons.Edit) });
+
+        var menus = cut.FindComponents<RowActionsMenu>();
+        menus.Should().HaveCount(2, "one actions menu per row");
+        menus.Should().OnlyContain(m => m.Instance.ForceKebab == false, "no row qualifies for the kebab");
+        cut.Markup.Should().Contain(">Edit</fluent-button>", "single-action rows render a labeled Edit button");
+    }
+
+    [TestMethod]
+    public void RowActions_AnyRowHasKebab_ForcesKebabOnEveryRow()
+    {
+        // W1 has 2 actions (Edit + Delete) → qualifies for the kebab; W2 has
+        // only 1 action (Edit). Repo convention: because W1 qualifies, the
+        // kebab is forced on EVERY row so the actions column is consistent.
+        var cut = RenderWrapper(
+            items: [new(Guid.NewGuid(), "W1"), new(Guid.NewGuid(), "W2")],
+            rowActions: w => w.Name == "W1"
+                ? new List<RowAction>
+                {
+                    RowAction.Callback("Edit", () => { }, FluentIcons.Edit),
+                    RowAction.Callback("Delete", () => { }, FluentIcons.Delete, destructive: true),
+                }
+                : new List<RowAction> { RowAction.Callback("Edit", () => { }, FluentIcons.Edit) });
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("fluent-data-grid", "the grid renders"));
+        cut.WaitForAssertion(() => cut.FindComponents<RowActionsMenu>().Should().HaveCount(2,
+            "one actions menu per row"));
+        var menus = cut.FindComponents<RowActionsMenu>();
+        menus.Should().OnlyContain(m => m.Instance.ForceKebab == true,
+            "any row qualifying for the kebab forces it on every row");
     }
 }

@@ -11,6 +11,7 @@ using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetActiveAcademicYear;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetActiveSubPeriod;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.GetPeriodById;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.ListPeriods;
+using SchoolCollab.Students.Core.CQRS.Periods.Queries.ListTopLevelPeriods;
 using SchoolCollab.Students.Core.CQRS.Periods.Queries.ListSubPeriods;
 using SchoolCollab.Students.Core.Domain.Exceptions;
 using SchoolCollab.Students.Core.DTOs;
@@ -27,6 +28,13 @@ public static class PeriodRoutes
             [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListPeriods, SchoolCollab.Students.Core.DTOs.PeriodDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new ListPeriods(), ct)));
+
+        // Top-level periods only (landing grid): parents with server-computed
+        // sub-period counts — no sub-period rows are returned for display.
+        group.MapGet("/periods/top-level", async (
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<ListTopLevelPeriods, PeriodLandingDto[]> handler,
+            CancellationToken ct) =>
+            Results.Ok(await handler.HandleAsync(new ListTopLevelPeriods(), ct)));
 
         group.MapGet("/periods/{id:guid}", async (
             Guid id,
