@@ -1,292 +1,228 @@
 ---
 name: orchestrator-worker-reviewer
-description: Four-agent orchestrator-led workflow for implementing features and fixes with spec/plan ownership in the School-Collab repo. An orchestrator (document owner) plans and owns the plan/acceptance docs, a worker implements, a reviewer verifies against the plan, and the orchestrator runs an acceptance pass — then a UI tester (4th agent) bug-hunts delivered UI work after the round closes, with findings looping back to the orchestrator for rework planning. Default agents are provided; all four are configurable via exact provider/id strings. Use for feature implementation, multi-fix rounds, or any work where plans/review docs written must be checked by a document owner before closing.
+description: Tiered orchestrator-led workflow for implementing features and fixes in the School-Collab repo, optimized for speed and token usage. Tier 1 collapses to a single worker run with the parent authoring the plan and transcribing acceptance; Tier 2 adds a static diff-only reviewer; Tier 3 runs the full four-agent pipeline - orchestrator (document owner) plans and owns the round doc, worker implements, reviewer statically verifies against the plan, orchestrator accepts and hands over UI-tester scope, and a UI tester bug-hunts delivered UI work. Use for feature implementation, multi-fix rounds, or any work where plans and reviews must be checked by a document owner before closing. Do NOT use for trivial single-file non-behavioural changes (do those solo).
 ---
 
-# Orchestrator-Worker-Reviewer (with UI Tester)
+# Orchestrator-Worker-Reviewer (with UI Tester) — tiered
 
-A spec/plan-owned implementation workflow with independent verification. Four
-agents collaborate inside one `workflowScript`:
+Four roles collaborate on spec/plan-owned implementation with independent
+verification, executed at the cheapest tier the task safely supports:
 
-1. **Orchestrator** — document owner. Reads specs/review docs, writes the plan,
-   authors the worker + reviewer tasks, and runs the final acceptance pass.
-   Only the orchestrator edits the plan/acceptance docs. When the UI tester
-   reports findings, the orchestrator authors the rework plan for the worker.
-2. **Worker** — implements exactly what the orchestrator's plan specifies.
-   Runs build + affected tests. Does **not** touch the plan/acceptance docs.
-3. **Reviewer** — verifies the worker's diffs against the orchestrator's plan
-   and the source specs; runs build + tests independently; writes a review doc.
-   The reviewer's task ALSO includes a **best-coding-practices check**: verify
-   the worker did not overwrite or delete pre-existing code outside the
-   plan's scope (no destructive rewrites of untouched regions); that it used
-   the repo's installed skills where applicable (e.g. `dotnet-best-practices`,
-   `dialog-ui`, `blazor-css-isolation`, `fluentui-*`, `author-component`,
-   `collect-user-input`); and that the new code is concise, readable, and
-   maintainable (naming, minimal diff, no dead code, follows repo
-   conventions). Violations are findings (P1 for destructive overwrites /
-   ignored mandated skills, P2 for readability nits), each with file+line
-   evidence. If the reviewer lacks shell/file-write tools, it returns the full
-   report + acceptance JSON inline so the parent persists it.
-4. **UI Tester** — adversarial bug hunter over the **delivered UI work**, run
-   after the orchestrator-accept pass closes the round. Its scope comes
-   **verbatim from the orchestrator's tester-scope handover** (the affected
-   pages/dialogs/landing pages/clients the orchestrator enumerated from the
-   worker's diff); the tester neither derives nor expands its own scope. NOT a
-   second reviewer: it does not check plan conformance; it hunts for real
-   user-facing defects the conformance pass structurally misses (swallowed
-   errors, perpetual spinners, missing error surfaces, invisible validation,
-   wrong bindings, silent no-ops, accessibility regressions, broken
-   refresh/navigation). Anything outside the handover scope is reported as an
-   out-of-round observation for the parent, not a rework item. Its findings
-   (P1/P2/pass, with file+line evidence) loop back to the orchestrator,
-   which appends a rework plan for the worker; the loop repeats until the
-   tester passes (bounded — see Pitfalls).
+1. **Orchestrator** — document owner. Reads specs, plans, authors acceptance
+   criteria, owns the round doc, and writes the acceptance verdict. In Tier 3
+   it also derives the UI-tester scope handover. In Tiers 1–2 the **parent
+   acts as orchestrator** (parent-authored plan, parent-transcribed verdict).
+2. **Worker** — implements exactly the plan; runs build + affected tests; never
+   edits the round doc; returns a structured WORKER REPORT.
+3. **Reviewer** — **static, diff-only**: verifies the worker's diff against
+   the plan plus the best-coding-practices check. Never builds or tests.
+   Returns a structured REVIEW block inline.
+4. **UI Tester** — adversarial bug hunter over delivered UI, scoped
+   **verbatim** to the orchestrator's handover. Not a second reviewer.
+   Returns a structured UI TEST block inline.
 
-## Default agents
+Cost rules that apply to every round (speed + token budget):
 
-These defaults are wired for the current School-Collab multi-model setup. Copy
-an exact `provider/id` from `subagent({ action: "models" })` to override any of
-them (bare ids resolve only when unique in the registry).
+- **Cheapest safe tier** — never pay for agents a task does not need.
+- **One authoritative build/test pass** — the worker builds + tests the
+  affected projects; the parent reruns the authoritative pass once
+  (incremental); the reviewer never builds. Parent numbers are the only
+  source of truth.
+- **One round doc + one diff artifact** — hand-offs pass paths, not payloads;
+  the plan is the single source of truth for worker and reviewer.
 
-| Role | Default agent definition | Default model |
-|------|--------------------------|---------------|
-| Orchestrator | `delegate` (or `oracle`) | `ollama/glm-5.3-flash:cloud` |
-| Worker | `worker` | `ollama/deepseek-v4-flash:0731-cloud` |
-| Reviewer | `reviewer` | `ollama/kimi-k2.7-code:cloud` |
-| UI Tester | `worker` (or custom) | `ollama/minimax-m3:cloud` |
+## Tiers
 
-To use different models, pass the exact `provider/id` in each `runs.run`'s
-`model` field, e.g. `model: "github-copilot/claude-sonnet-5"`. To use a
-different agent definition, pass `agent: "<name>"` (one of the builtin
-`delegate`/`oracle`/`reviewer`/`worker`/`scout`/`researcher`, or a custom agent).
+| Tier | Use when | Child runs | Acceptance |
+|---|---|---|---|
+| 0 | Trivial non-behavioural change (typo, comment, config tweak) | 0 — do not invoke this skill | solo, per `AGENTS.md` |
+| 1 | Small behavioural fix passing the eligibility checklist | 1 (worker) | parent: scope check + authoritative build/test + transcribed verdict |
+| 2 | Behavioural, no UI, single-context plan | 2 (worker + static reviewer); ≤1 rework iteration (worker + reviewer) | parent adjudicates REVIEW + transcribes verdict |
+| 3 | Feature rounds, any UI round, anything failing the Tier-1 checklist | 4–5: orchestrator-plan, worker, reviewer, orchestrator-accept (+ UI tester when the UI trigger fires) | orchestrator writes the verdict (+ tester-scope handover) |
 
-## Provider profiles: pi (default) and Cline
+Default to the **lowest tier that qualifies**; when ambiguous, go one tier up.
+When starting a feature or fix, offer the user the menu (solo / light round /
+full four-agent) per repo `AGENTS.md` — do not default silently.
 
-Two providers can drive this workflow. The four roles, their tasks, round-doc
-ownership, and the Procedure stay identical — only the model ids and the spawn
-mechanism differ. **Pick one provider per round; never mix the two mid-round.**
+### Tier-1 eligibility checklist (ALL must hold)
 
-### pi profile (default)
+- Single bounded context; expected diff ≤ ~4 files.
+- No UI surfaces: no `.razor`, `.razor.css`, `.css`, or `.js` files, nothing
+  under `wwwroot/`, no ApiClient / Blazor client project files.
+- No EF migration, schema, or MassTransit contract changes; no new public API.
+- Existing tests cover it, or the plan states why a test change is unnecessary.
+- No interplay with other in-flight work.
 
-Run via `workflowScript` / `runs.run('...', { agent, model, task })` with the
-Default agents table above. Model ids come from
-`subagent({ action: "models" })` (exact `provider/id` strings).
+### Mid-round escalation
 
-### Cline profile
+If any agent (or the parent) discovers scope creep — more files than planned,
+UI touched, schema/contract changes, wider behavioural surface — stop the fast
+path and **bump the tier**; continue the round at the higher tier. Never force
+a light tier through. Record escalations in the round doc.
 
-Run from a Cline session via its team/teammate machinery: spawn four teammates
-named `orchestrator`, `worker`, `reviewer`, `ui-tester` with the role prompts
-from this skill's role definitions, then execute the Procedure steps in order
-(orchestrator → worker → reviewer → orchestrator-accept → ui-tester → rework
-loop, max ~2 iterations), passing each hand-off text as the next teammate's
-task. If teammate dispatch returns
-`Unauthorized: ... re-authenticate your Cline account`, **stop and
-re-authenticate before rerunning** — a round must not proceed with a dead
-session.
+## Round docs — one doc, one diff artifact
 
-**Provider switch to `clinepass`.** Cline cannot resolve pi's
-`ollama/<id>:cloud` ids. Before starting the round, **switch the Cline
-session's provider to `clinepass`** — the Cline profile that stores the
-equivalent models for this workflow. Every pi default has a direct
-`cline-pass/` equivalent under it:
+- `documents/rounds/round-<round-slug>.md` — the **single round doc** with
+  sections `## Plan`, `## Worker Report`, `## Review`, `## Acceptance`,
+  `## UI Tester` (fill only the tier-appropriate ones). Sole writer: the
+  orchestrator run (Tier 3) or the parent (Tiers 1–2). Reviewer and tester
+  never write files — they return structured blocks inline and the parent
+  persists them into the doc.
+- `documents/rounds/diffs-<round-slug>.patch` — written **once** by the parent
+  from `git diff` immediately after the worker run; passed by path to the
+  reviewer and tester instead of inline hunks.
+- Round doc line 1 records provider + models (traceability — format in
+  `references/models.md`).
+- Never write durable specs here; fold a round's durable outcomes into
+  `documents/specs/` when it closes. `documents/rounds/` is ephemeral — see
+  `documents/rounds/README.md`.
 
-| Role | pi default | `clinepass` equivalent |
-|---|---|---|
-| Orchestrator | `ollama/glm-5.3-flash:cloud` | `cline-pass/glm-5.3` |
-| Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` |
-| Reviewer | `ollama/kimi-k2.7-code:cloud` | `cline-pass/kimi-k2.7-code` |
-| UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
+## Models and per-tier strategy
 
-Other models stored under `clinepass`, usable as substitutes:
-`cline-pass/kimi-k3` (stronger reviewer), `cline-pass/deepseek-v4-pro`
-(stronger worker), `cline-pass/glm-5.2`, `cline-pass/kimi-k2.6`,
-`cline-pass/qwen3.8-max`, `cline-pass/qwen3.7-max`, `cline-pass/qwen3.7-plus`,
-`cline-pass/mimo-v2.5-pro`, `cline-pass/mimo-v2.5`. Substitute within the same
-tier (fast generalist / implementer / deep verifier) only when a listed
-equivalent is unavailable.
+Exact id tables (pi + clinepass), substitution rules, and the traceability
+format live in `references/models.md`. Summary:
 
-**Role prompts for the four Cline teammates** (paste into each teammate's
-system prompt): orchestrator = document owner (writes plan/acceptance docs
-only, no code); worker = implements the plan exactly, runs build + affected
-tests, never edits plan/acceptance docs; reviewer = verifies diff vs plan +
-source specs, runs build/tests independently, includes the
-best-coding-practices check (no overwrites / repo skills honored /
-readability), returns findings inline; ui-tester = adversarial bug hunter
-scoped **verbatim** to the tester-scope handover, returns P1/P2/pass with
-file+line evidence inline.
+| Role | pi default | clinepass | Tiers |
+|---|---|---|---|
+| Orchestrator | `ollama/glm-5.3-flash:cloud` | `cline-pass/glm-5.3` | 3 only |
+| Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` | 1–3 |
+| Reviewer | `ollama/kimi-k2.7-code:cloud` | `cline-pass/kimi-k2.7-code` | 2–3 |
+| UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
 
-**Traceability rule (both providers):** record which provider ran the round in
-the acceptance doc header — e.g. `Provider: pi` or
-`Provider: Cline/clinepass (models: cline-pass/glm-5.3, deepseek-v4-flash,
-kimi-k2.7-code, minimax-m3)` — so build/test numbers and findings can be
-traced to the driving models.
+## Provider profiles
 
-## Round docs location
+- **pi (default):** run all phases as ONE `workflowScript` call with
+  `async: true` using `await runs.run(...)`. Never combine structured
+  single-child execution (`agent`+`task`) with `workflowScript`. Model ids come
+  from `subagent({ action: "models" })` — copy exact `provider/id` strings.
+- **Cline:** spawn teammates named `orchestrator`, `worker`, `reviewer`,
+  `ui-tester` with the compact contracts from `references/role-contracts.md`.
+  **Spawn once per session and reuse them across rounds** — do not re-spawn
+  per round. Switch the session's provider to `clinepass` before starting
+  (pi's `ollama/<id>:cloud` ids do not resolve in Cline). If teammate dispatch
+  returns `Unauthorized: ... re-authenticate your Cline account`, stop and
+  re-authenticate before rerunning — a round must not proceed on a dead
+  session.
+- **Pick one provider per round; never mix mid-round.**
 
-All per-round working docs this workflow produces — the orchestrator's
-`plan-*.md` and `acceptance-*.md`, the reviewer's `review-*.md`, and the UI
-tester's `ui-tester-*.md` — MUST live in `documents/rounds/`, NEVER in
-`documents/specs/`. `documents/specs/` is reserved for durable feature
-specs that remain the source of truth; round docs are ephemeral residue.
-Name each doc `<kind>-<round-slug>.md` (e.g. `plan-period-followups-r1.md`).
-`documents/rounds/` is a quarantine folder: it is safe to bulk-trash once a
-round's durable outcomes are folded into the feature spec — see
-`documents/rounds/README.md`.
+## Role contracts and structured output
 
-## When to Use
+Each child's task = its compact contract (see `references/role-contracts.md`)
++ the plan + the round-doc and patch paths. Children read the plan and patch
+artifact from disk; they do NOT receive full reports verbatim and do NOT
+re-read source specs — the plan is the single source of truth, and specs are
+opened only to resolve ambiguity.
 
-Use when a task needs a spec/plan-owned implementation pass with independent
-verification: feature implementation, multi-fix rounds, or any work where a
-document-owner should plan, a worker should code, and a reviewer should verify
-— with the orchestrator accepting the review for correctness before the round
-closes. Especially suited to rounds where review docs or plans written must be
-checked by a document owner before closing.
+Structured blocks (formats in `references/role-contracts.md`): **WORKER
+REPORT** (changed files, build/test verdicts, deviations), **REVIEW** (P1/P2
+with file:line evidence + best-practices check), **UI TEST** (scope ack,
+P1/P2 with file:line, out-of-round observations).
+
+## Deterministic UI-round trigger
+
+After the worker run, the parent derives the UI verdict from
+`git diff --name-only`: the round is a **UI round** iff the changed-file list
+contains any `.razor`, `.razor.css`, `.css`, or `.js` file, anything under
+`wwwroot/`, or a file in the ApiClient / Blazor client projects. Only UI
+rounds get a tester pass; the tester-scope handover enumerates exactly these
+surfaces — the changed files, the pages/dialogs/landing pages that render
+them, the ApiClient methods they call, and the navigation entry points — and
+the tester never derives or expands its own scope.
 
 ## Procedure
 
-1. **Confirm the three agents are registered.** Run
-   `subagent({ action: "models" })` and copy exact `provider/id` strings for
-   orchestrator, worker, reviewer (or accept the defaults above). Override any
-   by copying exact ids.
-2. **Author the orchestrator task.** Read the source specs/review docs, write a
-   plan (or refine an existing one), define the worker's implementable task and
-   the reviewer's acceptance criteria, and state which doc(s) the orchestrator
-   owns. Orchestrator output must include (a) the plan, (b) the worker task
-   text, (c) the reviewer task text, and (d) the acceptance doc path it will
-   own (all round docs — plan/review/acceptance/ui-tester — go in
-   `documents/rounds/`; see **Round docs location** above).
-3. **Author the worker task.** Implement exactly what the orchestrator plan
-   specifies; run build + affected tests; do **not** edit the orchestrator's
-   plan/acceptance docs. Return a concise changed-files + build/test report.
-4. **Author the reviewer task.** Verify the worker's diffs against the
-   orchestrator plan and the source specs; run build + tests independently;
-   write findings to a review doc. The task MUST also instruct the reviewer to
-   run a **best-coding-practices check** on the worker's diff:
-   - **No overwrites:** the diff must not rewrite or delete pre-existing code
-     outside the plan's scope (flag unrelated deletions/reformatting/
-     "improvements" the plan never asked for — they hide real changes and
-     break review).
-   - **Repo skills honored:** where the touched surface has an applicable
-     installed skill (e.g. `dotnet-best-practices`, `dialog-ui`,
-     `blazor-css-isolation`, `fluentui-*`, `author-component`,
-     `collect-user-input`), the implementation must follow it; deviations are
-     findings.
-   - **Readability & maintenance (concise):** naming matches repo conventions,
-     minimal focused diff, no dead/duplicated code, follows the repo's
-     established patterns.
-   Report violations as P1 (destructive overwrites, ignored mandated skills) /
-   P2 (readability nits) with file+line evidence. If the reviewer lacks shell
-   tools, instruct it to return the full report + acceptance JSON in its final
-   response so the parent can persist and run build/tests.
-5. **Run all phases as ONE `workflowScript` call with `async: true`.** Order:
-   - `await runs.run('orchestrator', { agent: 'delegate', model: <orchestratorId>, task: orchestratorTask })`
-   - `await runs.run('worker', { agent: 'worker', model: <workerId>, task: workerTask })`
-   - `await runs.run('reviewer', { agent: 'reviewer', model: <reviewerId>, task: reviewerTask })`
-   - `await runs.run('orchestrator-accept', { agent: 'delegate', model: <orchestratorId>, task: acceptTask })`
+0. **Select the tier.** Apply the eligibility checklist; default to the lowest
+   safe tier; offer the AGENTS.md menu when the choice is not obvious. Record
+   the tier + provider + models in the round doc header, plus the round base
+   (`git rev-parse HEAD`; if the tree is dirty at round start, also record
+   `git diff --name-only` so the round diff can be isolated).
+1. **Setup (once per session).** Resolve model ids (pi:
+   `subagent({ action: "models" })`; Cline: switch to `clinepass`). Cline:
+   spawn the four teammates once and reuse them across rounds.
+2. **Plan.** Tiers 1–2: the parent writes the `## Plan` section (goal, scope,
+   expected files, acceptance criteria; Tier 2 adds the reviewer's acceptance
+   criteria). Tier 3: the orchestrator run reads the source specs/review
+   docs, writes `## Plan`, and authors the worker/reviewer task specs and
+   acceptance criteria. The plan must be implementable standalone.
+3. **Worker run.** Task = worker contract + the plan inline + expected files +
+   round-doc path (the worker does not edit it). The worker implements, runs
+   build + affected tests, returns WORKER REPORT. The parent persists the
+   report into the doc.
+4. **Freeze the diff, then verify in parallel.** The parent writes
+   `diffs-<slug>.patch` (`git diff`, or `git diff <base-sha>` when the tree
+   was dirty at start), then concurrently:
+   - (a) The parent runs the authoritative `dotnet build SchoolCollab.sln`
+     (incremental after the worker) and `dotnet test` on the affected
+     projects **plus `SchoolCollab.ArchitectureTests.Unit`** (repo-wide
+     scanner — always include it).
+   - (b) Tiers 2–3: dispatch the static reviewer with the plan + patch path +
+     WORKER REPORT; the reviewer returns the REVIEW block. Tier 1 has no
+     reviewer — the parent does the scope check itself (diff-stat vs plan
+     scope; unrelated deletions/reformatting are findings).
 
-   Pass the orchestrator's plan text into the worker task; pass the worker's
-   report (or the plan + git-diff instructions) into the reviewer task; pass
-   the reviewer's report + worker report into the acceptance task. Await
-   sequentially.
-6. **Loop on P1 gaps.** After the reviewer settles, read its report. If it
-   raised P1 gaps the worker can fix, send a follow-up worker task referencing
-   the P1 items, then re-run the reviewer. Stop when no P1 remains or the user
-   accepts the residual risk.
-7. **Orchestrator acceptance pass + tester-scope handover.** Run a final
-   `runs.run('orchestrator-accept', ...)` giving the orchestrator the
-   reviewer's report and the final build/test results; it writes/appends the
-   acceptance verdict to its owned doc and either closes the round or lists
-   remaining P1 items. **When the verdict is CLOSED and the round touched UI,
-   the acceptance pass must also produce the UI-tester scope handover**: from
-   the worker's changed-files report (and `git diff --name-only`), the
-   orchestrator enumerates every affected UI surface — the changed
-   `.razor`/`.razor.css` files themselves, the pages/landing pages/dialogs
-   that render them, the ApiClient methods they call, and any navigation
-   entry points that reach them — and appends that explicit, closed list
-   (with a one-line rationale per entry) to its owned doc. This list is the
-   tester's ENTIRE scope; the tester must not derive or expand its own scope.
-8. **UI-tester pass (4th agent).** When the round touched UI and the
-   acceptance verdict is CLOSED, run
-   `runs.run('ui-tester', { agent: 'worker', model: <testerId>, task: testerTask })`.
-   **The task must carry the orchestrator's scope handover verbatim** (the
-   affected-surfaces list from step 7) as the tester's complete scope — the
-   tester bug-hunts ONLY those surfaces: swallowed errors, perpetual
-   spinners, missing state rendering, invisible validation, wrong bindings,
-   DTO/property mismatches that surface as silent no-ops, accessibility
-   regressions. It must NOT review unrelated UI pages/components; findings
-   outside the handover scope are returned as out-of-round observations for
-   the parent, not rework items. It returns P1 / P2 / pass with file+line
-   evidence, inline in its final response; the parent persists the report.
-9. **Tester-findings rework loop.** If the tester reports P1 (or P2 the user
-   wants fixed), run `runs.run('orchestrator-rework', { agent: 'delegate',
-   model: <orchestratorId>, task: reworkTask })` with the tester's findings —
-   the orchestrator appends a rework plan to its owned doc and emits a focused
-   worker task. Then worker fixes → tester re-verifies (re-run step 8 with the
-   rework diff folded into the handover scope). Stop when the tester passes or
-   the user accepts the residuals. **Bound the loop at ~2 rework iterations** —
-   after that surface residuals to the user instead of looping forever.
-10. **Parent is the source of truth for build/test numbers.** From the parent,
-   run `dotnet build SchoolCollab.sln -c Debug --nologo -v q` and the affected
-   `dotnet test` projects yourself; merge the authoritative numbers into the
-   orchestrator's acceptance doc. Persist any reviewer report the reviewer
-   could not write itself.
-11. **Report to the user:** per-agent status, build/test counts, reviewer +
-   tester findings, rework iterations, and the acceptance-doc path. Update the
-   relevant backlog with completion notes.
+   Never start a build while a child may still write to the working tree
+   (MSB3027 file locks). The static reviewer is safe to run in parallel
+   precisely because it never builds.
+5. **Accept.** Tiers 1–2: the parent adjudicates findings and transcribes the
+   verdict into `## Acceptance` (criteria checklist, build/test numbers, P1
+   list or CLOSED, residual P2s). Tier 3: the orchestrator-accept run receives
+   the REVIEW block + the parent's build/test numbers and writes
+   `## Acceptance`; when the verdict is CLOSED and the UI trigger fires, it
+   also appends the tester-scope handover.
+6. **UI tester pass (Tier 3, UI rounds).** Task = tester contract + the
+   handover verbatim + patch path. The tester bug-hunts only the handed-over
+   surfaces and returns UI TEST; the parent persists it into `## UI Tester`.
+7. **Bounded rework loops.**
+   - Reviewer P1s → worker rework task (failing items + patch path only, no
+     full history) → re-verify statically (reviewer, or parent scope-check
+     for tiny rework diffs). **Tier 2: ≤1 iteration. Tier 3: ≤2.**
+   - Tester P1s → orchestrator (Tier 3) or parent appends a rework plan → one
+     worker run → **tester re-verifies only**; the parent statically checks
+     the rework diff for plan conformance (no reviewer re-run). **≤2
+     iterations.**
+   - At the bound, surface residuals to the user instead of looping.
+8. **Report.** Per-agent status, build/test counts, findings, rework
+   iterations, round-doc path. Fold durable outcomes into the spec and update
+   the backlog.
 
 ## Pitfalls
 
-- **Never combine structured single-child execution (`agent`+`task`) with
-  `workflowScript`.** Use `workflowScript` with `async: true` and
-  `runs.run` / `runs.all` inside it, or use standalone sequential `subagent`
-  calls. Do not mix.
-- **`workflowScript` continuation is not always persisted across detached
-  children.** If the workflow errors with `unsupported-continuation` after a
-  child settles, recover each child result with
-  `subagent({ action: "status", id, view: "transcript" })` and read its output
-  file, then finish from the parent.
-- **Reviewer read-only agents often lack bash/file-write tools.** Tell the
-  reviewer up front to return the full report text + acceptance JSON in its
-  final response; the parent persists the review doc and runs build/tests.
+- **Never combine structured single-child execution with `workflowScript`.**
+- **`workflowScript` continuation may not persist across detached children** —
+  if the workflow errors `unsupported-continuation`, recover each child via
+  `subagent({ action: "status", id, view: "transcript" })`. All durable round
+  state is already on disk (round doc + patch), so resuming is cheap.
+- **The reviewer is static by design.** If it reports build/test numbers,
+  discard them — the parent is the only build/test authority; never trust
+  child-reported counts.
 - **Workers sometimes overwrite code, ignore repo skills, or skip repo
-  conventions.** That is why the reviewer task explicitly includes the
-  best-coding-practices check (no overwrites / repo skills honored /
-  readability & maintenance). Do not let the round close on "plan-conformance
-  only" when these violations exist — a P1 overwrite finding goes through the
-  same rework loop as any other P1.
-- **Children may pause and request supervisor decisions via intercom.** Reply
-  with `subagent_supervisor({ action: "reply", replyTo: <id>, message: ... })`
-  then `subagent_wait({ id: <childId> })` to resume.
-- **Bare model ids resolve only when unique.** Always copy the exact
-  `provider/id` from the models list (e.g. `ollama/glm-5.3-flash:cloud`, not
-  `glm-5.2`).
-- **Do not let the worker edit the orchestrator's plan or acceptance docs.**
-  That breaks the ownership/correctness contract. Only the orchestrator owns
-  those.
-- **The parent is the final source of truth for build/test numbers.** Always
-  rerun them from the parent; do not trust child-reported counts blindly.
-- **The UI tester is NOT a second reviewer.** Do not ask it to verify plan
-  conformance (the reviewer did that) — ask it to hunt for user-facing defects
-  the plan-conformance pass structurally misses (silent failures, missing
-  error surfaces, loading states that never resolve).
-- **The UI tester must stay scoped to the round's touched UI surfaces**
-  (changed files + the pages/dialogs they directly render into). Findings
-  about unrelated UI pages/components are out of round: record them as parent
-  observations (optionally a backlog item), never as rework for this round.
-  Overreach wastes cycles and muddies the acceptance doc.
-- **Bound the tester-rework loop** (max ~2 rework iterations per round); after
-  that surface residuals to the user instead of looping forever.
+  conventions** — the reviewer's best-coding-practices check exists for this.
+  A P1 overwrite finding goes through the rework loop like any other P1.
+- **Do not build while a child can still write to the tree** (MSB3027 locks).
+  Safe pattern: worker settled → patch frozen → parent build in parallel with
+  the static reviewer.
+- **Bare model ids resolve only when unique** — copy exact `provider/id`
+  strings (`references/models.md`).
+- **Only the orchestrator (Tier 3) or the parent (Tiers 1–2) writes the round
+  doc** — never the worker, reviewer, or tester.
+- **The UI tester is not a second reviewer** — no plan conformance; scope
+  comes verbatim from the handover; out-of-scope findings are parent
+  observations (optional backlog item), never rework.
+- **Escalate instead of forcing a light tier through.**
+- Children may pause for supervisor decisions via intercom (pi) — reply, then
+  wait for the child to settle.
 
 ## Verification
 
-1. All child runs complete (`subagent` status shows each as completed exit 0).
-2. Parent-run `dotnet build SchoolCollab.sln -c Debug` reports 0 errors.
-3. Parent-run `dotnet test` for affected projects reports 0 failures; record
-   the pass counts.
-4. The orchestrator's acceptance doc exists and contains the plan, the
-   reviewer's findings, and an explicit close-or-remaining-P1 verdict — plus,
-   for UI rounds, the tester-scope handover (affected UI surfaces list), the
-   UI tester's findings, and the final tester verdict.
-5. No P1 findings (reviewer — including best-practices violations — or
-   tester) remain unaddressed, or the user has explicitly accepted them.
-6. The relevant backlog/spec doc is updated with completion notes.
+1. All child runs completed (subagent status completed, exit 0).
+2. Parent-run `dotnet build SchoolCollab.sln -c Debug`: 0 errors.
+3. Parent-run `dotnet test` — affected projects **plus
+   `SchoolCollab.ArchitectureTests.Unit`**: 0 failures; pass counts recorded
+   in the round doc.
+4. The round doc exists with tier-appropriate sections filled and an explicit
+   verdict (CLOSED, or remaining P1s listed), plus the provider/models header.
+5. No P1 findings remain unaddressed, or the user explicitly accepted the
+   residuals. Loop bounds respected (Tier 2 reviewer loop ≤1; Tier 3 reviewer
+   ≤2, tester ≤2).
+6. The relevant backlog/spec doc is updated with completion notes; durable
+   outcomes folded into `documents/specs/`.
