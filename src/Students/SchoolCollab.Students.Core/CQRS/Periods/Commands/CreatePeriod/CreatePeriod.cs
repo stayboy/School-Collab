@@ -12,7 +12,8 @@ namespace SchoolCollab.Students.Core.CQRS.Periods.Commands.CreatePeriod;
 public sealed record SubPeriodDefinition(
     string Name,
     DateOnly StartDate,
-    DateOnly EndDate);
+    DateOnly EndDate,
+    int? ActivationToleranceDays = null);
 
 /// <summary>
 /// The result of an atomic create: the created top-level academic year id plus
@@ -28,4 +29,5 @@ public sealed record CreatePeriod(
     DateOnly EndDate,
     AcademicYearDivision Division,
     Guid? ParentPeriodId = null,
-    IReadOnlyList<SubPeriodDefinition>? SubPeriods = null) : ICommand;
+    IReadOnlyList<SubPeriodDefinition>? SubPeriods = null,
+    int? ActivationToleranceDays = null) : ICommand;

@@ -476,6 +476,15 @@
 
 ---
 
+## Follow-ups — Period Activation Window (period-activation-window-auto-activation.md)
+
+- [ ] **P2** Implement the FR-AA auto-activation sweep: `PeriodAutoActivationService`
+  (`BackgroundService`) in `Students.Worker` + `GetDraftPeriodsDueForActivationAsync`
+  repository query + sweep unit tests. Spec-only this round. *Source:*
+  `period-activation-window-auto-activation.md` FR-AA1..AA8.
+
+---
+
 ## Dependency Graph
 
 ```

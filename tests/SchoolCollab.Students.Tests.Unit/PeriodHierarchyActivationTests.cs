@@ -26,7 +26,7 @@ public class PeriodHierarchyActivationTests
         new(s.Periods, s.Cache, s.Tenants, NullLogger<CreatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) =>
-        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
+        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     private static CompletePeriodHandler NewComplete(StudentsTestScope s) =>
         new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<CompletePeriodHandler>.Instance);
@@ -35,7 +35,7 @@ public class PeriodHierarchyActivationTests
         new(s.Periods, s.Cache, NullLogger<ArchivePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivateRecording(StudentsTestScope s, RecordingPublisher publisher) =>
-        new(s.Periods, publisher, s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
+        new(s.Periods, publisher, s.Cache, NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     private sealed class RecordingPublisher : IIntegrationEventPublisher
     {

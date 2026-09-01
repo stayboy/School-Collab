@@ -38,6 +38,9 @@ public class DependencyInjectionRegistrationTests
 
         var services = new ServiceCollection();
         services.AddLogging();
+        // IConfiguration is registered by the ASP.NET Core host in production; the
+        // handler scan (e.g. ActivatePeriodHandler) depends on it, so register it here.
+        services.AddSingleton<IConfiguration>(configuration);
 
         // Cross-module ports the API host supplies at startup (see Students.Api/Program.cs)
         // but which AddStudentsCore intentionally leaves for the host to wire up.

@@ -49,6 +49,12 @@ var studentsOutboxExchange     = builder.AddParameter("outbox-exchange-students"
 // consistent. Warm-then-flip rollout: run with false → verify rows → set true.
 var useLocalCodedValueProjection = builder.AddParameter("use-local-coded-value-projection");
 
+// Period activation-window tolerance (period-activation-window-auto-activation.md FR-W2):
+// default number of days a period may be activated before its StartDate or after its
+// EndDate. Fanned out to students-api and students-worker as
+// Students__PeriodActivationToleranceDays (read as Students:PeriodActivationToleranceDays).
+var periodActivationToleranceDays = builder.AddParameter("period-activation-tolerance-days");
+
 // AI provider configuration that the `settings-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
 // see every knob they may need to set in exactly one place — the AppHost's
@@ -137,6 +143,7 @@ var studentsApi = builder.AddProject<Projects.SchoolCollab_Students_Api>("studen
     .WithReference(redis)
     .WithEnvironment("Outbox__ExchangeName", studentsOutboxExchange)
     .WithEnvironment("Students__UseLocalCodedValueProjection", useLocalCodedValueProjection)
+    .WithEnvironment("Students__PeriodActivationToleranceDays", periodActivationToleranceDays)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
@@ -176,6 +183,7 @@ var studentsWorker = builder.AddProject<Projects.SchoolCollab_Students_Worker>("
     // (adr-cross-module-calls.md Phase 1).
     .WithEnvironment("RabbitMq__Subscriber__ExchangeName", settingsOutboxExchange)
     .WithEnvironment("Students__UseLocalCodedValueProjection", useLocalCodedValueProjection)
+    .WithEnvironment("Students__PeriodActivationToleranceDays", periodActivationToleranceDays)
     .WaitFor(rabbit)
     .WaitForCompletion(migrator);
 

@@ -41,7 +41,7 @@ public sealed class GetActiveAcademicYearHandler(
                     period.Id, period.Name, period.StartDate, period.EndDate,
                     period.Status.ToString(),
                     period.ParentPeriodId, period.NextPeriodId,
-                    period.Division.ToString(),
+                    period.Division.ToString(), period.ActivationToleranceDays,
                     period.CreatedAt, period.UpdatedAt);
             },
             CacheOptions,

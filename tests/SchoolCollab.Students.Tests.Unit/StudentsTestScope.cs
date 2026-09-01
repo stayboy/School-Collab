@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Data;
@@ -60,4 +61,18 @@ internal sealed class StudentsTestScope : IDisposable
     }
 
     public void Dispose() => Db.Dispose();
+
+    /// <summary>
+    /// Builds an <see cref="IConfiguration"/> that sets the global period activation-window
+    /// tolerance (<c>Students:PeriodActivationToleranceDays</c>). Tests that exercise the
+    /// window guard pass a small value; tests that only exercise hierarchy/guard behaviour
+    /// pass a large value so the window guard never interferes with their scenarios.
+    /// </summary>
+    public static IConfiguration Config(int toleranceDays) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Students:PeriodActivationToleranceDays"] = toleranceDays.ToString()
+            })
+            .Build();
 }

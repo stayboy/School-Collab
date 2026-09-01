@@ -118,7 +118,8 @@ public sealed class CreatePeriodHandler(
             command.StartDate,
             command.EndDate,
             command.Division,
-            command.ParentPeriodId)
+            command.ParentPeriodId,
+            command.ActivationToleranceDays)
             .WithTenant(tenantProvider);
 
         var subPeriods = new List<Period>();
@@ -131,7 +132,8 @@ public sealed class CreatePeriodHandler(
                     sub.StartDate,
                     sub.EndDate,
                     command.Division,
-                    parentPeriodId: year.Id)
+                    parentPeriodId: year.Id,
+                    sub.ActivationToleranceDays)
                     .WithTenant(tenantProvider));
             }
         }

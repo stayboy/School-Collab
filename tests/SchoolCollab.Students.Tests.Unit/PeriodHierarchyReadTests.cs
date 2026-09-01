@@ -24,7 +24,7 @@ public class PeriodHierarchyReadTests
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) =>
         new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache,
-            NullLogger<ActivatePeriodHandler>.Instance);
+            NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     private static GetActiveAcademicYearHandler NewActiveYear(StudentsTestScope s) =>
         new(s.Db, s.Cache);

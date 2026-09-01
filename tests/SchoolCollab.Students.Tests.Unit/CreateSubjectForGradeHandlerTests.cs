@@ -54,7 +54,7 @@ public class CreateTopicForGradeHandlerTests
             AcademicYearDivision.Terms, ParentPeriodId: ay))).YearId;
         var activate = new ActivatePeriodHandler(
             s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache,
-            NullLogger<ActivatePeriodHandler>.Instance);
+            NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
         await activate.HandleAsync(new ActivatePeriod(ay));
         await activate.HandleAsync(new ActivatePeriod(term));
         return term;

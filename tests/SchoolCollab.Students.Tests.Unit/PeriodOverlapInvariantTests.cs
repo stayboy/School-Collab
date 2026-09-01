@@ -22,7 +22,7 @@ public class PeriodOverlapInvariantTests
         new(s.Periods, s.Cache, NullLogger<UpdatePeriodHandler>.Instance);
 
     private static ActivatePeriodHandler NewActivate(StudentsTestScope s) =>
-        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance);
+        new(s.Periods, Mock.Of<IIntegrationEventPublisher>(), s.Cache, NullLogger<ActivatePeriodHandler>.Instance, StudentsTestScope.Config(10000));
 
     [TestMethod]
     public async Task Create_NonOverlapping_Succeeds()

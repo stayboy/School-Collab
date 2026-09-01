@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Students.Contracts.Events;
 using SchoolCollab.Core.CQRS;
@@ -15,7 +16,8 @@ public sealed class ActivatePeriodHandler(
     IPeriodRepository repository,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
-    ILogger<ActivatePeriodHandler> logger) : ICommandHandler<ActivatePeriod>
+    ILogger<ActivatePeriodHandler> logger,
+    IConfiguration configuration) : ICommandHandler<ActivatePeriod>
 {
     public async Task HandleAsync(ActivatePeriod command, CancellationToken cancellationToken = default)
     {
@@ -23,6 +25,27 @@ public sealed class ActivatePeriodHandler(
 
         var period = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new PeriodNotFoundException(command.Id);
+
+        // ── Activation-window guard (period-activation-window-auto-activation.md FR-W1/W2/W4):
+        //    a period whose [StartDate, EndDate] is far away from today cannot be activated.
+        //    Effective tolerance = per-period override (ActivationToleranceDays) or the global
+        //    default (Students:PeriodActivationToleranceDays, default 10). Evaluated BEFORE any
+        //    state mutation (before the FR-G1 sub-period guard, prior-year close, sibling close,
+        //    and Activate()) so a guard failure leaves zero rows changed (all-or-nothing).
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var defaultTolerance = Math.Max(0, configuration.GetValue("Students:PeriodActivationToleranceDays", defaultValue: 10));
+        if (!period.IsWithinActivationWindow(today, defaultTolerance))
+        {
+            var tolerance = period.ActivationToleranceDays ?? defaultTolerance;
+            var toleranceSource = period.ActivationToleranceDays is { } overrideDays
+                ? $"per-period override ({overrideDays} days)"
+                : $"global default ({defaultTolerance} days)";
+            throw new PeriodActivationWindowException(
+                $"Cannot activate period '{period.Name}' ({period.StartDate:O}–{period.EndDate:O}): " +
+                $"today ({today:O}) is outside the activation window " +
+                $"[{period.StartDate.AddDays(-tolerance):O}, {period.EndDate.AddDays(tolerance):O}] " +
+                $"(tolerance {tolerance} days, {toleranceSource}).");
+        }
 
         // ── Activation guard (period-activation-guard-atomic-create.md FR-G1/G2):
         //    a top-level academic year divided into Terms/Semesters cannot be
@@ -107,8 +130,11 @@ public sealed class ActivatePeriodHandler(
         if (period.ParentPeriodId is null && period.Division != AcademicYearDivision.None)
         {
             var candidates = await repository.GetSubPeriodsAsync(period.Id, cancellationToken);
-            var toActivate = candidates
+            var eligible = candidates
                 .Where(sp => sp.Status != PeriodStatus.Completed && sp.Status != PeriodStatus.Archived)
+                .ToArray();
+            var toActivate = eligible
+                .Where(sp => sp.IsWithinActivationWindow(today, defaultTolerance))
                 .OrderBy(sp => sp.StartDate)
                 .ThenBy(sp => sp.Id)
                 .FirstOrDefault();
@@ -128,6 +154,15 @@ public sealed class ActivatePeriodHandler(
                         DateTimeOffset.UtcNow), cancellationToken);
                 }
                 toActivate.ClearDomainEvents();
+            }
+            else if (eligible.Length > 0)
+            {
+                // FR-W5: the cascade only activates sub-periods inside their own activation
+                // window. Zero in-window candidates is a valid gap state (FR-H4) — skip and log.
+                logger.LogInformation(
+                    "Skipping FR-H4a auto-activation for academic year {Id}: {EligibleCount} eligible " +
+                    "sub-period(s) exist but none is inside its activation window (gap state stays valid, FR-H4)",
+                    period.Id, eligible.Length);
             }
         }
 

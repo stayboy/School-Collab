@@ -124,6 +124,7 @@ files only carry values that genuinely belong to that single service
 | `openrouter-default-model` | Aspire parameter | `google/gemma-4-31b-it` | Model name to use when provider is `openrouter`. Injected as `OpenRouter__DefaultModel`. |
 | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
 | `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
+| `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
 
 **Where to set them:**
 
@@ -671,6 +672,8 @@ matching env-var form:
 | `Parameters:openrouter-default-model` | `Parameters__openrouter_default_model` |
 | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
 | `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
+| `Parameters:period-activation-tolerance-days` | `Parameters__period_activation_tolerance_days` |
+| `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
 | `Outbox:ExchangeName` | `Outbox__ExchangeName` |
 | `Outbox:BatchSize` | `Outbox__BatchSize` |
 | `Outbox:PollInterval` | `Outbox__PollInterval` |

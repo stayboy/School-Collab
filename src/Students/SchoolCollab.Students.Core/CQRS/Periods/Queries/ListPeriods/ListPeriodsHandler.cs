@@ -54,6 +54,7 @@ public sealed class ListPeriodsHandler(
                     p.ParentPeriodId,
                     p.NextPeriodId,
                     p.Division.ToString(),
+                    p.ActivationToleranceDays,
                     p.CreatedAt,
                     p.UpdatedAt)).ToArray();
             },
