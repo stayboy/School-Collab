@@ -21,7 +21,7 @@
 @if (Show)
 {
     <div class="sub-periods-editor">
-        <div class="sub-periods-header">
+        <div class="sub-periods-header mb-3">
             <h4>Sub-periods</h4>
             <div class="sub-periods-actions">
                 <FluentButton Appearance="Appearance.Accent"
@@ -56,9 +56,6 @@
                                          Style="flex:1; min-width:0" />
                         <FluentDatePicker Label="" @bind-Value="row.Start" Style="flex:1; min-width:0" />
                         <FluentDatePicker Label="" @bind-Value="row.End"   Style="flex:1; min-width:0" />
-                        <FluentNumberField Label="" @bind-Value="row.ActivationToleranceDays" Min="0"
-                                           Title="Activation tolerance (days) — optional"
-                                           Style="width: 8rem" />
                         <FluentButton IconStart="@FluentIcons.Dismiss"
                                       Title="Remove this sub-period"
                                       OnClick="@(() => RemoveCreateRowAsync(rowIndex))" />
@@ -69,6 +66,27 @@
         else
         {
             @* ── Edit mode: live list (FluentDataGrid in-cell editing) + add row ── *@
+
+            @* Always-visible inline add row (hidden while an in-cell edit is active).
+               Placed directly beneath the "Sub-periods" header, before the grid. *@
+            @if (_editingId is null)
+            {
+                <FluentStack Orientation="Orientation.Horizontal"
+                             HorizontalGap="8"
+                             VerticalAlignment="VerticalAlignment.Bottom"
+                             class="subperiods-inline-add">
+                    <FluentTextField @bind-Value="_name"
+                                     Placeholder="New sub-period name (e.g. Term 1)"
+                                     Style="flex: 2; min-width: 160px" />
+                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" Style="width: 130px" />
+                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   Style="width: 130px" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+                                  Title="Add sub-period">
+                        @(_saving ? "Saving…" : "Add")
+                    </FluentButton>
+                </FluentStack>
+            }
+
             @if (!string.IsNullOrEmpty(_error))
             {
                 <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
@@ -149,25 +167,6 @@
                     </TemplateColumn>
                 </FluentDataGrid>
             }
-
-            @* Always-visible inline add row (hidden while an in-cell edit is active). *@
-            @if (_editingId is null)
-            {
-                <div class="subperiods-inline-add">
-                    <FluentTextField @bind-Value="_name"
-                                     Placeholder="New sub-period name (e.g. Term 1)"
-                                     class="subperiods-field-name" />
-                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
-                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
-                    <FluentNumberField @bind-Value="_tolerance" Min="0"
-                                       Title="Activation tolerance (days) — optional"
-                                       class="subperiods-field-tolerance" />
-                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
-                                  Title="Add sub-period">
-                        @(_saving ? "Saving…" : "Add")
-                    </FluentButton>
-                </div>
-            }
         }
     </div>
 }
@@ -201,7 +200,6 @@
         public string Name { get; set; } = "";
         public DateTime? Start { get; set; }
         public DateTime? End { get; set; }
-        public int? ActivationToleranceDays { get; set; }
     }
 
     private readonly List<SubPeriodRow> _createRows = new();
@@ -213,7 +211,6 @@
     private string _name = string.Empty;
     private DateTime? _start;
     private DateTime? _end;
-    private int? _tolerance;
     private volatile bool _disposed;
 
     /// <summary>The sub-period kind label for edit-mode rows / splits. The
@@ -332,7 +329,7 @@
                     return false;
                 }
             }
-            result.Add(new SubPeriodDefinitionRequest(row.Name.Trim(), s, e, row.ActivationToleranceDays));
+            result.Add(new SubPeriodDefinitionRequest(row.Name.Trim(), s, e));
         }
         definitions = result;
         return true;
@@ -463,7 +460,6 @@
         _name = p.Name;
         _start = p.StartDate.ToDateTime(TimeOnly.MinValue);
         _end = p.EndDate.ToDateTime(TimeOnly.MinValue);
-        _tolerance = p.ActivationToleranceDays;
         _error = null;
     }
 
@@ -478,7 +474,6 @@
         _name = string.Empty;
         _start = null;
         _end = null;
-        _tolerance = null;
     }
     /// would double-prompt.</summary>
     private async Task OnDeleteAsync(PeriodDto p)
@@ -531,11 +526,11 @@
         {
             if (_editingId is { } editId)
             {
-                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, YearId.Value, _tolerance));
+                await Api.UpdatePeriodAsync(editId, new UpdatePeriodRequest(_name.Trim(), startDate, endDate, YearId.Value, null));
             }
             else
             {
-                await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, YearId.Value, null, _tolerance));
+                await Api.CreatePeriodAsync(new CreatePeriodRequest(_name.Trim(), startDate, endDate, division, YearId.Value, null, null));
             }
 
             if (_disposed) return;

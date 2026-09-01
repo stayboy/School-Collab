@@ -235,4 +235,64 @@ public class PeriodActivationWindowTests
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
+    // Sub-period inheritance: a sub-period with no override inherits its parent's
+    // override (widens the window beyond the global default).
+    [TestMethod]
+    public async Task Activate_SubPeriod_InheritsParentOverride_WidensWindow_Allowed()
+    {
+        using var s = new StudentsTestScope("window-sub-inherit-widen");
+        var create = NewCreate(s);
+        var year = (await create.HandleAsync(new CreatePeriod(
+            "AY", Today.AddDays(-100), Today.AddDays(100), AcademicYearDivision.Terms,
+            ActivationToleranceDays: 30))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", Today.AddDays(20), Today.AddDays(40), AcademicYearDivision.Terms,
+            ParentPeriodId: year))).YearId;
+
+        await NewActivate(s, 10).HandleAsync(new ActivatePeriod(year));
+        // Default 10 would reject (today < StartDate − 10); inherited parent 30 allows it.
+        await NewActivate(s, 10).HandleAsync(new ActivatePeriod(t1));
+
+        (await s.Db.Periods.SingleAsync(p => p.Id == t1)).Status.Should().Be(PeriodStatus.Active);
+    }
+
+    // Sub-period inheritance: a sub-period with no override inherits its parent's
+    // override (narrows the window below the global default).
+    [TestMethod]
+    public async Task Activate_SubPeriod_InheritsParentOverride_NarrowsWindow_Throws()
+    {
+        using var s = new StudentsTestScope("window-sub-inherit-narrow");
+        var create = NewCreate(s);
+        var year = (await create.HandleAsync(new CreatePeriod(
+            "AY", Today.AddDays(-100), Today.AddDays(100), AcademicYearDivision.Terms,
+            ActivationToleranceDays: 0))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", Today.AddDays(5), Today.AddDays(40), AcademicYearDivision.Terms,
+            ParentPeriodId: year))).YearId;
+
+        await NewActivate(s, 10).HandleAsync(new ActivatePeriod(year));
+        // Default 10 would allow (today >= StartDate − 10); inherited parent 0 rejects it.
+        var act = async () => await NewActivate(s, 10).HandleAsync(new ActivatePeriod(t1));
+        await act.Should().ThrowAsync<PeriodActivationWindowException>();
+    }
+
+    // Sub-period inheritance: a sub-period's own override beats the parent's.
+    [TestMethod]
+    public async Task Activate_SubPeriod_OwnOverrideBeatsParent_Throws()
+    {
+        using var s = new StudentsTestScope("window-sub-own-override");
+        var create = NewCreate(s);
+        var year = (await create.HandleAsync(new CreatePeriod(
+            "AY", Today.AddDays(-100), Today.AddDays(100), AcademicYearDivision.Terms,
+            ActivationToleranceDays: 30))).YearId;
+        var t1 = (await create.HandleAsync(new CreatePeriod(
+            "T1", Today.AddDays(5), Today.AddDays(40), AcademicYearDivision.Terms,
+            ParentPeriodId: year, ActivationToleranceDays: 0))).YearId;
+
+        await NewActivate(s, 10).HandleAsync(new ActivatePeriod(year));
+        // Parent 30 would allow; the sub-period's own override 0 rejects it.
+        var act = async () => await NewActivate(s, 10).HandleAsync(new ActivatePeriod(t1));
+        await act.Should().ThrowAsync<PeriodActivationWindowException>();
+    }
 }
+

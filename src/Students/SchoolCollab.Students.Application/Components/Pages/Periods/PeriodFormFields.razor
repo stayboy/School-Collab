@@ -20,7 +20,6 @@
 @using SchoolCollab.Students.Core.Domain
 @using SchoolCollab.Admin.Shared.Components
 @using Microsoft.FluentUI.AspNetCore.Components
-@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
 
 @* Division is the single kind selector (plan-drop-periodtype.md). None = a
    plain top-level academic year; Terms/Semesters on a top-level year (no
@@ -36,7 +35,7 @@
     <DropdownForEnum TEnum="AcademicYearDivision"
                      @bind-SelectedValue="Model.Division"
                      Disabled="@DivisionLocked"
-                     Width="FieldWidth.W9" />
+                     Width="FieldWidth.W6" />
 </FormRow>
 
 @if (IsSubPeriod)
@@ -49,7 +48,7 @@
                            OptionValue="@(ay => ay.Id.ToString())"
                            Disabled="true"
                            Placeholder="— Select academic year —"
-                           Width="FieldWidth.W9" />
+                           Width="FieldWidth.W6" />
     </FormRow>
 }
 
@@ -82,7 +81,7 @@
 <FormRow Label="Activation tolerance (days)"
          LabelTip="Optional. How many days before the start date and after the end date this period may be activated. Leave blank to use the default."
          For="activationTolerance">
-    <FluentNumberField Id="activationTolerance" @bind-Value="Model.ActivationToleranceDays" Min="0" Style="flex:1; min-width:0" />
+    <FluentNumberField Id="activationTolerance" @bind-Value="Model.ActivationToleranceDays" Min="0" Style="width: 8rem" />
 </FormRow>
 
 @code {

@@ -131,16 +131,35 @@ public sealed class Period : ITenantEntity, IEntity, IAuditableEntity, IHasRowVe
     }
 
     /// <summary>
+    /// Effective tolerance for this period's activation window: its own override
+    /// (<see cref="ActivationToleranceDays"/>), else the parent's override
+    /// (sub-periods inherit their parent's tolerance), else the global default.
+    /// </summary>
+    public int ResolveEffectiveTolerance(int? parentToleranceDays, int defaultToleranceDays)
+        => ActivationToleranceDays ?? parentToleranceDays ?? defaultToleranceDays;
+
+    /// <summary>
+    /// True when <paramref name="today"/> falls inside this period's activation window
+    /// <c>[StartDate − tol, EndDate + tol]</c>, where tol is the effective tolerance
+    /// (FR-W2 + sub-period inheritance): this period's override, else its parent's
+    /// override, else the global default. Boundaries are inclusive (FR-W1/W2).
+    /// </summary>
+    public bool IsWithinActivationWindow(DateOnly today, int? parentToleranceDays, int defaultToleranceDays)
+    {
+        var tolerance = ResolveEffectiveTolerance(parentToleranceDays, defaultToleranceDays);
+        return today >= StartDate.AddDays(-tolerance) && today <= EndDate.AddDays(tolerance);
+    }
+
+    /// <summary>
     /// True when <paramref name="today"/> falls inside this period's activation window
     /// <c>[StartDate − tol, EndDate + tol]</c>, where tol = <see cref="ActivationToleranceDays"/>
     /// (per-period override) or <paramref name="defaultToleranceDays"/> (global default).
+    /// Top-level periods have no parent, so this is equivalent to
+    /// <see cref="IsWithinActivationWindow(DateOnly, int?, int)"/> with a null parent.
     /// Boundaries are inclusive (period-activation-window-auto-activation.md FR-W1/W2).
     /// </summary>
     public bool IsWithinActivationWindow(DateOnly today, int defaultToleranceDays)
-    {
-        var tolerance = ActivationToleranceDays ?? defaultToleranceDays;
-        return today >= StartDate.AddDays(-tolerance) && today <= EndDate.AddDays(tolerance);
-    }
+        => IsWithinActivationWindow(today, parentToleranceDays: null, defaultToleranceDays);
 
     public void Activate()
     {
