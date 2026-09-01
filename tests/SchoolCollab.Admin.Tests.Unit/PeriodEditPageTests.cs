@@ -71,6 +71,7 @@ public class PeriodEditPageTests : BunitContext
     private static readonly Guid YearId = Guid.Parse("22222222-2222-2222-2222-222222222222");
     private static readonly Guid DraftSub1Id = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
     private static readonly Guid DraftSub2Id = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+    private static readonly Guid ActiveSubId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
 
     private static string PeriodJson(Guid id, string name, string type, string status, Guid? parent, string start = "2026-01-01", string end = "2026-12-31") =>
         $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"{start}\",\"endDate\":\"{end}\",\"status\":\"{status}\",\"periodType\":\"{type}\",\"parentPeriodId\":{(parent is null ? "null" : $"\"{parent}\"")},\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
@@ -239,9 +240,10 @@ public class PeriodEditPageTests : BunitContext
     }
 
     /// <summary>
-    /// In-cell editing (round subperiods-incell-grid): clicking Edit on a sub-period
-    /// row switches that row to in-cell inputs (Save/Cancel appear), and Save persists
-    /// via PUT /students/periods/{id}.
+    /// In-cell editing (round subperiods-incell-grid): opening the sub-period row's
+    /// kebab (⋮) and clicking Edit (repo-standard RowActionsMenu) switches that row
+    /// to in-cell inputs (Save/Cancel appear), and Save persists via
+    /// PUT /students/periods/{id}.
     /// </summary>
     [TestMethod]
     public void SubPeriodsSection_InCellEdit_SaveCallsUpdate()
@@ -254,9 +256,12 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("PUT", $"/students/periods/{DraftSub1Id}", HttpStatusCode.NoContent, "");
 
         var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Edit sub-period\""));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sub-periods"));
 
-        cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Edit sub-period").Click();
+        // Open the sub-period row's kebab (⋮, RowActionsMenu) and click Edit.
+        cut.Find("fluent-button[title='Sub-period actions']").Click();
+        var editItem = cut.FindAll("fluent-menu-item").First(i => i.TextContent.Contains("Edit"));
+        editItem.Click();
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Save sub-period\""));
         cut.Markup.Should().Contain("title=\"Cancel editing\"", "in-cell editing shows a Cancel affordance");
@@ -265,6 +270,54 @@ public class PeriodEditPageTests : BunitContext
 
         cut.WaitForAssertion(() => handler.Calls.Should().Contain(("PUT", $"/students/periods/{DraftSub1Id}")));
     }
+    /// <summary>
+    /// Repo-standard kebab: a Draft sub-period row renders the shared RowActionsMenu
+    /// with Edit + Delete (destructive). Non-Draft rows drop the Delete item and
+    /// render a single-action Edit button instead.
+    /// </summary>
+    [TestMethod]
+    public void SubPeriodsSection_DraftRow_RendersKebabWithEditAndDelete()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("Terms"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
+            $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)}]");
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sub-periods"));
+
+        cut.Find("fluent-button[title='Sub-period actions']").Click();
+        var labels = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToArray();
+        labels.Should().Contain(new[] { "Edit", "Delete" },
+            "a Draft sub-period row offers Edit and a destructive Delete in the kebab");
+    }
+
+    /// <summary>
+    /// Repo-standard kebab consistency: when ANY sub-period row is Draft (2
+    /// actions → qualifies for the kebab), the kebab is forced on EVERY row —
+    /// including non-Draft rows that would otherwise render a lone labeled Edit
+    /// button. This keeps the actions column visually consistent.
+    /// </summary>
+    [TestMethod]
+    public void SubPeriodsSection_AnyDraftRow_ForcesKebabOnEveryRow()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("Terms"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
+            $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)},{PeriodJson(ActiveSubId, "Term 2", "Term", "Active", YearId)}]");
+
+        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sub-periods"));
+
+        // Both rows render the kebab trigger (⋮) — the Draft row qualifies, so the
+        // non-Draft row is forced to the kebab too instead of a lone Edit button.
+        cut.FindAll("fluent-button[title='Sub-period actions']").Should().HaveCount(2,
+            "every sub-period row renders the kebab trigger when any row qualifies");
+    }
+
+
 
     // ── Draft-period delete danger zone (period-draft-delete.md FR-D10) ──
 

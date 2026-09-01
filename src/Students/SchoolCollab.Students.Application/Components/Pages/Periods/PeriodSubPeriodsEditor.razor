@@ -132,13 +132,15 @@
                             }
                             else
                             {
-                                <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Edit"
-                                              Title="Edit sub-period" OnClick="@(() => StartEdit(context))">Edit</FluentButton>
-                                @if (context.Status == "Draft")
-                                {
-                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Delete"
-                                                  Title="Delete sub-period" OnClick="@(() => OnDeleteAsync(context))">Delete</FluentButton>
-                                }
+                                @* Repo-standard kebab (⋮) actions menu — same pattern as the
+                                   Periods landing grid. Edit always; Delete only for Draft rows
+                                   (destructive, gated by the component-level confirm). When any
+                                   row is Draft (2 actions) the kebab is forced on every row so the
+                                   actions column renders consistently. *@
+                                <RowActionsMenu AriaLabel="Sub-period actions"
+                                                UseMenuService="false"
+                                                ForceKebab="@_forceKebab"
+                                                Actions="@BuildRowActions(context)" />
                             }
                         </div>
                     </TemplateColumn>
@@ -415,6 +417,42 @@
 
     // ── Edit-mode inline add/edit ───────────────────────────────────────────
 
+    /// <summary>
+    /// Grid-level kebab consistency flag (repo convention): true when any
+    /// sub-period row is Draft — a Draft row has 2 actions (Edit + Delete) and
+    /// therefore qualifies for the kebab (⋮). When true, every row renders the
+    /// kebab so the actions column looks consistent instead of mixing a lone
+    /// labeled Edit button on non-Draft rows with a kebab on Draft rows.
+    /// </summary>
+    private bool _forceKebab => _subs.Any(sp => sp.Status == "Draft");
+
+    /// <summary>
+    /// Builds the row actions for the shared <c>RowActionsMenu</c> kebab in the
+    /// edit-mode grid. Edit is always offered; Delete only for Draft rows
+    /// (destructive — the component-level confirm in <c>RowActionsMenu</c> prompts
+    /// before invoking <see cref="OnDeleteAsync"/>). A Draft row therefore renders
+    /// the ⋮ kebab (2 items); non-Draft rows a single-action Edit button. When any
+    /// row is Draft, <see cref="_forceKebab"/> forces the kebab on every row so the
+    /// actions column renders consistently (repo convention).
+    /// </summary>
+    private IReadOnlyList<RowAction> BuildRowActions(PeriodDto p)
+    {
+        var actions = new List<RowAction>
+        {
+            RowAction.Callback("Edit", () => StartEdit(p), FluentIcons.Edit)
+        };
+        if (p.Status == "Draft")
+        {
+            actions.Add(RowAction.Callback(
+                "Delete",
+                () => OnDeleteAsync(p),
+                FluentIcons.Delete,
+                destructive: true,
+                confirmMessage: PeriodDeletePrompts.SubPeriodMessage(p.Name, GetKindLabel(p))));
+        }
+        return actions;
+    }
+
     private void StartEdit(PeriodDto p)
     {
         _editingId = p.Id;
@@ -437,17 +475,13 @@
         _end = null;
     }
 
-    /// <summary>FR-D12: deletes a Draft sub-period row, sharing the grid's wording.</summary>
+    /// <summary>FR-D12: deletes a Draft sub-period row. The destructive confirm is
+    /// enforced once by the shared <c>RowActionsMenu</c> (the kebab that owns this
+    /// action); this method only performs the delete, so a page-level confirm here
+    /// would double-prompt.</summary>
     private async Task OnDeleteAsync(PeriodDto p)
     {
         if (_disposed || YearId is null) return;
-
-        var dialog = await DialogService.ShowConfirmationAsync(
-            PeriodDeletePrompts.SubPeriodMessage(p.Name, GetKindLabel(p)),
-            "Delete",
-            "Cancel");
-        var result = await dialog.Result;
-        if (result.Cancelled) return;
 
         Logger.LogInformation("Deleting sub-period {Id} of year {YearId}", p.Id, YearId.Value);
         try

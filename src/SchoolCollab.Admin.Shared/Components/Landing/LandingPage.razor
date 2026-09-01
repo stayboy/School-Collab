@@ -138,7 +138,10 @@
     /// <para>Actions-column rendering follows the landing-grid pattern
     /// (handled inside <see cref="RowActionsMenu"/>; pages don't branch):
     /// 0 actions → renders nothing; exactly 1 action → a labeled
-    /// <c>FluentButton</c>; 2+ actions → the kebab (⋮) menu.</para>
+    /// <c>FluentButton</c>; 2+ actions → the kebab (⋮) menu. For visual
+    /// consistency, when ANY row in the grid qualifies for the kebab (2+
+    /// actions) LandingPage forces the kebab on every row (repo convention),
+    /// so a lone labeled button never sits next to a kebab.</para>
     /// </summary>
     [Parameter]
     public Func<TItem, IReadOnlyList<RowAction>>? RowActions { get; set; }
@@ -171,9 +174,21 @@
         <TemplateColumn TGridItem="TItem" Title="@RowActionsColumnTitle" Sortable="false" Context="row">
             <RowActionsMenu AriaLabel="@(RowActionsAriaLabel ?? RowActionsColumnTitle)"
                             UseMenuService="@RowActionsUseMenuService"
+                            ForceKebab="@_forceKebab"
                             Actions="@RowActions(row)" />
         </TemplateColumn>
     }</text>;
+
+    /// <summary>
+    /// Grid-level kebab consistency flag: true when any row in <see cref="Items"/>
+    /// qualifies for the kebab (2+ non-separator actions via <see cref="RowActions"/>).
+    /// When true, every row renders the kebab (⋮) so the actions column looks
+    /// consistent across the grid (repo convention) instead of mixing a lone
+    /// labeled button on some rows with a kebab on others.
+    /// </summary>
+    private bool _forceKebab
+        => Items is not null && RowActions is not null
+            && Items.Any(item => RowActionsMenu.HasKebabActions(RowActions(item)));
 
     /// <summary>
     /// Error text. Rendered as a red message bar beneath the grid when non-empty.
