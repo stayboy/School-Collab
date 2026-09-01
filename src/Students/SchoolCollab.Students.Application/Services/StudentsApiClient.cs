@@ -124,6 +124,21 @@ public sealed record PeriodDto(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
+/// <summary>Top-level period (academic year) row for the Periods landing grid,
+/// with server-computed sub-period counts — sub-period rows are never returned
+/// for display. Mirrors <c>SchoolCollab.Students.Core.DTOs.PeriodLandingDto</c>.</summary>
+public sealed record PeriodLandingDto(
+    Guid Id,
+    string Name,
+    DateOnly StartDate,
+    DateOnly EndDate,
+    string Status,
+    string Division,
+    int SubPeriodCount,
+    int DraftSubPeriodCount,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
 public sealed record StudentEnrollmentDto(
     Guid Id,
     Guid StudentId,
@@ -1269,6 +1284,25 @@ public sealed class StudentsApiClient : IContactsClient
                 statusCode: response.StatusCode);
         }
         return await response.Content.ReadFromJsonAsync<PeriodDto[]>(ct);
+    }
+
+    /// <summary>
+    /// Top-level periods (academic years) only, with server-computed sub-period
+    /// counts. <c>GET /students/periods/top-level</c>. Used by the Periods
+    /// landing grid so sub-period rows never reach the UI for display.
+    /// </summary>
+    public async Task<PeriodLandingDto[]?> ListTopLevelPeriodsAsync(CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync("/students/periods/top-level", ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = await response.Content.ReadAsStringAsync(ct);
+            throw new HttpRequestException(
+                $"ListTopLevelPeriods failed ({(int)response.StatusCode} {response.StatusCode}): {body}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+        return await response.Content.ReadFromJsonAsync<PeriodLandingDto[]>(ct);
     }
 
     public async Task<PeriodDto[]?> ListSubPeriodsAsync(Guid academicYearId, CancellationToken ct = default)

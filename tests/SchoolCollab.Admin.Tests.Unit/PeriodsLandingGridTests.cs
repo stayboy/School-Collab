@@ -102,17 +102,27 @@ public class PeriodsLandingGridTests : BunitContext
     private static string PeriodJson(Guid id, string name, string type, string status, Guid? parent, string start = "2026-01-01", string end = "2026-12-31") =>
         $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"{start}\",\"endDate\":\"{end}\",\"status\":\"{status}\",\"periodType\":\"{type}\",\"parentPeriodId\":{(parent is null ? "null" : $"\"{parent}\"")},\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
-    /// <summary>Variants that set the DTO's <c>division</c> field (a real PeriodDto
-    /// property) — used by the FR-G6 activation-guard row-action tests, which key
-    /// off <c>division</c> to decide whether a Draft year's Activate is guarded.</summary>
+    /// <summary>Renders a plain <c>PeriodDto</c> JSON (used for the
+    /// <c>/active-academic-year</c> endpoint respon, which returns a single
+    /// <see cref="PeriodDto"/> — the active-year chip consumes this.</summary>
     private static string PeriodJsonWithDivision(Guid id, string name, string division, string status, Guid? parent, string start = "2026-01-01", string end = "2026-12-31") =>
         $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"{start}\",\"endDate\":\"{end}\",\"status\":\"{status}\",\"division\":\"{division}\",\"parentPeriodId\":{(parent is null ? "null" : $"\"{parent}\"")},\"nextPeriodId\":null,\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
 
-    private static string PeriodsJson() =>
-        $"[{PeriodJson(YearId, "2026", "AcademicYear", "Active", null)}," +
-        $"{PeriodJson(EmptyYearId, "2025", "AcademicYear", "Completed", null)}," +
-        $"{PeriodJson(Term1Id, "Term 1", "Term", "Draft", YearId, "2026-01-01", "2026-06-30")}," +
-        $"{PeriodJson(Term2Id, "Term 2", "Semester", "Active", YearId, "2026-07-01", "2026-12-31")}]";
+    /// <summary>Landing-grid row JSON for <c>GET /students/periods/top-level</c>
+    /// (a <c>PeriodLandingDto</c>): top-level years only, with server-computed
+    /// sub-period counts. The count fields drive the Sub-periods column and the
+    /// FR-G6 activation-guard row-action tests.</summary>
+    private static string LandingJson(Guid id, string name, string division, string status, int subCount, int draftCount, string start = "2026-01-01", string end = "2026-12-31") =>
+        $"{{\"id\":\"{id}\",\"name\":\"{name}\",\"startDate\":\"{start}\",\"endDate\":\"{end}\",\"status\":\"{status}\",\"division\":\"{division}\",\"subPeriodCount\":{subCount},\"draftSubPeriodCount\":{draftCount},\"createdAt\":\"2026-01-01T00:00:00Z\",\"updatedAt\":\"2026-01-01T00:00:00Z\"}}";
+
+    /// <summary>Landing rows for the shared grid tests: 2026 (Terms year, 2
+    /// sub-periods, 1 Draft) and 2025 (None-division year, no sub-periods).
+    /// Sub-period rows are never returned — the top-level endpoint excludes
+    /// them (regression: they must not render as grid rows).</summary>
+    private static string LandingJson() =>
+        $"[{LandingJson(YearId, "2026", "Terms", "Active", 2, 1)}," +
+        $"{LandingJson(EmptyYearId, "2025", "None", "Completed", 0, 0)}," +
+        $"{LandingJson(DraftYearId, "2027", "Terms", "Draft", 1, 1)}]";
 
     // ── FR-2 / FR-3 / FR-5 grid assertions ──────────────────────────────────
 
@@ -120,7 +130,7 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_Name_RendersAsEditLink()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK, LandingJson());
 
         var cut = Render<Periods>();
 
@@ -133,51 +143,54 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_CountColumn_ShowsPerYearCounts()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK, LandingJson());
 
         var cut = Render<Periods>();
 
-        // Year 2026 has 2 sub-periods (Term 1 Draft + Term 2 Semester).
+        // Year 2026 has 2 sub-periods — rendered as a worded link (click target).
         cut.WaitForAssertion(() => cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("title") == "View sub-periods"));
         var countLink = cut.FindAll("fluent-anchor").First(a => a.GetAttribute("title") == "View sub-periods");
-        countLink.TextContent.Trim().Should().Be("2", "2026 has two sub-periods");
+        countLink.TextContent.Trim().Should().Be("2 sub-periods", "2026 has two sub-periods");
     }
 
     [TestMethod]
     public void Periods_ZeroCount_RendersMutedNonInteractive()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK, LandingJson());
 
         var cut = Render<Periods>();
 
-        // Only ONE View-sub-periods link exists (the 2-count for 2026); the
-        // empty year (2025) renders a non-interactive muted "0", not a link.
+        // 2026 (2 subs) and the Draft 2027 year (1 sub) each render a
+        // View-sub-periods link; the empty year (2025) renders a
+        // non-interactive muted "None", not a link.
         cut.WaitForAssertion(() => cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("title") == "View sub-periods"));
-        cut.FindAll("fluent-anchor").Count(a => a.GetAttribute("title") == "View sub-periods").Should().Be(1);
-        cut.FindAll(".muted").Any(m => m.TextContent.Trim() == "0").Should().BeTrue(
-            "a year with no sub-periods renders a muted, non-interactive 0");
+        cut.FindAll("fluent-anchor").Count(a => a.GetAttribute("title") == "View sub-periods").Should().Be(2);
+        cut.FindAll(".muted").Any(m => m.TextContent.Trim() == "None").Should().BeTrue(
+            "a year with no sub-periods renders a muted, non-interactive None");
     }
 
     [TestMethod]
-    public void Periods_SubPeriodRows_RenderEmDash()
+    public void Periods_SubPeriodRows_NeverRendered()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK, LandingJson());
 
         var cut = Render<Periods>();
 
-        // Term / Semester rows are not AcademicYear → they render an em dash
-        // in the count column, non-interactive.
-        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Term 1"));
-        cut.Markup.Should().Contain("—", "sub-period rows show an em dash in the count column");
+        // Regression for the top-level endpoint: the grid shows academic years
+        // only — sub-period rows (which the endpoint does not even return)
+        // must never appear.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("2026"));
+        cut.Markup.Should().NotContain("Term 1");
+        cut.Markup.Should().NotContain("Term 2");
     }
 
     [TestMethod]
     public void Periods_CountLink_OpensSubPeriodsDialog()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK, LandingJson());
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
             $"[{PeriodJson(Term1Id, "Term 1", "Term", "Draft", YearId, "2026-01-01", "2026-06-30")}]");
 
@@ -205,7 +218,7 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_RowActions_CollapseToSingle()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK, LandingJson());
 
         var cut = Render<Periods>();
 
@@ -243,8 +256,8 @@ public class PeriodsLandingGridTests : BunitContext
         // Draft rows now carry Activate + Delete, so they render as a kebab menu.
         var yearId = Guid.Parse("99999999-9999-9999-9999-999999999999");
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJsonWithDivision(yearId, "2027", "Terms", "Draft", null, "2027-01-01", "2027-12-31") + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(yearId, "2027", "Terms", "Draft", 0, 0) + "]");
 
         var cut = Render<Periods>();
 
@@ -264,11 +277,9 @@ public class PeriodsLandingGridTests : BunitContext
         // A Terms year with at least one Draft sub → Activate enabled (regression).
         // Draft rows now carry Activate + Delete, so they render as a kebab menu.
         var yearId = Guid.Parse("88888888-8888-8888-8888-888888888888");
-        var draftSub = Guid.Parse("77777777-7777-7777-7777-777777777777");
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJsonWithDivision(yearId, "2027", "Terms", "Draft", null, "2027-01-01", "2027-12-31") + "," +
-            PeriodJsonWithDivision(draftSub, "Term 1", "Terms", "Draft", yearId, "2027-01-01", "2027-06-30") + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(yearId, "2027", "Terms", "Draft", 1, 1) + "]");
 
         var cut = Render<Periods>();
 
@@ -288,8 +299,8 @@ public class PeriodsLandingGridTests : BunitContext
         // Draft rows now carry Activate + Delete, so they render as a kebab menu.
         var yearId = Guid.Parse("66666666-6666-6666-6666-666666666666");
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJsonWithDivision(yearId, "2027", "None", "Draft", null, "2027-01-01", "2027-12-31") + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(yearId, "2027", "None", "Draft", 0, 0) + "]");
 
         var cut = Render<Periods>();
 
@@ -298,6 +309,46 @@ public class PeriodsLandingGridTests : BunitContext
         cut.WaitForAssertion(() => cut.FindAll("fluent-menu-item")
             .Any(m => m.TextContent.Trim() == "Activate").Should().BeTrue(
                 "a None-division Draft year offers an enabled Activate"));
+    }
+
+    [TestMethod]
+    public void Periods_ActiveYearChip_ShowsServerResolvedActiveYear()
+    {
+        var yearId = Guid.Parse("88888888-8888-8888-8888-888888888888");
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(yearId, "2026", "Terms", "Active", 2, 1) + "]");
+        // The active-year chip must read the authoritative /active-academic-year
+        // endpoint, NOT the grid's top-level snapshot — so it tracks the server
+        // truth after an activation that flips the tenant's current period.
+        handler.Map("GET", "/students/periods/active-academic-year", HttpStatusCode.OK,
+            PeriodJsonWithDivision(yearId, "2026", "Terms", "Active", null));
+
+        var cut = Render<Periods>();
+
+        cut.WaitForAssertion(() => cut.FindAll(".period-active-chip").Any().Should().BeTrue());
+        cut.FindAll("fluent-badge").Any(b => b.TextContent.Contains("2026")).Should().BeTrue(
+            "the chip surfaces the authoritative active academic year from the active-year endpoint");
+    }
+
+    [TestMethod]
+    public void Periods_ActiveYearChip_ShowsNone_WhenNoActiveYear()
+    {
+        var yearId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+        var handler = RegisterClient();
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(yearId, "2026", "None", "Draft", 0, 0) + "]");
+        // Active-year endpoint intentionally NOT mapped → 404 → the chip must
+        // degrade gracefully to a muted "None" (no stale/incorrect pointer).)
+        var cut = Render<Periods>();
+        cut.WaitForAssertion(() => cut.FindAll(".period-active-chip").Any().Should().BeTrue());
+        cut.FindAll(".period-active-chip").Any(c => c.TextContent.Contains("None")).Should().BeTrue(
+            "the chip shows None when there is no active academic year");
+        // No year-named Accent badge — it must not invent an active year from the
+        // grid snapshot.
+
+        cut.FindAll("fluent-badge").Any(b => b.TextContent.Trim() == "2026").Should().BeFalse(
+            "the chip must not derive an active year from the grid's top-level snapshot");
     }
 
     // ── FR-4 dialog assertions ──────────────────────────────────────────────
@@ -492,8 +543,8 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_RowActions_DraftRow_OffersDelete()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "None", "Draft", null) + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(DraftYearId, "2026", "None", "Draft", 0, 0) + "]");
 
         var cut = Render<Periods>();
 
@@ -512,7 +563,7 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_RowActions_NonDraft_NoDelete()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK, PeriodsJson());
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK, LandingJson());
 
         var cut = Render<Periods>();
 
@@ -530,8 +581,8 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_Delete_Confirm_CallsApiAndReloads()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "None", "Draft", null) + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(DraftYearId, "2026", "None", "Draft", 0, 0) + "]");
         handler.Map("DELETE", $"/students/periods/{DraftYearId}", HttpStatusCode.NoContent, "");
         Services.AddSingleton(ConfirmationDialog().Object);
 
@@ -553,8 +604,8 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_Delete_Cancelled_DoesNotCallApi()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "None", "Draft", null) + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(DraftYearId, "2026", "None", "Draft", 0, 0) + "]");
         var dialogRef = new Mock<IDialogReference>();
         dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
         var dialogMock = new Mock<IDialogService>();
@@ -579,10 +630,8 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_Delete_YearConfirmation_NamesPeriodAndDraftSubCount()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJsonWithDivision(DraftYearId, "2026", "Terms", "Draft", null) + "," +
-            PeriodJsonWithDivision(DraftSub1Id, "Term 1", "Terms", "Draft", DraftYearId) + "," +
-            PeriodJsonWithDivision(DraftSub2Id, "Term 2", "Terms", "Draft", DraftYearId) + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(DraftYearId, "2026", "Terms", "Draft", 2, 2) + "]");
         var captured = new StringBuilder();
         Services.AddSingleton(ConfirmationDialog(captured).Object);
 
@@ -609,8 +658,8 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_RowActions_DeactivatedRow_OffersArchive()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJson(DeactivatedYearId, "2025-archived", "AcademicYear", "Deactivated", null) + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(DeactivatedYearId, "2025-archived", "None", "Deactivated", 0, 0) + "]");
 
         var cut = Render<Periods>();
 
@@ -627,8 +676,8 @@ public class PeriodsLandingGridTests : BunitContext
     public void Periods_RowActions_DeactivatedRow_NoLifecycleActions()
     {
         var handler = RegisterClient();
-        handler.Map("GET", "/students/periods", HttpStatusCode.OK,
-            "[" + PeriodJson(DeactivatedYearId, "2025-archived", "AcademicYear", "Deactivated", null) + "]");
+        handler.Map("GET", "/students/periods/top-level", HttpStatusCode.OK,
+            "[" + LandingJson(DeactivatedYearId, "2025-archived", "None", "Deactivated", 0, 0) + "]");
 
         var cut = Render<Periods>();
 

@@ -10,6 +10,7 @@
 @inject IDialogService DialogService
 @inject ILogger<Edit> Logger
 @inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
 @implements IDisposable
 
 <PageTitle>Edit Period</PageTitle>
@@ -234,6 +235,7 @@
 
             if (_disposed) return;
             Logger.LogInformation("Period {Id} updated", Id);
+            Toast.ShowSuccess($"Period '{_model.Name.Trim()}' updated.");
             Nav.NavigateTo("/students/periods");
         }
         catch (Exception ex)
