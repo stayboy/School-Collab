@@ -98,6 +98,11 @@
     min-width: 140px;
 }
 
+.subperiods-field-tolerance {
+    flex: 0 0 8rem;
+    min-width: 8rem;
+}
+
 .spinner-container {
     display: flex;
     justify-content: center;

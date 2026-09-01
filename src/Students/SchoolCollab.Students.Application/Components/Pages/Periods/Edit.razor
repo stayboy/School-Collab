@@ -138,6 +138,7 @@
         public string ParentPeriodIdText { get; set; } = "";
         public DateTime? Start { get; set; }
         public DateTime? End { get; set; }
+        public int? ActivationToleranceDays { get; set; }
     }
 
     private readonly PeriodFormModel _model = new();
@@ -179,6 +180,7 @@
                     ? division
                     : AcademicYearDivision.None;
                 _model.ParentPeriodIdText = _period.ParentPeriodId?.ToString() ?? "";
+                _model.ActivationToleranceDays = _period.ActivationToleranceDays;
 
                 // Clear any prior load error only on the success path: a 404
                 // (GetPeriodByIdAsync returns null) surfaces a page-level error
@@ -231,7 +233,7 @@
         {
             var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
             var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
-            await Api.UpdatePeriodAsync(Id, new UpdatePeriodRequest(_model.Name.Trim(), startDate, endDate, parentId));
+            await Api.UpdatePeriodAsync(Id, new UpdatePeriodRequest(_model.Name.Trim(), startDate, endDate, parentId, _model.ActivationToleranceDays));
 
             if (_disposed) return;
             Logger.LogInformation("Period {Id} updated", Id);

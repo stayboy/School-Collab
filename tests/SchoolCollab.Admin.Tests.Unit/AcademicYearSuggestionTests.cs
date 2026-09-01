@@ -8,7 +8,7 @@ namespace SchoolCollab.Admin.Tests.Unit;
 public class AcademicYearSuggestionTests
 {
     private static PeriodDto MakePeriod(DateOnly start, DateOnly end) =>
-        new(Guid.NewGuid(), "p", start, end, "Completed", null, null, "None", default, default);
+        new(Guid.NewGuid(), "p", start, end, "Completed", null, null, "None", null, default, default);
 
     [TestMethod]
     public void ForDate_InSeptember_ReturnsCurrentYearWindow()
