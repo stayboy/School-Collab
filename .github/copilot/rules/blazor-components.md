@@ -600,6 +600,12 @@ Use FluentUI's own layout components for edit/create forms:
 - Put form controls in a `<FluentStack Orientation="Orientation.Vertical" Gap="1rem">`
   when fields should stack vertically. This gives consistent spacing between fields
   without custom flex containers.
+- **Dropdowns: use the repo wrappers, not raw `FluentSelect`.** Enum options →
+  `DropdownForEnum`; coded values → `CodedValueDropdown`; parent-owned DTO lists →
+  `DropdownComponent` (bind the primitive key, side-effects on
+  `@bind-SelectedValue:after` — never `SelectedValueChanged=`). Raw `FluentSelect`
+  only when none covers the case (e.g. `Multiple`) — comment why. Full decision
+  table + pitfalls: `.github/skills/dropdown-ui/SKILL.md`.
 - Keep each FluentUI control's label/input relationship intact. Do not add custom
   `margin-bottom` to labels; let the control render its normal label spacing.
 - Use `full-width` only for controls that should span the available form width (text

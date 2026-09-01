@@ -88,6 +88,7 @@ instead of duplicating it.
 | Card-level create / edit dialogs and sections | `.github/copilot/rules/section-card.md` |
 | Shared constants and enums | `.github/copilot/rules/shared-constants.md` |
 | Dialogs (shared form-fields, no nesting) | `.github/skills/dialog-ui/SKILL.md` |
+| Dropdowns & selects (wrappers, binding, width) | `.github/skills/dropdown-ui/SKILL.md` |
 | Fluent UI icons | `.github/skills/fluentui-icons/SKILL.md` |
 | Fluent UI component props | `.github/skills/fluentui-component-props/SKILL.md` |
 | Bounded context creation | `.github/skills/bounded-context/SKILL.md` |
