@@ -102,11 +102,19 @@ optional-on-demand — it applies to every C# edit in this repo, and the rule's 
 enforced in CI by `SchoolCollab.ArchitectureTests.Unit`.
 
 **Feature/fix implementation — ask before starting:** Before beginning a feature or fix
-implementation, **ask the user whether to go solo or use the 4-agent
-`orchestrator-worker-reviewer` skill** (orchestrator plans + owns docs, worker implements,
-reviewer verifies, orchestrator accepts, UI tester bug-hunts delivered UI). Do not default
-to one approach; the user wants to choose explicitly. All round docs that workflow produces
-go in `documents/rounds/` — see "Repository docs layout" below.
+implementation, **ask the user which execution mode to use** — do not default to one;
+the user wants to choose explicitly:
+
+1. **Solo** — the session agent implements directly. Trivial, non-behavioural work only.
+2. **Light round** — the tiered `orchestrator-worker-reviewer` skill, Tiers 1–2: the
+   parent plans and accepts; one worker run, plus a static diff-only reviewer for
+   Tier 2. Small-to-medium behavioural fixes.
+3. **Full four-agent round** — the same skill, Tier 3: orchestrator plans + owns the
+   round doc, worker implements, reviewer statically verifies, orchestrator accepts
+   and hands over UI-tester scope, UI tester bug-hunts delivered UI.
+
+Each round produces a single `round-<slug>.md` (+ `diffs-<slug>.patch`) in
+`documents/rounds/` — see "Repository docs layout" below.
 
 ## Tenancy & Operational Standards
 
@@ -144,7 +152,7 @@ Whenever a new feature or architectural change is requested:
 |---|---|
 | `documents/solution/` | Durable research, decisions, and implementation steps (technical memory — standard above). |
 | `documents/specs/` | Durable feature specs that remain the source of truth. |
-| `documents/rounds/` | **Ephemeral per-round agent docs** (`plan-*`, `review-*`, `acceptance-*`, `ui-tester-*.md`) from the four-agent `orchestrator-worker-reviewer` skill. Never write round docs into `documents/specs/`. The whole folder is safe to bulk-trash once rounds close — rules: `documents/rounds/README.md`. |
+| `documents/rounds/` | **Ephemeral per-round agent docs** (one `round-*.md` + one `diffs-*.patch` per round) from the tiered `orchestrator-worker-reviewer` skill. Never write round docs into `documents/specs/`. The whole folder is safe to bulk-trash once rounds close — rules: `documents/rounds/README.md`. |
 | `documents/runbooks/` | Operational runbooks: recurring procedures and incident/ops behavior. |
 | `documents/ai-prompts/` | Reference archive of AI system-prompt variants — never loaded at runtime. |
 
