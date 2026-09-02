@@ -16,11 +16,11 @@ using System.Security.Claims;
 namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
-/// bUnit tests for the Create.razor page hosted against the StudentsApiClient
-/// HTTP integration boundary (documents/specs/period-edit-parity-deactivate.md).
-/// Covers the blocked-parent panel: when ?parent= points at a None-division
-/// year, the page shows a warning + back affordance and renders NO editable
-/// form fields (review P2-2).
+/// bUnit tests for the PeriodUpsert page (create mode) hosted against the
+/// StudentsApiClient HTTP integration boundary
+/// (documents/specs/period-create-edit-single-page.md). Covers the blocked-parent
+/// panel: when ?parent= points at a None-division year, the page shows a warning +
+/// back affordance and renders NO editable form fields (review P2-2).
 /// </summary>
 [TestClass]
 public class PeriodCreatePageTests : BunitContext
@@ -81,9 +81,9 @@ public class PeriodCreatePageTests : BunitContext
 
     private static readonly Guid BlockedParentId = Guid.Parse("99999999-9999-9999-9999-999999999996");
 
-    /// <summary>P2-2 review fix: rendering Create.razor with ?parent= pointing at
-    /// a None-division year surfaces the blocked-parent warning + back affordance
-    /// and renders NO editable form fields (no Division selector, no Submit).</summary>
+    /// <summary>P2-2 review fix: rendering PeriodUpsert (create mode) with ?parent=
+    /// pointing at a None-division year surfaces the blocked-parent warning + back
+    /// affordance and renders NO editable form fields (no Division selector, no Submit).</summary>
     [TestMethod]
     public void BlockedParentPanel_Shows_WhenParentDivisionNone()
     {
@@ -92,7 +92,7 @@ public class PeriodCreatePageTests : BunitContext
             "[" + YearJson(BlockedParentId, "ParentYear", "None", "Active") + "]");
 
         Services.GetRequiredService<NavigationManager>().NavigateTo($"/students/periods/create?parent={BlockedParentId}", forceLoad: true);
-        var cut = Render<Create>();
+        var cut = Render<PeriodUpsert>();
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("sub-periods are not allowed",
             "the blocked-parent warning is shown when ?parent= points at a None-division year"));

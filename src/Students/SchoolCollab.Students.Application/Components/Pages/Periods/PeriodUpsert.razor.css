@@ -1,8 +1,7 @@
-/* Period edit page — the owning form (period-edit-parity-deactivate.md FR-E7,
-   Topic pattern: the page supplies the <EditForm>, PeriodFormFields renders the
-   shared field rows, and PeriodSubPeriodsEditor owns the sub-periods section).
-   Form-level styles moved here from the deleted PeriodForm.razor.css, plus the
-   page's own danger/deactivate/separator styles. */
+/* PeriodUpsert — the single period create/edit page (period-create-edit-single-page.md).
+   Merges the former Create.razor.css and Edit.razor.css form-level styles: the page
+   supplies the form shell, PeriodFormFields renders the shared field rows, and
+   PeriodSubPeriodsEditor owns the sub-periods section. */
 
 .period-form {
     max-width: 680px;
@@ -28,12 +27,28 @@
     line-height: 1.4;
 }
 
+.form-tip {
+    margin-bottom: 1.1rem;
+    padding: 0.65rem 0.8rem;
+    background: #f3f8fd;
+    border: 1px solid #d7e8f7;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    line-height: 1.45;
+    color: #3c3c3c;
+}
+
+::deep .form-tip fluent-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+    color: #0a5cb8;
+}
+
 .form-actions {
-    margin-top: 1.1rem;
-    padding-top: 1rem;
-    border-top: 1px solid var(--neutral-stroke-rest, #eee);
+    margin-top: 1.5rem;
     display: flex;
     align-items: center;
+    justify-content: flex-end;
     gap: 0.75rem;
 }
 

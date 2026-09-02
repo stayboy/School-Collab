@@ -17,7 +17,7 @@ using System.Security.Claims;
 namespace SchoolCollab.Admin.Tests.Unit;
 
 /// <summary>
-/// bUnit tests for <see cref="Edit"/> (the period edit page). Locks the
+/// bUnit tests for <see cref="PeriodUpsert"/> (the period edit page). Locks the
 /// sub-period section placement + the guard that combines PeriodType with
 /// the tenant's academic-year division. The placement is verified by the
 /// section's position relative to the form's Period-type selector: the
@@ -109,7 +109,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Sub-periods"), TimeSpan.FromSeconds(5));
         cut.WaitForState(() => cut.Markup.Contains("Edit period"), TimeSpan.FromSeconds(5));
@@ -136,7 +136,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, TermJson());
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Edit period"), TimeSpan.FromSeconds(5));
         cut.Markup.Should().NotContain("Sub-periods",
@@ -144,23 +144,27 @@ public class PeriodEditPageTests : BunitContext
     }
 
     /// <summary>
-    /// G3: editing an AcademicYear under a "None" division does NOT render the
-    /// sub-period section — sub-periods are server-rejected under "None", so
-    /// rendering the section would surface a form that always fails. Mirrors
-    /// server-side PeriodFrameworkMismatchException gate.
+    /// G3: editing an AcademicYear under a "None" division renders the sub-period
+    /// section but DISABLED (period-create-edit-single-page.md FR-5/FR-7): the
+    /// section is always visible for a top-level period, and a None division
+    /// disables its controls with a hint. Sub-periods are still server-rejected
+    /// under "None", so the create submit sends no definitions.
     /// </summary>
     [TestMethod]
-    public void Edit_AcademicYear_NoneDivision_HidesSubPeriodsSection()
+    public void Edit_AcademicYear_NoneDivision_ShowsDisabledSubPeriodsSection()
     {
         var handler = Register();
         handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("None"));
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
-        cut.WaitForState(() => cut.Markup.Contains("Edit period"), TimeSpan.FromSeconds(5));
-        cut.Markup.Should().NotContain("Sub-periods",
-            "a None division forbids sub-periods at the server; the section must be hidden");
+        cut.WaitForState(() => cut.Markup.Contains("Sub-periods"), TimeSpan.FromSeconds(5));
+        cut.Markup.Should().Contain("Sub-periods",
+            "the section renders for any top-level period regardless of division (FR-5)");
+        cut.Markup.Should().Contain("Switch division to Terms or Semesters to add sub-periods",
+            "a None division disables the section with a hint (FR-7)");
     }
 
     /// <summary>
@@ -176,7 +180,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Sub-periods"), TimeSpan.FromSeconds(5));
         cut.Markup.Should().Contain("Sub-periods",
@@ -184,10 +188,9 @@ public class PeriodEditPageTests : BunitContext
     }
 
     /// <summary>
-    /// G5: when the division flag is unreadable (404 → null), the guard
-    /// treats it as "unknown" and still shows the section — PeriodSubPeriodsEditor
-    /// falls back to an explicit type selector so the user is never blocked
-    /// by a failed flag read.
+    /// G5: when the division is unreadable (null), the section still renders for
+    /// a top-level period (FR-5); the editor disables its controls because the
+    /// division is not Terms/Semesters.
     /// </summary>
     [TestMethod]
     public void Edit_AcademicYear_UnknownDivision_StillShowsSubPeriodsSection()
@@ -198,7 +201,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Sub-periods"), TimeSpan.FromSeconds(5));
         cut.Markup.Should().Contain("Sub-periods",
@@ -217,7 +220,7 @@ public class PeriodEditPageTests : BunitContext
         var handler = Register();
         handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.InternalServerError, "{\"message\":\"boom\"}");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Couldn't load this period"));
     }
@@ -234,7 +237,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Add sub-period\""));
     }
@@ -255,7 +258,7 @@ public class PeriodEditPageTests : BunitContext
             $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)}]");
         handler.Map("PUT", $"/students/periods/{DraftSub1Id}", HttpStatusCode.NoContent, "");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sub-periods"));
 
         // Open the sub-period row's kebab (⋮, RowActionsMenu) and click Edit.
@@ -284,7 +287,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
             $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)}]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sub-periods"));
 
         cut.Find("fluent-button[title='Sub-period actions']").Click();
@@ -308,7 +311,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK,
             $"[{PeriodJson(DraftSub1Id, "Term 1", "Term", "Draft", YearId)},{PeriodJson(ActiveSubId, "Term 2", "Term", "Active", YearId)}]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sub-periods"));
 
         // Both rows render the kebab trigger (⋮) — the Draft row qualifies, so the
@@ -344,7 +347,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, DraftYearJson("None"));
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Danger zone"));
         cut.Markup.Should().Contain("title=\"Delete period\"",
@@ -359,7 +362,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("None"));
         handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Edit period"), TimeSpan.FromSeconds(5));
         cut.Markup.Should().NotContain("Danger zone",
@@ -377,7 +380,7 @@ public class PeriodEditPageTests : BunitContext
         handler.Map("DELETE", $"/students/periods/{YearId}", HttpStatusCode.NoContent, "");
         Services.AddSingleton(ConfirmationDialog().Object);
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Delete period\""));
 
         cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Delete period").Click();
@@ -398,7 +401,7 @@ public class PeriodEditPageTests : BunitContext
         var captured = new StringBuilder();
         Services.AddSingleton(ConfirmationDialog(captured).Object);
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("title=\"Delete period\""));
 
         cut.FindAll("fluent-button").First(b => b.GetAttribute("title") == "Delete period").Click();
@@ -407,4 +410,35 @@ public class PeriodEditPageTests : BunitContext
         captured.ToString().Should().Contain("2 draft sub-periods",
             "the edit-page year confirmation matches the grid wording (FR-D9/D10)");
     }
+    // ── Auto-split count (period-create-edit-single-page.md FR-8) ──
+
+    /// <summary>FR-8: the auto-split count is prefilled from the division
+    /// convention (Terms = 3) until the user overrides it.</summary>
+    [TestMethod]
+    public void SubPeriodsSection_SplitCount_TermsPrefillsThree()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("Terms"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
+
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Auto-split into 3"));
+    }
+
+    /// <summary>FR-8: the auto-split count is prefilled from the division
+    /// convention (Semesters = 2) until the user overrides it.</summary>
+    [TestMethod]
+    public void SubPeriodsSection_SplitCount_SemestersPrefillsTwo()
+    {
+        var handler = Register();
+        handler.Map("GET", $"/students/periods/{YearId}", HttpStatusCode.OK, AcademicYearJson("Semesters"));
+        handler.Map("GET", "/students/periods", HttpStatusCode.OK, "[]");
+        handler.Map("GET", $"/students/periods/{YearId}/sub-periods", HttpStatusCode.OK, "[]");
+
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Auto-split into 2"));
+    }
+
 }
+

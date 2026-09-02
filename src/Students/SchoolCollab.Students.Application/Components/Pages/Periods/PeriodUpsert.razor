@@ -1,0 +1,591 @@
+@page "/students/periods/create"
+@page "/students/periods/{Id:guid}/edit"
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Students.Core.Domain
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.AspNetCore.Components
+@using Microsoft.FluentUI.AspNetCore.Components
+@using System.Net
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@inject StudentsApiClient Api
+@inject NavigationManager Nav
+@inject IDialogService DialogService
+@inject ILogger<PeriodUpsert> Logger
+@inject VisibleTenantService VisibleTenant
+@inject IToastService Toast
+@implements IDisposable
+
+<PageTitle>@(IsCreate ? "New Period" : "Edit Period")</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        <TenantGate>
+            <ChildContent>
+                @if (!_isRealTenant)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Warning">
+                        You have no tenant assigned. Period records are tenant-scoped — pick a tenant to continue.
+                    </FluentMessageBar>
+                }
+                else
+                {
+                    <section class="page-container">
+                        @if (!IsCreate && !string.IsNullOrEmpty(_loadError))
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+                        }
+
+                        <div class="period-form">
+                            @if (IsCreate)
+                            {
+                                @* ── Create mode ─────────────────────────────────────────── *@
+                                <div class="form-section-header">
+                                    <div>
+                                        <h3>New period</h3>
+                                        <p class="form-hint">@CreateHint</p>
+                                    </div>
+                                </div>
+
+                                @if (_parentBlocked)
+                                {
+                                    @* P2-5: a None-division parent year cannot host sub-periods. Inline
+                                       warning + back affordance instead of a dead-end form. *@
+                                    <FluentMessageBar Intent="MessageIntent.Warning" class="mt-3">@BlockedParentMessage</FluentMessageBar>
+                                    <div class="mt-3">
+                                        <FluentButton Appearance="Appearance.Accent" Autofocus="true" OnClick="CancelAsync">Back to periods</FluentButton>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <FluentStack Orientation="Orientation.Horizontal"
+                                                 HorizontalGap="8"
+                                                 VerticalAlignment="VerticalAlignment.Top"
+                                                 class="form-tip">
+                                        <FluentIcon Icon="@(Icons.Regular.Size20.Calendar)" />
+                                        <span>@CreateHint</span>
+                                    </FluentStack>
+
+                                    <PeriodFormFields Model="_model"
+                                                      IsSubPeriod="_isSubPeriod"
+                                                      DivisionLocked="_isSubPeriod"
+                                                      AcademicYears="_academicYears">
+                                        <NameActions>
+                                            <FluentButton IconStart="@FluentIcons.Calendar"
+                                                          Title="Fill the form with the current academic year (editable template)"
+                                                          OnClick="SuggestAcademicYearAsync" />
+                                            <FluentButton IconStart="@FluentIcons.ArrowClockwise"
+                                                          Title="Fill the form with the next academic year after the latest period"
+                                                          OnClick="BackfillAsync" />
+                                        </NameActions>
+                                    </PeriodFormFields>
+
+                                    <PeriodSubPeriodsEditor @ref="_subPeriodEditor"
+                                                            Show="@ShowSubPeriodsSection"
+                                                            Division="@_model.Division.ToString()"
+                                                            YearStart="@_model.Start"
+                                                            YearEnd="@_model.End" />
+
+                                    <div class="form-actions">
+                                        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+                                        <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@(_saving)">
+                                            @(_saving ? "Saving…" : "Create period")
+                                        </FluentButton>
+                                    </div>
+                                }
+
+                                @if (!string.IsNullOrEmpty(_error))
+                                {
+                                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                                }
+                            }
+                            else
+                            {
+                                @* ── Edit mode ───────────────────────────────────────────── *@
+                                @* Render the form only when the period loaded successfully. A 404
+                                   (Api.GetPeriodByIdAsync returns null) or a load failure surfaces
+                                   a page-level error above (P2-3 review fix). *@
+                                @if (_period is not null)
+                                {
+                                    <div class="form-section-header">
+                                        <div>
+                                            <h3>Edit period</h3>
+                                            <p class="form-hint">@EditHint</p>
+                                        </div>
+                                    </div>
+
+                                    @* The edit form matches the create form (period-edit-parity-deactivate.md
+                                       FR-E3): same shared field rows + the same sub-periods section with the
+                                       Auto-split button (FR-E4). Division is disabled (immutable — FR-E2);
+                                       no create-only Suggest/Backfill buttons. *@
+                                    <PeriodFormFields Model="_model"
+                                                      IsSubPeriod="_isSubPeriod"
+                                                      DivisionLocked="true"
+                                                      AcademicYears="_academicYears" />
+
+                                    <PeriodSubPeriodsEditor @ref="_subPeriodEditor"
+                                                            Show="@ShowSubPeriodsSection"
+                                                            YearId="@Id"
+                                                            Division="@_division"
+                                                            YearStart="@_model.Start"
+                                                            YearEnd="@_model.End"
+                                                            OnChanged="OnSubPeriodsChangedAsync" />
+
+                                    <div class="form-actions">
+                                        <FluentButton Appearance="Appearance.Outline" OnClick="CancelAsync">Cancel</FluentButton>
+                                        <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@(_saving)">
+                                            @(_saving ? "Saving…" : "Save changes")
+                                        </FluentButton>
+                                    </div>
+
+                                    @if (!string.IsNullOrEmpty(_saveError))
+                                    {
+                                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_saveError</FluentMessageBar>
+                                    }
+
+                                    @* FR-X9: Deactivate is available on Active periods (NOT the Draft danger zone). *@
+                                    @if (_period is { Status: "Active" })
+                                    {
+                                        <hr class="period-edit-separator" aria-hidden="true" />
+                                        <section class="period-edit-danger" aria-label="Period lifecycle">
+                                            <h3>Deactivate period</h3>
+                                            <p class="form-hint">Retire this active period and free its date range so you can create a corrected period.</p>
+                                            <FluentButton Appearance="Appearance.Stealth"
+                                                          IconStart="@FluentIcons.Dismiss"
+                                                          Title="Deactivate period"
+                                                          OnClick="OnDeactivateAsync">Deactivate…</FluentButton>
+                                        </section>
+                                    }
+
+                                    @* FR-D10: danger zone for Draft periods only. Shares the grid's
+                                       confirmation wording (FR-D9). *@
+                                    @if (_period is { Status: "Draft" })
+                                    {
+                                        <hr class="period-edit-separator" aria-hidden="true" />
+                                        <section class="period-edit-danger" aria-label="Danger zone">
+                                            <h3>Danger zone</h3>
+                                            <p class="form-hint">Deleting a draft period cannot be undone.</p>
+                                            <FluentButton Appearance="Appearance.Stealth"
+                                                          IconStart="@FluentIcons.Delete"
+                                                          Title="Delete period"
+                                                          OnClick="OnDeleteAsync">Delete…</FluentButton>
+                                        </section>
+                                    }
+                                }
+                            }
+                        </div>
+                    </section>
+                }
+            </ChildContent>
+            <Fallback>
+                <FluentMessageBar Intent="MessageIntent.Warning">
+                    You have no tenant assigned. Period records are tenant-scoped — pick a tenant to continue.
+                </FluentMessageBar>
+            </Fallback>
+        </TenantGate>
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid Id { get; set; }
+
+    private PeriodSubPeriodsEditor? _subPeriodEditor;
+    private bool _isRealTenant;
+    private Guid? _initialParent;
+    private bool _saving;
+    private string? _error;
+    private string? _loadError;
+    private string? _saveError;
+    private PeriodDto? _period;
+    private volatile bool _disposed;
+
+    private sealed class PeriodFormModel : PeriodFormFields.IPeriodFormModel
+    {
+        public string Name { get; set; } = string.Empty;
+        // Default to Terms so the sub-periods section is enabled on a fresh create
+        // (a None-division year has no sub-periods and disables the section).
+        public AcademicYearDivision Division { get; set; } = AcademicYearDivision.Terms;
+        public string ParentPeriodIdText { get; set; } = "";
+        public DateTime? Start { get; set; }
+        public DateTime? End { get; set; }
+        public int? ActivationToleranceDays { get; set; }
+    }
+
+    private readonly PeriodFormModel _model = new();
+    private PeriodDto[]? _loadedPeriods;
+    private bool _isSubPeriod;
+    private bool _parentBlocked;
+    private AcademicYearDivision _lastDivision = AcademicYearDivision.Terms;
+
+    /// <summary>Create mode when no period id is present (the create route).</summary>
+    private bool IsCreate => Id == Guid.Empty;
+
+    private const string CreateHint =
+        "Pre-filled with the current academic year (1 Sep – 31 Aug) as an editable template. " +
+        "Use the buttons to suggest or backfill, then adjust as needed.";
+
+    private const string EditHint = "Update the period name and date range. Division and sub-period types cannot be changed after creation.";
+
+    private const string BlockedParentMessage =
+        "This academic year's division is 'None' — sub-periods are not allowed. " +
+        "Create an Academic Year instead, or change the year's division.";
+
+    /// <summary>The loaded period's division (edit mode).</summary>
+    private string? _division => _period?.Division;
+
+    private PeriodDto[] _academicYears =>
+        _loadedPeriods?.Where(p => p.ParentPeriodId is null && p.Division == _model.Division.ToString()).ToArray() ?? [];
+
+    /// <summary>The sub-periods section renders for any top-level period (not a
+    /// sub-period, not a blocked parent), regardless of division
+    /// (period-create-edit-single-page.md FR-5). The editor disables itself when
+    /// the division is None (FR-7).</summary>
+    private bool ShowSubPeriodsSection =>
+        IsCreate
+            ? !_isSubPeriod && !_parentBlocked
+            : _period is { ParentPeriodId: null };
+
+    /// <summary>When the division changes to None in create mode, empty the
+    /// editor's in-memory rows so the section is empty (FR-7).</summary>
+    protected override void OnParametersSet()
+    {
+        if (_model.Division != _lastDivision)
+        {
+            _lastDivision = _model.Division;
+            if (_model.Division == AcademicYearDivision.None && _subPeriodEditor is not null)
+            {
+                _subPeriodEditor.ClearCreateRows();
+            }
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var scope = await VisibleTenant.GetScopeAsync();
+        _isRealTenant = scope.IsRealTenant;
+
+        if (IsCreate)
+        {
+            await InitializeCreateAsync();
+        }
+        else
+        {
+            await InitializeEditAsync();
+        }
+    }
+
+    private async Task InitializeCreateAsync()
+    {
+        if (QueryHelpers.ParseQuery(Nav.ToAbsoluteUri(Nav.Uri).Query).TryGetValue("parent", out var parentVal)
+            && Guid.TryParse(parentVal, out var parentId))
+        {
+            _initialParent = parentId;
+        }
+
+        try
+        {
+            _loadedPeriods = await Api.ListPeriodsAsync() ?? [];
+
+            if (_initialParent is { } pid)
+            {
+                _model.ParentPeriodIdText = pid.ToString();
+                var parent = _loadedPeriods.FirstOrDefault(p => p.Id == pid);
+                _model.Division = parent?.Division is { } parentDivision
+                    && Enum.TryParse<AcademicYearDivision>(parentDivision, out var parsed)
+                        ? parsed
+                        : AcademicYearDivision.None;
+                _isSubPeriod = true;
+                if (_model.Division == AcademicYearDivision.None)
+                {
+                    _parentBlocked = true;
+                }
+            }
+
+            if (string.IsNullOrWhiteSpace(_model.Name) && !_parentBlocked)
+            {
+                SuggestAcademicYearAsync();
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to initialize period create form");
+            _error = ex.Message;
+        }
+    }
+
+    private async Task InitializeEditAsync()
+    {
+        try
+        {
+            // Independent loads — run in parallel (parallel-loading skill).
+            var periodTask = Api.GetPeriodByIdAsync(Id);
+            var periodsTask = Api.ListPeriodsAsync();
+            await Task.WhenAll(periodTask, periodsTask);
+            _period = await periodTask;
+            _loadedPeriods = await periodsTask;
+
+            if (_period is not null)
+            {
+                _model.Name = _period.Name;
+                _model.Start = _period.StartDate.ToDateTime(TimeOnly.MinValue);
+                _model.End = _period.EndDate.ToDateTime(TimeOnly.MinValue);
+                _model.Division = Enum.TryParse<AcademicYearDivision>(_period.Division, out var division)
+                    ? division
+                    : AcademicYearDivision.None;
+                _model.ParentPeriodIdText = _period.ParentPeriodId?.ToString() ?? "";
+                _model.ActivationToleranceDays = _period.ActivationToleranceDays;
+
+                // Clear any prior load error only on the success path: a 404
+                // (GetPeriodByIdAsync returns null) surfaces a page-level error
+                // instead of an empty editable form (P2-3 review fix).
+                _loadError = null;
+            }
+            else
+            {
+                _loadError = "Period not found.";
+            }
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load period {Id} for edit", Id);
+            _loadError = $"Couldn't load this period. Try again. ({ex.Message})";
+        }
+    }
+
+    private void SuggestAcademicYearAsync()
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        ApplySuggestion(AcademicYearSuggestion.ForDate(today));
+    }
+
+    private void BackfillAsync() => ApplySuggestion(AcademicYearSuggestion.BackfillFrom(_loadedPeriods));
+
+    private void ApplySuggestion((string Name, DateOnly StartDate, DateOnly EndDate) suggestion)
+    {
+        _model.Name = suggestion.Name;
+        _model.Start = suggestion.StartDate.ToDateTime(TimeOnly.MinValue);
+        _model.End = suggestion.EndDate.ToDateTime(TimeOnly.MinValue);
+    }
+
+    /// <summary>After an edit-mode sub-period CRUD the page stays as-is (the landing
+    /// grid re-fetches on navigation).</summary>
+    private Task OnSubPeriodsChangedAsync() => Task.CompletedTask;
+
+    private void CancelAsync() => Nav.NavigateTo("/students/periods");
+
+    private async Task SubmitAsync()
+    {
+        if (IsCreate)
+        {
+            await SubmitCreateAsync();
+        }
+        else
+        {
+            await SubmitEditAsync();
+        }
+    }
+
+    private async Task SubmitCreateAsync()
+    {
+        _error = null;
+
+        if (string.IsNullOrWhiteSpace(_model.Name))
+        {
+            _error = "Enter a period name.";
+            return;
+        }
+        if (_model.Start is null || _model.End is null)
+        {
+            _error = "Enter a start and end date.";
+            return;
+        }
+        if (_model.End.Value.Date < _model.Start.Value.Date)
+        {
+            _error = "End date must be on or after the start date.";
+            return;
+        }
+
+        var division = _model.Division;
+        Guid? parentId = Guid.TryParse(_model.ParentPeriodIdText, out var pid) ? pid : null;
+
+        if (_isSubPeriod && !parentId.HasValue)
+        {
+            _error = "Select a parent academic year for this period.";
+            return;
+        }
+        if (division == AcademicYearDivision.None && parentId.HasValue)
+        {
+            _error = "A None-division period is a top-level academic year and must not have a parent.";
+            return;
+        }
+
+        // Client-side sub-period validation mirrors FR-C2 (names/dates/containment/
+        // sibling overlap) before the submit is sent. A None division sends no
+        // sub-period definitions (FR-7).
+        IReadOnlyList<SubPeriodDefinitionRequest>? subPeriods = null;
+        if (division != AcademicYearDivision.None && ShowSubPeriodsSection && _subPeriodEditor is not null)
+        {
+            if (!_subPeriodEditor.TryBuildDefinitions(out subPeriods, out var subError))
+            {
+                _error = subError;
+                return;
+            }
+        }
+
+        _saving = true;
+        try
+        {
+            var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
+            var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
+            var id = await Api.CreatePeriodAsync(new CreatePeriodRequest(
+                _model.Name.Trim(), startDate, endDate, division, parentId, subPeriods, _model.ActivationToleranceDays));
+            var saved = await Api.GetPeriodByIdAsync(id);
+
+            if (_disposed) return;
+            Logger.LogInformation("Period created {Id}", saved?.Id);
+            // Success toast fires before navigation; the FluentToastProvider
+            // (root layout) survives the route change.
+            Toast.ShowSuccess($"Period '{_model.Name.Trim()}' created.");
+            Nav.NavigateTo("/students/periods");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to create period");
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    private async Task SubmitEditAsync()
+    {
+        _saveError = null;
+
+        if (string.IsNullOrWhiteSpace(_model.Name))
+        {
+            _saveError = "Enter a period name.";
+            return;
+        }
+        if (_model.Start is null || _model.End is null)
+        {
+            _saveError = "Enter a start and end date.";
+            return;
+        }
+        if (_model.End.Value.Date < _model.Start.Value.Date)
+        {
+            _saveError = "End date must be on or after the start date.";
+            return;
+        }
+
+        Guid? parentId = Guid.TryParse(_model.ParentPeriodIdText, out var pid) ? pid : null;
+
+        _saving = true;
+        try
+        {
+            var startDate = DateOnly.FromDateTime(_model.Start.Value.Date);
+            var endDate = DateOnly.FromDateTime(_model.End.Value.Date);
+            await Api.UpdatePeriodAsync(Id, new UpdatePeriodRequest(_model.Name.Trim(), startDate, endDate, parentId, _model.ActivationToleranceDays));
+
+            if (_disposed) return;
+            Logger.LogInformation("Period {Id} updated", Id);
+            Toast.ShowSuccess($"Period '{_model.Name.Trim()}' updated.");
+            Nav.NavigateTo("/students/periods");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to save period {Id}", Id);
+            _saveError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _saving = false;
+        }
+    }
+
+    /// <summary>FR-X9: deactivates an Active period, sharing the grid's confirmation
+    /// wording (PeriodDeactivatePrompts). 404 (already gone) → leave the page (EC-3).</summary>
+    private async Task OnDeactivateAsync()
+    {
+        if (_disposed || _period is null) return;
+
+        var dialog = await DialogService.ShowConfirmationAsync(
+            PeriodDeactivatePrompts.DeactivateMessage(_period.Name),
+            "Deactivate",
+            "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        Logger.LogInformation("Deactivating period {Id} from edit page", Id);
+        try
+        {
+            await Api.DeactivatePeriodAsync(Id);
+            Nav.NavigateTo("/students/periods");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound })
+            {
+                Nav.NavigateTo("/students/periods");
+                return;
+            }
+            Logger.LogError(ex, "Failed to deactivate period {Id} from edit page", Id);
+            _saveError = $"Couldn't deactivate this period. Try again. ({ex.Message})";
+        }
+    }
+
+    /// <summary>FR-D10: deletes the Draft period from the edit page danger zone,
+    /// sharing the grid's confirmation wording (FR-D9). A 404 means the period is
+    /// already gone (deleted elsewhere) — treat as success and leave the page (EC-3).</summary>
+    private async Task OnDeleteAsync()
+    {
+        if (_disposed || _period is null) return;
+
+        string message;
+        if (_period.ParentPeriodId is null)
+        {
+            var subs = await Api.ListSubPeriodsAsync(Id) ?? [];
+            var draftCount = subs.Count(s => s.Status == "Draft");
+            message = PeriodDeletePrompts.YearMessage(_period.Name, draftCount);
+        }
+        else
+        {
+            var kind = _division == "Semesters" ? "Semester" : "Term";
+            message = PeriodDeletePrompts.SubPeriodMessage(_period.Name, kind);
+        }
+
+        var dialog = await DialogService.ShowConfirmationAsync(message, "Delete", "Cancel");
+        var result = await dialog.Result;
+        if (result.Cancelled) return;
+
+        Logger.LogInformation("Deleting period {Id} from edit page", Id);
+        try
+        {
+            await Api.DeletePeriodAsync(Id);
+            Nav.NavigateTo("/students/periods");
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            if (ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound })
+            {
+                Nav.NavigateTo("/students/periods");
+                return;
+            }
+            Logger.LogError(ex, "Failed to delete period {Id} from edit page", Id);
+            _saveError = $"Couldn't delete this period. Try again. ({ex.Message})";
+        }
+    }
+
+    public void Dispose() => _disposed = true;
+}
