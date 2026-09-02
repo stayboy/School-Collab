@@ -33,6 +33,7 @@
 .sub-periods-actions {
     display: flex;
     gap: 0.5rem;
+    align-items: center;
 }
 
 .sub-period-row {
@@ -80,6 +81,15 @@
     padding: 0.5rem;
     border: 1px dashed var(--neutral-stroke-rest, #d1d1d1);
     border-radius: 4px;
+}
+
+.subperiods-field-name {
+    flex: 2;
+    min-width: 160px;
+}
+
+.subperiods-field-date {
+    width: 110px;
 }
 
 .spinner-container {

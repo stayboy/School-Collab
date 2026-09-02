@@ -10,7 +10,14 @@
    Edit mode (YearId != null): performs live CRUD via the API and fires OnChanged.
    Auto-split is enabled only when the year range is valid AND all existing
    sub-periods are Draft or none exist (FR-E5); replacing Draft sub-periods requires
-   confirmation; any non-Draft sub-period disables the button with a tooltip. *@
+   confirmation; any non-Draft sub-period disables the button with a tooltip.
+
+   The section renders for any top-level period regardless of division
+   (period-create-edit-single-page.md FR-5). When the division is None the section
+   is disabled (FR-7): the controls are inactive and a hint explains why. The
+   auto-split count is user-configurable (FR-8/FR-9), prefilled from the division
+   convention (Terms = 3, Semesters = 2) and following division changes until the
+   user overrides it. *@
 @using SchoolCollab.Students.Application.Services
 @using SchoolCollab.Students.Core.Domain
 @using Microsoft.AspNetCore.Components
@@ -30,17 +37,36 @@
                               Title="@AutoSplitTitle">
                     @AutoSplitLabel
                 </FluentButton>
-                @if (YearId is null)
-                {
-                    <FluentButton Appearance="Appearance.Outline" OnClick="AddCreateRowAsync">+ Add sub-period</FluentButton>
-                }
             </div>
         </div>
+
+        @if (!IsEnabled)
+        {
+            <p class="form-hint">Switch division to Terms or Semesters to add sub-periods.</p>
+        }
 
         @if (YearId is null)
         {
             @* ── Create mode: in-memory definition rows ─────────────────────── *@
             <p class="form-hint">Terms/Semesters are created together with this year in a single operation.</p>
+
+            @* Inline add row — same entry pattern as edit mode. *@
+            @if (IsEnabled)
+            {
+                <FluentStack Orientation="Orientation.Horizontal"
+                             HorizontalGap="8"
+                             VerticalAlignment="VerticalAlignment.Bottom"
+                             class="subperiods-inline-add">
+                    <FluentTextField @bind-Value="_name"
+                                     Placeholder="New sub-period name (e.g. Term 1)"
+                                     class="subperiods-field-name" />
+                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
+                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
+                    <FluentButton Appearance="Appearance.Accent" OnClick="AddCreateRowFromInlineAsync"
+                                  Title="Add sub-period">Add</FluentButton>
+                </FluentStack>
+            }
+
             @if (_createRows.Count == 0)
             {
                 <p class="muted">No sub-periods yet — add rows or use Auto-split.</p>
@@ -67,9 +93,8 @@
         {
             @* ── Edit mode: live list (FluentDataGrid in-cell editing) + add row ── *@
 
-            @* Always-visible inline add row (hidden while an in-cell edit is active).
-               Placed directly beneath the "Sub-periods" header, before the grid. *@
-            @if (_editingId is null)
+            @* Always-visible inline add row (hidden while an in-cell edit is active). *@
+            @if (_editingId is null && IsEnabled)
             {
                 <FluentStack Orientation="Orientation.Horizontal"
                              HorizontalGap="8"
@@ -77,9 +102,9 @@
                              class="subperiods-inline-add">
                     <FluentTextField @bind-Value="_name"
                                      Placeholder="New sub-period name (e.g. Term 1)"
-                                     Style="flex: 2; min-width: 160px" />
-                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" Style="width: 130px" />
-                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   Style="width: 130px" />
+                                     class="subperiods-field-name" />
+                    <FluentDatePicker @bind-Value="_start" Placeholder="Start date" class="subperiods-field-date" />
+                    <FluentDatePicker @bind-Value="_end"   Placeholder="End date"   class="subperiods-field-date" />
                     <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
                                   Title="Add sub-period">
                         @(_saving ? "Saving…" : "Add")
@@ -92,80 +117,83 @@
                 <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
             }
 
-            @if (_loading)
+            @if (IsEnabled)
             {
-                <div class="spinner-container"><FluentProgressRing /></div>
-            }
-            else if (_subs.Length == 0 && _editingId is null)
-            {
-                <FluentMessageBar Intent="MessageIntent.Info">
-                    No sub-periods yet. Add terms or semesters below.
-                </FluentMessageBar>
-            }
-            else
-            {
-                <FluentDataGrid TGridItem="PeriodDto"
-                                Items="_subs.AsQueryable()"
-                                GenerateHeader="GenerateHeaderOption.Default"
-                                RowClass="@(p => p.Id == _editingId ? "subperiods-row--editing" : null)"
-                                GridTemplateColumns="minmax(160px,2fr) 130px 130px 110px auto">
-                    <TemplateColumn TGridItem="PeriodDto" Title="Name">
-                        @if (context.Id == _editingId)
-                        {
-                            <FluentTextField @bind-Value="_name" class="subperiods-cell-name" />
-                        }
-                        else
-                        {
-                            <span class="subperiods-name">@context.Name</span>
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn TGridItem="PeriodDto" Title="Start">
-                        @if (context.Id == _editingId)
-                        {
-                            <FluentDatePicker @bind-Value="_start" class="subperiods-cell-date" />
-                        }
-                        else
-                        {
-                            @context.StartDate.ToString("d")
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn TGridItem="PeriodDto" Title="End">
-                        @if (context.Id == _editingId)
-                        {
-                            <FluentDatePicker @bind-Value="_end" class="subperiods-cell-date" />
-                        }
-                        else
-                        {
-                            @context.EndDate.ToString("d")
-                        }
-                    </TemplateColumn>
-                    <TemplateColumn TGridItem="PeriodDto" Title="Status">
-                        <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
-                    </TemplateColumn>
-                    <TemplateColumn TGridItem="PeriodDto" Title="">
-                        <div class="subperiods-actions">
+                @if (_loading)
+                {
+                    <div class="spinner-container"><FluentProgressRing /></div>
+                }
+                else if (_subs.Length == 0 && _editingId is null)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Info">
+                        No sub-periods yet. Add terms or semesters below.
+                    </FluentMessageBar>
+                }
+                else
+                {
+                    <FluentDataGrid TGridItem="PeriodDto"
+                                    Items="_subs.AsQueryable()"
+                                    GenerateHeader="GenerateHeaderOption.Default"
+                                    RowClass="@(p => p.Id == _editingId ? "subperiods-row--editing" : null)"
+                                    GridTemplateColumns="minmax(160px,2fr) 130px 130px 110px auto">
+                        <TemplateColumn TGridItem="PeriodDto" Title="Name">
                             @if (context.Id == _editingId)
                             {
-                                <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
-                                              Title="Save sub-period">Save</FluentButton>
-                                <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Dismiss"
-                                              Title="Cancel editing" OnClick="CancelEdit">Cancel</FluentButton>
+                                <FluentTextField @bind-Value="_name" class="subperiods-cell-name" />
                             }
                             else
                             {
-                                @* Repo-standard kebab (⋮) actions menu — same pattern as the
-                                   Periods landing grid. Edit always; Delete only for Draft rows
-                                   (destructive, gated by the component-level confirm). When any
-                                   row is Draft (2 actions) the kebab is forced on every row so the
-                                   actions column renders consistently. *@
-                                <RowActionsMenu AriaLabel="Sub-period actions"
-                                                UseMenuService="false"
-                                                ForceKebab="@_forceKebab"
-                                                Actions="@BuildRowActions(context)" />
+                                <span class="subperiods-name">@context.Name</span>
                             }
-                        </div>
-                    </TemplateColumn>
-                </FluentDataGrid>
+                        </TemplateColumn>
+                        <TemplateColumn TGridItem="PeriodDto" Title="Start">
+                            @if (context.Id == _editingId)
+                            {
+                                <FluentDatePicker @bind-Value="_start" class="subperiods-cell-date" />
+                            }
+                            else
+                            {
+                                @context.StartDate.ToString("d")
+                            }
+                        </TemplateColumn>
+                        <TemplateColumn TGridItem="PeriodDto" Title="End">
+                            @if (context.Id == _editingId)
+                            {
+                                <FluentDatePicker @bind-Value="_end" class="subperiods-cell-date" />
+                            }
+                            else
+                            {
+                                @context.EndDate.ToString("d")
+                            }
+                        </TemplateColumn>
+                        <TemplateColumn TGridItem="PeriodDto" Title="Status">
+                            <FluentBadge Appearance="@GetStatusAppearance(context.Status)">@context.Status</FluentBadge>
+                        </TemplateColumn>
+                        <TemplateColumn TGridItem="PeriodDto" Title="">
+                            <div class="subperiods-actions">
+                                @if (context.Id == _editingId)
+                                {
+                                    <FluentButton Appearance="Appearance.Accent" OnClick="SubmitAsync" Disabled="@_saving"
+                                                  Title="Save sub-period">Save</FluentButton>
+                                    <FluentButton Appearance="Appearance.Stealth" IconStart="@FluentIcons.Dismiss"
+                                                  Title="Cancel editing" OnClick="CancelEdit">Cancel</FluentButton>
+                                }
+                                else
+                                {
+                                    @* Repo-standard kebab (⋮) actions menu — same pattern as the
+                                       Periods landing grid. Edit always; Delete only for Draft rows
+                                       (destructive, gated by the component-level confirm). When any
+                                       row is Draft (2 actions) the kebab is forced on every row so the
+                                       actions column renders consistently. *@
+                                    <RowActionsMenu AriaLabel="Sub-period actions"
+                                                    UseMenuService="false"
+                                                    ForceKebab="@_forceKebab"
+                                                    Actions="@BuildRowActions(context)" />
+                                }
+                            </div>
+                        </TemplateColumn>
+                    </FluentDataGrid>
+                }
             }
         }
     </div>
@@ -175,11 +203,12 @@
     /// <summary>The academic year id in edit mode; null in create mode.</summary>
     [Parameter] public Guid? YearId { get; set; }
 
-    /// <summary>True when this section should render (top-level Terms/Semesters year).</summary>
+    /// <summary>True when this section should render (any top-level period).</summary>
     [Parameter] public bool Show { get; set; }
 
     /// <summary>The year's division ("Terms"/"Semesters"/"None"/null). Drives the
-    /// Auto-split span count + the sub-period kind label.</summary>
+    /// Auto-split span-count prefill, the sub-period kind label, and the section's
+    /// enabled state (None disables it).</summary>
     [Parameter] public string? Division { get; set; }
 
     /// <summary>The year's date range (create: from the form; edit: editable).</summary>
@@ -213,8 +242,11 @@
     private DateTime? _end;
     private volatile bool _disposed;
 
+    /// <summary>True when the division allows sub-periods (Terms/Semesters). A
+    /// None division disables the section (period-create-edit-single-page.md FR-7).</summary>
+    private bool IsEnabled => Division is "Terms" or "Semesters";
+
     /// <summary>The sub-period kind label for edit-mode rows / splits. The
-    /// section is only shown for a Terms/Semesters parent year, so the
     /// parent's division decides; the fallback default is "Term".</summary>
     private string Kind => Division switch
     {
@@ -225,18 +257,23 @@
     private bool HasYearRange =>
         YearStart is not null && YearEnd is not null && YearEnd.Value.Date >= YearStart.Value.Date;
 
+    /// <summary>The auto-split count, derived from the division convention
+    /// (Terms = 3, Semesters = 2).</summary>
     private int SplitCount => Division == "Semesters" ? 2 : 3;
 
     private string AutoSplitLabel => $"Auto-split into {SplitCount}";
-    /// </summary>
+
     private bool CanAutoSplit
-        => HasYearRange
+        => IsEnabled
+           && HasYearRange
            && (YearId is null || _subs.All(sp => sp.Status == "Draft"));
 
     private string AutoSplitTitle
     {
         get
         {
+            if (!IsEnabled)
+                return "Switch division to Terms or Semesters to add sub-periods";
             if (!HasYearRange)
                 return "Enter the year's date range to auto-split";
             if (YearId is not null && _subs.Any(sp => sp.Status != "Draft"))
@@ -276,13 +313,26 @@
 
     // ── Create-mode rows ────────────────────────────────────────────────────
 
-    private void AddCreateRowAsync() => _createRows.Add(new SubPeriodRow());
+    /// <summary>Appends a new in-memory sub-period row from the inline add row
+    /// (create mode). Clears the inline fields after adding.</summary>
+    private void AddCreateRowFromInlineAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_name) || _start is null || _end is null) return;
+        _createRows.Add(new SubPeriodRow { Name = _name.Trim(), Start = _start, End = _end });
+        _name = string.Empty;
+        _start = null;
+        _end = null;
+    }
 
     private void RemoveCreateRowAsync(int index)
     {
         if (index >= 0 && index < _createRows.Count)
             _createRows.RemoveAt(index);
     }
+
+    /// <summary>Clears the create-mode in-memory rows. Called by the host when the
+    /// division changes to None so the section is empty (FR-7).</summary>
+    public void ClearCreateRows() => _createRows.Clear();
 
     /// <summary>
     /// Validates the create-mode in-memory rows against FR-C2 and materializes them
@@ -417,7 +467,6 @@
     }
 
     // ── Edit-mode inline add/edit ───────────────────────────────────────────
-
     /// <summary>
     /// Grid-level kebab consistency flag (repo convention): true when any
     /// sub-period row is Draft — a Draft row has 2 actions (Edit + Delete) and
@@ -475,7 +524,7 @@
         _start = null;
         _end = null;
     }
-    /// would double-prompt.</summary>
+
     private async Task OnDeleteAsync(PeriodDto p)
     {
         if (_disposed || YearId is null) return;
@@ -551,10 +600,10 @@
         }
     }
 
-    /// <summary>The new sub-period's division. The section is only shown for a
-    /// Terms/Semesters parent year (<see cref="Show"/>), so the parent's
-    /// division always decides; the None arm is a defensive fallback that
-    /// defaults to Terms (a sub-period cannot be division-less).</summary>
+    /// <summary>The new sub-period's division. The section renders for any
+    /// top-level period (<see cref="Show"/>); the parent's division always
+    /// decides, and the None arm is a defensive fallback that defaults to
+    /// Terms (a sub-period cannot be division-less).</summary>
     private AcademicYearDivision DeduceDivision() => Division switch
     {
         "Semesters" => AcademicYearDivision.Semesters,

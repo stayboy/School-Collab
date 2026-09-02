@@ -82,7 +82,7 @@ public class PeriodFormParityTests : BunitContext
     public void Edit_AcademicYear_DivisionSelectIsDisabled()
     {
         Registered();
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Edit period"));
         var divisionSelect = cut.FindAll("fluent-select").FirstOrDefault(s => s.TextContent.Contains("Terms"));
@@ -97,7 +97,7 @@ public class PeriodFormParityTests : BunitContext
         var handler = Registered();
         handler.SubPeriods = (HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
 
         cut.WaitForState(() => cut.Markup.Contains("Sub-periods"));
         cut.WaitForAssertion(() => cut.FindAll("fluent-button")
@@ -112,7 +112,7 @@ public class PeriodFormParityTests : BunitContext
         var handler = Registered();
         handler.SubPeriods = (HttpStatusCode.OK, "[]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForState(() => cut.Markup.Contains("Sub-periods"));
 
         var auto = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Auto-split"));
@@ -126,7 +126,7 @@ public class PeriodFormParityTests : BunitContext
         var handler = Registered();
         handler.SubPeriods = (HttpStatusCode.OK, $"[{SubJson("Active")}]");
 
-        var cut = Render<Edit>(p => p.Add(x => x.Id, YearId));
+        var cut = Render<PeriodUpsert>(p => p.Add(x => x.Id, YearId));
         cut.WaitForState(() => cut.Markup.Contains("Sub-periods"));
 
         var auto = cut.FindAll("fluent-button").First(b => b.TextContent.Contains("Auto-split"));
