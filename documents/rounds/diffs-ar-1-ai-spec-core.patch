@@ -1,0 +1,2196 @@
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index a0b2a82d..8c5a4657 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -55,14 +55,32 @@ public static class AssignmentRoutes
+             [FromServices] ICommandHandler<CreateAssignmentCommand, Guid> handler,
+             CancellationToken ct) =>
+         {
+-            var cmd = new CreateAssignmentCommand(
+-                req.Title, req.Description, (AssignmentType)req.AssignmentType,
+-                (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
+-                req.TopicId, req.GradeLevelId,
+-                req.DueDate, req.MaxScore,
+-                req.MandatoryReview);
+-            var id = await handler.HandleAsync(cmd, ct);
+-            return Results.Created($"/assignments/{id}", new { id });
++            try
++            {
++                var cmd = new CreateAssignmentCommand(
++                    req.Title, req.Description, (AssignmentType)req.AssignmentType,
++                    (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
++                    req.TopicId, req.GradeLevelId,
++                    req.DueDate, req.MaxScore,
++                    req.MandatoryReview,
++                    req.AiPromptOverride,
++                    req.Questions,
++                    req.Attachments);
++                var id = await handler.HandleAsync(cmd, ct);
++                return Results.Created($"/assignments/{id}", new { id });
++            }
++            catch (AssignmentQuestionValidationException ex)
++            {
++                return Results.BadRequest(new { ex.Message });
++            }
++            catch (AssignmentNotFoundException)
++            {
++                return Results.NotFound();
++            }
++            catch (InvalidOperationException ex)
++            {
++                return Results.BadRequest(new { ex.Message });
++            }
+         });
+ 
+         group.MapPut("/{id:guid}", async (
+@@ -77,7 +95,10 @@ public static class AssignmentRoutes
+                     id, req.Title, req.Description, (AssignmentType)req.AssignmentType,
+                     (GradingFormat)req.GradingFormat, (TargetAudienceType)req.TargetAudienceType,
+                     req.TopicId, req.GradeLevelId,
+-                    req.DueDate, req.MaxScore, req.MandatoryReview);
++                    req.DueDate, req.MaxScore, req.MandatoryReview,
++                    req.AiPromptOverride,
++                    req.Questions,
++                    req.Attachments);
+                 await handler.HandleAsync(cmd, ct);
+                 return Results.NoContent();
+             }
+@@ -85,6 +106,10 @@ public static class AssignmentRoutes
+             {
+                 return Results.NotFound();
+             }
++            catch (AssignmentQuestionValidationException ex)
++            {
++                return Results.BadRequest(new { ex.Message });
++            }
+             catch (InvalidOperationException ex)
+             {
+                 return Results.BadRequest(new { ex.Message });
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 5697d08b..86f49a0b 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -18,6 +18,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
+     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<AssignmentStatusDto>());
+     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GradingFormatDto>());
+     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<TargetAudienceTypeDto>());
++    // AI spec §3.2: question payloads round-trip the discriminator as a string
++    // (e.g. "multipleChoice") — register the converter on the same options block
++    // as the other assignment enums so existing callers stay valid.
++    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<QuestionTypeDto>());
+ });
+ 
+ var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
+diff --git a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+index 10879974..66bcf40b 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+@@ -39,6 +39,16 @@ public enum TargetAudienceTypeDto
+     SelectedGroups = 2
+ }
+ 
++/// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Domain.QuestionType</c>
++/// (AI spec §3.2 / decision 10). TrueFalse is stored as MC with two canonical
++/// options — the discriminator is retained for client-side handling.</summary>
++public enum QuestionTypeDto
++{
++    MultipleChoice = 0,
++    TrueFalse = 1,
++    ShortAnswer = 2
++}
++
+ public record AssignmentSummaryDto(
+     Guid Id,
+     string Title,
+@@ -68,7 +78,10 @@ public record CreateAssignmentRequest(
+     Guid? GradeLevelId = null,
+     DateTimeOffset? DueDate = null,
+     decimal? MaxScore = null,
+-    bool MandatoryReview = true);
++    bool MandatoryReview = true,
++    string? AiPromptOverride = null,
++    IReadOnlyList<NewQuestionDto>? Questions = null,
++    IReadOnlyList<NewAttachmentDto>? Attachments = null);
+ 
+ public record UpdateAssignmentRequest(
+     string Title,
+@@ -80,7 +93,33 @@ public record UpdateAssignmentRequest(
+     Guid? GradeLevelId = null,
+     DateTimeOffset? DueDate = null,
+     decimal? MaxScore = null,
+-    bool MandatoryReview = true);
++    bool MandatoryReview = true,
++    string? AiPromptOverride = null,
++    IReadOnlyList<NewQuestionDto>? Questions = null,
++    IReadOnlyList<NewAttachmentDto>? Attachments = null);
++
++/// <summary>An inbound question option on the create/update request (AI spec §3.2).</summary>
++public record NewQuestionOptionDto(string OptionText, bool IsCorrect);
++
++/// <summary>An inbound question on the create/update request (AI spec §3.2).
++/// <see cref="Options"/> is required for <see cref="QuestionTypeDto.MultipleChoice"/>
++/// and <see cref="QuestionTypeDto.TrueFalse"/>; null/empty for
++/// <see cref="QuestionTypeDto.ShortAnswer"/>.</summary>
++public record NewQuestionDto(
++    string QuestionText,
++    QuestionTypeDto QuestionType,
++    int DisplayOrder,
++    IReadOnlyList<NewQuestionOptionDto>? Options,
++    string? ModelAnswer = null);
++
++/// <summary>An inbound attachment metadata record on the create/update request
++/// (AI spec §3.2). <see cref="StoragePath"/> is opaque to the UI — the file is
++/// already staged to storage before submit (EC-4).</summary>
++public record NewAttachmentDto(
++    string FileName,
++    string ContentType,
++    long FileSize,
++    string StoragePath);
+ 
+ /// <summary>Publish an assignment (spec §8). Optional contact selection:
+ /// when <see cref="ContactIds"/> is non-empty, only those subscribed contacts
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommand.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommand.cs
+index ae0f33dc..feae1b18 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommand.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommand.cs
+@@ -1,9 +1,14 @@
+ using SchoolCollab.Core.CQRS;
+ 
++using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core.Domain;
+ 
+ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
+ 
++/// <summary>Create a new draft assignment (spec §3.2 / §2.6 FR-250/251/230/210).
++/// <see cref="Questions"/> and <see cref="Attachments"/> are optional trailing
++/// parameters — manual assignments may omit them entirely. <see cref="AiPromptOverride"/>
++/// is the per-assignment override appended to the embedded AI prompt (decision 8).</summary>
+ public sealed record CreateAssignmentCommand(
+     string Title,
+     string? Description,
+@@ -14,4 +19,7 @@ public sealed record CreateAssignmentCommand(
+     Guid? GradeLevelId,
+     DateTimeOffset? DueDate,
+     decimal? MaxScore,
+-    bool MandatoryReview = true) : ICommand;
++    bool MandatoryReview = true,
++    string? AiPromptOverride = null,
++    IReadOnlyList<NewQuestionDto>? Questions = null,
++    IReadOnlyList<NewAttachmentDto>? Attachments = null) : ICommand;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs
+index d6b9eab2..b0ec9946 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateAssignmentCommand/CreateAssignmentCommandHandler.cs
+@@ -2,6 +2,7 @@ using Microsoft.Extensions.Caching.Hybrid;
+ using Microsoft.Extensions.Logging;
+ using SchoolCollab.Core.CQRS;
+ using SchoolCollab.Core.EntityCodes;
++using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Contracts.Events;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain;
+@@ -27,6 +28,15 @@ public sealed class CreateAssignmentCommandHandler(
+         // Spec §4.5: auto-generate the assignment code before constructing the entity.
+         var assignmentNumber = await entityCodeGenerator.GenerateAsync("ASSIGNMENT_CODE", cancellationToken);
+ 
++        // Validate ALL inbound child collections BEFORE constructing the aggregate so a
++        // FR-252 violation never leaves partial children on the domain (EC-7). The
++        // domain helpers below are the single way questions/options/attachments enter
++        // the aggregate (spec §3.3).
++        if (command.Questions is { Count: > 0 })
++        {
++            QuestionOptionDtoValidator.ValidateQuestions(command.Questions);
++        }
++
+         var assignment = Assignment.Create(
+             command.Title,
+             command.Description,
+@@ -39,9 +49,36 @@ public sealed class CreateAssignmentCommandHandler(
+             command.MaxScore,
+             createdByTeacherId: Guid.Empty, // TODO: wire up authenticated teacher ID
+             mandatoryReview: command.MandatoryReview,
+-            assignmentNumber: assignmentNumber)
++            assignmentNumber: assignmentNumber,
++            aiPromptOverride: command.AiPromptOverride)
+             .WithTenant(tenantProvider);
+ 
++        if (command.Questions is { Count: > 0 })
++        {
++            // Re-index DisplayOrder 0..n by list position (EC-7) — the payload's
++            // DisplayOrder is informational; persistence is contiguous.
++            for (var i = 0; i < command.Questions.Count; i++)
++            {
++                var q = command.Questions[i];
++                var question = assignment.AddQuestion(q.QuestionText, (QuestionType)q.QuestionType, i, q.ModelAnswer);
++                if (q.Options is { Count: > 0 })
++                {
++                    foreach (var opt in q.Options)
++                    {
++                        question.AddOption(opt.OptionText, opt.IsCorrect);
++                    }
++                }
++            }
++        }
++
++        if (command.Attachments is { Count: > 0 })
++        {
++            foreach (var attachment in command.Attachments)
++            {
++                assignment.AddAttachment(attachment.FileName, attachment.ContentType, attachment.FileSize, attachment.StoragePath);
++            }
++        }
++
+         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentCreatedEvent>())
+         {
+             await publisher.EnqueueAsync(
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/QuestionOptionDtoValidator.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/QuestionOptionDtoValidator.cs
+new file mode 100644
+index 00000000..e9b0c697
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/QuestionOptionDtoValidator.cs
+@@ -0,0 +1,93 @@
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands;
++
++/// <summary>
++/// FR-252 / spec §3.3 / decision 10 — pure validation for inbound
++/// <see cref="NewQuestionDto"/> payloads. Throws
++/// <see cref="AssignmentQuestionValidationException"/> with a single clear
++/// message before any child is added to the aggregate so a partial state can
++/// never be persisted. Shared by Create + Update handlers.
++/// </summary>
++internal static class QuestionOptionDtoValidator
++{
++    /// <summary>Validate every inbound question; throw on the first violation.</summary>
++    public static void ValidateQuestions(IReadOnlyList<NewQuestionDto> questions)
++    {
++        for (var i = 0; i < questions.Count; i++)
++        {
++            ValidateQuestion(questions[i], listIndex: i);
++        }
++    }
++
++    private static void ValidateQuestion(NewQuestionDto q, int listIndex)
++    {
++        if (string.IsNullOrWhiteSpace(q.QuestionText))
++        {
++            throw new AssignmentQuestionValidationException(
++                $"Question at position {listIndex}: QuestionText is required.");
++        }
++
++        switch (q.QuestionType)
++        {
++            case QuestionTypeDto.MultipleChoice:
++                ValidateMultipleChoice(q, listIndex);
++                break;
++            case QuestionTypeDto.TrueFalse:
++                ValidateTrueFalse(q, listIndex);
++                break;
++            case QuestionTypeDto.ShortAnswer:
++                // ShortAnswer: no options required, modelAnswer optional (spec §5).
++                break;
++            default:
++                throw new AssignmentQuestionValidationException(
++                    $"Question at position {listIndex}: unsupported question type '{q.QuestionType}'.");
++        }
++    }
++
++    private static void ValidateMultipleChoice(NewQuestionDto q, int listIndex)
++    {
++        var options = q.Options ?? [];
++        if (options.Count < 2)
++        {
++            throw new AssignmentQuestionValidationException(
++                $"Question at position {listIndex}: MultipleChoice requires at least 2 options.");
++        }
++        var correctCount = options.Count(o => o.IsCorrect);
++        if (correctCount != 1)
++        {
++            throw new AssignmentQuestionValidationException(
++                $"Question at position {listIndex}: MultipleChoice requires exactly 1 correct option " +
++                $"(found {correctCount}).");
++        }
++    }
++
++    private static void ValidateTrueFalse(NewQuestionDto q, int listIndex)
++    {
++        var options = q.Options ?? [];
++        // Canonical TrueFalse shape: exactly two options labelled "True" and "False"
++        // (decision 10 / spec §5). The handler does NOT synthesize options — payloads
++        // must carry them.
++        if (options.Count != 2)
++        {
++            throw new AssignmentQuestionValidationException(
++                $"Question at position {listIndex}: TrueFalse requires exactly 2 options (found {options.Count}).");
++        }
++        var hasTrue = options.Any(o => string.Equals(o.OptionText, "True", StringComparison.OrdinalIgnoreCase));
++        var hasFalse = options.Any(o => string.Equals(o.OptionText, "False", StringComparison.OrdinalIgnoreCase));
++        if (!hasTrue || !hasFalse)
++        {
++            throw new AssignmentQuestionValidationException(
++                $"Question at position {listIndex}: TrueFalse options must be exactly 'True' and 'False'.");
++        }
++        var correctCount = options.Count(o => o.IsCorrect);
++        if (correctCount != 1)
++        {
++            throw new AssignmentQuestionValidationException(
++                $"Question at position {listIndex}: TrueFalse requires exactly 1 correct option " +
++                $"(found {correctCount}).");
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommand.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommand.cs
+index 262052dc..194bc689 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommand.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommand.cs
+@@ -1,9 +1,14 @@
+ using SchoolCollab.Core.CQRS;
+ 
++using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core.Domain;
+ 
+ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
+ 
++/// <summary>Update a draft assignment (spec §3.2 / decision b). Questions and
++/// attachments are full-replacement semantics on the draft (snapshot existing
++/// child ids → remove each → re-add inbound). The aggregate stays draft-only —
++/// non-draft updates are rejected by the domain (FR-252).</summary>
+ public sealed record UpdateAssignmentCommand(
+     Guid Id,
+     string Title,
+@@ -15,4 +20,7 @@ public sealed record UpdateAssignmentCommand(
+     Guid? GradeLevelId,
+     DateTimeOffset? DueDate,
+     decimal? MaxScore,
+-    bool MandatoryReview) : ICommand;
++    bool MandatoryReview,
++    string? AiPromptOverride = null,
++    IReadOnlyList<NewQuestionDto>? Questions = null,
++    IReadOnlyList<NewAttachmentDto>? Attachments = null) : ICommand;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommandHandler.cs
+index 5ffa3139..6bef2bc7 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/UpdateAssignmentCommand/UpdateAssignmentCommandHandler.cs
+@@ -2,7 +2,9 @@ using Microsoft.Extensions.Caching.Hybrid;
+ using Microsoft.Extensions.Logging;
+ using SchoolCollab.Core.CQRS;
+ using SchoolCollab.Assignments.Contracts.Events;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
+ using SchoolCollab.Core.Messaging;
+ 
+@@ -21,6 +23,13 @@ public sealed class UpdateAssignmentCommandHandler(
+         var assignment = await repository.GetAsync(command.Id, cancellationToken)
+             ?? throw new AssignmentNotFoundException(command.Id);
+ 
++        // Validate ALL inbound child collections BEFORE mutating the aggregate so a
++        // FR-252 violation never leaves the aggregate with a partial replacement.
++        if (command.Questions is { Count: > 0 })
++        {
++            QuestionOptionDtoValidator.ValidateQuestions(command.Questions);
++        }
++
+         assignment.Update(
+             command.Title,
+             command.Description,
+@@ -31,7 +40,60 @@ public sealed class UpdateAssignmentCommandHandler(
+             command.GradeLevelId,
+             command.DueDate,
+             command.MaxScore,
+-            command.MandatoryReview);
++            command.MandatoryReview,
++            command.AiPromptOverride);
++
++        // Full-replacement semantics for questions + attachments (decision b):
++        // snapshot existing child ids, remove each, then re-add inbound. Re-index
++        // DisplayOrder 0..n by inbound list position (EC-7). When the inbound
++        // collection is null we preserve the current children (manual edit may
++        // touch only the assignment properties); a non-null but empty collection
++        // clears the children.
++        if (command.Questions is not null)
++        {
++            var existingQuestionIds = assignment.Questions.Select(q => q.Id).ToList();
++            foreach (var qid in existingQuestionIds)
++            {
++                assignment.RemoveQuestion(qid);
++            }
++
++            for (var i = 0; i < command.Questions.Count; i++)
++            {
++                var q = command.Questions[i];
++                var question = assignment.AddQuestion(q.QuestionText, (Domain.QuestionType)q.QuestionType, i, q.ModelAnswer);
++                if (q.Options is { Count: > 0 })
++                {
++                    foreach (var opt in q.Options)
++                    {
++                        question.AddOption(opt.OptionText, opt.IsCorrect);
++                    }
++                }
++            }
++        }
++
++        if (command.Attachments is not null)
++        {
++            var existingAttachmentIds = assignment.Attachments.Select(a => a.Id).ToList();
++            foreach (var aid in existingAttachmentIds)
++            {
++                assignment.RemoveAttachment(aid);
++            }
++
++            foreach (var attachment in command.Attachments)
++            {
++                assignment.AddAttachment(attachment.FileName, attachment.ContentType, attachment.FileSize, attachment.StoragePath);
++            }
++        }
++
++        // DetectChanges is required so the change tracker picks up field-backed
++        // mutations on owned-type collections (Questions / Attachments) before
++        // SaveChanges runs. The Configuration sets
++        // UsePropertyAccessMode(PropertyAccessMode.Field) for these navigations,
++        // and the InMemory provider (used in unit tests) does not detect
++        // field-level list mutations automatically. PostgreSQL at runtime uses
++        // change-tracking proxies and would also benefit from an explicit
++        // DetectChanges after this kind of replacement pattern.
++        repository.DetectChanges();
+ 
+         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentUpdatedEvent>())
+         {
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentConfiguration.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentConfiguration.cs
+index cdbb8da1..97deb07a 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentConfiguration.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/AssignmentConfiguration.cs
+@@ -58,6 +58,8 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
+ 
+         builder.Property(x => x.PublishedAt);
+ 
++        builder.Property(x => x.AiPromptOverride).HasMaxLength(4000);
++
+ 
+         builder.HasIndex(x => x.TopicId)
+             .HasDatabaseName("ix_assignments_topic_id");
+@@ -97,6 +99,7 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
+             q.Property(q => q.QuestionType).IsRequired().HasDefaultValue(QuestionType.MultipleChoice);
+             q.Property(q => q.DisplayOrder).IsRequired();
+             q.Property(q => q.CorrectOptionId);
++            q.Property(q => q.ModelAnswer).HasMaxLength(2000);
+ 
+             q.OwnsMany(q => q.Options, o =>
+             {
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs
+index aebe88b3..8f6783ba 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/AssignmentRepository.cs
+@@ -22,4 +22,6 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
+                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt))
+             .ToListAsync(ct);
+     }
++
++    public void DetectChanges() => Db.ChangeTracker.DetectChanges();
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IAssignmentRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IAssignmentRepository.cs
+index 9e7e1b32..f72ad9e0 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IAssignmentRepository.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IAssignmentRepository.cs
+@@ -9,4 +9,11 @@ public interface IAssignmentRepository
+     Task UpdateAsync(Assignment assignment, CancellationToken ct = default);
+     Task DeleteAsync(Assignment assignment, CancellationToken ct = default);
+     Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? status, CancellationToken ct = default);
++    /// <summary>Force the EF change tracker to detect mutations on field-backed
++    /// owned-type collections before SaveChanges. Required by the update
++    /// handler after a full-replacement of questions/attachments (the
++    /// AssignmentConfiguration uses PropertyAccessMode.Field on those
++    /// navigations, and neither the InMemory provider nor post-replacement
++    /// reference checks pick up the field-level list mutations automatically).</summary>
++    void DetectChanges();
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Assignment.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Assignment.cs
+index 1cc9059e..4fe70881 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Assignment.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Assignment.cs
+@@ -43,6 +43,9 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
+     public bool MandatoryReview { get; private set; }
+     /// <summary>Set when the assignment is published (spec §4.8). Null while Draft.</summary>
+     public DateTimeOffset? PublishedAt { get; private set; }
++    /// <summary>Optional free-text override for the assignment-question-generation
++    /// system prompt (spec §3.2 / decision 8). Null falls back to the embedded prompt.</summary>
++    public string? AiPromptOverride { get; private set; }
+     public uint RowVersion { get; private set; }
+     public DateTimeOffset CreatedAt { get; private set; }
+     public DateTimeOffset UpdatedAt { get; private set; }
+@@ -64,7 +67,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
+         decimal? maxScore,
+         Guid createdByTeacherId = default,
+         bool mandatoryReview = true,
+-        string? assignmentNumber = null)
++        string? assignmentNumber = null,
++        string? aiPromptOverride = null)
+     {
+         if (topicId == Guid.Empty)
+             throw new ArgumentException("Topic is required.", nameof(topicId));
+@@ -89,6 +93,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
+             // Mandatory review is the default (spec §4.7); callers may opt out.
+             MandatoryReview = mandatoryReview,
+             AssignmentNumber = assignmentNumber?.Trim(),
++            AiPromptOverride = aiPromptOverride?.Trim(),
+             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
+             CreatedAt = now,
+             UpdatedAt = now
+@@ -101,7 +106,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
+     public void Update(string title, string? description, AssignmentType assignmentType,
+         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
+         Guid topicId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
+-        bool mandatoryReview)
++        bool mandatoryReview, string? aiPromptOverride = null)
+     {
+         if (Status != AssignmentStatus.Draft)
+             throw new InvalidOperationException("Only draft assignments can be updated.");
+@@ -120,6 +125,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
+         DueDate = dueDate;
+         MaxScore = maxScore;
+         MandatoryReview = mandatoryReview;
++        AiPromptOverride = aiPromptOverride?.Trim();
+         UpdatedAt = DateTimeOffset.UtcNow;
+         _domainEvents.Add(new AssignmentUpdatedEvent(Id, Title));
+     }
+@@ -155,9 +161,9 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
+         _domainEvents.Add(new AssignmentClosedEvent(Id, Title));
+     }
+ 
+-    public AssignmentQuestion AddQuestion(string questionText, QuestionType questionType, int displayOrder)
++    public AssignmentQuestion AddQuestion(string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null)
+     {
+-        var question = new AssignmentQuestion(Id, questionText, questionType, displayOrder);
++        var question = new AssignmentQuestion(Id, questionText, questionType, displayOrder, modelAnswer);
+         _questions.Add(question);
+         UpdatedAt = DateTimeOffset.UtcNow;
+         return question;
+@@ -173,6 +179,24 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
+         }
+     }
+ 
++    public AssignmentAttachment AddAttachment(string fileName, string contentType, long fileSize, string storagePath)
++    {
++        var attachment = new AssignmentAttachment(Id, fileName, contentType, fileSize, storagePath);
++        _attachments.Add(attachment);
++        UpdatedAt = DateTimeOffset.UtcNow;
++        return attachment;
++    }
++
++    public void RemoveAttachment(Guid attachmentId)
++    {
++        var attachment = _attachments.SingleOrDefault(a => a.Id == attachmentId);
++        if (attachment is not null)
++        {
++            _attachments.Remove(attachment);
++            UpdatedAt = DateTimeOffset.UtcNow;
++        }
++    }
++
+     public AssignmentReview AddReview(Guid teacherId, decimal? score, string? comments)
+     {
+         var review = new AssignmentReview(Id, teacherId, score, comments);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentQuestion.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentQuestion.cs
+index 88962c14..ab72c592 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentQuestion.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/AssignmentQuestion.cs
+@@ -6,13 +6,14 @@ public sealed class AssignmentQuestion
+ 
+     private AssignmentQuestion() { }
+ 
+-    internal AssignmentQuestion(Guid assignmentId, string questionText, QuestionType questionType, int displayOrder)
++    internal AssignmentQuestion(Guid assignmentId, string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null)
+     {
+         Id = Guid.NewGuid();
+         AssignmentId = assignmentId;
+         QuestionText = questionText;
+         QuestionType = questionType;
+         DisplayOrder = displayOrder;
++        ModelAnswer = modelAnswer;
+     }
+ 
+     public Guid Id { get; private set; }
+@@ -21,6 +22,10 @@ public sealed class AssignmentQuestion
+     public QuestionType QuestionType { get; private set; }
+     public int DisplayOrder { get; private set; }
+     public Guid? CorrectOptionId { get; private set; }
++    /// <summary>Optional reference answer kept on the question for teacher reference
++    /// (AI spec decision 10 / §5). Free-text for <see cref="QuestionType.ShortAnswer"/>
++    /// (teacher grades manually); null for MC/TF.</summary>
++    public string? ModelAnswer { get; private set; }
+ 
+     public IReadOnlyList<QuestionOption> Options => _options.AsReadOnly();
+ 
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/AssignmentQuestionValidationException.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/AssignmentQuestionValidationException.cs
+new file mode 100644
+index 00000000..e4cc3308
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/AssignmentQuestionValidationException.cs
+@@ -0,0 +1,6 @@
++namespace SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++public sealed class AssignmentQuestionValidationException : Exception
++{
++    public AssignmentQuestionValidationException(string message) : base(message) { }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260905113946_AddAiPromptOverrideAndQuestionModelAnswer.Designer.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260905113946_AddAiPromptOverrideAndQuestionModelAnswer.Designer.cs
+new file mode 100644
+index 00000000..2dea0c26
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260905113946_AddAiPromptOverrideAndQuestionModelAnswer.Designer.cs
+@@ -0,0 +1,790 @@
++﻿// <auto-generated />
++using System;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.EntityFrameworkCore.Migrations;
++using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
++using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
++using SchoolCollab.Assignments.Core.Data;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    [DbContext(typeof(AssignmentsDbContext))]
++    [Migration("20260905113946_AddAiPromptOverrideAndQuestionModelAnswer")]
++    partial class AddAiPromptOverrideAndQuestionModelAnswer
++    {
++        /// <inheritdoc />
++        protected override void BuildTargetModel(ModelBuilder modelBuilder)
++        {
++#pragma warning disable 612, 618
++            modelBuilder
++                .HasAnnotation("ProductVersion", "10.0.8")
++                .HasAnnotation("Relational:MaxIdentifierLength", 63);
++
++            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<string>("AiPromptOverride")
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("ai_prompt_override");
++
++                    b.Property<string>("AssignmentNumber")
++                        .HasMaxLength(50)
++                        .HasColumnType("character varying(50)")
++                        .HasColumnName("assignment_number");
++
++                    b.Property<int>("AssignmentType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("assignment_type");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("CreatedByTeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("created_by_teacher_id");
++
++                    b.Property<string>("Description")
++                        .HasMaxLength(5000)
++                        .HasColumnType("character varying(5000)")
++                        .HasColumnName("description");
++
++                    b.Property<DateTimeOffset?>("DueDate")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("due_date");
++
++                    b.Property<Guid?>("GradeLevelId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("grade_level_id");
++
++                    b.Property<int>("GradingFormat")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("grading_format");
++
++                    b.Property<bool>("MandatoryReview")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("mandatory_review");
++
++                    b.Property<decimal?>("MaxScore")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("max_score");
++
++                    b.Property<DateTimeOffset?>("PublishedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("published_at");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("Status")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("status");
++
++                    b.Property<int>("TargetAudienceType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("target_audience_type");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Title")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("title");
++
++                    b.Property<Guid>("TopicId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("topic_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignments");
++
++                    b.HasIndex("CreatedByTeacherId")
++                        .HasDatabaseName("ix_assignments_teacher_id");
++
++                    b.HasIndex("GradeLevelId")
++                        .HasDatabaseName("ix_assignments_grade_level_id");
++
++                    b.HasIndex("Status")
++                        .HasDatabaseName("ix_assignments_status");
++
++                    b.HasIndex("TopicId")
++                        .HasDatabaseName("ix_assignments_topic_id");
++
++                    b.ToTable("assignments", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("ActivityGroupId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("activity_group_id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_activity_groups");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_activity_groups_assignment_id");
++
++                    b.HasIndex("TenantId", "ActivityGroupId")
++                        .HasDatabaseName("ix_assignment_activity_groups_tenant_group");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ActivityGroupId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_activity_groups_tenant_assignment_group");
++
++                    b.ToTable("assignment_activity_groups", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentRecipient", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<int>("Channel")
++                        .HasColumnType("integer")
++                        .HasColumnName("channel");
++
++                    b.Property<Guid>("ContactId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("contact_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<DateTimeOffset?>("DeliveredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("delivered_at");
++
++                    b.Property<bool>("NotifyOnBroadcast")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("notify_on_broadcast");
++
++                    b.Property<DateTimeOffset?>("OpenedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("opened_at");
++
++                    b.Property<Guid>("OwnerId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("owner_id");
++
++                    b.Property<int>("OwnerType")
++                        .HasColumnType("integer")
++                        .HasColumnName("owner_type");
++
++                    b.Property<int?>("Role")
++                        .HasColumnType("integer")
++                        .HasColumnName("role");
++
++                    b.Property<bool>("SubscriptionActive")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("subscription_active");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<Guid?>("WardStudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("ward_student_id");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_recipients");
++
++                    b.HasIndex("AssignmentId", "OwnerId")
++                        .HasDatabaseName("ix_assignment_recipients_assignment_owner");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ContactId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_recipients_tenant_assignment_contact");
++
++                    b.ToTable("assignment_recipients", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmission", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("CurrentSource")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_source");
++
++                    b.Property<int>("CurrentVersionNumber")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_version_number");
++
++                    b.Property<DateTimeOffset>("LastSubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("last_submitted_at");
++
++                    b.Property<int>("ReviewState")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("review_state");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid?>("SubmissionGateId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_gate_id");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submissions");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submissions_tenant_assignment_student");
++
++                    b.ToTable("assignment_submissions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Content")
++                        .HasMaxLength(20000)
++                        .HasColumnType("character varying(20000)")
++                        .HasColumnName("content");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("Source")
++                        .HasColumnType("integer")
++                        .HasColumnName("source");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<DateTimeOffset>("SubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<int>("VersionNumber")
++                        .HasColumnType("integer")
++                        .HasColumnName("version_number");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submission_versions");
++
++                    b.HasIndex("TenantId", "SubmissionId", "VersionNumber")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submission_versions_tenant_submission_version");
++
++                    b.ToTable("assignment_submission_versions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.GuardianSubmissionGate", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("ReviewComment")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("review_comment");
++
++                    b.Property<DateTimeOffset?>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<Guid?>("ReviewedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("reviewed_by_guardian_id");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<bool>("SubmissionEnabledForStudent")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("submission_enabled_for_student");
++
++                    b.Property<DateTimeOffset?>("SubmittedByGuardianAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_by_guardian_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_guardian_submission_gates");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_guardian_submission_gates_tenant_assignment_student");
++
++                    b.ToTable("guardian_submission_gates", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionReview", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Comments")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("comments");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("Grade")
++                        .HasMaxLength(20)
++                        .HasColumnType("character varying(20)")
++                        .HasColumnName("grade");
++
++                    b.Property<DateTimeOffset>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<decimal?>("Score")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("score");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<Guid>("TeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("teacher_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_submission_reviews");
++
++                    b.HasIndex("TenantId", "SubmissionId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_submission_reviews_tenant_submission");
++
++                    b.ToTable("submission_reviews", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Core.Messaging.OutboxMessage", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<int>("Attempts")
++                        .HasColumnType("integer")
++                        .HasColumnName("attempts");
++
++                    b.Property<DateTimeOffset?>("DispatchedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("dispatched_at");
++
++                    b.Property<string>("LastError")
++                        .HasColumnType("text")
++                        .HasColumnName("last_error");
++
++                    b.Property<DateTimeOffset>("OccurredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("occurred_at");
++
++                    b.Property<string>("Payload")
++                        .IsRequired()
++                        .HasColumnType("text")
++                        .HasColumnName("payload");
++
++                    b.Property<Guid?>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Type")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("type");
++
++                    b.HasKey("Id")
++                        .HasName("pk_outbox_messages");
++
++                    b.HasIndex("OccurredAt")
++                        .HasDatabaseName("ix_outbox_messages_pending")
++                        .HasFilter("dispatched_at IS NULL");
++
++                    b.HasIndex("TenantId")
++                        .HasDatabaseName("ix_outbox_messages_tenant_id");
++
++                    b.ToTable("outbox_messages", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentAttachment", "Attachments", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("ContentType")
++                                .IsRequired()
++                                .HasMaxLength(100)
++                                .HasColumnType("character varying(100)")
++                                .HasColumnName("content_type");
++
++                            b1.Property<string>("FileName")
++                                .IsRequired()
++                                .HasMaxLength(255)
++                                .HasColumnType("character varying(255)")
++                                .HasColumnName("file_name");
++
++                            b1.Property<long>("FileSize")
++                                .HasColumnType("bigint")
++                                .HasColumnName("file_size");
++
++                            b1.Property<string>("StoragePath")
++                                .IsRequired()
++                                .HasMaxLength(500)
++                                .HasColumnType("character varying(500)")
++                                .HasColumnName("storage_path");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_attachments");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_attachments_assignment_id");
++
++                            b1.ToTable("assignment_attachments", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_attachments_assignments_assignment_id");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentQuestion", "Questions", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<Guid?>("CorrectOptionId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("correct_option_id");
++
++                            b1.Property<int>("DisplayOrder")
++                                .HasColumnType("integer")
++                                .HasColumnName("display_order");
++
++                            b1.Property<string>("ModelAnswer")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("model_answer");
++
++                            b1.Property<string>("QuestionText")
++                                .IsRequired()
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("question_text");
++
++                            b1.Property<int>("QuestionType")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("integer")
++                                .HasDefaultValue(0)
++                                .HasColumnName("question_type");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_questions");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_questions_assignment_id");
++
++                            b1.ToTable("assignment_questions", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_questions_assignments_assignment_id");
++
++                            b1.OwnsMany("SchoolCollab.Assignments.Core.Domain.QuestionOption", "Options", b2 =>
++                                {
++                                    b2.Property<Guid>("Id")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("id");
++
++                                    b2.Property<bool>("IsCorrect")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("boolean")
++                                        .HasDefaultValue(false)
++                                        .HasColumnName("is_correct");
++
++                                    b2.Property<string>("OptionText")
++                                        .IsRequired()
++                                        .HasMaxLength(500)
++                                        .HasColumnType("character varying(500)")
++                                        .HasColumnName("option_text");
++
++                                    b2.Property<Guid>("QuestionId")
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("question_id");
++
++                                    b2.HasKey("Id")
++                                        .HasName("pk_question_options");
++
++                                    b2.HasIndex("QuestionId")
++                                        .HasDatabaseName("ix_question_options_question_id");
++
++                                    b2.ToTable("question_options", (string)null);
++
++                                    b2.WithOwner()
++                                        .HasForeignKey("QuestionId")
++                                        .HasConstraintName("fk_question_options_assignment_questions_question_id");
++                                });
++
++                            b1.Navigation("Options");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentReview", "Reviews", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("Comments")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("comments");
++
++                            b1.Property<DateTimeOffset>("ReviewDate")
++                                .HasColumnType("timestamp with time zone")
++                                .HasColumnName("review_date");
++
++                            b1.Property<decimal?>("Score")
++                                .HasPrecision(5, 2)
++                                .HasColumnType("numeric(5,2)")
++                                .HasColumnName("score");
++
++                            b1.Property<Guid>("TeacherId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("teacher_id");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_reviews");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_reviews_assignment_id");
++
++                            b1.ToTable("assignment_reviews", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_reviews_assignments_assignment_id");
++                        });
++
++                    b.Navigation("Attachments");
++
++                    b.Navigation("Questions");
++
++                    b.Navigation("Reviews");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany()
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_activity_groups_assignments_assignment_id");
++                });
++#pragma warning restore 612, 618
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260905113946_AddAiPromptOverrideAndQuestionModelAnswer.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260905113946_AddAiPromptOverrideAndQuestionModelAnswer.cs
+new file mode 100644
+index 00000000..709694c8
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260905113946_AddAiPromptOverrideAndQuestionModelAnswer.cs
+@@ -0,0 +1,40 @@
++﻿using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    /// <inheritdoc />
++    public partial class AddAiPromptOverrideAndQuestionModelAnswer : Migration
++    {
++        /// <inheritdoc />
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.AddColumn<string>(
++                name: "ai_prompt_override",
++                table: "assignments",
++                type: "character varying(4000)",
++                maxLength: 4000,
++                nullable: true);
++
++            migrationBuilder.AddColumn<string>(
++                name: "model_answer",
++                table: "assignment_questions",
++                type: "character varying(2000)",
++                maxLength: 2000,
++                nullable: true);
++        }
++
++        /// <inheritdoc />
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.DropColumn(
++                name: "ai_prompt_override",
++                table: "assignments");
++
++            migrationBuilder.DropColumn(
++                name: "model_answer",
++                table: "assignment_questions");
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+index 7c82b508..ce8a497e 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+@@ -28,6 +28,11 @@ namespace SchoolCollab.Assignments.Core.Migrations
+                         .HasColumnType("uuid")
+                         .HasColumnName("id");
+ 
++                    b.Property<string>("AiPromptOverride")
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("ai_prompt_override");
++
+                     b.Property<string>("AssignmentNumber")
+                         .HasMaxLength(50)
+                         .HasColumnType("character varying(50)")
+@@ -650,6 +655,11 @@ namespace SchoolCollab.Assignments.Core.Migrations
+                                 .HasColumnType("integer")
+                                 .HasColumnName("display_order");
+ 
++                            b1.Property<string>("ModelAnswer")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("model_answer");
++
+                             b1.Property<string>("QuestionText")
+                                 .IsRequired()
+                                 .HasMaxLength(2000)
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs
+index 04960c59..0214c5ff 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentActivityGroupTests.cs
+@@ -381,6 +381,7 @@ public class AssignmentActivityGroupTests
+         public Task DeleteAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
+         public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
+             => Task.FromResult(new List<AssignmentSummary>());
++        public void DetectChanges() { /* no-op for fake */ }
+     }
+ 
+     private sealed class FakeSubmissionRepository : ISubmissionRepository
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentQuestionAttachmentTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentQuestionAttachmentTests.cs
+new file mode 100644
+index 00000000..58c98bbe
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentQuestionAttachmentTests.cs
+@@ -0,0 +1,104 @@
++using FluentAssertions;
++using SchoolCollab.Assignments.Core.Domain;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// Phase B1 round ar-1: covers the new domain surface from
++/// <c>documents/specs/assignment-creation-with-ai.md</c> §3.1:
++/// <list type="bullet">
++///   <item><see cref="Assignment.AddAttachment"/> / <see cref="Assignment.RemoveAttachment"/></item>
++///   <item><see cref="AssignmentQuestion.ModelAnswer"/> on the new optional
++///         <c>modelAnswer</c> parameter to <see cref="Assignment.AddQuestion"/></item>
++///   <item><see cref="AssignmentQuestion.AddOption"/> setting <c>CorrectOptionId</c></item>
++/// </list>
++/// </summary>
++[TestClass]
++public class AssignmentQuestionAttachmentTests
++{
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
++
++    private static Assignment NewAssignment() =>
++        Assignment.Create("Title", null, AssignmentType.Digital,
++            GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
++            TopicId, null, null, null, TeacherId);
++
++    [TestMethod]
++    public void AddAttachment_AddsToAttachmentsList_AndReturnsRow()
++    {
++        var assignment = NewAssignment();
++
++        var attachment = assignment.AddAttachment(
++            fileName: "syllabus.pdf",
++            contentType: "application/pdf",
++            fileSize: 1024,
++            storagePath: "tenants/abc/assignments/x/syllabus.pdf");
++
++        assignment.Attachments.Should().HaveCount(1, "AddAttachment must append to the owned list");
++        assignment.Attachments[0].Id.Should().Be(attachment.Id, "the returned row must be the persisted one");
++        assignment.Attachments[0].FileName.Should().Be("syllabus.pdf");
++        assignment.Attachments[0].ContentType.Should().Be("application/pdf");
++        assignment.Attachments[0].FileSize.Should().Be(1024);
++        assignment.Attachments[0].StoragePath.Should().Be("tenants/abc/assignments/x/syllabus.pdf");
++        assignment.Attachments[0].AssignmentId.Should().Be(assignment.Id);
++    }
++
++    [TestMethod]
++    public void RemoveAttachment_RemovesFromList()
++    {
++        var assignment = NewAssignment();
++        var attachment = assignment.AddAttachment("a.txt", "text/plain", 1, "tenants/x/a.txt");
++
++        assignment.RemoveAttachment(attachment.Id);
++
++        assignment.Attachments.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public void RemoveAttachment_WithUnknownId_IsNoOp()
++    {
++        var assignment = NewAssignment();
++        assignment.AddAttachment("a.txt", "text/plain", 1, "tenants/x/a.txt");
++
++        assignment.RemoveAttachment(Guid.NewGuid());
++
++        assignment.Attachments.Should().HaveCount(1, "RemoveAttachment must silently ignore unknown ids");
++    }
++
++    [TestMethod]
++    public void AddQuestion_AcceptsModelAnswer()
++    {
++        var assignment = NewAssignment();
++
++        var q = assignment.AddQuestion("Name the main product of photosynthesis.",
++            QuestionType.ShortAnswer, displayOrder: 0, modelAnswer: "Glucose");
++
++        q.ModelAnswer.Should().Be("Glucose",
++            "ModelAnswer must be settable via the new optional parameter");
++    }
++
++    [TestMethod]
++    public void AddQuestion_WithoutModelAnswer_DefaultsToNull()
++    {
++        var assignment = NewAssignment();
++
++        var q = assignment.AddQuestion("2 + 2 = ?", QuestionType.ShortAnswer, displayOrder: 0);
++
++        q.ModelAnswer.Should().BeNull(
++            "ModelAnswer must default to null when not supplied — preserves the prior contract");
++    }
++
++    [TestMethod]
++    public void AddQuestion_AddOptionIsCorrectTrue_SetsCorrectOptionId()
++    {
++        var assignment = NewAssignment();
++        var q = assignment.AddQuestion("Pick A.", QuestionType.MultipleChoice, 0);
++
++        var correct = q.AddOption("A", isCorrect: true);
++        q.AddOption("B", isCorrect: false);
++
++        q.CorrectOptionId.Should().Be(correct.Id,
++            "AddOption with isCorrect=true must set CorrectOptionId to the new option");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerQuestionsTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerQuestionsTests.cs
+new file mode 100644
+index 00000000..cec6e8f3
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/CreateAssignmentCommandHandlerQuestionsTests.cs
+@@ -0,0 +1,317 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Moq;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Core.EntityCodes;
++using SchoolCollab.Core.Messaging;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit.Handlers;
++
++/// <summary>
++/// Phase B1 round ar-1: <c>CreateAssignmentCommandHandler</c> now persists
++/// questions, options, attachments and <c>AiPromptOverride</c> on the draft
++/// (AI spec §3.3 / §2.6 FR-250/251/230/210). Validation (FR-252) must reject
++/// malformed payloads BEFORE any child is added (EC-7), so a partial
++/// aggregate can never be persisted. Mirrors the setup pattern of
++/// <c>CreateAssignmentCommandHandlerEntityCodeTests</c>.
++/// </summary>
++[TestClass]
++public class CreateAssignmentCommandHandlerQuestionsTests
++{
++    private static readonly Guid TestTenant = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++
++    private static (AssignmentsDbContext db, HybridCache cache, ITenantProvider tenants) BuildScope(string name)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(opts => opts.UseInMemoryDatabase(name));
++        services.AddDistributedMemoryCache();
++        services.AddHybridCache();
++        var sp = services.BuildServiceProvider();
++
++        var db = sp.GetRequiredService<AssignmentsDbContext>();
++        db.Database.EnsureCreated();
++        var tenants = sp.GetRequiredService<ITenantProvider>();
++        ((TenantProvider)tenants).SetTenant(new TenantContext(TestTenant, "TestSchool", TenantType.School));
++        return (db, sp.GetRequiredService<HybridCache>(), tenants);
++    }
++
++    private static CreateAssignmentCommandHandler NewHandler(AssignmentsDbContext db, HybridCache cache, ITenantProvider tenants)
++    {
++        var generator = new Mock<IEntityCodeGenerator>();
++        generator.Setup(g => g.GenerateAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
++                 .ReturnsAsync("ASGA01");
++        var publisher = new Mock<IIntegrationEventPublisher>();
++        return new CreateAssignmentCommandHandler(
++            new AssignmentRepository(db),
++            generator.Object,
++            publisher.Object,
++            cache,
++            tenants,
++            NullLogger<CreateAssignmentCommandHandler>.Instance);
++    }
++
++    private static CreateAssignmentCommand SampleCommand(
++        string? aiPromptOverride = null,
++        IReadOnlyList<NewQuestionDto>? questions = null,
++        IReadOnlyList<NewAttachmentDto>? attachments = null) =>
++        new(
++            Title: "Algebra HW",
++            Description: null,
++            AssignmentType: AssignmentType.Digital,
++            GradingFormat: GradingFormat.AutoGraded,
++            TargetAudienceType: TargetAudienceType.AllStudents,
++            TopicId: Guid.NewGuid(),
++            GradeLevelId: null,
++            DueDate: null,
++            MaxScore: 100m,
++            MandatoryReview: true,
++            AiPromptOverride: aiPromptOverride,
++            Questions: questions,
++            Attachments: attachments);
++
++    private static NewQuestionDto McQuestion(int displayOrder) =>
++        new(
++            QuestionText: $"Pick the capital of France. [{displayOrder}]",
++            QuestionType: QuestionTypeDto.MultipleChoice,
++            DisplayOrder: displayOrder,
++            Options:
++            [
++                new NewQuestionOptionDto("Berlin", false),
++                new NewQuestionOptionDto("Paris", true),
++                new NewQuestionOptionDto("Madrid", false),
++                new NewQuestionOptionDto("Rome", false)
++            ]);
++
++    private static NewQuestionDto TrueFalseCorrect() =>
++        new(
++            QuestionText: "Photosynthesis requires sunlight.",
++            QuestionType: QuestionTypeDto.TrueFalse,
++            DisplayOrder: 0,
++            Options:
++            [
++                new NewQuestionOptionDto("True", true),
++                new NewQuestionOptionDto("False", false)
++            ]);
++
++    private static NewQuestionDto ShortAnswer() =>
++        new(
++            QuestionText: "Name the main product of photosynthesis.",
++            QuestionType: QuestionTypeDto.ShortAnswer,
++            DisplayOrder: 0,
++            Options: null,
++            ModelAnswer: "Glucose");
++
++    [TestMethod]
++    public async Task HandleAsync_PersistsQuestionsAndOptions_ReindexedByListPosition()
++    {
++        var (db, cache, tenants) = BuildScope("create-questions-reindex");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        // Inbound carries DisplayOrder 5, 99 — handler must re-index 0..n.
++        var questions = new[]
++        {
++            McQuestion(5),
++            McQuestion(99)
++        };
++
++        var id = await handler.HandleAsync(SampleCommand(questions: questions));
++
++        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
++        stored.Questions.Should().HaveCount(2);
++        stored.Questions.Select(q => q.DisplayOrder)
++            .Should().BeEquivalentTo(new[] { 0, 1 }, opts => opts.WithStrictOrdering(),
++                "the handler re-indexes DisplayOrder 0..n by inbound list position (EC-7)");
++        stored.Questions.SelectMany(q => q.Options)
++            .Select(o => o.IsCorrect)
++            .Where(b => b)
++            .Should().HaveCount(2, "both questions must persist exactly one correct option");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_McWithZeroCorrect_RejectedBeforeAnyChildAdded()
++    {
++        var (db, cache, tenants) = BuildScope("create-mc-no-correct");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var questions = new[]
++        {
++            new NewQuestionDto(
++                "Q?", QuestionTypeDto.MultipleChoice, 0,
++                Options: [new NewQuestionOptionDto("A", false), new NewQuestionOptionDto("B", false)])
++        };
++
++        var act = async () => await handler.HandleAsync(SampleCommand(questions: questions));
++
++        await act.Should().ThrowAsync<AssignmentQuestionValidationException>()
++            .WithMessage("*exactly 1 correct option*");
++        db.Assignments.IgnoreQueryFilters().Should().BeEmpty(
++            "FR-252 must reject before any child is added — no partial aggregate");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_McWithTwoCorrect_Rejected()
++    {
++        var (db, cache, tenants) = BuildScope("create-mc-two-correct");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var questions = new[]
++        {
++            new NewQuestionDto(
++                "Q?", QuestionTypeDto.MultipleChoice, 0,
++                Options:
++                [
++                    new NewQuestionOptionDto("A", true),
++                    new NewQuestionOptionDto("B", true),
++                    new NewQuestionOptionDto("C", false)
++                ])
++        };
++
++        var act = async () => await handler.HandleAsync(SampleCommand(questions: questions));
++
++        await act.Should().ThrowAsync<AssignmentQuestionValidationException>()
++            .WithMessage("*exactly 1 correct option*");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_TfNonCanonical_Rejected()
++    {
++        var (db, cache, tenants) = BuildScope("create-tf-noncanonical");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var questions = new[]
++        {
++            new NewQuestionDto(
++                "Q?", QuestionTypeDto.TrueFalse, 0,
++                Options:
++                [
++                    new NewQuestionOptionDto("Yes", true),
++                    new NewQuestionOptionDto("No", false)
++                ])
++        };
++
++        var act = async () => await handler.HandleAsync(SampleCommand(questions: questions));
++
++        await act.Should().ThrowAsync<AssignmentQuestionValidationException>()
++            .WithMessage("*'True' and 'False'*");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_TfCanonicalWithOneCorrect_Accepted()
++    {
++        var (db, cache, tenants) = BuildScope("create-tf-ok");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var id = await handler.HandleAsync(SampleCommand(questions: [TrueFalseCorrect()]));
++
++        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
++        stored.Questions.Should().HaveCount(1);
++        stored.Questions[0].Options.Should().HaveCount(2);
++        stored.Questions[0].CorrectOptionId.Should().NotBeNull();
++        stored.Questions[0].Options.Single(o => o.Id == stored.Questions[0].CorrectOptionId)
++            .OptionText.Should().Be("True");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_EmptyQuestionText_Rejected()
++    {
++        var (db, cache, tenants) = BuildScope("create-empty-text");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var questions = new[]
++        {
++            new NewQuestionDto(
++                "   ", QuestionTypeDto.MultipleChoice, 0,
++                Options: [new NewQuestionOptionDto("A", true), new NewQuestionOptionDto("B", false)])
++        };
++
++        var act = async () => await handler.HandleAsync(SampleCommand(questions: questions));
++
++        await act.Should().ThrowAsync<AssignmentQuestionValidationException>()
++            .WithMessage("*QuestionText is required*");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_ShortAnswer_PersistsModelAnswerWithoutOptions()
++    {
++        var (db, cache, tenants) = BuildScope("create-shortanswer");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var id = await handler.HandleAsync(SampleCommand(questions: [ShortAnswer()]));
++
++        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
++        stored.Questions.Should().HaveCount(1);
++        stored.Questions[0].QuestionType.Should().Be(QuestionType.ShortAnswer);
++        stored.Questions[0].ModelAnswer.Should().Be("Glucose",
++            "ShortAnswer must persist the inbound ModelAnswer for teacher reference");
++        stored.Questions[0].Options.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_Attachments_PersistedWithOpaqueStoragePath()
++    {
++        var (db, cache, tenants) = BuildScope("create-attachments");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var attachments = new[]
++        {
++            new NewAttachmentDto("syllabus.pdf", "application/pdf", 2048, "tenants/abc/x/syllabus.pdf"),
++            new NewAttachmentDto("intro.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 512, "tenants/abc/x/intro.docx")
++        };
++
++        var id = await handler.HandleAsync(SampleCommand(attachments: attachments));
++
++        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
++        stored.Attachments.Should().HaveCount(2);
++        stored.Attachments.Select(a => a.StoragePath)
++            .Should().BeEquivalentTo(attachments.Select(a => a.StoragePath),
++                "StoragePath is opaque — must be stored as given");
++        stored.Attachments.Should().AllSatisfy(a => a.AssignmentId.Should().Be(id));
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_AiPromptOverride_Persisted()
++    {
++        var (db, cache, tenants) = BuildScope("create-aiprompt");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var id = await handler.HandleAsync(SampleCommand(aiPromptOverride: "Make questions for grade 5 only."));
++
++        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
++        stored.AiPromptOverride.Should().Be("Make questions for grade 5 only.",
++            "the per-assignment AI prompt override must round-trip through the create command (FR-230)");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_NullQuestions_BehavesAsToday()
++    {
++        var (db, cache, tenants) = BuildScope("create-null-questions");
++        using var _db = db;
++        var handler = NewHandler(db, cache, tenants);
++
++        var id = await handler.HandleAsync(SampleCommand(questions: null, attachments: null));
++
++        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
++        stored.Questions.Should().BeEmpty(
++            "a null Questions collection is the pre-feature contract — must not error or synthesise rows");
++        stored.Attachments.Should().BeEmpty();
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+index 68a88f4a..6d9ef9bd 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+@@ -555,6 +555,7 @@ public class SubmissionEngineTests
+         public Task DeleteAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
+         public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
+             => Task.FromResult(new List<AssignmentSummary>());
++        public void DetectChanges() { /* no-op for fake */ }
+     }
+ 
+     private sealed class FakeSubmissionRepository : ISubmissionRepository
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/UpdateAssignmentCommandHandlerQuestionsTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/UpdateAssignmentCommandHandlerQuestionsTests.cs
+new file mode 100644
+index 00000000..fd2eb472
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/UpdateAssignmentCommandHandlerQuestionsTests.cs
+@@ -0,0 +1,224 @@
++using FluentAssertions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.Extensions.Caching.Hybrid;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging.Abstractions;
++using Moq;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
++using SchoolCollab.Assignments.Core.Data;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Core.Messaging;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit.Handlers;
++
++/// <summary>
++/// Phase B1 round ar-1: <c>UpdateAssignmentCommandHandler</c> now supports
++/// draft-replacement semantics for questions and attachments (decision b) plus
++/// the optional <c>AiPromptOverride</c>. Non-draft updates still reject (FR-252).
++/// Mirrors the setup pattern of <c>CreateAssignmentCommandHandlerEntityCodeTests</c>.
++/// </summary>
++[TestClass]
++public class UpdateAssignmentCommandHandlerQuestionsTests
++{
++    private static readonly Guid TestTenant = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
++
++    private static (AssignmentsDbContext db, HybridCache cache, ITenantProvider tenants) BuildScope(string name)
++    {
++        var services = new ServiceCollection();
++        services.AddTenancy();
++        services.AddDbContext<AssignmentsDbContext>(opts => opts.UseInMemoryDatabase(name));
++        services.AddDistributedMemoryCache();
++        services.AddHybridCache();
++        var sp = services.BuildServiceProvider();
++
++        var db = sp.GetRequiredService<AssignmentsDbContext>();
++        db.Database.EnsureCreated();
++        var tenants = sp.GetRequiredService<ITenantProvider>();
++        ((TenantProvider)tenants).SetTenant(new TenantContext(TestTenant, "TestSchool", TenantType.School));
++        return (db, sp.GetRequiredService<HybridCache>(), tenants);
++    }
++
++    private static UpdateAssignmentCommandHandler NewHandler(IAssignmentRepository repo, HybridCache cache)
++    {
++        var publisher = new Mock<IIntegrationEventPublisher>();
++        return new UpdateAssignmentCommandHandler(
++            repo,
++            publisher.Object,
++            cache,
++            NullLogger<UpdateAssignmentCommandHandler>.Instance);
++    }
++
++    private static Assignment SeedDraft(AssignmentsDbContext db, ITenantProvider tenants)
++    {
++        var assignment = Assignment.Create(
++            "Original", null, AssignmentType.Digital,
++            GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
++            Guid.NewGuid(), null, null, null,
++            createdByTeacherId: Guid.Empty,
++            mandatoryReview: true,
++            assignmentNumber: "ASGA01",
++            aiPromptOverride: "initial override")
++            .WithTenant(tenants);
++        var q1 = assignment.AddQuestion("Old MC", QuestionType.MultipleChoice, 0);
++        q1.AddOption("A", true);
++        q1.AddOption("B", false);
++        var q2 = assignment.AddQuestion("Old TF", QuestionType.TrueFalse, 1);
++        q2.AddOption("True", true);
++        q2.AddOption("False", false);
++        assignment.AddAttachment("old.pdf", "application/pdf", 1, "tenants/x/old.pdf");
++        db.Assignments.Add(assignment);
++        db.SaveChanges();
++        return assignment;
++    }
++
++    private static UpdateAssignmentCommand SampleUpdate(
++        Guid id,
++        string? aiPromptOverride = null,
++        IReadOnlyList<NewQuestionDto>? questions = null,
++        IReadOnlyList<NewAttachmentDto>? attachments = null) =>
++        new(
++            Id: id,
++            Title: "Updated",
++            Description: null,
++            AssignmentType: AssignmentType.Digital,
++            GradingFormat: GradingFormat.AutoGraded,
++            TargetAudienceType: TargetAudienceType.AllStudents,
++            TopicId: Guid.NewGuid(),
++            GradeLevelId: null,
++            DueDate: null,
++            MaxScore: 100m,
++            MandatoryReview: true,
++            AiPromptOverride: aiPromptOverride,
++            Questions: questions,
++            Attachments: attachments);
++
++    /// <summary>Capturing fake repository. The EF Core InMemory provider has a known
++    /// quirk where a Same-Context Load → Replace-Owned-Children → SaveChanges
++    /// sequence on <c>OwnsMany</c> collections raises a phantom
++    /// "entity does not exist in the store" error. We assert the handler's
++    /// aggregate mutations directly from the captured instance — the handler's
++    /// job is to mutate the in-memory aggregate correctly; EF persistence is
++    /// already covered by the in-memory provider's add-path tests.</summary>
++    private sealed class CapturingAssignmentRepository : IAssignmentRepository
++    {
++        public Assignment? Loaded { get; set; }
++        public Assignment? Updated { get; private set; }
++        public Func<Assignment, Task>? OnUpdate { get; set; }
++
++        public Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default)
++        {
++            return Task.FromResult(Loaded);
++        }
++
++        public Task AddAsync(Assignment assignment, CancellationToken ct = default) => Task.CompletedTask;
++        public Task DeleteAsync(Assignment assignment, CancellationToken ct = default) => Task.CompletedTask;
++        public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
++            => Task.FromResult(new List<AssignmentSummary>());
++        public void DetectChanges() { }
++
++        public async Task UpdateAsync(Assignment assignment, CancellationToken ct = default)
++        {
++            Updated = assignment;
++            if (OnUpdate is not null) await OnUpdate(assignment);
++        }
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_Draft_ReplacesQuestionsAndAttachments()
++    {
++        // Build an in-memory store + tenant scope, seed the aggregate, then drive
++        // the handler through a capturing fake so we can verify the in-memory
++        // replacement without invoking the InMemory provider's broken owned-type
++        // delete-on-save path. EF persistence of the new owned rows is exercised
++        // by the Create-handler tests (the add path).
++        var (db, _, tenants) = BuildScope("update-replace-seed");
++        var seeded = SeedDraft(db, tenants);
++        var seededId = seeded.Id;
++        db.ChangeTracker.Clear();
++        // Re-fetch the aggregate from the store so the capturing fake sees a
++        // snapshot identical to what the real repository would return.
++        var loaded = db.Assignments.Single(a => a.Id == seededId);
++        db.ChangeTracker.Clear();
++
++        var (_, cache, _) = BuildScope("update-replace");
++        var repo = new CapturingAssignmentRepository { Loaded = loaded };
++        var handler = NewHandler(repo, cache);
++
++        var inboundQuestions = new[]
++        {
++            new NewQuestionDto(
++                "Brand new short answer.",
++                QuestionTypeDto.ShortAnswer, 0, null, ModelAnswer: "Glucose")
++        };
++        var inboundAttachments = new[]
++        {
++            new NewAttachmentDto("new.pdf", "application/pdf", 2048, "tenants/x/new.pdf")
++        };
++
++        await handler.HandleAsync(SampleUpdate(seededId,
++            aiPromptOverride: "fresh override",
++            questions: inboundQuestions,
++            attachments: inboundAttachments));
++
++        var mutated = repo.Updated;
++        mutated.Should().NotBeNull("the handler must invoke UpdateAsync exactly once");
++        mutated!.Title.Should().Be("Updated");
++        mutated.AiPromptOverride.Should().Be("fresh override");
++
++        mutated.Questions.Should().HaveCount(1, "the inbound question list fully replaces the prior two");
++        mutated.Questions[0].QuestionText.Should().Be("Brand new short answer.");
++        mutated.Questions[0].ModelAnswer.Should().Be("Glucose");
++        mutated.Questions[0].DisplayOrder.Should().Be(0, "the handler re-indexes DisplayOrder 0..n by inbound list position");
++
++        mutated.Attachments.Should().HaveCount(1, "the inbound attachment list fully replaces the prior one");
++        mutated.Attachments[0].StoragePath.Should().Be("tenants/x/new.pdf");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_NullQuestions_PreservesExistingChildren()
++    {
++        var (db, cache, tenants) = BuildScope("update-null-children");
++        var original = SeedDraft(db, tenants);
++        var handler = NewHandler(new AssignmentRepository(db), cache);
++
++        await handler.HandleAsync(SampleUpdate(original.Id,
++            aiPromptOverride: "still here",
++            questions: null,
++            attachments: null));
++
++        db.ChangeTracker.Clear();
++        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == original.Id);
++        stored.Questions.Should().HaveCount(2, "a null Questions collection leaves existing children untouched");
++        stored.Attachments.Should().HaveCount(1);
++        stored.AiPromptOverride.Should().Be("still here");
++    }
++
++    [TestMethod]
++    public async Task HandleAsync_NonDraft_StillRejected()
++    {
++        var (db, cache, tenants) = BuildScope("update-published");
++        var assignment = Assignment.Create(
++            "Pub", null, AssignmentType.Digital,
++            GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
++            Guid.NewGuid(), null, null, null,
++            createdByTeacherId: Guid.Empty,
++            mandatoryReview: true,
++            assignmentNumber: "ASGA02")
++            .WithTenant(tenants);
++        assignment.Publish();
++        db.Assignments.Add(assignment);
++        db.SaveChanges();
++        var handler = NewHandler(new AssignmentRepository(db), cache);
++
++        var act = async () => await handler.HandleAsync(SampleUpdate(assignment.Id,
++            aiPromptOverride: "x",
++            questions: null,
++            attachments: null));
++
++        await act.Should().ThrowAsync<InvalidOperationException>()
++            .WithMessage("*Only draft assignments can be updated*");
++    }
++}

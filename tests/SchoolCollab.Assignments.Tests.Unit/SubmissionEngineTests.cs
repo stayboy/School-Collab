@@ -555,6 +555,7 @@ public class SubmissionEngineTests
         public Task DeleteAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
         public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
             => Task.FromResult(new List<AssignmentSummary>());
+        public void DetectChanges() { /* no-op for fake */ }
     }
 
     private sealed class FakeSubmissionRepository : ISubmissionRepository

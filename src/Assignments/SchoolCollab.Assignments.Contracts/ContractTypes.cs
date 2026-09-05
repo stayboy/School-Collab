@@ -39,6 +39,16 @@ public enum TargetAudienceTypeDto
     SelectedGroups = 2
 }
 
+/// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Domain.QuestionType</c>
+/// (AI spec §3.2 / decision 10). TrueFalse is stored as MC with two canonical
+/// options — the discriminator is retained for client-side handling.</summary>
+public enum QuestionTypeDto
+{
+    MultipleChoice = 0,
+    TrueFalse = 1,
+    ShortAnswer = 2
+}
+
 public record AssignmentSummaryDto(
     Guid Id,
     string Title,
@@ -68,7 +78,10 @@ public record CreateAssignmentRequest(
     Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
     decimal? MaxScore = null,
-    bool MandatoryReview = true);
+    bool MandatoryReview = true,
+    string? AiPromptOverride = null,
+    IReadOnlyList<NewQuestionDto>? Questions = null,
+    IReadOnlyList<NewAttachmentDto>? Attachments = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -80,7 +93,33 @@ public record UpdateAssignmentRequest(
     Guid? GradeLevelId = null,
     DateTimeOffset? DueDate = null,
     decimal? MaxScore = null,
-    bool MandatoryReview = true);
+    bool MandatoryReview = true,
+    string? AiPromptOverride = null,
+    IReadOnlyList<NewQuestionDto>? Questions = null,
+    IReadOnlyList<NewAttachmentDto>? Attachments = null);
+
+/// <summary>An inbound question option on the create/update request (AI spec §3.2).</summary>
+public record NewQuestionOptionDto(string OptionText, bool IsCorrect);
+
+/// <summary>An inbound question on the create/update request (AI spec §3.2).
+/// <see cref="Options"/> is required for <see cref="QuestionTypeDto.MultipleChoice"/>
+/// and <see cref="QuestionTypeDto.TrueFalse"/>; null/empty for
+/// <see cref="QuestionTypeDto.ShortAnswer"/>.</summary>
+public record NewQuestionDto(
+    string QuestionText,
+    QuestionTypeDto QuestionType,
+    int DisplayOrder,
+    IReadOnlyList<NewQuestionOptionDto>? Options,
+    string? ModelAnswer = null);
+
+/// <summary>An inbound attachment metadata record on the create/update request
+/// (AI spec §3.2). <see cref="StoragePath"/> is opaque to the UI — the file is
+/// already staged to storage before submit (EC-4).</summary>
+public record NewAttachmentDto(
+    string FileName,
+    string ContentType,
+    long FileSize,
+    string StoragePath);
 
 /// <summary>Publish an assignment (spec §8). Optional contact selection:
 /// when <see cref="ContactIds"/> is non-empty, only those subscribed contacts

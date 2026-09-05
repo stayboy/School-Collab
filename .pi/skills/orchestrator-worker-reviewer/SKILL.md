@@ -85,9 +85,9 @@ format live in `references/models.md`. Summary:
 | Role | pi default | clinepass | Tiers |
 |---|---|---|---|
 | Orchestrator | `ollama/glm-5.3-flash:cloud` | `cline-pass/glm-5.3` | 3 only |
-| Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` | 1–3 |
+| Worker | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 1–3 |
 | Reviewer | `ollama/kimi-k2.7-code:cloud` | `cline-pass/kimi-k2.7-code` | 2–3 |
-| UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
+| UI Tester | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` | 3 + UI |
 
 ## Provider profiles
 

@@ -43,6 +43,9 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public bool MandatoryReview { get; private set; }
     /// <summary>Set when the assignment is published (spec §4.8). Null while Draft.</summary>
     public DateTimeOffset? PublishedAt { get; private set; }
+    /// <summary>Optional free-text override for the assignment-question-generation
+    /// system prompt (spec §3.2 / decision 8). Null falls back to the embedded prompt.</summary>
+    public string? AiPromptOverride { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -64,7 +67,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         decimal? maxScore,
         Guid createdByTeacherId = default,
         bool mandatoryReview = true,
-        string? assignmentNumber = null)
+        string? assignmentNumber = null,
+        string? aiPromptOverride = null)
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
@@ -89,6 +93,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             // Mandatory review is the default (spec §4.7); callers may opt out.
             MandatoryReview = mandatoryReview,
             AssignmentNumber = assignmentNumber?.Trim(),
+            AiPromptOverride = aiPromptOverride?.Trim(),
             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             CreatedAt = now,
             UpdatedAt = now
@@ -101,7 +106,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public void Update(string title, string? description, AssignmentType assignmentType,
         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
         Guid topicId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
-        bool mandatoryReview)
+        bool mandatoryReview, string? aiPromptOverride = null)
     {
         if (Status != AssignmentStatus.Draft)
             throw new InvalidOperationException("Only draft assignments can be updated.");
@@ -120,6 +125,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         DueDate = dueDate;
         MaxScore = maxScore;
         MandatoryReview = mandatoryReview;
+        AiPromptOverride = aiPromptOverride?.Trim();
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentUpdatedEvent(Id, Title));
     }
@@ -155,9 +161,9 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         _domainEvents.Add(new AssignmentClosedEvent(Id, Title));
     }
 
-    public AssignmentQuestion AddQuestion(string questionText, QuestionType questionType, int displayOrder)
+    public AssignmentQuestion AddQuestion(string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null)
     {
-        var question = new AssignmentQuestion(Id, questionText, questionType, displayOrder);
+        var question = new AssignmentQuestion(Id, questionText, questionType, displayOrder, modelAnswer);
         _questions.Add(question);
         UpdatedAt = DateTimeOffset.UtcNow;
         return question;
@@ -169,6 +175,24 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         if (question is not null)
         {
             _questions.Remove(question);
+            UpdatedAt = DateTimeOffset.UtcNow;
+        }
+    }
+
+    public AssignmentAttachment AddAttachment(string fileName, string contentType, long fileSize, string storagePath)
+    {
+        var attachment = new AssignmentAttachment(Id, fileName, contentType, fileSize, storagePath);
+        _attachments.Add(attachment);
+        UpdatedAt = DateTimeOffset.UtcNow;
+        return attachment;
+    }
+
+    public void RemoveAttachment(Guid attachmentId)
+    {
+        var attachment = _attachments.SingleOrDefault(a => a.Id == attachmentId);
+        if (attachment is not null)
+        {
+            _attachments.Remove(attachment);
             UpdatedAt = DateTimeOffset.UtcNow;
         }
     }
