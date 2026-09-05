@@ -18,6 +18,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<AssignmentStatusDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<GradingFormatDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<TargetAudienceTypeDto>());
+    // AI spec §3.2: question payloads round-trip the discriminator as a string
+    // (e.g. "multipleChoice") — register the converter on the same options block
+    // as the other assignment enums so existing callers stay valid.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<QuestionTypeDto>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")

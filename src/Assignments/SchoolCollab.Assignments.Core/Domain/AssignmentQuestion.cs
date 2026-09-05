@@ -6,13 +6,14 @@ public sealed class AssignmentQuestion
 
     private AssignmentQuestion() { }
 
-    internal AssignmentQuestion(Guid assignmentId, string questionText, QuestionType questionType, int displayOrder)
+    internal AssignmentQuestion(Guid assignmentId, string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null)
     {
         Id = Guid.NewGuid();
         AssignmentId = assignmentId;
         QuestionText = questionText;
         QuestionType = questionType;
         DisplayOrder = displayOrder;
+        ModelAnswer = modelAnswer;
     }
 
     public Guid Id { get; private set; }
@@ -21,6 +22,10 @@ public sealed class AssignmentQuestion
     public QuestionType QuestionType { get; private set; }
     public int DisplayOrder { get; private set; }
     public Guid? CorrectOptionId { get; private set; }
+    /// <summary>Optional reference answer kept on the question for teacher reference
+    /// (AI spec decision 10 / §5). Free-text for <see cref="QuestionType.ShortAnswer"/>
+    /// (teacher grades manually); null for MC/TF.</summary>
+    public string? ModelAnswer { get; private set; }
 
     public IReadOnlyList<QuestionOption> Options => _options.AsReadOnly();
 

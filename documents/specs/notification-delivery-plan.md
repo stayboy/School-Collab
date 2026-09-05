@@ -8,6 +8,12 @@
 > `grade-level-detail-view-plan.md §9`. Existing foundation is reused:
 > `Contact`/`ContactSubscription`/`ContactChannel`, `ContactRoutes` CQRS,
 > `IAssignmentNotificationBroadcaster` (assignments), the grade-level Detail page.
+>
+> **Go-forward scope note (2026-09-03):** the shipped policy half of this plan is
+> complete; the deferred delivery half is subsumed by
+> `assignment-request-feature-spec.md` §5 as workstream WS-E (deep links, channel
+> delivery + `NotificationLog`, reminder/overdue/archive worker) — see
+> `documents/solution/assignment-request-go-forward-breakdown.md`.
 
 ## 1. Goals
 
