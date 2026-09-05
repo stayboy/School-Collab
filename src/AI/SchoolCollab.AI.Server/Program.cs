@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SchoolCollab.AI.Abstractions;
+using SchoolCollab.AI.Endpoints;
 using SchoolCollab.AI.Services;
 using SchoolCollab.AI.Tools.CodedValues;
 using SchoolCollab.Core.Auth;
@@ -95,11 +96,18 @@ builder.Services.AddCodedValuesAiTools(client =>
 // parallel AddXxxAiTools() call.
 builder.Services.AddSingleton<AIChatEngine>();
 
+// Assignment question-generation surface: a dedicated prompt provider + service
+// registered as their concrete types (decision (a)/(b) — avoids the singleton
+// ISystemPromptProvider collision with CodedValuesSystemPromptProvider). The
+// endpoint returns a single JSON document (spec §4.3) — no SSE, no tools (v1).
+builder.Services.AddAssignmentQuestionGeneration();
+
 var app = builder.Build();
 
 app.UseSerilogRequestLogging();
 
 app.MapDefaultEndpoints();
+app.MapAssignmentQuestionGenerationEndpoints();
 
 // Configuration endpoint — returns the default AI provider and model so that
 // admin clients can display the active configuration without re-implementing

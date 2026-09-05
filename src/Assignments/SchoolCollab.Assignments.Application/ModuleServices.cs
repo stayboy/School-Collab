@@ -9,8 +9,9 @@ public static class ModuleServices
 {
     /// <summary>
     /// Wires the Assignments admin module's HTTP client (against
-    /// <c>assignments-api</c>). The CodedValues client the Assignments pages
-    /// use (e.g. the subject / grade dropdowns on the Create form) is
+    /// <c>assignments-api</c>) and the AI question-generation HTTP client
+    /// (against <c>settings-ai</c>). The CodedValues client the Assignments
+    /// pages use (e.g. the subject / grade dropdowns on the Create form) is
     /// registered by <c>AddSettingsModule</c> in
     /// <c>SchoolCollab.Settings.Application.ModuleServices</c> against the unified
     /// <c>settings-api</c> — do NOT re-register it here. A pre-merge
@@ -30,6 +31,15 @@ public static class ModuleServices
         // propagateTenant:true wires TenantPropagationDelegatingHandler
         // (dev-selected tenant) plus the retry handler + long handler lifetime.
         services.AddCrossModuleHttpClient<AssignmentsApiClient>("https+http://assignments-api", propagateTenant: true);
+
+        // AI question-generation seam (spec §3.4 / round ar-2 decision (a)/(d)).
+        // The endpoint is anonymous on the AI host (matches /api/ai/chat posture)
+        // and reads no tenant data, so we propagateTenant:false (decision (d)
+        // corollary) and expose the typed client through
+        // IAssignmentQuestionGenerator so the wizard depends on the abstraction.
+        services.AddCrossModuleHttpClient<AssignmentQuestionGenerator>("https+http://settings-ai", propagateTenant: false);
+        services.AddTransient<IAssignmentQuestionGenerator>(sp =>
+            sp.GetRequiredService<AssignmentQuestionGenerator>());
 
         return services;
     }
