@@ -1,0 +1,210 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Microsoft.FluentUI.AspNetCore.Components
+@implements IDisposable
+@inject IDialogService DialogService
+@inject ILogger<QuestionEditorSection> Logger
+
+<section class="question-editor-section">
+    <div class="question-editor-toolbar">
+        <span class="question-editor-count">@Model.Questions.Count question(s)</span>
+        <FluentButton Appearance="Appearance.Accent"
+                      IconStart="@FluentIcons.Add"
+                      OnClick="OnAddQuestionAsync">
+            Add question
+        </FluentButton>
+    </div>
+
+    @if (Model.Questions.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">No questions yet. Add a question to get started.</FluentMessageBar>
+    }
+    else
+    {
+        <div class="question-editor-pages">
+            @foreach (var (row, index) in _currentPage.Select((r, i) => (r, i)))
+            {
+                var absoluteIndex = _paginationState.CurrentPageIndex * AssignmentEditFormModel.QuestionPageSize + index;
+                <div class="question-editor-card" @key="row">
+                    <div class="question-editor-card-header">
+                        <span class="question-editor-position">#@(absoluteIndex + 1)</span>
+                        <span class="question-editor-card-spacer" aria-hidden="true"></span>
+                        <FluentButton Appearance="Appearance.Stealth"
+                                      OnClick="@(() => OnRemoveQuestionAsync(absoluteIndex))"
+                                      aria-label="Remove question">
+                            Remove
+                        </FluentButton>
+                    </div>
+
+                    <FluentTextField @bind-Value="row.QuestionText"
+                                     Label="Question *"
+                                     class="full-width" />
+
+                    <DropdownForEnum TEnum="QuestionTypeDto"
+                                     @bind-SelectedValue="row.Type"
+                                     @bind-SelectedValue:after="() => OnTypeChanged(row)"
+                                     Label="Type"
+                                     Class="w-3" />
+
+                    @switch (row.Type)
+                    {
+                        case QuestionTypeDto.MultipleChoice:
+                        {
+                            <div class="question-editor-options">
+                                <span class="question-editor-sublabel">Options (pick the correct one)</span>
+                                <FluentRadioGroup TValue="int" Name="@RadioGroupKey(row)">
+                                    @for (var i = 0; i < row.Options.Count; i++)
+                                    {
+                                        var opt = row.Options[i];
+                                        var optIndex = i;
+                                        <div class="question-editor-option-row" @key="opt">
+                                            <FluentRadio Value="@optIndex"
+                                                         Group="@RadioGroupKey(row)"
+                                                         Checked="@(row.CorrectOptionIndex == optIndex)"
+                                                         CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, optIndex, v)))"
+                                                         aria-label="Mark as correct option" />
+                                            <FluentTextField @bind-Value="opt.OptionText"
+                                                             Placeholder="@($"Option {optIndex + 1}")"
+                                                             class="full-width" />
+                                            @if (row.Options.Count > QuestionEditorRow.MinOptions)
+                                            {
+                                                <FluentButton Appearance="Appearance.Stealth"
+                                                              OnClick="@(() => row.RemoveOptionAt(optIndex))"
+                                                              aria-label="Remove option">
+                                                    ×
+                                                </FluentButton>
+                                            }
+                                        </div>
+                                    }
+                                </FluentRadioGroup>
+                                <FluentButton Appearance="Appearance.Outline"
+                                              Disabled="@(row.Options.Count >= QuestionEditorRow.MaxOptions)"
+                                              OnClick="@(() => row.AddOption())">
+                                    Add option
+                                </FluentButton>
+                            </div>
+                            break;
+                        }
+                        case QuestionTypeDto.TrueFalse:
+                        {
+                            <div class="question-editor-options">
+                                <span class="question-editor-sublabel">Correct answer</span>
+                                <FluentRadioGroup TValue="int" Name="@RadioGroupKey(row)">
+                                    <FluentRadio Value="0"
+                                                 Label="True"
+                                                 Checked="@(row.CorrectOptionIndex == 0)"
+                                                 CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, 0, v)))" />
+                                    <FluentRadio Value="1"
+                                                 Label="False"
+                                                 Checked="@(row.CorrectOptionIndex == 1)"
+                                                 CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, 1, v)))" />
+                                </FluentRadioGroup>
+                            </div>
+                            break;
+                        }
+                        case QuestionTypeDto.ShortAnswer:
+                        {
+                            <FluentTextArea @bind-Value="row.ModelAnswer"
+                                            Label="Model answer (teacher reference)"
+                                            Rows="2"
+                                            class="full-width" />
+                            break;
+                        }
+                    }
+                </div>
+            }
+        </div>
+
+        <FluentPaginator State="@_paginationState" />
+    }
+</section>
+
+@code {
+    /// <summary>The form model that owns the question list being edited.</summary>
+    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
+
+    /// <summary>Raised when the model was mutated (add / remove / type
+    /// change / option edit) so the page can re-render review counts and
+    /// the submit gate. Child-write re-render trap (blazor-components.md
+    /// "Share form fields…" §6): the EventCallback invoke re-renders the
+    /// receiver, which a raw binding into the parent's model object
+    /// would not do.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private readonly PaginationState _paginationState = new()
+    {
+        ItemsPerPage = AssignmentEditFormModel.QuestionPageSize,
+    };
+    private IReadOnlyList<QuestionEditorRow> _currentPage = [];
+
+    protected override void OnParametersSet()
+    {
+        // Track the paginator's total so it follows appends/removals
+        // (FR-240). PaginationState's setters are async in this
+        // FluentUI version, so fire-and-forget is acceptable here —
+        // OnParametersSet already runs on the renderer thread; the
+        // paginator UI catches up after.
+        _ = _paginationState.SetTotalItemCountAsync(Model.Questions.Count);
+        if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
+        {
+            _ = _paginationState.SetCurrentPageIndexAsync(Math.Max(0, Model.QuestionPageCount() - 1));
+        }
+        _currentPage = Model.GetQuestionPage(_paginationState.CurrentPageIndex);
+    }
+
+    private async Task OnAddQuestionAsync()
+    {
+        Model.AddQuestion(QuestionEditorRow.NewMultipleChoice());
+        await _paginationState.SetCurrentPageIndexAsync(Model.QuestionPageCount() - 1);
+        await Changed.InvokeAsync();
+    }
+
+    private async Task OnRemoveQuestionAsync(int index)
+    {
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            "Remove this question?",
+            "Remove",
+            "Cancel",
+            "Remove question");
+        if (!confirmed)
+        {
+            return;
+        }
+        Model.RemoveQuestionAt(index);
+        if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
+        {
+            await _paginationState.SetCurrentPageIndexAsync(Math.Max(0, Model.QuestionPageCount() - 1));
+        }
+        await Changed.InvokeAsync();
+    }
+
+    private async Task OnTypeChanged(QuestionEditorRow row)
+    {
+        // ApplyTypeChange resets options and the correct pick per spec §7.
+        row.ApplyTypeChange(row.Type);
+        await Changed.InvokeAsync();
+    }
+
+    private async Task OnCorrectOptionChanged(QuestionEditorRow row, int index, bool isChecked)
+    {
+        if (isChecked)
+        {
+            row.CorrectOptionIndex = index;
+        }
+        else if (row.CorrectOptionIndex == index)
+        {
+            // Allow clearing the correct pick (radio-uncheck). The
+            // submit gate will then reject the row.
+            row.CorrectOptionIndex = null;
+        }
+        await Changed.InvokeAsync();
+    }
+
+    /// <summary>Stable radio group key per question row, so each row's
+    /// <c>FluentRadio</c> group is independent.</summary>
+    private static string RadioGroupKey(QuestionEditorRow row) => $"q-{row.DisplayOrder}";
+
+    public void Dispose()
+    {
+        // No unmanaged resources; the paginator is owned by Blazor.
+    }
+}

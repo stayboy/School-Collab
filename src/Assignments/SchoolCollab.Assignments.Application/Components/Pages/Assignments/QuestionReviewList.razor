@@ -1,0 +1,99 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Application.Helpers
+
+<section class="question-review-section">
+    <div class="question-review-summary">
+        <span>@Model.Questions.Count question(s)</span>
+        <span class="question-review-resources">
+            @if (Model.Attachments.Count == 0)
+            {
+                <span>Resources: none yet</span>
+            }
+            else
+            {
+                <span>Resources: @Model.Attachments.Count file(s)</span>
+            }
+        </span>
+    </div>
+
+    @if (Model.Questions.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">No questions yet.</FluentMessageBar>
+    }
+    else
+    {
+        <div class="question-review-list">
+            @foreach (var (row, index) in _currentPage.Select((r, i) => (r, i)))
+            {
+                var absoluteIndex = _paginationState.CurrentPageIndex * AssignmentEditFormModel.QuestionPageSize + index;
+                <div class="question-review-card" @key="row">
+                    <div class="question-review-card-header">
+                        <span class="question-review-position">#@(absoluteIndex + 1)</span>
+                        <FluentBadge Appearance="Appearance.Accent">@EnumHelper.GetDescription(row.Type)</FluentBadge>
+                    </div>
+
+                    <div class="question-review-text">@row.QuestionText</div>
+
+                    @switch (row.Type)
+                    {
+                        case QuestionTypeDto.MultipleChoice:
+                        case QuestionTypeDto.TrueFalse:
+                        {
+                            <ul class="question-review-options">
+                                @for (var i = 0; i < row.Options.Count; i++)
+                                {
+                                    var opt = row.Options[i];
+                                    var isCorrect = row.CorrectOptionIndex == i;
+                                    <li class="@(isCorrect ? "question-review-option is-correct" : "question-review-option")" @key="opt">
+                                        @if (isCorrect)
+                                        {
+                                            <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
+                                        }
+                                        else
+                                        {
+                                            <span class="question-review-option-bullet" aria-hidden="true"></span>
+                                        }
+                                        <span>@opt.OptionText</span>
+                                    </li>
+                                }
+                            </ul>
+                            break;
+                        }
+                        case QuestionTypeDto.ShortAnswer:
+                        {
+                            <div class="question-review-model-answer">
+                                <span class="question-review-sublabel">Model answer:</span>
+                                <span>@(string.IsNullOrWhiteSpace(row.ModelAnswer) ? "—" : row.ModelAnswer)</span>
+                            </div>
+                            break;
+                        }
+                    }
+                </div>
+            }
+        </div>
+
+        <FluentPaginator State="@_paginationState" />
+    }
+</section>
+
+@code {
+    /// <summary>The form model the review list reads from.</summary>
+    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
+
+    private readonly PaginationState _paginationState = new()
+    {
+        ItemsPerPage = AssignmentEditFormModel.QuestionPageSize,
+    };
+    private IReadOnlyList<QuestionEditorRow> _currentPage = [];
+
+    protected override void OnParametersSet()
+    {
+        _ = _paginationState.SetTotalItemCountAsync(Model.Questions.Count);
+        if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
+        {
+            _ = _paginationState.SetCurrentPageIndexAsync(Math.Max(0, Model.QuestionPageCount() - 1));
+        }
+        _currentPage = Model.GetQuestionPage(_paginationState.CurrentPageIndex);
+    }
+}

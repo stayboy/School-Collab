@@ -526,6 +526,39 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   **Carried follow-ups:** anonymous AI-host endpoints (accepted posture pending the
   identity round); flip `propagateTenant:false` when WS-B2 org-level prompts land;
   live-model probe folds into round 3; ar-1 EF owned-children verification still open.
+- `ar-3-ai-wizard` — **IN FLIGHT, PAUSED ON PROVIDER QUOTA 2026-09-05** (ollama.com 429:
+  "session usage limit" hit by the resumed minimax-m3 worker mid-build). Plan quality
+  verified (16-file expected list, decisions (a)–(e)); worker pass 1 hit the 30-min cap;
+  resume pass 2 created `AssignmentCreateBunitTests.cs` then died on 429. **On-disk
+  state:** all 12 production files + `AssignmentFormModelMappingsTests.cs` extension +
+  `AssignmentCreateBunitTests.cs` are done. **MISSING:**
+  `QuestionGenerationSectionBunitTests.cs`, `QuestionEditorSectionBunitTests.cs`,
+  `QuestionReviewListBunitTests.cs`, then build + tests + worker report.
+  **Resume:** revive the worker run (`subagent({action:"resume",
+  id:"bd092d67-d1c9-4a61-8c45-dc4685e34e23"})`) with the bounded remainder — or finish
+  the 3 test files solo — then parent host steps → reviewer → accept → **FIRST UI-TESTER
+  PASS (deepseek-v4-flash)**. NOTE: the whole skill model fleet runs on ollama.com cloud —
+  reviewer/accept/tester may hit the same quota; surface to the owner rather than
+  retry-looping.
+- `ar-3-ai-wizard` — **CLOSED 2026-09-05** (`documents/rounds/round-ar-3-ai-wizard.md` +
+  `diffs-ar-3-ai-wizard.patch`). The first UI round of the train — full five-agent
+  pipeline including the first deepseek-v4-flash tester pass. Provenance: the worker
+  needed 3 passes (30-min cap → ollama.com 429 quota wall → a fresh-worker completion of
+  the test files). Delivered (AI-spec §10 phases 7–8): form-model question/attachment
+  editor rows + submit gate + ToCreateRequest; QuestionGenerationSection (FR-220 gating,
+  prompt override, count/type-mix, cancellable Generate, friendly retryable errors incl.
+  a catch-all so nothing escapes to the page ErrorBoundary) + QuestionEditorSection
+  (paged editor, renders UNCONDITIONALLY on Step 2, type-consistent option seeding) +
+  QuestionReviewList (paged read-only); Create.razor wiring (nested FormModel deleted →
+  AssignmentEditFormModel); ApiClient QuestionTypeDto JSON converter; bUnit/mapping tests
+  (Assignments.Tests.Unit 198/0). Reviewer P2-only; tester found 1 genuine P1
+  (hand-written questions unreachable in default config — editor nested inside the
+  generation gate) + 3 P2s → rework iteration 1 fixed all four → tester re-verification
+  PASS. Authoritative: build 0 errors; 198/0 + 20/0.
+  **Residual:** QuestionEditorSection.razor unnecessary empty @implements IDisposable
+  (reviewer P2 — cleanup candidate).
+  **Carried:** Resources upload UI deferred to ar-4 (IFileStore + staging endpoint);
+  a live-model probe (manual wizard exercise against the real AI provider).
 
 ---
 

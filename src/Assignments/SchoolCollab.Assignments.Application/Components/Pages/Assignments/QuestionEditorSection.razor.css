@@ -1,0 +1,71 @@
+/* Scoped styles for the paginated question editor. The wizard's
+   wizard-section / wizard-section-header / wizard-hint chrome is
+   reused from Create.razor.css — only this component's own
+   toolbar / cards / option rows are styled here. */
+
+.question-editor-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.question-editor-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.question-editor-count {
+    font-weight: 600;
+    color: var(--neutral-foreground-hint);
+}
+
+.question-editor-pages {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.question-editor-card {
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 10px;
+    padding: 1rem;
+    background: var(--neutral-fill);
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.question-editor-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.question-editor-position {
+    font-weight: 700;
+    color: var(--neutral-foreground-hint);
+}
+
+.question-editor-card-spacer {
+    flex: 1;
+}
+
+.question-editor-options {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.question-editor-sublabel {
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+    font-weight: 600;
+}
+
+.question-editor-option-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
