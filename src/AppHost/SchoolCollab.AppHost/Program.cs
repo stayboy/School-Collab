@@ -55,6 +55,20 @@ var useLocalCodedValueProjection = builder.AddParameter("use-local-coded-value-p
 // Students__PeriodActivationToleranceDays (read as Students:PeriodActivationToleranceDays).
 var periodActivationToleranceDays = builder.AddParameter("period-activation-tolerance-days");
 
+// WS-A1 / FR-210: assignments file-store + upload configuration. Defaults are the
+// production caps documented in documents/configuration.md §2/§13 — keep them
+// in lockstep with the AttachmentUploadOptions defaults in
+// src/Assignments/SchoolCollab.Assignments.Core/Services/AttachmentUploadOptions.cs.
+// Fanned out onto assignments-api as Assignments__FileStore__RootPath,
+// Assignments__AttachmentUpload__MaxFileSizeBytes,
+// Assignments__AttachmentUpload__MaxTotalSizeBytes, and
+// Assignments__AttachmentUpload__AllowedExtensions (comma-separated; the config
+// binder splits it into the AllowedExtensions array).
+var assignmentFileStoreRoot       = builder.AddParameter("assignment-file-store-root");
+var assignmentUploadMaxFileBytes  = builder.AddParameter("assignment-upload-max-file-bytes");
+var assignmentUploadMaxTotalBytes = builder.AddParameter("assignment-upload-max-total-bytes");
+var assignmentUploadAllowedExt    = builder.AddParameter("assignment-upload-allowed-extensions");
+
 // AI provider configuration that the `settings-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
 // see every knob they may need to set in exactly one place — the AppHost's
@@ -159,6 +173,10 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithReference(studentsApi)
     .WithReference(settingsApi)
     .WithEnvironment("Outbox__ExchangeName", assignmentsOutboxExchange)
+    .WithEnvironment("Assignments__FileStore__RootPath", assignmentFileStoreRoot)
+    .WithEnvironment("Assignments__AttachmentUpload__MaxFileSizeBytes", assignmentUploadMaxFileBytes)
+    .WithEnvironment("Assignments__AttachmentUpload__MaxTotalSizeBytes", assignmentUploadMaxTotalBytes)
+    .WithEnvironment("Assignments__AttachmentUpload__AllowedExtensions", assignmentUploadAllowedExt)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);

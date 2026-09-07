@@ -30,7 +30,12 @@ public sealed class AssignmentsApiClient
                 new JsonStringEnumConverter<ContactChannelDto>(),
                 new JsonStringEnumConverter<GuardianRoleDto>(),
                 new JsonStringEnumConverter<SubmissionSourceDto>(),
-                new JsonStringEnumConverter<QuestionTypeDto>()
+                new JsonStringEnumConverter<QuestionTypeDto>(),
+                // WS-A1 / FR-210-212: content module + AI-generation resource
+                // enums round-trip as strings on the staging endpoint +
+                // create payload.
+                new JsonStringEnumConverter<ModuleTypeDto>(),
+                new JsonStringEnumConverter<ResourceKindDto>()
             }
         };
     }
@@ -165,5 +170,73 @@ public sealed class AssignmentsApiClient
     {
         _logger.LogInformation("Enabling submission for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
         (await _http.PostAsJsonAsync($"/assignments/{assignmentId}/students/{studentId}/enable-submission", req, _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    // ── WS-A1 / FR-210-212: stage one resource file (EC-4 stage-at-selection) ──
+
+    /// <summary>Stages one uploaded file via the multipart staging
+    /// endpoint (WS-A1 / FR-210). On 200 returns the server-issued
+    /// <see cref="StagedAttachmentDto"/> (carrying the opaque
+    /// <c>StoragePath</c> the wizard then rides on the create payload).
+    /// On 400 / 413 reads the <c>{"message": ...}</c> body and throws
+    /// a typed <see cref="AttachmentStagingFailed"/> carrying the server
+    /// message (the round-2 <c>QuestionGenerationFailed</c> pattern).
+    /// Any other non-success status propagates as an
+    /// <see cref="HttpRequestException"/> via
+    /// <see cref="HttpResponseMessage.EnsureSuccessStatusCode"/>.</summary>
+    public async Task<StagedAttachmentDto> StageAttachmentAsync(
+        Stream content,
+        string fileName,
+        string contentType,
+        long fileSize,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new ArgumentException("File name is required.", nameof(fileName));
+        if (string.IsNullOrWhiteSpace(contentType))
+            throw new ArgumentException("Content type is required.", nameof(contentType));
+
+        using var form = new MultipartFormDataContent();
+        var fileContent = new StreamContent(content);
+        fileContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(contentType);
+        form.Add(fileContent, "file", fileName);
+
+        _logger.LogInformation(
+            "Staging attachment {FileName} ({FileSize} bytes)", fileName, fileSize);
+        var response = await _http.PostAsync("/assignments/attachments/stage", form, ct);
+
+        if (response.IsSuccessStatusCode)
+        {
+            return (await response.Content.ReadFromJsonAsync<StagedAttachmentDto>(_jsonOptions, ct))!;
+        }
+
+        if (response.StatusCode is System.Net.HttpStatusCode.BadRequest
+            or System.Net.HttpStatusCode.RequestEntityTooLarge)
+        {
+            string message;
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(
+                    await response.Content.ReadAsStringAsync(ct));
+                if (doc.RootElement.TryGetProperty("message", out var m) && m.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    message = m.GetString() ?? "The server rejected the staged file.";
+                }
+                else
+                {
+                    message = "The server rejected the staged file.";
+                }
+            }
+            catch (System.Text.Json.JsonException)
+            {
+                message = "The server rejected the staged file.";
+            }
+            _logger.LogWarning("Stage attachment rejected by server: {Message}", message);
+            throw new AttachmentStagingFailed(message);
+        }
+
+        response.EnsureSuccessStatusCode();
+        throw new InvalidOperationException("Unreachable: EnsureSuccessStatusCode returned without throwing.");
     }
 }

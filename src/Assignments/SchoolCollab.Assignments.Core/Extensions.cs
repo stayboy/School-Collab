@@ -6,6 +6,7 @@ using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Tenancy;
 
 namespace SchoolCollab.Assignments.Core;
@@ -19,6 +20,18 @@ public static class Extensions
         // Ensure the tenant provider is available for the DbContext and handlers
         // even when this module is used without authentication (e.g. worker/tests).
         services.AddTenancy();
+
+        // WS-A1 / FR-210: file-store + attachment-upload options. Both sections
+        // are AppHost-injected via WithEnvironment in assignments-api (see
+        // documents/configuration.md §2/§11/§13). Defaults match the AppHost
+        // Parameters: defaults so a developer running without the AppHost still
+        // gets sensible behavior.
+        services.Configure<AssignmentFileStoreOptions>(
+            configuration.GetSection(AssignmentFileStoreOptions.SectionName));
+        services.Configure<AttachmentUploadOptions>(
+            configuration.GetSection(AttachmentUploadOptions.SectionName));
+        services.AddScoped<IFileStore, LocalFileStore>();
+
         var connectionString = configuration.GetConnectionString("assignments-db")
             ?? configuration["ConnectionStrings:assignments-db"]
             ?? "Host=localhost;Port=5432;Database=schoolcollab_assignments;Username=postgres;Password=postgres";

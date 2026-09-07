@@ -171,4 +171,39 @@ public class QuestionReviewListBunitTests : BunitContext
                 "a blank model answer renders an em-dash placeholder");
         });
     }
+
+    // ── WS-A1 / ar-4: live "Resources: N file(s)" summary line ────────
+
+    [TestMethod]
+    public void TwoAttachments_RendersResourcesTwoFilesSummary()
+    {
+        // Decision (a) consequence: with the Resources UI now landed, the
+        // round-3 placeholder "Resources: none yet" must flip to the live
+        // count when the form model carries staged attachments.
+        var model = new AssignmentEditFormModel();
+        model.Attachments.Add(new AttachmentEditorRow
+        {
+            FileName = "syllabus.pdf",
+            ContentType = "application/pdf",
+            FileSize = 2048,
+            StoragePath = "tenants/t/staging/g1/syllabus.pdf",
+        });
+        model.Attachments.Add(new AttachmentEditorRow
+        {
+            FileName = "rubric.docx",
+            ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            FileSize = 4096,
+            StoragePath = "tenants/t/staging/g2/rubric.docx",
+        });
+
+        var cut = RenderReview(model);
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Resources: 2 file(s)",
+                "decision (a): the round-3 placeholder flips to live data when attachments exist");
+            cut.Markup.Should().NotContain("Resources: none yet",
+                "with staged attachments, the empty-state copy is replaced");
+        });
+    }
 }

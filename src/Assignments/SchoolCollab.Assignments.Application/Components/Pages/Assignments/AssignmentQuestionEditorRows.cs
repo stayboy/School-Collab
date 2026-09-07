@@ -196,12 +196,11 @@ public sealed class QuestionEditorRow
 }
 
 /// <summary>
-/// One row in the <see cref="AssignmentEditFormModel.Attachments"/> list.
-/// The visible form-model half of spec §3.5 (FR-210–212) lands now; the
-/// Step-2 Resources UI section, the upload control, and the staging-at-
-/// submit (EC-4) are owned by ar-4-modules-resources (decision (a)).
-/// <see cref="UploadStream"/> is documented as ar-4-consumed and is
-/// unused this round by design.
+/// One row in the <see cref="AssignmentEditFormModel.Attachments"/> list
+/// (WS-A1 / FR-210–212, spec §3.5 model half). The wizard's Resources
+/// UI section, the upload control, and the stage-at-selection path
+/// (EC-4 reconciliation, decision (b)) are owned by ar-4 this round;
+/// the row carries the staged-file metadata the API client surfaces.
 /// </summary>
 public sealed class AttachmentEditorRow
 {
@@ -216,12 +215,6 @@ public sealed class AttachmentEditorRow
     public long FileSize { get; set; }
 
     /// <summary>The opaque storage path returned by the file-store
-    /// staging endpoint. Populated by ar-4 before submit (EC-4).</summary>
+    /// staging endpoint. Populated by ar-4 at selection time (decision (b)).</summary>
     public string? StoragePath { get; set; }
-
-    /// <summary>The transient in-memory stream. Held only between
-    /// file-pick and stage-at-submit; <c>null</c> after the row is
-    /// staged. <strong>ar-4-only</strong> — unused this round by
-    /// design (decision (a) carries the upload UI).</summary>
-    public System.IO.Stream? UploadStream { get; set; }
 }

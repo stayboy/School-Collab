@@ -1,0 +1,162 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Assignments.Application.Services
+@inject AssignmentsApiClient Api
+@inject IDialogService DialogService
+@inject ILogger<ResourcesSection> Logger
+
+<section class="resources-section">
+    <div class="resources-section-toolbar">
+        <FluentInputFile Mode="InputFileMode.Stream"
+                         Multiple="true"
+                         MaximumFileCount="@AttachmentUploadPolicy.MaximumFileCount"
+                         MaximumFileSize="@AttachmentUploadPolicy.MaxFileSizeBytes"
+                         Accept="@AttachmentUploadPolicy.AcceptExtensions"
+                         OnFileUploaded="@OnFileUploadedAsync"
+                         OnFileCountExceeded="@OnFileCountExceededAsync"
+                         DragDropZoneVisible="true">
+            Upload files
+        </FluentInputFile>
+        <span class="resources-section-count">@Model.Attachments.Count file(s) attached</span>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error" class="resources-section-error">@_error</FluentMessageBar>
+    }
+
+    @if (Model.Attachments.Count == 0)
+    {
+        <FluentMessageBar Intent="MessageIntent.Info">No resources attached yet.</FluentMessageBar>
+    }
+    else
+    {
+        <ul class="resources-section-list">
+            @foreach (var (row, index) in Model.Attachments.Select((r, i) => (r, i)).ToList())
+            {
+                <li class="resources-section-row" @key="row">
+                    <FluentIcon Icon="@(Icons.Regular.Size20.Document)"
+                                Color="@Color.Accent"
+                                aria-hidden="true" />
+                    <span class="resources-section-row-name">@row.FileName</span>
+                    <span class="resources-section-row-size">@AttachmentUploadPolicy.FormatFileSize(row.FileSize)</span>
+                    <FluentButton Appearance="Appearance.Neutral"
+                                  IconEnd="@(FluentIcons.Dismiss)"
+                                  OnClick="@(() => RemoveAtAsync(index))"
+                                  aria-label="@($"Remove {row.FileName}")" />
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    /// <summary>The form model that owns the attachment list. The section
+    /// mutates <see cref="AssignmentEditFormModel.Attachments"/> via
+    /// <see cref="AssignmentEditFormModel.AddAttachment"/> and
+    /// <see cref="AssignmentEditFormModel.RemoveAttachmentAt"/>.</summary>
+    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
+
+    /// <summary>Raised after each successful stage + add so the parent
+    /// page re-renders the Review attachment summary + submit gate
+    /// (the same pattern the question section uses).</summary>
+    [Parameter] public EventCallback Changed { get; set; }
+
+    private string? _error;
+    private bool _staging;
+
+    private async Task OnFileUploadedAsync(FluentInputFileEventArgs args)
+    {
+        await StageFileAsync(args.Stream, args.Name, args.ContentType, args.Size);
+    }
+
+    /// <summary>The testable seam for the upload pipeline: drives the
+    /// client pre-check, calls the staging API, and appends a row on
+    /// success. The bUnit suite hits this method directly because the
+    /// FluentInputFile JS pipeline is not driven in tests (the ar-3
+    /// recorded fallback for web-component quirks).</summary>
+    public async Task StageFileAsync(Stream content, string fileName, string contentType, long fileSize)
+    {
+        if (_staging)
+        {
+            // FluentUI's multi-select fires OnFileUploaded for every queued
+            // file while a previous one is still staging. Surface a friendly,
+            // retryable message instead of silently dropping the file — the
+            // user can wait a moment and re-pick the same file.
+            _error = $"'{fileName}' is still uploading — please wait until the current upload finishes, then try again.";
+            return;
+        }
+
+        var clientError = AttachmentUploadPolicy.Validate(fileName, fileSize);
+        if (clientError is not null)
+        {
+            _error = clientError;
+            return;
+        }
+
+        _staging = true;
+        try
+        {
+            var staged = await Api.StageAttachmentAsync(content, fileName, contentType, fileSize);
+            Model.AddAttachment(new AttachmentEditorRow
+            {
+                FileName = staged.FileName,
+                ContentType = staged.ContentType,
+                FileSize = staged.FileSize,
+                StoragePath = staged.StoragePath,
+            });
+            _error = null;
+            await Changed.InvokeAsync();
+        }
+        catch (AttachmentStagingFailed ex)
+        {
+            _error = ex.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            // navigation cancellation — swallow (mirrors the wizard's other sections)
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Stage attachment failed for {FileName}", fileName);
+            _error = $"Could not upload '{fileName}'.";
+        }
+        finally
+        {
+            _staging = false;
+        }
+    }
+
+    private async Task RemoveAtAsync(int index)
+    {
+        if (index < 0 || index >= Model.Attachments.Count)
+        {
+            return;
+        }
+        var fileName = Model.Attachments[index].FileName ?? "(unnamed)";
+        var confirmed = await DialogService.ShowConfirmDialogAsync(
+            $"Remove '{fileName}'?",
+            "Remove",
+            "Cancel",
+            "Remove file");
+        if (!confirmed)
+        {
+            return;
+        }
+        Model.RemoveAttachmentAt(index);
+        await Changed.InvokeAsync();
+    }
+
+    private Task OnFileCountExceededAsync(int exceededCount)
+    {
+        // FluentUI 4.14.2's callback parameter is "the total number of files
+        // that were attempted for upload", NOT the configured cap — so we
+        // must reference AttachmentUploadPolicy.MaximumFileCount directly
+        // (the same constant the FluentInputFile markup is bound to) to
+        // show the user the true ceiling instead of the attempted batch size.
+        _ = exceededCount;
+        _error = $"Too many files selected at once — the limit is {AttachmentUploadPolicy.MaximumFileCount}. Add them in smaller batches.";
+        return Task.CompletedTask;
+    }
+}

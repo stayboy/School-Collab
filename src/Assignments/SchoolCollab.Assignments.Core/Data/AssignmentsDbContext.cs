@@ -18,6 +18,8 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     public DbSet<AssignmentSubmissionVersion> AssignmentSubmissionVersions => Set<AssignmentSubmissionVersion>();
     public DbSet<SubmissionReview> SubmissionReviews => Set<SubmissionReview>();
     public DbSet<AssignmentActivityGroup> AssignmentActivityGroups => Set<AssignmentActivityGroup>();
+    public DbSet<ContentModule> ContentModules => Set<ContentModule>();
+    public DbSet<AssignmentResource> AssignmentResources => Set<AssignmentResource>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -41,6 +43,11 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         modelBuilder.ApplyConfiguration(new AssignmentSubmissionVersionConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new SubmissionReviewConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new AssignmentActivityGroupConfiguration(() => CurrentTenantId));
+        // WS-A1: standalone child entities (content modules + AI-generation
+        // resources) — configurations follow the explicit-ApplyConfiguration
+        // pattern so constructor-injected tenant-id accessors are available.
+        modelBuilder.ApplyConfiguration(new ContentModuleConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new AssignmentResourceConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
 
         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed

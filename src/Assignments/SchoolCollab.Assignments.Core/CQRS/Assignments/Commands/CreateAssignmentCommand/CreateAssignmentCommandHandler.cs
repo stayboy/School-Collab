@@ -1,11 +1,13 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 
@@ -17,6 +19,7 @@ public sealed class CreateAssignmentCommandHandler(
     IIntegrationEventPublisher publisher,
     HybridCache cache,
     ITenantProvider tenantProvider,
+    IOptions<AttachmentUploadOptions> uploadOptions,
     ILogger<CreateAssignmentCommandHandler> logger) : ICommandHandler<CreateAssignmentCommand, Guid>
 {
     public async Task<Guid> HandleAsync(CreateAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -30,12 +33,15 @@ public sealed class CreateAssignmentCommandHandler(
 
         // Validate ALL inbound child collections BEFORE constructing the aggregate so a
         // FR-252 violation never leaves partial children on the domain (EC-7). The
-        // domain helpers below are the single way questions/options/attachments enter
-        // the aggregate (spec §3.3).
+        // domain helpers below are the single way questions/options/attachments/modules/
+        // resources enter the aggregate (spec §3.3 / WS-A1).
         if (command.Questions is { Count: > 0 })
         {
             QuestionOptionDtoValidator.ValidateQuestions(command.Questions);
         }
+        AssignmentContentValidator.ValidateModules(command.ContentModules);
+        AssignmentContentValidator.ValidateResources(command.Resources);
+        AssignmentContentValidator.ValidateAttachments(command.Attachments, uploadOptions.Value);
 
         var assignment = Assignment.Create(
             command.Title,
@@ -76,6 +82,37 @@ public sealed class CreateAssignmentCommandHandler(
             foreach (var attachment in command.Attachments)
             {
                 assignment.AddAttachment(attachment.FileName, attachment.ContentType, attachment.FileSize, attachment.StoragePath);
+            }
+        }
+
+        // WS-A1: content modules (student-facing) + AI-generation resources.
+        // AddModule uses the aggregate's running _modules.Count as the
+        // DisplayOrder index, so calling it in inbound list order produces
+        // DisplayOrder 0..n contiguously (EC-7 analog).
+        if (command.ContentModules is { Count: > 0 })
+        {
+            for (var i = 0; i < command.ContentModules.Count; i++)
+            {
+                var m = command.ContentModules[i];
+                assignment.AddModule(
+                    (ModuleType)m.ModuleType,
+                    m.Url,
+                    m.Title,
+                    m.StoragePath,
+                    m.MinCompletionThresholdPercent,
+                    m.IsRequired);
+            }
+        }
+        if (command.Resources is { Count: > 0 })
+        {
+            foreach (var r in command.Resources)
+            {
+                assignment.AddResource(
+                    (ResourceKind)r.ResourceKind,
+                    r.Url,
+                    r.StoragePath,
+                    r.DisplayName,
+                    r.IncludedInGeneration);
             }
         }
 

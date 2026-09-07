@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
@@ -10,6 +11,7 @@ using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.EntityCodes;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -57,13 +59,16 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             publisher.Object,
             cache,
             tenants,
+            Options.Create(new AttachmentUploadOptions()),
             NullLogger<CreateAssignmentCommandHandler>.Instance);
     }
 
     private static CreateAssignmentCommand SampleCommand(
         string? aiPromptOverride = null,
         IReadOnlyList<NewQuestionDto>? questions = null,
-        IReadOnlyList<NewAttachmentDto>? attachments = null) =>
+        IReadOnlyList<NewAttachmentDto>? attachments = null,
+        IReadOnlyList<NewContentModuleDto>? contentModules = null,
+        IReadOnlyList<NewResourceDto>? resources = null) =>
         new(
             Title: "Algebra HW",
             Description: null,
@@ -77,7 +82,9 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             MandatoryReview: true,
             AiPromptOverride: aiPromptOverride,
             Questions: questions,
-            Attachments: attachments);
+            Attachments: attachments,
+            ContentModules: contentModules,
+            Resources: resources);
 
     private static NewQuestionDto McQuestion(int displayOrder) =>
         new(

@@ -42,6 +42,7 @@ School-Collab platform. It covers:
 10. [Local-development quickstart](#10-local-development-quickstart)
 11. [Environment-variable reference](#11-environment-variable-reference)
 12. [Production checklist](#12-production-checklist)
+13. [`Assignments` — attachment upload + file store (`assignments-api`)](#13-assignments--attachment-upload--file-store-assignments-api)
 
 ---
 
@@ -125,6 +126,10 @@ files only carry values that genuinely belong to that single service
 | `openrouter-api-key` | Aspire secret parameter (`AddParameter`) | _none — must be supplied to enable cloud models_ | OpenRouter API key. Injected as `OpenRouter__ApiKey`. The AI host logs a warning and falls back to a no-op client when the key is missing. |
 | `feature-flag-disable-oidc-auth` | Aspire parameter | `false` | Replace Keycloak OIDC with `TestAuthHandler` for local development. Injected as `FeatureFlags__FEATURE__DisableOIDCAuth` into `settings-api`, `assignments-api`, `students-api`, and `admin`. See §5. |
 | `period-activation-tolerance-days` | Aspire parameter | `10` | Default number of days a period may be activated before its `StartDate` or after its `EndDate` (the activation window `[StartDate − tol, EndDate + tol]`). Injected as `Students__PeriodActivationToleranceDays` into `students-api` and `students-worker`; read as `Students:PeriodActivationToleranceDays`. A per-period override (`Period.ActivationToleranceDays`) takes precedence. See `period-activation-window-auto-activation.md` FR-W2. |
+| `assignment-file-store-root` | Aspire parameter | `assignment-files` | Local root directory for the assignments file store (relative paths resolve against `AppContext.BaseDirectory`; the directory is created on first write). Injected as `Assignments__FileStore__RootPath` into `assignments-api`; read as `Assignments:FileStore:RootPath`. WS-A1 / D-1: local FS dev implementation; Azure Blob deferred. |
+| `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
+| `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
+| `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
 
 **Where to set them:**
 
@@ -673,7 +678,17 @@ matching env-var form:
 | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
 | `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
 | `Parameters:period-activation-tolerance-days` | `Parameters__period_activation_tolerance_days` |
+| `Parameters:assignment-file-store-root` | `Parameters__assignment_file_store_root` |
+| `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
+| `Parameters:assignment-upload-max-total-bytes` | `Parameters__assignment_upload_max_total_bytes` |
+| `Parameters:assignment-upload-allowed-extensions` | `Parameters__assignment_upload_allowed_extensions` |
 | `Students:PeriodActivationToleranceDays` | `Students__PeriodActivationToleranceDays` |
+| `Assignments:FileStore:RootPath` | `Assignments__FileStore__RootPath` |
+| `Assignments:AttachmentUpload:MaxFileSizeBytes` | `Assignments__AttachmentUpload__MaxFileSizeBytes` |
+| `Assignments:AttachmentUpload:MaxTotalSizeBytes` | `Assignments__AttachmentUpload__MaxTotalSizeBytes` |
+| `Assignments:AttachmentUpload:AllowedExtensions` | `Assignments__AttachmentUpload__AllowedExtensions` |
+| `Assignments:AttachmentUpload:StagingRetentionHours` | `Assignments__AttachmentUpload__StagingRetentionHours` |
+| `Assignments:AttachmentUpload:SweepIntervalHours` | `Assignments__AttachmentUpload__SweepIntervalHours` |
 | `Outbox:ExchangeName` | `Outbox__ExchangeName` |
 | `Outbox:BatchSize` | `Outbox__BatchSize` |
 | `Outbox:PollInterval` | `Outbox__PollInterval` |
@@ -728,8 +743,67 @@ Before deploying, verify:
       each service's outbox before applying the EF migration. See
       [`messaging-consolidation-plan.md`](./solution/messaging-consolidation-plan.md)
       §3.3 for the full deployment-order recipe.
+- [ ] **Assignment upload caps + allowlist** are sourced from the AppHost
+      `Parameters:assignment-upload-*` block. When raising the per-file cap
+      above Kestrel's default ~30 MB request-body limit, also raise
+      `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize`
+      on the `assignments-api` Kestrel options — otherwise the cap is
+      unreachable because Kestrel rejects the multipart body first. The
+      orphan sweep runs every `SweepIntervalHours` (default 24 h) and
+      deletes staged files older than `StagingRetentionHours` (default
+      48 h) that are NOT referenced by any assignment attachment,
+      resource, or content-module row (decision (b)).
 - [ ] **Logging levels** are `Information` (or stricter) by default in
       production; override per-category for noisy modules.
+
+---
+
+## 13. `Assignments` — attachment upload + file store (`assignments-api`)
+
+The first upload surface in the platform (WS-A1 / FR-210–212 / EC-4).
+The wizard stages each file at selection time (decision (b) —
+stage-at-selection honestly reconciled against the spec's preferred
+stage-at-submit, which is impossible for a single-create-call wizard)
+via `POST /assignments/attachments/stage`, then rides the returned
+`StoragePath` on the create payload.
+
+### `Assignments:FileStore`
+
+**Type:** [`SchoolCollab.Assignments.Core.Services.AssignmentFileStoreOptions`](../../src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentFileStoreOptions.cs)
+**Section name:** `Assignments:FileStore`
+**Bound in:** `AddAssignmentsCore` (reaches the Api via its existing
+`AddAssignmentsCore` call — no Program.cs registration needed)
+
+| Property | Default | Description |
+| :--- | :--- | :--- |
+| `RootPath` | `assignment-files` | Local root directory for staged files. Relative paths resolve against `AppContext.BaseDirectory` at construction time (the directory is created on first write). Sourced from the AppHost parameter `assignment-file-store-root`. |
+
+### `Assignments:AttachmentUpload`
+
+**Type:** [`SchoolCollab.Assignments.Core.Services.AttachmentUploadOptions`](../../src/Assignments/SchoolCollab.Assignments.Core/Services/AttachmentUploadOptions.cs)
+**Section name:** `Assignments:AttachmentUpload`
+**Bound in:** `AddAssignmentsCore`
+
+| Property | Default | Description |
+| :--- | :--- | :--- |
+| `MaxFileSizeBytes` | `26214400` (25 MiB) | Per-file size cap enforced at stage by `StagedFileValidator`. Sourced from `assignment-upload-max-file-bytes`. **Note:** stays under Kestrel's default ~30 MB request-body limit; raising it above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize`. |
+| `MaxTotalSizeBytes` | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (defense in depth on top of the per-file cap). Sourced from `assignment-upload-max-total-bytes`. |
+| `AllowedExtensions` | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Allowlist of file extensions (case-insensitive). Sourced from `assignment-upload-allowed-extensions` (comma-separated; the config binder splits it into the array). |
+| `StagingRetentionHours` | `48` | How long staged files live before the sweep is allowed to delete them (hours). Drives `StagedFileSweepService`. Not currently fanned out from the AppHost — override via env-var `Assignments__AttachmentUpload__StagingRetentionHours` if needed. |
+| `SweepIntervalHours` | `24` | How often the orphan sweep runs (hours). Drives `StagedFileSweepService`. Not currently fanned out from the AppHost — override via env-var `Assignments__AttachmentUpload__SweepIntervalHours` if needed. |
+
+### Orphan sweep (decision (b))
+
+`StagedFileSweepService` (a hosted BackgroundService in `assignments-api`)
+runs every `SweepIntervalHours` and deletes staged files older than
+`StagingRetentionHours` that are NOT referenced by any row in
+`assignment_attachments.storage_path`, `assignment_resources.storage_path`,
+or `assignment_content_modules.storage_path`. The reference check is the
+correctness core — a missing check would delete the very blobs the
+created assignment points at. The sweep uses
+`IgnoreQueryFilters(["Tenant"])` (the sanctioned opt-out the tenancy
+tests exercise) for a read-only cross-tenant projection and performs NO
+tenant-entity writes.
 
 ---
 

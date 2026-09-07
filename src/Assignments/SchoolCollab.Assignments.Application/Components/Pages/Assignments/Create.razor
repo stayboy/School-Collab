@@ -310,6 +310,21 @@
                     }
 
                     <QuestionEditorSection Model="_model" Changed="OnWizardQuestionsChanged" />
+
+                    @* ar-4: Step-2 Resources section (WS-A1 / FR-210-212).
+                       Files stage at selection time and ride the create
+                       payload as StoragePaths (decision (b) — stage-at-
+                       selection vs the spec's preferred stage-at-submit). *@
+                    <section class="wizard-section">
+                        <div class="wizard-section-header">
+                            <FluentIcon Icon="@(Icons.Regular.Size24.FolderOpen)" Color="@Color.Accent" />
+                            <div>
+                                <h3>Resources</h3>
+                                <p class="wizard-hint">Attach files that support this assignment — they are stored and ride along when you save.</p>
+                            </div>
+                        </div>
+                        <ResourcesSection Model="_model" Changed="OnWizardQuestionsChanged" />
+                    </section>
                 </FluentWizardStep>
 
                 @* ── Step 3: Review & Submit ── *@

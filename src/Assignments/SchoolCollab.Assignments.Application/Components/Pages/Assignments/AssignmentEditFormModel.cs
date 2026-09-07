@@ -313,4 +313,30 @@ public sealed class AssignmentEditFormModel
             Questions[i].DisplayOrder = i;
         }
     }
+
+    /// <summary>Appends a staged <see cref="AttachmentEditorRow"/> to
+    /// <see cref="Attachments"/> (WS-A1 / FR-210–212). Called by the
+    /// Resources UI section after a successful
+    /// <c>StageAttachmentAsync</c> returns the <c>StoragePath</c>.
+    /// No re-indexing is needed — the create payload projects the list
+    /// in order, and the server keeps that order.</summary>
+    public void AddAttachment(AttachmentEditorRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        Attachments.Add(row);
+    }
+
+    /// <summary>Removes the staged attachment at <paramref name="index"/>
+    /// (FR-212 — soft remove-X; the orphaned blob is swept server-side
+    /// by <c>StagedFileSweepService</c> per decision (b)). Out-of-range
+    /// indices are silently ignored so a stale click cannot throw
+    /// inside the section.</summary>
+    public void RemoveAttachmentAt(int index)
+    {
+        if (index < 0 || index >= Attachments.Count)
+        {
+            return;
+        }
+        Attachments.RemoveAt(index);
+    }
 }

@@ -9,6 +9,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     private readonly List<AssignmentQuestion> _questions = [];
     private readonly List<AssignmentReview> _reviews = [];
     private readonly List<AssignmentAttachment> _attachments = [];
+    private readonly List<ContentModule> _modules = [];
+    private readonly List<AssignmentResource> _resources = [];
     private readonly List<IDomainEvent> _domainEvents = [];
 
     private Assignment() { }
@@ -53,6 +55,15 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public IReadOnlyList<AssignmentQuestion> Questions => _questions.AsReadOnly();
     public IReadOnlyList<AssignmentReview> Reviews => _reviews.AsReadOnly();
     public IReadOnlyList<AssignmentAttachment> Attachments => _attachments.AsReadOnly();
+    /// <summary>Standalone tenant child (WS-A1): content modules the
+    /// student consumes to satisfy the assignment. The FK is declared
+    /// once from the aggregate side (cascade); rows persist as
+    /// first-class records, not owned types.</summary>
+    public IReadOnlyList<ContentModule> Modules => _modules.AsReadOnly();
+    /// <summary>Standalone tenant child (WS-A1): AI-generation inputs
+    /// (links / files / videos). Same persistence model as
+    /// <see cref="Modules"/>.</summary>
+    public IReadOnlyList<AssignmentResource> Resources => _resources.AsReadOnly();
     public IReadOnlyList<IDomainEvent> DomainEvents => _domainEvents.AsReadOnly();
 
     public static Assignment Create(
@@ -203,6 +214,84 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         _reviews.Add(review);
         UpdatedAt = DateTimeOffset.UtcNow;
         return review;
+    }
+
+    // ── Content modules + resources (WS-A1) ──────────────────────────
+
+    /// <summary>Appends a content module to the assignment (draft-only).
+    /// Validation is the caller's responsibility (mirrors AddQuestion).</summary>
+    public ContentModule AddModule(
+        ModuleType moduleType,
+        string url,
+        string? title = null,
+        string? storagePath = null,
+        int minCompletionThresholdPercent = 100,
+        bool isRequired = false)
+    {
+        var module = ContentModule.Create(
+            TenantId, Id, moduleType, url, title, storagePath,
+            _modules.Count,
+            minCompletionThresholdPercent, isRequired);
+        _modules.Add(module);
+        UpdatedAt = DateTimeOffset.UtcNow;
+        return module;
+    }
+
+    /// <summary>Removes a module by id; silent no-op when not found
+    /// (mirrors RemoveQuestion) so a stale inbound id never throws.</summary>
+    public void RemoveModule(Guid moduleId)
+    {
+        var module = _modules.SingleOrDefault(m => m.Id == moduleId);
+        if (module is not null)
+        {
+            _modules.Remove(module);
+            UpdatedAt = DateTimeOffset.UtcNow;
+        }
+    }
+
+    /// <summary>Re-indexes <c>DisplayOrder</c> 0..n over the given
+    /// ordered ids. Ids not found in the current collection are
+    /// ignored; modules not mentioned keep their current order
+    /// (the only caller — the update handler — passes the complete
+    /// re-ordered list).</summary>
+    public void ReorderModules(IReadOnlyList<Guid> orderedModuleIds)
+    {
+        for (var i = 0; i < orderedModuleIds.Count; i++)
+        {
+            var id = orderedModuleIds[i];
+            var module = _modules.SingleOrDefault(m => m.Id == id);
+            if (module is not null)
+            {
+                module.SetDisplayOrder(i);
+            }
+        }
+    }
+
+    /// <summary>Appends an AI-generation resource (draft-only).</summary>
+    public AssignmentResource AddResource(
+        ResourceKind resourceKind,
+        string? url = null,
+        string? storagePath = null,
+        string? displayName = null,
+        bool includedInGeneration = true)
+    {
+        var resource = AssignmentResource.Create(
+            TenantId, Id, resourceKind, url, storagePath, displayName,
+            includedInGeneration);
+        _resources.Add(resource);
+        UpdatedAt = DateTimeOffset.UtcNow;
+        return resource;
+    }
+
+    /// <summary>Removes a resource by id; silent no-op when not found.</summary>
+    public void RemoveResource(Guid resourceId)
+    {
+        var resource = _resources.SingleOrDefault(r => r.Id == resourceId);
+        if (resource is not null)
+        {
+            _resources.Remove(resource);
+            UpdatedAt = DateTimeOffset.UtcNow;
+        }
     }
 
     public void ClearDomainEvents() => _domainEvents.Clear();

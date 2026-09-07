@@ -10,6 +10,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentC
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewSubmissionGate;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.StageAttachmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SubmitAssignmentOnBehalf;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
@@ -65,11 +66,17 @@ public static class AssignmentRoutes
                     req.MandatoryReview,
                     req.AiPromptOverride,
                     req.Questions,
-                    req.Attachments);
+                    req.Attachments,
+                    req.ContentModules,
+                    req.Resources);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
             catch (AssignmentQuestionValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (AssignmentContentValidationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }
@@ -98,7 +105,9 @@ public static class AssignmentRoutes
                     req.DueDate, req.MaxScore, req.MandatoryReview,
                     req.AiPromptOverride,
                     req.Questions,
-                    req.Attachments);
+                    req.Attachments,
+                    req.ContentModules,
+                    req.Resources);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }
@@ -107,6 +116,10 @@ public static class AssignmentRoutes
                 return Results.NotFound();
             }
             catch (AssignmentQuestionValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (AssignmentContentValidationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
             }
@@ -370,6 +383,38 @@ public static class AssignmentRoutes
             var result = await handler.HandleAsync(new GetGuardianGate(id, studentId), ct);
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
+
+        // ── WS-A1 / FR-210-212: stage one file for the create payload
+        // (EC-4 reconciliation: stage-at-selection, decision (b)).
+        // Antiforgery is disabled: the Api is consumed server-to-server by
+        // the admin Blazor host with token-based auth, not browser forms.
+        group.MapPost("/attachments/stage", async (
+            [FromForm] IFormFile? file,
+            [FromServices] ICommandHandler<StageAttachmentCommand, StagedAttachmentDto> handler,
+            CancellationToken ct) =>
+        {
+            if (file is null || file.Length == 0)
+            {
+                return Results.BadRequest(new { message = "A file is required." });
+            }
+            await using var stream = file.OpenReadStream();
+            try
+            {
+                var result = await handler.HandleAsync(
+                    new StageAttachmentCommand(stream, file.FileName, file.ContentType, file.Length),
+                    ct);
+                return Results.Ok(result);
+            }
+            catch (StagedFileRejectedException ex) when (ex.IsSizeLimit)
+            {
+                return Results.Json(new { ex.Message },
+                    statusCode: StatusCodes.Status413PayloadTooLarge);
+            }
+            catch (StagedFileRejectedException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        }).DisableAntiforgery();
 
         return group;
     }

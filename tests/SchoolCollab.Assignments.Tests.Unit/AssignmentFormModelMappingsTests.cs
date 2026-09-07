@@ -794,4 +794,53 @@ public class AssignmentFormModelMappingsTests
         QuestionGenerationGate.HintText(AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded)
             .Should().Be(QuestionGenerationGate.DisabledHint);
     }
+
+    // ── WS-A1 / ar-4: attachment helpers (FR-212 soft remove-X) ────────
+
+    [TestMethod]
+    public void AddAttachment_AppendsRowToAttachments()
+    {
+        var model = new AssignmentEditFormModel();
+        var row = new AttachmentEditorRow
+        {
+            FileName = "syllabus.pdf",
+            ContentType = "application/pdf",
+            FileSize = 4096,
+            StoragePath = "tenants/t/staging/g/syllabus.pdf",
+        };
+
+        model.AddAttachment(row);
+
+        model.Attachments.Should().HaveCount(1);
+        model.Attachments[0].Should().BeSameAs(row);
+    }
+
+    [TestMethod]
+    public void RemoveAttachmentAt_InRange_RemovesRow()
+    {
+        var model = new AssignmentEditFormModel();
+        var first = new AttachmentEditorRow { FileName = "first.pdf" };
+        var second = new AttachmentEditorRow { FileName = "second.pdf" };
+        model.AddAttachment(first);
+        model.AddAttachment(second);
+
+        model.RemoveAttachmentAt(0);
+
+        model.Attachments.Should().HaveCount(1);
+        model.Attachments[0].FileName.Should().Be("second.pdf");
+    }
+
+    [TestMethod]
+    public void RemoveAttachmentAt_OutOfRange_IsNoOp()
+    {
+        var model = new AssignmentEditFormModel();
+        model.AddAttachment(new AttachmentEditorRow { FileName = "stay.pdf" });
+
+        model.RemoveAttachmentAt(-1);
+        model.RemoveAttachmentAt(99);
+
+        model.Attachments.Should().HaveCount(1,
+            "out-of-range indices are silently ignored (the round-3 lesson applied to ar-4)");
+        model.Attachments[0].FileName.Should().Be("stay.pdf");
+    }
 }
