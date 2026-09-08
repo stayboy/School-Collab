@@ -56,7 +56,12 @@ public sealed class GetAssignmentByIdQueryHandler(
                     assignment.MandatoryReview,
                     assignment.CreatedByTeacherId,
                     assignment.CreatedAt,
-                    assignment.UpdatedAt);
+                    assignment.UpdatedAt,
+                    assignment.AvailableFromUtc,
+                    assignment.ArchiveGraceDays,
+                    (ApprovalStatusDto?)assignment.ApprovalStatus,
+                    assignment.ApprovedBy,
+                    assignment.ApprovedAt);
             },
             CacheOptions,
             tags: ["assignments"],

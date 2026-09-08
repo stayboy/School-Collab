@@ -111,6 +111,35 @@ public class AssignmentFormModelMappingsTests
         model.MaxScore.Should().Be(assignment.MaxScore);
     }
 
+    // ── WS-A2 / decision (j): LoadFrom carries ArchiveGraceDays ──
+
+    [TestMethod]
+    public void LoadFrom_CarriesArchiveGraceDays_NonDefaultValueRoundTrips()
+    {
+        var assignment = MakeAssignment();
+        var dtoWithNonDefaultGrace = assignment with { ArchiveGraceDays = 7 };
+
+        var model = new AssignmentEditFormModel();
+
+        model.LoadFrom(dtoWithNonDefaultGrace);
+
+        model.ArchiveGraceDays.Should().Be(7,
+            "LoadFrom must project the DTO's ArchiveGraceDays so the edit page never resets the grace window to the default (WS-A2 / decision (j))");
+    }
+
+    [TestMethod]
+    public void LoadFrom_CarriesArchiveGraceDays_DefaultValueAppliedWhenDtoOmits()
+    {
+        var assignment = MakeAssignment(); // ArchiveGraceDays defaults to 30 on the record
+
+        var model = new AssignmentEditFormModel { ArchiveGraceDays = 999 };
+
+        model.LoadFrom(assignment);
+
+        model.ArchiveGraceDays.Should().Be(30,
+            "a DTO with the default ArchiveGraceDays value still threads through LoadFrom (round-trip guarantee)");
+    }
+
     // ── QuestionEditorRow.FromGenerated / type converters (decision (b)) ──
 
     [TestMethod]

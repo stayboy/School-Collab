@@ -2,7 +2,9 @@
 @using SchoolCollab.Assignments.Contracts
 @using SchoolCollab.Assignments.Application.Helpers
 @using SchoolCollab.Admin.Shared.Components.Landing
+@using SchoolCollab.Core.Features
 @inject AssignmentsApiClient Api
+@inject IFeatureFlagService FeatureFlags
 @inject ILogger<Index> Logger
 @inject IToastService Toast
 @implements IDisposable
@@ -20,9 +22,10 @@
              SearchTextChanged="@OnSearchValueChanged"
              SearchPlaceholder="Search assignments…"
              RowActions="@BuildAssignmentActions"
-             RowActionsAriaLabel="Assignment actions">
+             RowActionsAriaLabel="Assignment actions"
+             RowActionsUseMenuService="false">
     <ToolbarFilters>
-        <FluentSelect Items="@_statusOptions"
+        <FluentSelect Items="@StatusFilterOptions"
                       @bind-SelectedOption="_selectedStatus"
                       @bind-SelectedOption:after="OnStatusFilterChangedAsync"
                       OptionText="@(o => o!.Label)"
@@ -43,12 +46,34 @@
             @EnumHelper.GetDescription(context.TargetAudienceType)
         </TemplateColumn>
         <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Status" SortBy="@_sortByStatus" Sortable="true">
+            @* WS-A2 deviation from decision (j): FluentBadge only supports Accent / Neutral /
+               Lightweight (validated at render in Fluent UI 4.14) — Outline would crash the grid.
+               Scheduled therefore shares Accent with Published (both committed publishing
+               states); the badge text distinguishes them. *@
             <FluentBadge Appearance="@(context.Status == AssignmentStatusDto.Published ? Appearance.Accent
-                : context.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
+                : context.Status == AssignmentStatusDto.Scheduled ? Appearance.Accent
+                : context.Status == AssignmentStatusDto.Closed || context.Status == AssignmentStatusDto.Archived ? Appearance.Neutral
                 : Appearance.Lightweight)">
                 @context.Status
             </FluentBadge>
         </TemplateColumn>
+        @* WS-A2 / spec §7 Q2 — reviewer-rework UI-tester P2: a Draft row's
+           approval state is otherwise invisible in the index, so the
+           optimistic Submit-for-approval flip (and its failure rollback)
+           has no surface. The Approval column is conditional on the flag
+           so OFF tenants see exactly today's grid; ON tenants see a chip
+           per Draft row with the five approval states. *@
+        @if (_approvalRequired)
+        {
+            <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Approval">
+                @if (context.Status == AssignmentStatusDto.Draft)
+                {
+                    <FluentBadge Appearance="@ApprovalChipAppearance(context.ApprovalStatus)">
+                        @ApprovalChipText(context.ApprovalStatus)
+                    </FluentBadge>
+                }
+            </TemplateColumn>
+        }
         <TemplateColumn TGridItem="AssignmentSummaryDto" Title="Due Date" SortBy="@_sortByDueDate" Sortable="true">
             @(context.DueDate?.ToLocalTime().ToString("g") ?? "—")
         </TemplateColumn>
@@ -83,19 +108,29 @@
 
     private static readonly LandingGridSettings _gridSettings = new()
     {
-        GridTemplateColumns = "minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto"
+        // WS-A2 / spec §7 Q2 — the optional Approval column rides on the
+        // flag. Template columns therefore grow by one when the flag is on
+        // (the explicit "auto" trailing column keeps the Actions column's
+        // natural width regardless).
+        GridTemplateColumns = "minmax(180px,2fr) 1fr 1fr 1fr 1fr 1fr 1fr auto auto"
     };
 
-    // Status filter
-    private record StatusOption(int? Value, string Label);
-    private readonly StatusOption[] _statusOptions =
+    // Status filter (WS-A2 / spec §3.5 — adds Scheduled + Archived).
+    public record StatusOption(int? Value, string Label);
+    public static readonly StatusOption[] StatusFilterOptions =
     [
         new(null, "All"),
         new(0, "Draft"),
         new(1, "Published"),
-        new(2, "Closed")
+        new(2, "Closed"),
+        new(3, "Scheduled"),
+        new(4, "Archived")
     ];
     private StatusOption? _selectedStatus;
+
+    // WS-A2 / spec §7 Q2: approval flag toggle for the Draft row action
+    // (Submit-for-approval replaces Publish when the flag is on).
+    private bool _approvalRequired;
 
     private readonly GridSort<AssignmentSummaryDto> _sortByTitle =
         GridSort<AssignmentSummaryDto>.ByAscending(x => x.Title);
@@ -120,6 +155,19 @@
         Logger.LogInformation("Loading assignments list");
         try
         {
+            // WS-A2 / spec §7 Q2: resolve the approval flag once and cache it
+            // (the NavMenu precedent). A resolution failure logs and leaves the
+            // page in the OFF state — the list never blocks on the flag.
+            try
+            {
+                _approvalRequired = await FeatureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, token);
+            }
+            catch (Exception flagEx)
+            {
+                Logger.LogWarning(flagEx, "Feature flag resolution failed; defaulting approval to OFF");
+                _approvalRequired = false;
+            }
+
             _items = await LoadAssignmentsAsync(token);
             if (_disposed) return;
             Logger.LogInformation("Loaded {Count} assignments", _items?.Length ?? 0);
@@ -143,6 +191,8 @@
             0 => AssignmentStatusDto.Draft,
             1 => AssignmentStatusDto.Published,
             2 => AssignmentStatusDto.Closed,
+            3 => AssignmentStatusDto.Scheduled,
+            4 => AssignmentStatusDto.Archived,
             _ => null
         };
         return await Api.ListAsync(statusFilter, ct);
@@ -247,6 +297,57 @@
         }
     }
 
+    // WS-A2 / spec §7 Q2: submit-for-approval optimistic update mirrors the
+    // existing publish/unpublish pattern — stamp the new approval state
+    // locally, then call the API. A failure rolls back to the previous row.
+    private async Task OnSubmitForApprovalAsync(Guid id)
+    {
+        if (_disposed || _items is null) return;
+        var idx = Array.FindIndex(_items, x => x.Id == id);
+        if (idx < 0) return;
+
+        var previous = _items[idx];
+        _items[idx] = previous with { ApprovalStatus = ApprovalStatusDto.Pending };
+        StateHasChanged();
+
+        try
+        {
+            await Api.SubmitForApprovalAsync(id);
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to submit assignment {AssignmentId} for approval", id);
+            var i = Array.FindIndex(_items, x => x.Id == id);
+            if (i >= 0) _items[i] = previous;
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    // WS-A2 / spec §7 Q2 — reviewer-rework UI-tester P2: the approval-state
+    // chip on a Draft row. Mirrors the Detail page's chip text + appearance
+    // so the user sees consistent approval surfaces across the two pages.
+    // (Validates the optimistic Submit-for-approval flip — and its failure
+    // rollback — visibly in the grid.)
+    private static string ApprovalChipText(ApprovalStatusDto? status) => status switch
+    {
+        null => "Not submitted",
+        ApprovalStatusDto.Pending => "Pending",
+        ApprovalStatusDto.Approved => "Approved",
+        ApprovalStatusDto.Rejected => "Rejected",
+        _ => "—"
+    };
+
+    private static Appearance ApprovalChipAppearance(ApprovalStatusDto? status) => status switch
+    {
+        null => Appearance.Lightweight,
+        ApprovalStatusDto.Pending => Appearance.Neutral,
+        ApprovalStatusDto.Approved => Appearance.Accent,
+        ApprovalStatusDto.Rejected => Appearance.Neutral,
+        _ => Appearance.Lightweight
+    };
+
     private IReadOnlyList<RowAction> BuildAssignmentActions(AssignmentSummaryDto a)
     {
         var actions = new List<RowAction>();
@@ -254,7 +355,24 @@
         {
             case AssignmentStatusDto.Draft:
                 actions.Add(RowAction.Navigate("Edit", $"/assignments/{a.Id}/edit", FluentIcons.Edit));
-                actions.Add(RowAction.Callback("Publish", () => OnPublishAsync(a.Id), FluentIcons.ArrowExportUp));
+                // WS-A2 / spec §7 Q2: when the approval flag is on, Draft
+                // rows surface "Submit for Approval" instead of Publish —
+                // BUT only while the assignment has no current approval. An
+                // already-APPROVED Draft must keep the Publish action so the
+                // reviewer-rework UI-tester P1 cannot silently revoke an
+                // approval (SubmitForApproval on an Approved row is a
+                // Draft-only guard that flips Approved → Pending).
+                if (_approvalRequired && a.ApprovalStatus != ApprovalStatusDto.Approved)
+                {
+                    actions.Add(RowAction.Callback(
+                        "Submit for Approval",
+                        () => OnSubmitForApprovalAsync(a.Id),
+                        FluentIcons.Checkmark));
+                }
+                else
+                {
+                    actions.Add(RowAction.Callback("Publish", () => OnPublishAsync(a.Id), FluentIcons.ArrowExportUp));
+                }
                 actions.Add(RowAction.Separator());
                 actions.Add(RowAction.Callback(
                     "Delete",
@@ -267,7 +385,16 @@
                 actions.Add(RowAction.Callback("Unpublish", () => OnUnpublishAsync(a.Id), FluentIcons.ArrowClockwise));
                 actions.Add(RowAction.Callback("Close", () => OnCloseAsync(a.Id), FluentIcons.Checkmark));
                 break;
+            case AssignmentStatusDto.Scheduled:
+                actions.Add(RowAction.Navigate("Edit", $"/assignments/{a.Id}/edit", FluentIcons.Edit));
+                actions.Add(RowAction.Callback("Publish now", () => OnPublishAsync(a.Id), FluentIcons.ArrowExportUp));
+                actions.Add(RowAction.Callback("Unpublish", () => OnUnpublishAsync(a.Id), FluentIcons.ArrowClockwise));
+                break;
             case AssignmentStatusDto.Closed:
+                actions.Add(RowAction.Navigate("Review", $"/assignments/{a.Id}", FluentIcons.Open));
+                break;
+            case AssignmentStatusDto.Archived:
+                // Spec §7 Q6: archived is read-only retention — review only.
                 actions.Add(RowAction.Navigate("Review", $"/assignments/{a.Id}", FluentIcons.Open));
                 break;
         }

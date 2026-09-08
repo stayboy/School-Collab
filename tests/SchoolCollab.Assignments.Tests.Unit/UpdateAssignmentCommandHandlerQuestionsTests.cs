@@ -10,6 +10,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCo
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.DTOs;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -83,7 +84,8 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         IReadOnlyList<NewQuestionDto>? questions = null,
         IReadOnlyList<NewAttachmentDto>? attachments = null,
         IReadOnlyList<NewContentModuleDto>? contentModules = null,
-        IReadOnlyList<NewResourceDto>? resources = null) =>
+        IReadOnlyList<NewResourceDto>? resources = null,
+        int archiveGraceDays = 30) =>
         new(
             Id: id,
             Title: "Updated",
@@ -100,7 +102,8 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             Questions: questions,
             Attachments: attachments,
             ContentModules: contentModules,
-            Resources: resources);
+            Resources: resources,
+            ArchiveGraceDays: archiveGraceDays);
 
     /// <summary>Capturing fake repository. The EF Core InMemory provider has a known
     /// quirk where a Same-Context Load → Replace-Owned-Children → SaveChanges
@@ -125,6 +128,11 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
             => Task.FromResult(new List<AssignmentSummary>());
         public void DetectChanges() { }
+
+        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
+        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
 
         public async Task UpdateAsync(Assignment assignment, CancellationToken ct = default)
         {
@@ -226,6 +234,62 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             attachments: null));
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Only draft assignments can be updated*");
+            .WithMessage("*Only draft or scheduled assignments can be updated*");
+    }
+
+    // ── WS-A2 / decision (k): ArchiveGraceDays threading + Scheduled update ──
+
+    [TestMethod]
+    public async Task HandleAsync_ArchiveGraceDays_ExplicitValueThreadedToUpdate()
+    {
+        var (db, _, tenants) = BuildScope("update-gracedays-seed");
+        var seeded = SeedDraft(db, tenants);
+        var seededId = seeded.Id;
+        db.ChangeTracker.Clear();
+        var loaded = db.Assignments.Single(a => a.Id == seededId);
+        db.ChangeTracker.Clear();
+
+        var (_, cache, _) = BuildScope("update-gracedays-handler");
+        var repo = new CapturingAssignmentRepository { Loaded = loaded };
+        var handler = NewHandler(repo, cache);
+
+        await handler.HandleAsync(SampleUpdate(seededId, archiveGraceDays: 7));
+
+        var mutated = repo.Updated;
+        mutated.Should().NotBeNull();
+        mutated!.ArchiveGraceDays.Should().Be(7,
+            "the explicit ArchiveGraceDays value must thread through to the updated aggregate (WS-A2 / decision (j))");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_FromScheduled_Succeeds_GuardWidened()
+    {
+        var (db, cache, tenants) = BuildScope("update-scheduled");
+        var assignment = Assignment.Create(
+            "Sch", null, AssignmentType.Digital,
+            GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
+            Guid.NewGuid(), null, null, null,
+            createdByTeacherId: Guid.Empty,
+            mandatoryReview: true,
+            assignmentNumber: "ASGA03")
+            .WithTenant(tenants);
+        var future = DateTimeOffset.UtcNow.AddDays(7);
+        assignment.Schedule(future, approvalRequired: false);
+        db.Assignments.Add(assignment);
+        db.SaveChanges();
+
+        var repo = new CapturingAssignmentRepository { Loaded = assignment };
+        var handler = NewHandler(repo, cache);
+
+        await handler.HandleAsync(SampleUpdate(assignment.Id,
+            aiPromptOverride: "edit-on-scheduled",
+            questions: null,
+            attachments: null));
+
+        var mutated = repo.Updated;
+        mutated.Should().NotBeNull("the update must succeed on a Scheduled assignment (WS-A2 / decision (a))");
+        mutated!.AiPromptOverride.Should().Be("edit-on-scheduled");
+        mutated.Status.Should().Be(AssignmentStatus.Scheduled,
+            "the status stays Scheduled — update does not transition lifecycle");
     }
 }

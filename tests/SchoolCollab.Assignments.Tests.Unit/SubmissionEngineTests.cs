@@ -139,7 +139,7 @@ public class SubmissionEngineTests
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
-            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -168,7 +168,7 @@ public class SubmissionEngineTests
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
-            TenantProvider(), new FakeBroadcaster(), new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), new FakeBroadcaster(), new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -296,7 +296,7 @@ public class SubmissionEngineTests
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
-            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id));
 
@@ -390,7 +390,7 @@ public class SubmissionEngineTests
             assignmentRepo, submissionRepo, new FakeContactResolver(subscribers),
             new FakeLinkRepository(), new FakeActivityGroupLookup(),
             new FakeTopicAssignmentLookup(),
-            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
+            TenantProvider(), broadcaster, new FakeNotificationPolicyResolver(), new FakeFeatureFlagService(), Cache(), NullLogger<PublishAssignmentCommandHandler>.Instance);
 
         // Select only the guardian contact (spec §8).
         await handler.HandleAsync(new PublishAssignmentCommand(assignment.Id, new[] { ContactGuardian }));
@@ -556,6 +556,10 @@ public class SubmissionEngineTests
         public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
             => Task.FromResult(new List<AssignmentSummary>());
         public void DetectChanges() { /* no-op for fake */ }
+        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
+        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
     }
 
     private sealed class FakeSubmissionRepository : ISubmissionRepository

@@ -26,4 +26,7 @@ public sealed record CreateAssignmentCommand(
     IReadOnlyList<NewQuestionDto>? Questions = null,
     IReadOnlyList<NewAttachmentDto>? Attachments = null,
     IReadOnlyList<NewContentModuleDto>? ContentModules = null,
-    IReadOnlyList<NewResourceDto>? Resources = null) : ICommand;
+    IReadOnlyList<NewResourceDto>? Resources = null,
+    /// <summary>WS-A2 (spec §7 Q6): archive grace window in days.
+    /// Threaded to <c>Assignment.Create(...)</c>.</summary>
+    int ArchiveGraceDays = 30) : ICommand;

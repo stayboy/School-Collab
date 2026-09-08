@@ -5,6 +5,7 @@ using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Assignments.Core.Services;
+using SchoolCollab.Core.Features;
 using SchoolCollab.Core.Tenancy;
 using SchoolCollab.Students.Core.Domain;
 
@@ -20,6 +21,7 @@ public sealed class PublishAssignmentCommandHandler(
     ITenantProvider tenantProvider,
     IAssignmentNotificationBroadcaster broadcaster,
     INotificationPolicyResolver policyResolver,
+    IFeatureFlagService featureFlags,
     HybridCache cache,
     ILogger<PublishAssignmentCommandHandler> logger) : ICommandHandler<PublishAssignmentCommand>
 {
@@ -30,7 +32,13 @@ public sealed class PublishAssignmentCommandHandler(
         var assignment = await repository.GetAsync(command.Id, cancellationToken)
             ?? throw new AssignmentNotFoundException(command.Id);
 
-        assignment.Publish();
+        // WS-A2 / spec §7 Q2: the approval flag gates publish. When on
+        // the row must carry ApprovalStatus.Approved — otherwise the
+        // domain throws the typed AssignmentApprovalRequiredException
+        // which the API surface maps to 400.
+        var approvalRequired = await featureFlags.IsEnabledAsync(FeatureFlagKeys.RequireAssignmentApproval, cancellationToken);
+
+        assignment.Publish(approvalRequired);
 
         var tenantId = tenantProvider.GetTenantContext().TenantId;
         var recipients = await ResolveRecipientsAndGatesAsync(assignment, tenantId, command.ContactIds, cancellationToken);

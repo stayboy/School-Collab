@@ -11,6 +11,7 @@ using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.DTOs;
 using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
@@ -43,6 +44,10 @@ public class UpdateAssignmentCommandHandlerModuleResourceTests
         public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
             => Task.FromResult(new List<AssignmentSummary>());
         public void DetectChanges() { }
+        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
+        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
         public Task UpdateAsync(Assignment assignment, CancellationToken ct = default)
         {
             Updated = assignment;

@@ -5,6 +5,8 @@
 @using SchoolCollab.Students.Core.DTOs
 @using Microsoft.FluentUI.AspNetCore.Components
 @using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Admin.Shared.Components
+@using SchoolCollab.Core.Features
 @inject AssignmentsApiClient Api
 @inject StudentsApiClient StudentsApi
 @inject IDialogService DialogService
@@ -30,8 +32,13 @@
             <div class="detail-container">
                 <div class="title-row">
                     <h2 class="page-title">@_item.Title</h2>
+                    @* WS-A2 deviation from decision (j): FluentBadge only supports Accent /
+                        Neutral / Lightweight (validated at render in Fluent UI 4.14) — Outline
+                        would crash the page. Scheduled shares Accent with Published (both
+                        committed publishing states); the badge text distinguishes them. *@
                     <FluentBadge Appearance="@( _item.Status == AssignmentStatusDto.Published ? Appearance.Accent
-                        : _item.Status == AssignmentStatusDto.Closed ? Appearance.Neutral
+                        : _item.Status == AssignmentStatusDto.Scheduled ? Appearance.Accent
+                        : _item.Status == AssignmentStatusDto.Closed || _item.Status == AssignmentStatusDto.Archived ? Appearance.Neutral
                         : Appearance.Lightweight)">
                         @_item.Status
                     </FluentBadge>
@@ -65,6 +72,22 @@
                             <div class="detail-label">Max Score</div>
                             <div class="detail-value">@( _item.MaxScore?.ToString("0.##") ?? "—")</div>
 
+                            <div class="detail-label">Available from</div>
+                            <div class="detail-value">@(_item.AvailableFromUtc?.ToLocalTime().ToString("g") ?? "—")</div>
+
+                            <div class="detail-label">Archive after</div>
+                            <div class="detail-value">
+                                @if (_item.DueDate.HasValue)
+                                {
+                                    @_item.DueDate.Value.AddDays(_item.ArchiveGraceDays).ToLocalTime().ToString("g")
+                                    <span class="dialog-hint">(grace: @_item.ArchiveGraceDays days)</span>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </div>
+
                             <div class="detail-label">Created</div>
                             <div class="detail-value">@_item.CreatedAt.ToLocalTime().ToString("g")</div>
 
@@ -88,8 +111,51 @@
                                 <FluentButton Appearance="Appearance.Accent" OnClick="OpenPublishDialogAsync" Disabled="@_publishing" class="ms-2">
                                     @(_publishing ? "Publishing…" : "Publish")
                                 </FluentButton>
+                                <FluentButton Appearance="Appearance.Outline" OnClick="OpenScheduleDialogAsync" Disabled="@_scheduling" class="ms-2">
+                                    @(_scheduling ? "Scheduling…" : "Schedule…")
+                                </FluentButton>
+                            }
+                            @if (_item.Status == AssignmentStatusDto.Scheduled)
+                            {
+                                <FluentButton Appearance="Appearance.Accent" OnClick="OpenPublishDialogAsync" Disabled="@_publishing" class="ms-2">
+                                    @(_publishing ? "Publishing…" : "Publish now")
+                                </FluentButton>
+                                <FluentButton Appearance="Appearance.Outline" OnClick="OnCancelScheduleAsync" Disabled="@_cancelling" class="ms-2">
+                                    @(_cancelling ? "Cancelling…" : "Cancel schedule")
+                                </FluentButton>
                             }
                         </div>
+
+                        @* WS-A2 / spec §7 Q2 — approval panel (flag-gated).
+                            Hidden when the approval feature flag is off. *@
+                        <FeatureFlagGate Key="@FeatureFlagKeys.RequireAssignmentApproval">
+                            <hr class="my-4" />
+                            <h4>Approval</h4>
+                            <div class="mt-2">
+                                <FluentBadge Appearance="@ApprovalBadgeAppearance()">@ApprovalStatusText()</FluentBadge>
+
+                                @if (_item.Status == AssignmentStatusDto.Draft && (_item.ApprovalStatus is null || _item.ApprovalStatus == ApprovalStatusDto.Rejected))
+                                {
+                                    <FluentButton Appearance="Appearance.Accent" OnClick="OnSubmitForApprovalAsync" Disabled="@_submittingForApproval" class="ms-2">
+                                        @(_submittingForApproval ? "Submitting…" : "Submit for Approval")
+                                    </FluentButton>
+                                }
+
+                                @if (_item.ApprovalStatus == ApprovalStatusDto.Pending)
+                                {
+                                    <FluentButton Appearance="Appearance.Accent" OnClick="OnApproveAsync" Disabled="@_actingOnApproval" class="ms-2">
+                                        @(_actingOnApproval ? "Working…" : "Approve")
+                                    </FluentButton>
+                                    <FluentButton Appearance="Appearance.Outline" OnClick="OnRejectAsync" Disabled="@_actingOnApproval" class="ms-2">
+                                        @(_actingOnApproval ? "Working…" : "Reject")
+                                    </FluentButton>
+                                }
+                            </div>
+                            @if (!string.IsNullOrEmpty(_approvalError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_approvalError</FluentMessageBar>
+                            }
+                        </FeatureFlagGate>
 
                         @if (_item.Status == AssignmentStatusDto.Closed)
                         {
@@ -266,6 +332,13 @@
     private bool _publishing;
     private string? _publishError;
 
+    // WS-A2 schedule / cancel-schedule / approval actions
+    private bool _scheduling;
+    private bool _cancelling;
+    private bool _submittingForApproval;
+    private bool _actingOnApproval;
+    private string? _approvalError;
+
     // Closed-assignment review (existing AssignmentReview)
     private bool _submittingReview;
     private string? _reviewError;
@@ -334,6 +407,30 @@
         return grade is not null ? $"Audience: {audience} · Grade {grade}" : $"Audience: {audience}";
     }
 
+    // ── WS-A2: approval-status chip + dialog ────────────────────────────
+
+    private string ApprovalStatusText() => _item?.ApprovalStatus switch
+    {
+        null => "Not submitted",
+        ApprovalStatusDto.Pending => "Pending",
+        ApprovalStatusDto.Approved => "Approved",
+        ApprovalStatusDto.Rejected => "Rejected",
+        _ => "—"
+    };
+
+    // WS-A2 deviation from decision (j): FluentBadge only supports Accent / Neutral /
+    // Lightweight, so Pending shares Neutral with Rejected (both "submitted, not yet
+    // approved" — text distinguishes). Approved keeps the Accent success fill and
+    // "Not submitted" stays muted Lightweight.
+    private Appearance ApprovalBadgeAppearance() => _item?.ApprovalStatus switch
+    {
+        null => Appearance.Lightweight,
+        ApprovalStatusDto.Pending => Appearance.Neutral,
+        ApprovalStatusDto.Approved => Appearance.Accent,
+        ApprovalStatusDto.Rejected => Appearance.Neutral,
+        _ => Appearance.Lightweight
+    };
+
     private async Task OpenPublishDialogAsync()
     {
         if (_item is null) return;
@@ -368,6 +465,143 @@
         finally
         {
             if (!_disposed) _publishing = false;
+        }
+    }
+
+    // WS-A2 / spec §3.5 step 2: open the schedule dialog (mirrors PublishDialog's
+    // ShowShellDialogAsync plumbing).
+    private async Task OpenScheduleDialogAsync()
+    {
+        if (_item is null) return;
+        _scheduling = true;
+        _approvalError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            var result = await DialogService.ShowShellDialogAsync<ScheduleDialog, ScheduleFormModel, ScheduleResult>(
+                new ScheduleFormModel(), title: "Schedule assignment", size: DialogSize.Medium);
+
+            if (result is null) return; // cancelled
+            await Api.ScheduleAsync(Id, result.AvailableFromUtc, ct);
+            _item = await Api.GetByIdAsync(Id, ct);
+            Nav.NavigateTo($"/assignments/{Id}", forceLoad: false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to schedule assignment {AssignmentId}", Id);
+            _approvalError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _scheduling = false;
+        }
+    }
+
+    private async Task OnCancelScheduleAsync()
+    {
+        if (_item is null) return;
+        _cancelling = true;
+        _approvalError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            await Api.UnpublishAsync(Id, ct);
+            _item = await Api.GetByIdAsync(Id, ct);
+            Nav.NavigateTo($"/assignments/{Id}", forceLoad: false);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to cancel schedule for assignment {AssignmentId}", Id);
+            _approvalError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _cancelling = false;
+        }
+    }
+
+    private async Task OnSubmitForApprovalAsync()
+    {
+        if (_item is null) return;
+        _submittingForApproval = true;
+        _approvalError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            await Api.SubmitForApprovalAsync(Id, ct);
+            _item = await Api.GetByIdAsync(Id, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to submit assignment {AssignmentId} for approval", Id);
+            _approvalError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _submittingForApproval = false;
+        }
+    }
+
+    private async Task OnApproveAsync()
+    {
+        if (_item is null) return;
+        if (!await DialogService.ShowConfirmDialogAsync($"Approve assignment '{_item.Title}'?", primaryText: "Approve"))
+            return;
+        _actingOnApproval = true;
+        _approvalError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            await Api.ApproveAsync(Id, Guid.Empty, ct);
+            _item = await Api.GetByIdAsync(Id, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to approve assignment {AssignmentId}", Id);
+            _approvalError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _actingOnApproval = false;
+        }
+    }
+
+    private async Task OnRejectAsync()
+    {
+        if (_item is null) return;
+        if (!await DialogService.ShowConfirmDialogAsync($"Reject assignment '{_item.Title}'?", primaryText: "Reject"))
+            return;
+        _actingOnApproval = true;
+        _approvalError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            await Api.RejectAsync(Id, Guid.Empty, ct);
+            _item = await Api.GetByIdAsync(Id, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reject assignment {AssignmentId}", Id);
+            _approvalError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _actingOnApproval = false;
         }
     }
 

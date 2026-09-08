@@ -17,4 +17,18 @@ public record AssignmentSummary(
     bool MandatoryReview,
     Guid CreatedByTeacherId,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    /// <summary>WS-A2 (spec §3.5 step 2): when the assignment is
+    /// scheduled to auto-publish.</summary>
+    DateTimeOffset? AvailableFromUtc = null,
+    /// <summary>WS-A2 (spec §7 Q6): archive grace window in days.</summary>
+    int ArchiveGraceDays = 30,
+    /// <summary>WS-A2 (spec §7 Q2): null when the assignment has
+    /// not been submitted for approval.</summary>
+    ApprovalStatus? ApprovalStatus = null,
+    /// <summary>WS-A2 (spec §7 Q2): who approved the assignment.
+    /// Cleared on <see cref="Assignment.Reject"/>.</summary>
+    Guid? ApprovedBy = null,
+    /// <summary>WS-A2 (spec §7 Q2): when an approval was granted.
+    /// Cleared on <see cref="Assignment.Reject"/>.</summary>
+    DateTimeOffset? ApprovedAt = null);

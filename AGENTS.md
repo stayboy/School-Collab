@@ -325,6 +325,18 @@ user instruction):
    git pull origin main
    ```
 
+**Execution model for commit / gh-PR tasks:** Once the user authorizes a
+commit (and the related PR/stack steps per this policy), the mechanical
+git/gh execution — staging the named change set, the commit, `gh stack`
+unstack/init/submit, and `gh pr` operations — is delegated to a lightweight
+subagent running `ollama/deepseek-v4-flash:0731-cloud` (pi provider; Cline
+equivalent: `cline-pass/deepseek-v4-flash`). The parent agent shows and
+confirms the change set, then hands the execution to that agent. Every gate
+in this policy (explicit authorization for each action, the change-set
+review, `SCHOOLCOLLAB_ALLOW_PUSH=1` for pushes, no merge without
+instruction) applies unchanged to the agent's steps; the agent reports the
+staged paths, commit SHA, and PR links back.
+
 **Local commit/push hold (the enforcement layer for commits):** Do not
 commit, push, open a PR, or merge without an explicit user instruction
 ("commit", "push", "open a PR", "merge"). When the user asks to commit,

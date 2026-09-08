@@ -68,7 +68,8 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         IReadOnlyList<NewQuestionDto>? questions = null,
         IReadOnlyList<NewAttachmentDto>? attachments = null,
         IReadOnlyList<NewContentModuleDto>? contentModules = null,
-        IReadOnlyList<NewResourceDto>? resources = null) =>
+        IReadOnlyList<NewResourceDto>? resources = null,
+        int archiveGraceDays = 30) =>
         new(
             Title: "Algebra HW",
             Description: null,
@@ -84,7 +85,8 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             Questions: questions,
             Attachments: attachments,
             ContentModules: contentModules,
-            Resources: resources);
+            Resources: resources,
+            ArchiveGraceDays: archiveGraceDays);
 
     private static NewQuestionDto McQuestion(int displayOrder) =>
         new(
@@ -320,5 +322,35 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         stored.Questions.Should().BeEmpty(
             "a null Questions collection is the pre-feature contract — must not error or synthesise rows");
         stored.Attachments.Should().BeEmpty();
+    }
+
+    // ── WS-A2 / decision (k): ArchiveGraceDays threading on create ──
+
+    [TestMethod]
+    public async Task HandleAsync_ArchiveGraceDays_DefaultsTo30_WhenOmitted()
+    {
+        var (db, cache, tenants) = BuildScope("create-gracedays-default");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        var id = await handler.HandleAsync(SampleCommand());
+
+        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
+        stored.ArchiveGraceDays.Should().Be(30,
+            "the command defaults to 30 when ArchiveGraceDays is omitted (WS-A2 / spec §7 Q6 default)");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_ArchiveGraceDays_ExplicitValuePersisted()
+    {
+        var (db, cache, tenants) = BuildScope("create-gracedays-explicit");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        var id = await handler.HandleAsync(SampleCommand(archiveGraceDays: 7));
+
+        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
+        stored.ArchiveGraceDays.Should().Be(7,
+            "the explicit ArchiveGraceDays value must thread through to the created aggregate (WS-A2 / decision (j))");
     }
 }

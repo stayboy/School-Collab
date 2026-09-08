@@ -148,6 +148,20 @@ the tester never derives or expands its own scope.
    round-doc path (the worker does not edit it). The worker implements, runs
    build + affected tests, returns WORKER REPORT. The parent persists the
    report into the doc.
+   **Build-escalation pattern (worker block rule):** when a worker pass times
+   out, stalls, or hangs mid-round (30-min cap, runaway shell command, repeated
+   build failures it cannot recover from), the parent interrupts it and
+   re-dispatches the SAME pass scope as an ESCALATION PASS to the reviewer
+   agent on `ollama/kimi-k2.7-code:cloud` — the reviewer model IS the
+   escalation executor — which reconciles the on-disk state first, then
+   completes the blocked pass. Subsequent worker passes revert to the worker
+   model. **Escalated work is reviewed by the HIGHER model: the static
+   re-verification of any pass completed via escalation runs on
+   `ollama/glm-5.3:cloud`** (user-set default 2026-09-08; the escalator never
+   re-verifies its own pass). One escalation per blocked pass; record
+   the provenance in the round doc (e.g. "pass 3 completed via escalation").
+   Do not steer or revive a run whose bash has been open past a plausible
+   build/test window — interrupt it; a hung process never settles.
 4. **Freeze the diff, then verify in parallel.** The parent writes
    `diffs-<slug>.patch` (`git diff`, or `git diff <base-sha>` when the tree
    was dirty at start), then concurrently:
@@ -211,6 +225,14 @@ the tester never derives or expands its own scope.
 - **Escalate instead of forcing a light tier through.**
 - Children may pause for supervisor decisions via intercom (pi) — reply, then
   wait for the child to settle.
+- **Runaway shell commands hang worker runs** — a worker once launched
+  `find / -name "..."` (a filesystem-wide scan from the root) and blocked
+  the run for 28 minutes. Worker task specs must carry the guard: repo-scoped
+  searches only (`grep`/`rg` under `src/`, `tests/`, or the NuGet cache under
+  `~/.nuget/packages`), never `find /`. If a worker's bash stays open past a
+  plausible build/test window, interrupt and escalate the pass per the
+  build-escalation pattern in step 3 — steering a hung process is wasted
+  quota.
 
 ## Verification
 

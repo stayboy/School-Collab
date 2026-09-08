@@ -2,15 +2,19 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Core.CQRS;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ApproveAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CloseAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.DeleteAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentCommand;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RejectAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewSubmissionGate;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ScheduleAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.StageAttachmentCommand;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SubmitAssignmentForApprovalCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SubmitAssignmentOnBehalf;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
@@ -68,7 +72,8 @@ public static class AssignmentRoutes
                     req.Questions,
                     req.Attachments,
                     req.ContentModules,
-                    req.Resources);
+                    req.Resources,
+                    req.ArchiveGraceDays);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
@@ -107,7 +112,8 @@ public static class AssignmentRoutes
                     req.Questions,
                     req.Attachments,
                     req.ContentModules,
-                    req.Resources);
+                    req.Resources,
+                    req.ArchiveGraceDays);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }
@@ -168,6 +174,129 @@ public static class AssignmentRoutes
             {
                 return Results.NotFound();
             }
+            // WS-A2 / spec §7 Q2: the typed approval guard surfaces as 400
+            // so the UI can render the inline error.
+            catch (AssignmentApprovalRequiredException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            // WS-A2 / decision (a): archived assignments are read-only;
+            // mirror the create/update/delete routes' InvalidOperationException
+            // -> 400 mapping so the call surfaces a domain message instead
+            // of a 500.
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // WS-A2 / spec §3.5 step 2: schedule the assignment to auto-publish
+        // at the given moment. The scheduled-publish sweep dispatches the
+        // existing publish command when AvailableFromUtc arrives.
+        group.MapPost("/{id:guid}/schedule", async (
+            Guid id,
+            [FromBody] ScheduleAssignmentRequest req,
+            [FromServices] ICommandHandler<ScheduleAssignmentCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new ScheduleAssignmentCommand(id, req.AvailableFromUtc), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (AssignmentApprovalRequiredException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            // ArgumentException for past-date; InvalidOperationException for
+            // wrong-status (matches the unpublish route's existing pattern).
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // WS-A2 / spec §7 Q2: submit a draft for approval. No body — the
+        // domain method is the entire side effect.
+        group.MapPost("/{id:guid}/submit-for-approval", async (
+            Guid id,
+            [FromServices] ICommandHandler<SubmitAssignmentForApprovalCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new SubmitAssignmentForApprovalCommand(id), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // WS-A2 / spec §7 Q2: approve a pending assignment. ApproverId is
+        // the identity placeholder until identity wiring lands.
+        group.MapPost("/{id:guid}/approve", async (
+            Guid id,
+            [FromBody] ApproveAssignmentRequest req,
+            [FromServices] ICommandHandler<ApproveAssignmentCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new ApproveAssignmentCommand(id, req.ApproverId), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // WS-A2 / spec §7 Q2: reject a pending assignment.
+        group.MapPost("/{id:guid}/reject", async (
+            Guid id,
+            [FromBody] RejectAssignmentRequest req,
+            [FromServices] ICommandHandler<RejectAssignmentCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new RejectAssignmentCommand(id, req.ApproverId), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
         });
 
         group.MapPost("/{id:guid}/unpublish", async (
@@ -203,6 +332,14 @@ public static class AssignmentRoutes
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
+            }
+            // WS-A2 / decision (a): archived assignments are read-only;
+            // mirror the publish route's InvalidOperationException -> 400
+            // mapping so the call surfaces a domain message instead of
+            // a 500.
+            catch (InvalidOperationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
             }
         });
 

@@ -48,4 +48,15 @@ public static class FeatureFlagKeys
     /// <c>IFeatureFlagService.IsEnabledAsync</c> / <c>&lt;FeatureFlagGate&gt;</c>.
     /// </summary>
     public const string EnableActivityGroups = "FEATURE:EnableActivityGroups";
+
+    /// <summary>
+    /// Gates the assignment approval workflow (WS-A2 / spec §7 Q2).
+    /// When on, every assignment requires approval before publish —
+    /// the publish + schedule command handlers throw the typed
+    /// <c>AssignmentApprovalRequiredException</c>, and the Admin
+    /// Assignments Index/Detail UI shows Submit-for-approval /
+    /// Approve / Reject surfaces. Default OFF (dark launch); tenants
+    /// opt in via the /config-flags surface.
+    /// </summary>
+    public const string RequireAssignmentApproval = "FEATURE:RequireAssignmentApproval";
 }

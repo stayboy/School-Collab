@@ -130,6 +130,7 @@ files only carry values that genuinely belong to that single service
 | `assignment-upload-max-file-bytes` | Aspire parameter | `26214400` (25 MiB) | Per-file size cap enforced at the staging endpoint (`POST /assignments/attachments/stage`). Injected as `Assignments__AttachmentUpload__MaxFileSizeBytes`; read as `Assignments:AttachmentUpload:MaxFileSizeBytes`. **Note:** the default stays under Kestrel's default ~30 MB request-body limit; raising this parameter above ~30 MB also requires raising `Microsoft.AspNetCore.Server.Kestrel.Core.Limits.MaxRequestBodySize` on the assignments-api Kestrel options. |
 | `assignment-upload-max-total-bytes` | Aspire parameter | `104857600` (100 MiB) | Total attachment size cap enforced on create/update (the sum of every staged file's `FileSize`). Injected as `Assignments__AttachmentUpload__MaxTotalSizeBytes`; read as `Assignments:AttachmentUpload:MaxTotalSizeBytes`. |
 | `assignment-upload-allowed-extensions` | Aspire parameter | `.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.png,.jpg,.jpeg,.gif,.webp,.txt,.md,.csv` | Comma-separated allowlist of file extensions accepted by the staging endpoint (case-insensitive). Injected as `Assignments__AttachmentUpload__AllowedExtensions`; the config binder splits it into the `AllowedExtensions` array. See §13 for the full property table. |
+| `feature-flag-require-assignment-approval` | Aspire parameter | `false` | Cold-start value for `FeatureFlags:FEATURE:RequireAssignmentApproval` (WS-A2 / spec §7 Q2). Injected as `FeatureFlags__FEATURE__RequireAssignmentApproval` into `assignments-api` and `admin`. The runtime authority is the Settings Config-service flag (the migration service seeds a default-OFF row, and tenants opt in via `/config-flags`). See §5. |
 
 **Where to set them:**
 
@@ -313,6 +314,7 @@ but is **superseded** by the two-kind model above.
 | :--- | :--- | :--- |
 | `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
 | `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. The global default remains OFF; the migration service additionally seeds a `TenantFeatureFlagOverride` turning the flag ON for the pilot tenant `Hydeson School` only (Phase 6.1 — see below). |
+| `FEATURE:RequireAssignmentApproval` | `false` | Gates the assignment approval workflow (WS-A2 / spec §7 Q2): when on, every assignment requires approval before publish — the publish + schedule command handlers throw `AssignmentApprovalRequiredException` (HTTP 400), and the Admin Assignments Index/Detail UI surfaces Submit-for-approval / Approve / Reject controls. Ships **dark** (default OFF). Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Admin/appsettings.json` + AppHost parameter fan-out. |
 
 ### Pilot-tenant override (Phase 6.1)
 
@@ -347,6 +349,7 @@ flags moved to the Config service.
 | :--- | :--- | :--- |
 | `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
 | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+| `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
 
 ### Setting a flag
 
@@ -677,6 +680,7 @@ matching env-var form:
 | `Parameters:openrouter-default-model` | `Parameters__openrouter_default_model` |
 | `Parameters:openrouter-api-key` | `Parameters__openrouter_api_key` |
 | `Parameters:feature-flag-disable-oidc-auth` | `Parameters__feature_flag_disable_oidc_auth` |
+| `Parameters:feature-flag-require-assignment-approval` | `Parameters__feature_flag_require_assignment_approval` |
 | `Parameters:period-activation-tolerance-days` | `Parameters__period_activation_tolerance_days` |
 | `Parameters:assignment-file-store-root` | `Parameters__assignment_file_store_root` |
 | `Parameters:assignment-upload-max-file-bytes` | `Parameters__assignment_upload_max_file_bytes` |
