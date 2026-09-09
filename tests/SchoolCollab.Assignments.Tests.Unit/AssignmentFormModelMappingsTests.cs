@@ -872,4 +872,99 @@ public class AssignmentFormModelMappingsTests
             "out-of-range indices are silently ignored (the round-3 lesson applied to ar-4)");
         model.Attachments[0].FileName.Should().Be("stay.pdf");
     }
+
+    // ── WS-A3 (spec §3.3 + §7 Q4): PassScore / MaxAttempts round-trip + gate ──
+
+    [TestMethod]
+    public void LoadFrom_CarriesPassScoreAndMaxAttempts()
+    {
+        var dto = MakeAssignment() with { PassScore = 80m, MaxAttempts = 3 };
+        var model = new AssignmentEditFormModel();
+
+        model.LoadFrom(dto);
+
+        model.PassScore.Should().Be(80m,
+            "LoadFrom must project the DTO's PassScore so the edit page never resets the threshold (WS-A3)");
+        model.MaxAttempts.Should().Be(3,
+            "LoadFrom must project the DTO's MaxAttempts so the edit page never resets the cap (WS-A3)");
+    }
+
+    [TestMethod]
+    public void ToCreateRequest_CarriesPassScoreAndMaxAttempts()
+    {
+        var model = new AssignmentEditFormModel
+        {
+            Title = "T",
+            PassScore = 75m,
+            MaxAttempts = 4,
+        };
+
+        var req = model.ToCreateRequest(
+            AssignmentTypeDto.Digital,
+            GradingFormatDto.AutoGraded,
+            TargetAudienceTypeDto.AllStudents,
+            TopicId,
+            null,
+            true);
+
+        req.PassScore.Should().Be(75m);
+        req.MaxAttempts.Should().Be(4);
+    }
+
+    [TestMethod]
+    public void ScoringFieldsPassSubmitGate_AutoGraded_PassScoreGreaterThanMaxScore_Fails()
+    {
+        var model = new AssignmentEditFormModel { MaxScore = 100m, PassScore = 101m };
+
+        var ok = model.ScoringFieldsPassSubmitGate(GradingFormatDto.AutoGraded, out var error);
+
+        ok.Should().BeFalse();
+        error.Should().Contain("Pass score must not exceed the max score");
+    }
+
+    [TestMethod]
+    public void ScoringFieldsPassSubmitGate_AutoGraded_ValidPasses()
+    {
+        var model = new AssignmentEditFormModel { MaxScore = 100m, PassScore = 80m, MaxAttempts = 3 };
+
+        var ok = model.ScoringFieldsPassSubmitGate(GradingFormatDto.AutoGraded, out var error);
+
+        ok.Should().BeTrue();
+        error.Should().BeNull();
+    }
+
+    [TestMethod]
+    public void ScoringFieldsPassSubmitGate_TeacherGraded_StalePassScore_Passes()
+    {
+        // The fields are hidden for TeacherGraded — stale values must
+        // never block submit with an invisible error.
+        var model = new AssignmentEditFormModel { MaxScore = 100m, PassScore = 200m, MaxAttempts = 0 };
+
+        var ok = model.ScoringFieldsPassSubmitGate(GradingFormatDto.TeacherGraded, out var error);
+
+        ok.Should().BeTrue();
+        error.Should().BeNull();
+    }
+
+    [TestMethod]
+    public void ScoringFieldsPassSubmitGate_AutoGraded_MaxAttemptsZero_Fails()
+    {
+        var model = new AssignmentEditFormModel { MaxAttempts = 0 };
+
+        var ok = model.ScoringFieldsPassSubmitGate(GradingFormatDto.AutoGraded, out var error);
+
+        ok.Should().BeFalse();
+        error.Should().Contain("Max attempts must be at least 1");
+    }
+
+    [TestMethod]
+    public void ScoringFieldsPassSubmitGate_AutoGraded_NegativePassScore_Fails()
+    {
+        var model = new AssignmentEditFormModel { PassScore = -1m };
+
+        var ok = model.ScoringFieldsPassSubmitGate(GradingFormatDto.AutoGraded, out var error);
+
+        ok.Should().BeFalse();
+        error.Should().Contain("Pass score cannot be negative");
+    }
 }

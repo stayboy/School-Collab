@@ -1,3 +1,4 @@
+using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Core.CQRS;
 
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentSubmission;
@@ -9,8 +10,14 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentS
 /// has been enabled by a Primary guardian review (§4.10). Inserts a new
 /// <see cref="SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion"/>
 /// and bumps CurrentVersionNumber.
+/// <para>WS-A3 (spec §3.3): the handler scores the inbound
+/// <see cref="Answers"/> via the pure <c>IScoringEngine</c>, persists
+/// per-version answer rows, and returns <c>SubmissionFeedbackDto</c> for
+/// InstantGraded (null otherwise — AutoGraded/TeacherGraded return
+/// 204 No Content).</para>
 /// </summary>
 public sealed record CreateStudentSubmissionCommand(
     Guid AssignmentId,
     Guid StudentId,
-    string? Content) : ICommand;
+    string? Content,
+    IReadOnlyList<SubmissionAnswerDto>? Answers = null) : ICommand;

@@ -210,6 +210,19 @@ public sealed class AssignmentsApiClient
         (await _http.PostAsJsonAsync($"/assignments/{assignmentId}/students/{studentId}/enable-submission", req, _jsonOptions, ct)).EnsureSuccessStatusCode();
     }
 
+    /// <summary>WS-A3 (spec §7 Q4) — clear the <c>MaxAttempts</c> cap
+    /// on a single submission. <paramref name="teacherId"/> is the
+    /// identity placeholder (D-6).</summary>
+    public async Task OverrideStudentSubmissionAttemptsAsync(Guid assignmentId, Guid studentId, Guid teacherId, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Overriding attempt cap for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
+        (await _http.PostAsJsonAsync(
+            $"/assignments/{assignmentId}/students/{studentId}/override-attempts",
+            new OverrideStudentSubmissionAttemptsRequest(teacherId),
+            _jsonOptions,
+            ct)).EnsureSuccessStatusCode();
+    }
+
     // ── WS-A1 / FR-210-212: stage one resource file (EC-4 stage-at-selection) ──
 
     /// <summary>Stages one uploaded file via the multipart staging

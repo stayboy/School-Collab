@@ -57,7 +57,11 @@ public sealed class CreateAssignmentCommandHandler(
             mandatoryReview: command.MandatoryReview,
             assignmentNumber: assignmentNumber,
             aiPromptOverride: command.AiPromptOverride,
-            archiveGraceDays: command.ArchiveGraceDays)
+            archiveGraceDays: command.ArchiveGraceDays,
+            // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
+            // cap — named args preserve the existing call style.
+            passScore: command.PassScore,
+            maxAttempts: command.MaxAttempts)
             .WithTenant(tenantProvider);
 
         if (command.Questions is { Count: > 0 })

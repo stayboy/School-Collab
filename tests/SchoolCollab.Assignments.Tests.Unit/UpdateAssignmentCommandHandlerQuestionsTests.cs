@@ -85,7 +85,10 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         IReadOnlyList<NewAttachmentDto>? attachments = null,
         IReadOnlyList<NewContentModuleDto>? contentModules = null,
         IReadOnlyList<NewResourceDto>? resources = null,
-        int archiveGraceDays = 30) =>
+        int archiveGraceDays = 30,
+        // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap.
+        decimal? passScore = null,
+        int? maxAttempts = null) =>
         new(
             Id: id,
             Title: "Updated",
@@ -103,7 +106,9 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             Attachments: attachments,
             ContentModules: contentModules,
             Resources: resources,
-            ArchiveGraceDays: archiveGraceDays);
+            ArchiveGraceDays: archiveGraceDays,
+            PassScore: passScore,
+            MaxAttempts: maxAttempts);
 
     /// <summary>Capturing fake repository. The EF Core InMemory provider has a known
     /// quirk where a Same-Context Load → Replace-Owned-Children → SaveChanges
@@ -291,5 +296,33 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         mutated!.AiPromptOverride.Should().Be("edit-on-scheduled");
         mutated.Status.Should().Be(AssignmentStatus.Scheduled,
             "the status stays Scheduled — update does not transition lifecycle");
+    }
+
+    // ── WS-A3 / spec §3.3 + §7 Q4: PassScore / MaxAttempts threading ──
+
+    [TestMethod]
+    public async Task HandleAsync_PassScoreAndMaxAttempts_ThreadedToUpdate()
+    {
+        var (db, _, tenants) = BuildScope("update-scoring-threaded");
+        var seeded = SeedDraft(db, tenants);
+        var seededId = seeded.Id;
+        db.ChangeTracker.Clear();
+        var loaded = db.Assignments.Single(a => a.Id == seededId);
+        var repo = new CapturingAssignmentRepository { Loaded = loaded };
+        var (_, cache, _) = BuildScope("update-scoring-threaded-cache");
+        var handler = NewHandler(repo, cache);
+
+        await handler.HandleAsync(SampleUpdate(seededId,
+            questions: null,
+            attachments: null,
+            passScore: 70m,
+            maxAttempts: 5));
+
+        var mutated = repo.Updated;
+        mutated.Should().NotBeNull();
+        mutated!.PassScore.Should().Be(70m,
+            "the PassScore must thread through to the updated aggregate (WS-A3 / spec §3.3)");
+        mutated.MaxAttempts.Should().Be(5,
+            "the MaxAttempts must thread through to the updated aggregate (WS-A3 / spec §7 Q4)");
     }
 }

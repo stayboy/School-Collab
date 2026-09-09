@@ -117,7 +117,13 @@ public record AssignmentSummaryDto(
     /// <see cref="ApprovalStatus"/> is <c>Approved</c>.</summary>
     Guid? ApprovedBy = null,
     /// <summary>The UTC moment an approval was granted.</summary>
-    DateTimeOffset? ApprovedAt = null);
+    DateTimeOffset? ApprovedAt = null,
+    /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
+    /// Null = no pass/fail signal.</summary>
+    decimal? PassScore = null,
+    /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
+    /// Null = unlimited.</summary>
+    int? MaxAttempts = null);
 
 public record CreateAssignmentRequest(
     string Title,
@@ -138,7 +144,13 @@ public record CreateAssignmentRequest(
     /// <summary>WS-A2 / spec §7 Q6: days added to <c>DueDate</c>
     /// before the archive sweep transitions the row to
     /// <see cref="AssignmentStatusDto.Archived"/>. Defaults to 30.</summary>
-    int ArchiveGraceDays = 30);
+    int ArchiveGraceDays = 30,
+    /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
+    /// Null = no pass/fail signal.</summary>
+    decimal? PassScore = null,
+    /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
+    /// Null = unlimited.</summary>
+    int? MaxAttempts = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -159,7 +171,13 @@ public record UpdateAssignmentRequest(
     /// <summary>WS-A2 / spec §7 Q6: days added to <c>DueDate</c>
     /// before the archive sweep transitions the row to
     /// <see cref="AssignmentStatusDto.Archived"/>. Defaults to 30.</summary>
-    int ArchiveGraceDays = 30);
+    int ArchiveGraceDays = 30,
+    /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
+    /// Null = no pass/fail signal.</summary>
+    decimal? PassScore = null,
+    /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
+    /// Null = unlimited.</summary>
+    int? MaxAttempts = null);
 
 /// <summary>Schedule an assignment to auto-publish at a future
 /// moment (spec §3.5 step 2). The sweep dispatches the existing
@@ -305,7 +323,11 @@ public record ReviewSubmissionGateRequest(
 
 public record SubmitAssignmentOnBehalfRequest(
     Guid GuardianId,
-    string? Content);
+    string? Content,
+    /// <summary>WS-A3 (spec §3.3): structured per-question answers
+    /// carried with the submission. Null/empty is valid (free-text
+    /// only).</summary>
+    IReadOnlyList<SubmissionAnswerDto>? Answers = null);
 
 public record ReviewSubmissionRequest(
     Guid TeacherId,
@@ -314,7 +336,48 @@ public record ReviewSubmissionRequest(
     string? Comments);
 
 /// <summary>Student self-submit (spec §4.11).</summary>
-public record CreateStudentSubmissionRequest(string? Content);
+public record CreateStudentSubmissionRequest(
+    string? Content,
+    /// <summary>WS-A3 (spec §3.3): structured per-question answers
+    /// carried with the submission. Null/empty is valid (free-text
+    /// only).</summary>
+    IReadOnlyList<SubmissionAnswerDto>? Answers = null);
+
+/// <summary>WS-A3 — one structured answer to one question on a
+/// submission. MC/TF carries <see cref="SelectedOptionId"/>;
+/// ShortAnswer carries <see cref="TextAnswer"/>. Exactly one of the
+/// two is expected; the
+/// <c>SubmissionAnswerValidator</c> runs cross-checks against the
+/// referenced question.</summary>
+public record SubmissionAnswerDto(
+    Guid QuestionId,
+    Guid? SelectedOptionId,
+    string? TextAnswer);
+
+/// <summary>WS-A3 (spec §3.3) — per-question correctness verdict in the
+/// <see cref="SubmissionFeedbackDto"/>. Null means the question was
+/// not auto-scorable (no model answer / no correct option); true/false
+/// is the engine's evaluation.</summary>
+public record SubmissionQuestionResultDto(
+    Guid QuestionId,
+    bool? IsCorrect);
+
+/// <summary>WS-A3 (spec §3.3) — the InstantGraded feedback envelope
+/// returned by the student-submit route. Per-question correctness plus
+/// the total score / pass flag. AutoGraded and TeacherGraded routes do
+/// NOT return this envelope (the score persists on the version but the
+/// per-question verdict is held until teacher review).</summary>
+public record SubmissionFeedbackDto(
+    IReadOnlyList<SubmissionQuestionResultDto> Questions,
+    decimal Score,
+    bool? Passed);
+
+/// <summary>WS-A3 (spec §7 Q4) — request body for the
+/// <c>POST /assignments/{id}/students/{studentId}/override-attempts</c>
+/// teacher override route. <see cref="TeacherId"/> is the identity
+/// placeholder until identity wiring lands (D-6, the
+/// <c>ReviewAssignmentRequest.TeacherId</c> posture).</summary>
+public record OverrideStudentSubmissionAttemptsRequest(Guid TeacherId);
 
 // ── Phase 7: publish recipients + submission detail (spec §8/§12) ────────────
 
@@ -367,7 +430,14 @@ public record SubmissionVersionDto(
     SubmissionSourceDto Source,
     string? Content,
     Guid? SubmittedByGuardianId,
-    DateTimeOffset SubmittedAt);
+    DateTimeOffset SubmittedAt,
+    /// <summary>WS-A3 (spec §3.3): auto-scored total for this version.
+    /// Null for TeacherGraded submissions or when no scoring ran.</summary>
+    decimal? Score = null,
+    /// <summary>WS-A3 (spec §3.3): whether this version scored at or
+    /// above the assignment's <c>PassScore</c>. Null when
+    /// <c>PassScore</c> is absent or scoring did not run.</summary>
+    bool? Passed = null);
 
 /// <summary>Teacher review/grade attached to a submission (spec §4.13).</summary>
 public record SubmissionReviewDto(

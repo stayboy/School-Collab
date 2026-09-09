@@ -47,6 +47,11 @@ public static class Extensions
         services.AddScoped<ISubmissionRepository, SubmissionRepository>();
         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
         services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
+        // WS-A3 (spec §3.3): pure scoring engine for AutoGraded /
+        // InstantGraded submissions. Handler seam — the engine itself is
+        // pure (no DbContext, no clock) and consumed by the submission
+        // handlers via constructor injection.
+        services.AddScoped<IScoringEngine, ScoringEngine>();
 
         services.AddHybridCache(options =>
         {

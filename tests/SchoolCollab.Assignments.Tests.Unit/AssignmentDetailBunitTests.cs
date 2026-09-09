@@ -504,4 +504,150 @@ public class AssignmentDetailBunitTests : BunitContext
                 "the page reloads the assignment after the schedule POST succeeds");
         }, TimeSpan.FromSeconds(15));
     }
+
+    // ── WS-A3 (spec §3.3): versions table Score + Passed columns ──────────
+
+    [TestMethod]
+    public void Detail_VersionsTable_RendersScoreAndPassed_WhenSet()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+
+        // WS-A3: register the specific /submissions backend BEFORE the generic
+        // SetupGetAssignment fallback; MockHttp v6 first-match ordering means
+        // the later empty fallback would otherwise win.
+        var studentId = Guid.NewGuid();
+        var submissionId = Guid.NewGuid();
+        var submissions = new[] {
+            new SubmissionForReviewDto(submissionId, dto.Id, dto.Title, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow),
+        };
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(submissions, _apiJsonOptions));
+
+        SetupGetAssignment(dto);
+
+        // Submission detail with two versions — both carry Score/Passed
+        // (AutoGraded / InstantGraded path).
+        var detail = new SubmissionDetailDto(
+            submissionId, dto.Id, studentId, 2, ReviewStateDto.Pending, DateTimeOffset.UtcNow,
+            new[]
+            {
+                new SubmissionVersionDto(Guid.NewGuid(), 1, SubmissionSourceDto.Student, "v1", null, DateTimeOffset.UtcNow, Score: 50m, Passed: true),
+                new SubmissionVersionDto(Guid.NewGuid(), 2, SubmissionSourceDto.GuardianOnBehalf, "v2", Guid.NewGuid(), DateTimeOffset.UtcNow, Score: 66.67m, Passed: true),
+            },
+            Review: null);
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/students/{studentId}/submission")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(detail, _apiJsonOptions));
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        // Drive the click: list of submissions shows the student; click "View" to load the detail.
+        cut.WaitForState(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Trim() == "View"));
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "View").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            // WS-A3 — versions table shows the Score values formatted to "0.##".
+            cut.Markup.Should().Contain("50", "the first version's score renders");
+            cut.Markup.Should().Contain("66.67", "the second version's score renders (2dp rounding)");
+            // The header always says "Passed"; scope to the v2 row's value cell so
+            // the assertion proves the VALUE rendered, not the header (parent-fix
+            // 2026-09-09: the escalation-authored Contain("Passed") was vacuously
+            // true against the <th>Passed</th> header).
+            cut.FindAll("table.recipients-table tbody tr")[1].QuerySelectorAll("td").ElementAt(4).TextContent.Trim()
+                .Should().Be("Passed", "the Passed value label renders for the passing version");
+            cut.Markup.Should().NotContain("Failed", "no version is marked Failed in this scenario");
+        });
+    }
+
+    [TestMethod]
+    public void Detail_VersionsTable_RendersFailedLabel_WhenPassedFalse()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+
+        // A single non-passing version — the plan's coverage line
+        // (renders "Passed"/"Failed") needs a positive "Failed" render.
+        var studentId = Guid.NewGuid();
+        var submissionId = Guid.NewGuid();
+        var submissions = new[] {
+            new SubmissionForReviewDto(submissionId, dto.Id, dto.Title, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow),
+        };
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(submissions, _apiJsonOptions));
+
+        SetupGetAssignment(dto);
+
+        var detail = new SubmissionDetailDto(
+            submissionId, dto.Id, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow,
+            new[]
+            {
+                new SubmissionVersionDto(Guid.NewGuid(), 1, SubmissionSourceDto.Student, "v1", null, DateTimeOffset.UtcNow, Score: 40m, Passed: false),
+            },
+            Review: null);
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/students/{studentId}/submission")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(detail, _apiJsonOptions));
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForState(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Trim() == "View"));
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "View").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            // Scope to the row's Passed value cell (td[4]) so the header's
+            // <th>Passed</th> text cannot satisfy the assertion vacuously
+            // (the parent-fix row-scoping pattern).
+            var versionRow = cut.FindAll("table.recipients-table tbody tr").First();
+            versionRow.QuerySelectorAll("td").ElementAt(4).TextContent.Trim()
+                .Should().Be("Failed", "a version with Passed=false must render the 'Failed' label");
+        });
+    }
+
+    [TestMethod]
+    public void Detail_VersionsTable_RendersEmDashForNullScoreAndPassed()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+
+        // WS-A3: register the specific /submissions backend BEFORE the generic
+        // SetupGetAssignment fallback so the submission row actually renders.
+        var studentId = Guid.NewGuid();
+        var submissionId = Guid.NewGuid();
+        var submissions = new[] {
+            new SubmissionForReviewDto(submissionId, dto.Id, dto.Title, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow),
+        };
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(submissions, _apiJsonOptions));
+
+        SetupGetAssignment(dto);
+
+        // TeacherGraded path: Score + Passed null → "—" fallback.
+        var detail = new SubmissionDetailDto(
+            submissionId, dto.Id, studentId, 1, ReviewStateDto.Pending, DateTimeOffset.UtcNow,
+            new[]
+            {
+                new SubmissionVersionDto(Guid.NewGuid(), 1, SubmissionSourceDto.Student, "v1", null, DateTimeOffset.UtcNow, Score: null, Passed: null),
+            },
+            Review: null);
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/students/{studentId}/submission")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(detail, _apiJsonOptions));
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForState(() => cut.FindAll("fluent-button").Any(b => b.TextContent.Trim() == "View"));
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "View").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            // Two em-dashes for the two null columns + one for the null Content (already shipped).
+            cut.Markup.Should().Contain("\u2014", "the em-dash placeholder renders for null Score/Passed");
+            // The Passed column HEADER always renders the word "Passed"; scope the
+            // value assertions to the version row so the header text cannot collide
+            // (parent-fix 2026-09-09: the escalation-authored NotContain("Passed")
+            // deterministically failed against the <th>Passed</th> header).
+            var versionRow = cut.FindAll("table.recipients-table tbody tr").Single();
+            var cells = versionRow.QuerySelectorAll("td").ToArray();
+            cells[3].TextContent.Trim().Should().Be("\u2014", "null Score renders the em-dash placeholder");
+            cells[4].TextContent.Trim().Should().Be("\u2014", "null Passed renders the em-dash placeholder");
+            cut.Markup.Should().NotContain("Failed", "no Failed value label when Passed is null");
+        });
+    }
 }

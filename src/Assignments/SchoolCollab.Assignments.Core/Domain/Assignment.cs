@@ -36,6 +36,19 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public Guid TenantId { get; private set; }
     public DateTimeOffset? DueDate { get; private set; }
     public decimal? MaxScore { get; private set; }
+    /// <summary>WS-A3 (spec §3.3) — the score threshold at which the
+    /// submission is considered passed. Null = no pass/fail signal.
+    /// Mutually validated with <see cref="MaxScore"/> in
+    /// <see cref="Create"/> / <see cref="Update"/>.</summary>
+    public decimal? PassScore { get; private set; }
+    /// <summary>WS-A3 (spec §7 Q4) — the maximum number of attempts a
+    /// student may submit on this assignment. Null = unlimited. The cap
+    /// is enforced by the submission handlers; a teacher override
+    /// (<see cref="AssignmentSubmission.OverrideAttemptLimit"/>) or a
+    /// higher value on this field clears the cap for the affected
+    /// submission. Validated &gt;= 1 when set (a 0-attempt assignment
+    /// would deadlock the literal cap check).</summary>
+    public int? MaxAttempts { get; private set; }
     public AssignmentStatus Status { get; private set; }
     public Guid CreatedByTeacherId { get; private set; }
     /// <summary>
@@ -100,12 +113,24 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         bool mandatoryReview = true,
         string? assignmentNumber = null,
         string? aiPromptOverride = null,
-        int archiveGraceDays = 30)
+        int archiveGraceDays = 30,
+        /// <summary>WS-A3 (spec §3.3): pass/fail score threshold. Null
+        /// means no pass/fail signal. When both are set must be &lt;=
+        /// <paramref name="maxScore"/>.</summary>
+        decimal? passScore = null,
+        /// <summary>WS-A3 (spec §7 Q4): max submission attempts. Null
+        /// means unlimited. When set must be &gt;= 1 (a 0-attempt
+        /// assignment would deadlock the literal cap check).</summary>
+        int? maxAttempts = null)
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
         if (targetAudienceType == TargetAudienceType.SelectedGrades && !gradeLevelId.HasValue)
             throw new ArgumentException("SelectedGrades assignments require a grade level.", nameof(gradeLevelId));
+        if (maxScore.HasValue && passScore.HasValue && passScore.Value > maxScore.Value)
+            throw new ArgumentException("Pass score must not exceed the max score.", nameof(passScore));
+        if (maxAttempts.HasValue && maxAttempts.Value < 1)
+            throw new ArgumentException("Max attempts must be at least 1.", nameof(maxAttempts));
 
         var now = DateTimeOffset.UtcNow;
         var assignment = new Assignment
@@ -120,6 +145,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             GradeLevelId = gradeLevelId,
             DueDate = dueDate,
             MaxScore = maxScore,
+            PassScore = passScore,
+            MaxAttempts = maxAttempts,
             Status = AssignmentStatus.Draft,
             CreatedByTeacherId = createdByTeacherId,
             // Mandatory review is the default (spec §4.7); callers may opt out.
@@ -141,7 +168,14 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public void Update(string title, string? description, AssignmentType assignmentType,
         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
         Guid topicId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
-        bool mandatoryReview, string? aiPromptOverride = null, int archiveGraceDays = 30)
+        bool mandatoryReview, string? aiPromptOverride = null, int archiveGraceDays = 30,
+        /// <summary>WS-A3 (spec §3.3): pass/fail score threshold. Null
+        /// means no pass/fail signal. When both are set must be &lt;=
+        /// <paramref name="maxScore"/>.</summary>
+        decimal? passScore = null,
+        /// <summary>WS-A3 (spec §7 Q4): max submission attempts. Null
+        /// means unlimited. When set must be &gt;= 1.</summary>
+        int? maxAttempts = null)
     {
         if (Status is not (AssignmentStatus.Draft or AssignmentStatus.Scheduled))
             throw new InvalidOperationException("Only draft or scheduled assignments can be updated.");
@@ -149,6 +183,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             throw new ArgumentException("Topic is required.", nameof(topicId));
         if (targetAudienceType == TargetAudienceType.SelectedGrades && !gradeLevelId.HasValue)
             throw new ArgumentException("SelectedGrades assignments require a grade level.", nameof(gradeLevelId));
+        if (maxScore.HasValue && passScore.HasValue && passScore.Value > maxScore.Value)
+            throw new ArgumentException("Pass score must not exceed the max score.", nameof(passScore));
+        if (maxAttempts.HasValue && maxAttempts.Value < 1)
+            throw new ArgumentException("Max attempts must be at least 1.", nameof(maxAttempts));
 
         Title = title.Trim();
         Description = description?.Trim();
@@ -159,6 +197,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         GradeLevelId = gradeLevelId;
         DueDate = dueDate;
         MaxScore = maxScore;
+        PassScore = passScore;
+        MaxAttempts = maxAttempts;
         MandatoryReview = mandatoryReview;
         AiPromptOverride = aiPromptOverride?.Trim();
         ArchiveGraceDays = archiveGraceDays;

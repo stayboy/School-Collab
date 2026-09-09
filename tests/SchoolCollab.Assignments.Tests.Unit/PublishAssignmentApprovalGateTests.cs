@@ -187,6 +187,7 @@ public class PublishAssignmentApprovalGateTests
         public void Update(AssignmentSubmission s) { }
         public void Add(AssignmentSubmissionVersion v) { }
         public void Add(SubmissionReview r) { }
+        public void Add(SubmissionAnswer a) { }
         public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
         public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid t, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
         public Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());

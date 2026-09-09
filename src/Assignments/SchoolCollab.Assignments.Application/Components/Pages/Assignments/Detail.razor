@@ -234,7 +234,12 @@
                                 <h5>Version history</h5>
                                 <table class="recipients-table">
                                     <thead>
-                                        <tr><th>Ver</th><th>Source</th><th>Submitted</th><th>Content</th></tr>
+                                        @* WS-A3 (spec §3.3): Score + Passed columns
+                                           surfaced for AutoGraded / InstantGraded
+                                           versions (the engine sets both; null for
+                                           TeacherGraded). The display falls back to
+                                           "—" when the value is null. *@
+                                        <tr><th>Ver</th><th>Source</th><th>Submitted</th><th>Score</th><th>Passed</th><th>Content</th></tr>
                                     </thead>
                                     <tbody>
                                         @foreach (var v in _selectedSubmission.Versions)
@@ -243,6 +248,8 @@
                                                 <td>@v.VersionNumber</td>
                                                 <td>@EnumHelper.GetDescription(v.Source)</td>
                                                 <td>@v.SubmittedAt.ToLocalTime().ToString("g")</td>
+                                                <td>@(v.Score?.ToString("0.##") ?? "—")</td>
+                                                <td>@(v.Passed is null ? "—" : v.Passed.Value ? "Passed" : "Failed")</td>
                                                 <td class="submission-content">@(v.Content ?? "—")</td>
                                             </tr>
                                         }

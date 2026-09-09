@@ -38,6 +38,11 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
 
     public void Add(AssignmentSubmissionVersion version) => db.AssignmentSubmissionVersions.Add(version);
     public void Add(SubmissionReview review) => db.SubmissionReviews.Add(review);
+    // WS-A3 (spec §3.3): append a structured answer row to the DbContext
+    // change tracker. The handler scores before creating the version,
+    // then iterates the inbound answers and adds one row per (version,
+    // question) pair — per-version analytics read pattern.
+    public void Add(SubmissionAnswer answer) => db.SubmissionAnswers.Add(answer);
 
     public Task<int> SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
 
@@ -113,7 +118,14 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
                                    (SubmissionSourceDto)(int)v.Source,
                                    v.Content,
                                    v.SubmittedByGuardianId,
-                                   v.SubmittedAt)).ToArrayAsync(ct);
+                                   v.SubmittedAt,
+                                   // WS-A3 (spec §3.3): auto-scored total + pass
+                                   // flag persisted per version. Both nullable
+                                   // — TeacherGraded submissions leave them
+                                   // null, and a missing PassScore on the
+                                   // assignment leaves Passed null.
+                                   v.Score,
+                                   v.Passed)).ToArrayAsync(ct);
 
         var review = await (from r in db.SubmissionReviews
                             where r.SubmissionId == submission.Id

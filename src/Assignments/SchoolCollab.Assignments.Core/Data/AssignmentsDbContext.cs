@@ -20,6 +20,12 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     public DbSet<AssignmentActivityGroup> AssignmentActivityGroups => Set<AssignmentActivityGroup>();
     public DbSet<ContentModule> ContentModules => Set<ContentModule>();
     public DbSet<AssignmentResource> AssignmentResources => Set<AssignmentResource>();
+    // WS-A3 (spec §3.3): structured per-question submission answers
+    // persisted per version — standalone tenant entity (the
+    // ar-4 standalone-entity pattern); FK declared once from the
+    // AssignmentSubmissionVersion aggregate side (cascade on version
+    // delete) — no navigation on either side.
+    public DbSet<SubmissionAnswer> SubmissionAnswers => Set<SubmissionAnswer>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -48,6 +54,9 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         // pattern so constructor-injected tenant-id accessors are available.
         modelBuilder.ApplyConfiguration(new ContentModuleConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new AssignmentResourceConfiguration(() => CurrentTenantId));
+        // WS-A3: structured per-question submission answers. Same explicit
+        // configuration pattern — constructor-injected tenant-id accessor.
+        modelBuilder.ApplyConfiguration(new SubmissionAnswerConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
 
         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed

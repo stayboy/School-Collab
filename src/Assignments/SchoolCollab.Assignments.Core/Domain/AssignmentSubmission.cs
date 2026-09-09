@@ -25,6 +25,21 @@ public sealed class AssignmentSubmission : ITenantEntity, IEntity, IAuditableEnt
     public Guid? SubmissionGateId { get; private set; }
     public ReviewState ReviewState { get; private set; }
 
+    /// <summary>WS-A3 (spec §7 Q4) — UTC moment a teacher overrode the
+    /// assignment's <c>MaxAttempts</c> cap for THIS submission. Null
+    /// means no override has been granted. The cap check treats a
+    /// non-null value as clearing the cap (re-stamping is idempotent —
+    /// the override is permanent for the submission; raising
+    /// <c>MaxAttempts</c> on a draft also helps via the standard edit
+    /// path).</summary>
+    public DateTimeOffset? AttemptLimitOverriddenAt { get; private set; }
+
+    /// <summary>WS-A3 (spec §7 Q4) — the id of the user who granted the
+    /// attempt-cap override. Null until <see cref="OverrideAttemptLimit"/>
+    /// runs. The placeholder posture mirrors
+    /// <c>ReviewAssignmentRequest.TeacherId</c> (D-6).</summary>
+    public Guid? AttemptLimitOverriddenBy { get; private set; }
+
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -71,6 +86,25 @@ public sealed class AssignmentSubmission : ITenantEntity, IEntity, IAuditableEnt
     internal void ApplyReview(ReviewState reviewState)
     {
         ReviewState = reviewState;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>WS-A3 (spec §7 Q4) — a teacher cleared the
+    /// assignment's <c>MaxAttempts</c> cap for this submission. The
+    /// override is permanent for the submission (re-stamping is
+    /// idempotent — the override sets <see cref="AttemptLimitOverriddenAt"/>
+    /// once and the cap check reads <c>is null</c>; no further guard is
+    /// needed). Called by <c>OverrideStudentSubmissionAttemptsCommandHandler</c>
+    /// — the enable-submission command's surface area (the assignment
+    /// itself remains draft-editable to raise <c>MaxAttempts</c> as
+    /// well).</summary>
+    internal void OverrideAttemptLimit(Guid teacherId)
+    {
+        if (teacherId == Guid.Empty)
+            throw new ArgumentException("Teacher id is required.", nameof(teacherId));
+
+        AttemptLimitOverriddenAt = DateTimeOffset.UtcNow;
+        AttemptLimitOverriddenBy = teacherId;
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 }

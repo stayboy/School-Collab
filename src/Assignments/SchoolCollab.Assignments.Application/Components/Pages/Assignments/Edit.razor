@@ -73,6 +73,13 @@
                 <FormRow Label="Max Score" For="assignmentEditMaxScore">
                     <FluentNumberField Id="assignmentEditMaxScore" @bind-Value="_model.MaxScore" class="narrow-field" />
                 </FormRow>
+
+                @* WS-A3 (spec §3.3 + §7 Q4): pass score + max attempts —
+                   hidden for TeacherGraded, rendered for AutoGraded +
+                   InstantGraded (the QuestionsPassSubmitGate conditional
+                   precedent). *@
+                <ScoringFieldsSection Model="_model" GradingFormat="SelectedGradingFormat" />
+
                 <FormRow Label="Guardian review" For="assignmentEditMandatoryReview">
                     <FluentCheckbox Id="assignmentEditMandatoryReview" @bind-Value="_mandatoryReview" Label="Require guardian review before student submits" />
                 </FormRow>
@@ -136,6 +143,19 @@
 
     private readonly AssignmentEditFormModel _model = new();
 
+    /// <summary>WS-A3 (spec §3.3 + §7 Q4): the page's currently selected
+    /// <see cref="GradingFormatDto"/>, projected from the dropdown's
+    /// parsed int — falls back to the loaded item's value when the
+    /// dropdown is unset, mirroring the page's existing int-parse
+    /// pattern. Used by the <see cref="ScoringFieldsSection"/> so the
+    /// Pass Score + Max Attempts fields render only for
+    /// AutoGraded / InstantGraded (and the
+    /// <c>ScoringFieldsPassSubmitGate</c> sees the live selection).</summary>
+    private GradingFormatDto SelectedGradingFormat =>
+        _selectedGradingFormat is not null
+            ? (GradingFormatDto)int.Parse(_selectedGradingFormat.Value)
+            : _item?.GradingFormat ?? GradingFormatDto.TeacherGraded;
+
     protected override async Task OnInitializedAsync()
     {
         _loadCts = new CancellationTokenSource();
@@ -197,6 +217,16 @@
                 return;
             }
 
+            // WS-A3 (spec §3.3 + §7 Q4): pass score + max attempts
+            // client-side gate (mirror of the server-side
+            // Assignment.Update validation). Runs only for AutoGraded +
+            // InstantGraded — TeacherGraded always passes.
+            if (!_model.ScoringFieldsPassSubmitGate(SelectedGradingFormat, out var scoringError))
+            {
+                _error = scoringError;
+                return;
+            }
+
             Logger.LogInformation("Updating assignment {AssignmentId}", Id);
 
             var req = new UpdateAssignmentRequest(
@@ -215,7 +245,14 @@
                 Attachments: null,
                 ContentModules: null,
                 Resources: null,
-                ArchiveGraceDays: _model.ArchiveGraceDays);
+                ArchiveGraceDays: _model.ArchiveGraceDays,
+                // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
+                // attempt cap threaded to the wire surface — the
+                // round-trip pass-through mirrors the ArchiveGraceDays
+                // pattern from round 5 (an edit never drops the loaded
+                // values).
+                PassScore: _model.PassScore,
+                MaxAttempts: _model.MaxAttempts);
 
             await Api.UpdateAsync(Id, req, ct);
             Nav.NavigateTo("/assignments");

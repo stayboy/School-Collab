@@ -280,6 +280,11 @@
                                 <FormRow Label="Max Score" For="assignmentCreateMaxScore">
                                     <FluentNumberField Id="assignmentCreateMaxScore" @bind-Value="_model.MaxScore" Style="width: 12rem;" />
                                 </FormRow>
+
+                                @* WS-A3 (spec §3.3 + §7 Q4): pass score + max
+                                   attempts — hidden for TeacherGraded, rendered
+                                   for AutoGraded + InstantGraded. *@
+                                <ScoringFieldsSection Model="_model" GradingFormat="_selectedGradingFormat" />
                             </FluentStack>
                         </FluentEditForm>
                     </section>
@@ -763,6 +768,17 @@
             if (!_model.QuestionsPassSubmitGate(_selectedGradingFormat, out var gateError))
             {
                 _error = gateError;
+                return;
+            }
+
+            // WS-A3 (spec §3.3 + §7 Q4): pass score + max attempts
+            // client-side gate (mirror of the server-side
+            // Assignment.Create / Update validation). Runs only for
+            // AutoGraded + InstantGraded — TeacherGraded always
+            // passes (fields hidden, stale values never block).
+            if (!_model.ScoringFieldsPassSubmitGate(_selectedGradingFormat, out var scoringError))
+            {
+                _error = scoringError;
                 return;
             }
 

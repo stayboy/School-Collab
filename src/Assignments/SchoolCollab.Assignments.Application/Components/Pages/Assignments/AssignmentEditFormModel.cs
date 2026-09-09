@@ -46,6 +46,19 @@ public sealed class AssignmentEditFormModel
     /// (decision (j) recorded adjustment).</summary>
     public int ArchiveGraceDays { get; set; }
 
+    /// <summary>WS-A3 (spec §3.3): pass/fail score threshold on the
+    /// assignment (decimal?, null = no pass/fail signal). Hidden in the
+    /// UI for TeacherGraded assignments (the
+    /// <see cref="ScoringFieldsSection"/> conditional); surfaced for
+    /// AutoGraded + InstantGraded only. Round-trips through the
+    /// create / update request.</summary>
+    public decimal? PassScore { get; set; }
+
+    /// <summary>WS-A3 (spec §7 Q4): max submission attempts (int?, null
+    /// = unlimited). When set must be &gt;= 1. Same conditional rule
+    /// as <see cref="PassScore"/> — hidden for TeacherGraded.</summary>
+    public int? MaxAttempts { get; set; }
+
     /// <summary>Fixed question page size for the editor + review paginator
     /// (spec §0 decision 9 / FR-240).</summary>
     public const int QuestionPageSize = 5;
@@ -75,6 +88,10 @@ public sealed class AssignmentEditFormModel
         DueDate = assignment.DueDate?.DateTime;
         MaxScore = assignment.MaxScore;
         ArchiveGraceDays = assignment.ArchiveGraceDays;
+        // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap
+        // — round-trip so the edit page never resets them to defaults.
+        PassScore = assignment.PassScore;
+        MaxAttempts = assignment.MaxAttempts;
     }
 
     /// <summary>
@@ -148,7 +165,11 @@ public sealed class AssignmentEditFormModel
             MandatoryReview: mandatoryReview,
             AiPromptOverride: AiPromptOverride,
             Questions: questions,
-            Attachments: attachments);
+            Attachments: attachments,
+            // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
+            // cap threaded to the wire surface.
+            PassScore: PassScore,
+            MaxAttempts: MaxAttempts);
     }
 
     /// <summary>
@@ -346,5 +367,46 @@ public sealed class AssignmentEditFormModel
             return;
         }
         Attachments.RemoveAt(index);
+    }
+
+    /// <summary>WS-A3 (spec §3.3 + §7 Q4) — client-side submit gate
+    /// mirroring the server-side <c>Assignment.Create</c> /
+    /// <c>Assignment.Update</c> validation rules on
+    /// <see cref="PassScore"/> + <see cref="MaxAttempts"/>. Mirrors the
+    /// <see cref="QuestionsPassSubmitGate"/> shape: returns false +
+    /// the first violation message, or true with <c>error = null</c>.
+    /// For <see cref="GradingFormatDto.TeacherGraded"/> the gate
+    /// always passes — the fields are hidden (stale values must not
+    /// block submit with an invisible error).</summary>
+    public bool ScoringFieldsPassSubmitGate(GradingFormatDto gradingFormat, out string? error)
+    {
+        if (gradingFormat is not (GradingFormatDto.AutoGraded or GradingFormatDto.InstantGraded))
+        {
+            // TeacherGraded (and any future non-auto format): the
+            // fields are hidden, never block submit.
+            error = null;
+            return true;
+        }
+
+        if (PassScore is decimal passScore && passScore < 0m)
+        {
+            error = "Pass score cannot be negative.";
+            return false;
+        }
+
+        if (MaxAttempts is int maxAttempts && maxAttempts < 1)
+        {
+            error = "Max attempts must be at least 1.";
+            return false;
+        }
+
+        if (PassScore.HasValue && MaxScore.HasValue && PassScore.Value > MaxScore.Value)
+        {
+            error = "Pass score must not exceed the max score.";
+            return false;
+        }
+
+        error = null;
+        return true;
     }
 }

@@ -25,6 +25,19 @@ public sealed class AssignmentSubmissionVersion : ITenantEntity, IEntity, IAudit
     public DateTimeOffset SubmittedAt { get; private set; }
     public string? Content { get; private set; }
 
+    /// <summary>WS-A3 (spec §3.3) — auto-scored total for this version,
+    /// set at creation by the scoring path for AutoGraded /
+    /// InstantGraded submissions. Null for TeacherGraded and when no
+    /// auto-scorable questions are present. Decimal(5, 2) at the EF
+    /// layer.</summary>
+    public decimal? Score { get; private set; }
+
+    /// <summary>WS-A3 (spec §3.3) — whether this version scored at or
+    /// above the assignment's <c>PassScore</c> threshold (when set).
+    /// Null when <c>PassScore</c> is absent on the assignment, when the
+    /// version is TeacherGraded, or when scoring did not run.</summary>
+    public bool? Passed { get; private set; }
+
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -38,7 +51,15 @@ public sealed class AssignmentSubmissionVersion : ITenantEntity, IEntity, IAudit
         SubmissionSource source,
         Guid? submittedByGuardianId,
         DateTimeOffset submittedAt,
-        string? content)
+        string? content,
+        /// <summary>WS-A3 (spec §3.3) — auto-scored total. Null for
+        /// TeacherGraded submissions and when no scoring ran (set by
+        /// the submission handler before calling this factory).</summary>
+        decimal? score = null,
+        /// <summary>WS-A3 (spec §3.3) — pass/fail flag against the
+        /// assignment's <c>PassScore</c> threshold. Null when the
+        /// threshold is absent or scoring did not run.</summary>
+        bool? passed = null)
     {
         return new AssignmentSubmissionVersion
         {
@@ -52,6 +73,8 @@ public sealed class AssignmentSubmissionVersion : ITenantEntity, IEntity, IAudit
             SubmittedByGuardianId = submittedByGuardianId,
             SubmittedAt = submittedAt,
             Content = content,
+            Score = score,
+            Passed = passed,
             CreatedAt = submittedAt,
             UpdatedAt = submittedAt
         };

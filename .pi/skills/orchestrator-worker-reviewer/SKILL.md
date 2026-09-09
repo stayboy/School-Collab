@@ -85,9 +85,9 @@ format live in `references/models.md`. Summary:
 | Role | pi default | clinepass | Tiers |
 |---|---|---|---|
 | Orchestrator | `ollama/glm-5.3-flash:cloud` | `cline-pass/glm-5.3` | 3 only |
-| Worker | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 1–3 |
+| Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` | 1–3 |
 | Reviewer | `ollama/kimi-k2.7-code:cloud` | `cline-pass/kimi-k2.7-code` | 2–3 |
-| UI Tester | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` | 3 + UI |
+| UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` | 3 + UI |
 
 ## Provider profiles
 
@@ -151,9 +151,11 @@ the tester never derives or expands its own scope.
    **Build-escalation pattern (worker block rule):** when a worker pass times
    out, stalls, or hangs mid-round (30-min cap, runaway shell command, repeated
    build failures it cannot recover from), the parent interrupts it and
-   re-dispatches the SAME pass scope as an ESCALATION PASS to the reviewer
-   agent on `ollama/kimi-k2.7-code:cloud` — the reviewer model IS the
-   escalation executor — which reconciles the on-disk state first, then
+   re-dispatches the SAME pass scope as an ESCALATION PASS on
+   `ollama/kimi-k2.7-code:cloud` — the reviewer model IS the escalation
+   executor — via a WRITE-CAPABLE agent shell (the `worker` or `delegate`
+   agent; the `reviewer` agent shell is read-only by design and cannot
+   execute passes) — which reconciles the on-disk state first, then
    completes the blocked pass. Subsequent worker passes revert to the worker
    model. **Escalated work is reviewed by the HIGHER model: the static
    re-verification of any pass completed via escalation runs on
