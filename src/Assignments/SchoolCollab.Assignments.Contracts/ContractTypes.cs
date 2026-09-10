@@ -49,6 +49,25 @@ public enum QuestionTypeDto
     ShortAnswer = 2
 }
 
+/// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Domain.ModuleType</c>
+/// (WS-A1 / spec §4.10). Student-facing content module kind on an
+/// assignment — video or guide.</summary>
+public enum ModuleTypeDto
+{
+    [Description("Video")] Video = 0,
+    [Description("Guide")] Guide = 1
+}
+
+/// <summary>Mirrors <c>SchoolCollab.Assignments.Core.Domain.ResourceKind</c>
+/// (WS-A1 / spec §3.2 / FR-211). AI-generation input kind — link, file,
+/// or video.</summary>
+public enum ResourceKindDto
+{
+    [Description("Link")] Url = 0,
+    [Description("File")] File = 1,
+    [Description("Video")] Video = 2
+}
+
 public record AssignmentSummaryDto(
     Guid Id,
     string Title,
@@ -81,7 +100,9 @@ public record CreateAssignmentRequest(
     bool MandatoryReview = true,
     string? AiPromptOverride = null,
     IReadOnlyList<NewQuestionDto>? Questions = null,
-    IReadOnlyList<NewAttachmentDto>? Attachments = null);
+    IReadOnlyList<NewAttachmentDto>? Attachments = null,
+    IReadOnlyList<NewContentModuleDto>? ContentModules = null,
+    IReadOnlyList<NewResourceDto>? Resources = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -96,7 +117,9 @@ public record UpdateAssignmentRequest(
     bool MandatoryReview = true,
     string? AiPromptOverride = null,
     IReadOnlyList<NewQuestionDto>? Questions = null,
-    IReadOnlyList<NewAttachmentDto>? Attachments = null);
+    IReadOnlyList<NewAttachmentDto>? Attachments = null,
+    IReadOnlyList<NewContentModuleDto>? ContentModules = null,
+    IReadOnlyList<NewResourceDto>? Resources = null);
 
 /// <summary>An inbound question option on the create/update request (AI spec §3.2).</summary>
 public record NewQuestionOptionDto(string OptionText, bool IsCorrect);
@@ -116,6 +139,67 @@ public record NewQuestionDto(
 /// (AI spec §3.2). <see cref="StoragePath"/> is opaque to the UI — the file is
 /// already staged to storage before submit (EC-4).</summary>
 public record NewAttachmentDto(
+    string FileName,
+    string ContentType,
+    long FileSize,
+    string StoragePath);
+
+/// <summary>An inbound content module on the create/update request
+/// (WS-A1 / spec §4.10 / FR-210–212). The wizard's Step-2 Resources UI
+/// section projects to this DTO and the create payload carries it
+/// alongside the attachments. <see cref="Url"/> is required for both
+/// <see cref="ModuleTypeDto.Video"/> and <see cref="ModuleTypeDto.Guide"/>
+/// (external embed URL or staged file URL returned by
+/// <c>POST /assignments/attachments/stage</c>).</summary>
+public record NewContentModuleDto(
+    ModuleTypeDto ModuleType,
+    string? Title,
+    string Url,
+    string? StoragePath,
+    int DisplayOrder,
+    int MinCompletionThresholdPercent = 100,
+    bool IsRequired = false);
+
+/// <summary>A persisted content module row (WS-A1). Read-back surfaces
+/// land in later rounds; declared here so the contract shape is
+/// discoverable.</summary>
+public record ContentModuleDto(
+    Guid Id,
+    Guid AssignmentId,
+    ModuleTypeDto ModuleType,
+    string? Title,
+    string Url,
+    string? StoragePath,
+    int DisplayOrder,
+    int MinCompletionThresholdPercent,
+    bool IsRequired);
+
+/// <summary>An inbound AI-generation input on the create/update request
+/// (WS-A1 / spec §3.2 / FR-211). The kind matrix is validator-owned —
+/// each kind has a different required-field shape (Url OR StoragePath,
+/// or exactly one of the two for Video).</summary>
+public record NewResourceDto(
+    ResourceKindDto ResourceKind,
+    string? Url,
+    string? StoragePath,
+    string? DisplayName,
+    bool IncludedInGeneration = true);
+
+/// <summary>A persisted resource row (WS-A1). Read-back surfaces land in
+/// later rounds.</summary>
+public record ResourceDto(
+    Guid Id,
+    Guid AssignmentId,
+    ResourceKindDto ResourceKind,
+    string? Url,
+    string? StoragePath,
+    string? DisplayName,
+    bool IncludedInGeneration);
+
+/// <summary>Result of <c>POST /assignments/attachments/stage</c> (WS-A1 /
+/// FR-210 / EC-4). The wizard stages one file at selection time and
+/// rides <see cref="StoragePath"/> on the create payload.</summary>
+public record StagedAttachmentDto(
     string FileName,
     string ContentType,
     long FileSize,

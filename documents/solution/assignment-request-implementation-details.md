@@ -559,6 +559,43 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   (reviewer P2 — cleanup candidate).
   **Carried:** Resources upload UI deferred to ar-4 (IFileStore + staging endpoint);
   a live-model probe (manual wizard exercise against the real AI provider).
+- `ar-4-modules-resources` — **IN FLIGHT, PAUSED ON PROVIDER QUOTA 2026-09-06** (ollama.com
+  429 — second occurrence; round 3 hit it too). Worker pass 1 died ~20 min in while mid-edit
+  (“checking a type name” — expect an in-flight compile error). Plan verified (997 lines,
+  58-file list, decisions (a)–(e), cut-line protocol). **On-disk state: 54/57 plan files
+  present** — all backend steps landed (domain entities + EF configs + migration
+  `20260906053255_AddContentModulesAndResources`, commands/handlers/validator,
+  `IFileStore` + `LocalFileStore` + options, staging endpoint + `StagedFileSweeper`,
+  AppHost params, ApiClient `StageAttachmentAsync`, `ResourcesSection.razor`/.razor.css
+  + Create.razor wiring). **MISSING: `tests/SchoolCollab.Assignments.Tests.Unit/ResourcesSectionBunitTests.cs`**
+  + unknown mid-edit compile state. **Resume:** dispatch a FRESH worker (not the revived
+  heavy run — quota lesson) with the bounded remainder: reconcile tree vs plan, write the
+  missing bUnit file, fix any in-flight compile errors, build 0 errors, test
+  Assignments.Tests.Unit + Assignments.Api.Tests.Unit + ArchitectureTests green, scratch
+  report. Failed run revivable if needed: `subagent({action:"resume",
+  id:"d852aa79-a845-42fb-8a85-2ad6c4a3d08e"})`. Then the normal close: patch freeze +
+  authoritative ∥ reviewer → accept → UI-tester pass (UI round confirmed).
+- `ar-4-modules-resources` — **CLOSED 2026-09-06** (`documents/rounds/round-ar-4-modules-resources.md`
+  + `diffs-ar-4-modules-resources.patch`). The second full five-agent + rework + re-verify
+  cycle of the train (worker pass 1 died on the 429 quota wall mid-edit; a fresh remainder
+  worker finished — 3 type fixes + the missing bUnit file). Delivered (WS-A1):
+  ContentModule + AssignmentResource standalone tenant entities + EF configs + additive
+  migration `20260906053255_AddContentModulesAndResources`; draft-only module/resource
+  command wiring with typed `AssignmentContentValidationException`/`StagedFileRejectedException`;
+  `IFileStore` + `LocalFileStore` + options; staging endpoint `POST /assignments/attachments/stage`
+  + `StagedFileSweeper` BackgroundService (reference-checked sweep); 4 AppHost params +
+  configuration.md §2/§11/§12/§13 mapping; wizard `ResourcesSection` UI (upload/remove/list/confirm)
+  completing round-3's deferral; ApiClient `StageAttachmentAsync`. Reviewer P2-only;
+  tester found 1 genuine P1 (count-cap message reported the attempted count as the limit)
+  + 2 P2s → rework iteration 1 fixed all three (shared `AttachmentUploadPolicy.MaximumFileCount`
+  constant as single source of truth) → tester re-verification PASS. Authoritative:
+  build 0 errors; Assignments 256/0 + Api 8/0 + Architecture 20/0.
+  **Residuals (accepted):** LocalFileStore.ResolveWithinRoot visibility; unused cts in
+  StagedFileSweepService; StagedFileValidator extension-case handling (follow-up note);
+  unused AttachmentStagingFailed.Result. **Next:** round 5 = ar-5-lifecycle (A2
+  Scheduled/Approval/Archive + flags + Index/Detail surfaces); D1 module-progress gating
+  is Phase-2 ward-experience territory; the ar-1 EF owned-children verification residual
+  is still open.
 
 ---
 

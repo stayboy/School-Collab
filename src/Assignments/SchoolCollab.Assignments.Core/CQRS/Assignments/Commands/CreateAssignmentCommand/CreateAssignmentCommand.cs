@@ -6,9 +6,11 @@ using SchoolCollab.Assignments.Core.Domain;
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
 
 /// <summary>Create a new draft assignment (spec §3.2 / §2.6 FR-250/251/230/210).
-/// <see cref="Questions"/> and <see cref="Attachments"/> are optional trailing
-/// parameters — manual assignments may omit them entirely. <see cref="AiPromptOverride"/>
-/// is the per-assignment override appended to the embedded AI prompt (decision 8).</summary>
+/// <see cref="Questions"/>, <see cref="Attachments"/>, <see cref="ContentModules"/>,
+/// and <see cref="Resources"/> are optional trailing parameters — manual assignments
+/// may omit them entirely. <see cref="AiPromptOverride"/> is the per-assignment
+/// override appended to the embedded AI prompt (decision 8). Content modules +
+/// resources are the WS-A1 children (spec §4.10 / FR-210–212).</summary>
 public sealed record CreateAssignmentCommand(
     string Title,
     string? Description,
@@ -22,4 +24,6 @@ public sealed record CreateAssignmentCommand(
     bool MandatoryReview = true,
     string? AiPromptOverride = null,
     IReadOnlyList<NewQuestionDto>? Questions = null,
-    IReadOnlyList<NewAttachmentDto>? Attachments = null) : ICommand;
+    IReadOnlyList<NewAttachmentDto>? Attachments = null,
+    IReadOnlyList<NewContentModuleDto>? ContentModules = null,
+    IReadOnlyList<NewResourceDto>? Resources = null) : ICommand;

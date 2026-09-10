@@ -78,6 +78,16 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Navigation(x => x.Questions).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
         builder.Navigation(x => x.Reviews).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
         builder.Navigation(x => x.Attachments).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
+        // WS-A1: standalone child collections — FK declared once from the
+        // aggregate side; Cascade covers assignment deletion; removing from
+        // the collection severs the required FK, so EF Core deletes the
+        // row at SaveChanges (the update handler's replacement semantics).
+        builder.HasMany(x => x.Modules).WithOne().HasForeignKey(m => m.AssignmentId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.Navigation(x => x.Modules).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
+        builder.HasMany(x => x.Resources).WithOne().HasForeignKey(r => r.AssignmentId)
+            .OnDelete(DeleteBehavior.Cascade);
+        builder.Navigation(x => x.Resources).UsePropertyAccessMode(PropertyAccessMode.Field).AutoInclude();
 
         builder.OwnsMany(x => x.Attachments, a =>
         {

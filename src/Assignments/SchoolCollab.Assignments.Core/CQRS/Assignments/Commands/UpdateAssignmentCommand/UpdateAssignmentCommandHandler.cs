@@ -1,11 +1,13 @@
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using SchoolCollab.Core.CQRS;
 using SchoolCollab.Assignments.Contracts.Events;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 
 namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
@@ -14,6 +16,7 @@ public sealed class UpdateAssignmentCommandHandler(
     IAssignmentRepository repository,
     IIntegrationEventPublisher publisher,
     HybridCache cache,
+    IOptions<AttachmentUploadOptions> uploadOptions,
     ILogger<UpdateAssignmentCommandHandler> logger) : ICommandHandler<UpdateAssignmentCommand>
 {
     public async Task HandleAsync(UpdateAssignmentCommand command, CancellationToken cancellationToken = default)
@@ -29,6 +32,9 @@ public sealed class UpdateAssignmentCommandHandler(
         {
             QuestionOptionDtoValidator.ValidateQuestions(command.Questions);
         }
+        AssignmentContentValidator.ValidateModules(command.ContentModules);
+        AssignmentContentValidator.ValidateResources(command.Resources);
+        AssignmentContentValidator.ValidateAttachments(command.Attachments, uploadOptions.Value);
 
         assignment.Update(
             command.Title,
@@ -85,14 +91,62 @@ public sealed class UpdateAssignmentCommandHandler(
             }
         }
 
+        // WS-A1: full-replacement semantics for content modules + resources
+        // (mirrors the questions / attachments pattern above): snapshot
+        // existing ids, remove each, then re-add inbound. When the inbound
+        // collection is null we preserve the current children (manual edit
+        // may touch only the assignment properties); a non-null but empty
+        // collection clears the children. AddModule uses the aggregate's
+        // running _modules.Count as the DisplayOrder index so the inbound
+        // list lands in contiguous 0..n order (EC-7 analog).
+        if (command.ContentModules is not null)
+        {
+            var existingModuleIds = assignment.Modules.Select(m => m.Id).ToList();
+            foreach (var mid in existingModuleIds)
+            {
+                assignment.RemoveModule(mid);
+            }
+
+            foreach (var m in command.ContentModules)
+            {
+                assignment.AddModule(
+                    (ModuleType)m.ModuleType,
+                    m.Url,
+                    m.Title,
+                    m.StoragePath,
+                    m.MinCompletionThresholdPercent,
+                    m.IsRequired);
+            }
+        }
+
+        if (command.Resources is not null)
+        {
+            var existingResourceIds = assignment.Resources.Select(r => r.Id).ToList();
+            foreach (var rid in existingResourceIds)
+            {
+                assignment.RemoveResource(rid);
+            }
+
+            foreach (var r in command.Resources)
+            {
+                assignment.AddResource(
+                    (ResourceKind)r.ResourceKind,
+                    r.Url,
+                    r.StoragePath,
+                    r.DisplayName,
+                    r.IncludedInGeneration);
+            }
+        }
+
         // DetectChanges is required so the change tracker picks up field-backed
-        // mutations on owned-type collections (Questions / Attachments) before
-        // SaveChanges runs. The Configuration sets
-        // UsePropertyAccessMode(PropertyAccessMode.Field) for these navigations,
-        // and the InMemory provider (used in unit tests) does not detect
-        // field-level list mutations automatically. PostgreSQL at runtime uses
-        // change-tracking proxies and would also benefit from an explicit
-        // DetectChanges after this kind of replacement pattern.
+        // mutations on the standalone child collections (Modules / Resources)
+        // as well as the owned-type collections (Questions / Attachments)
+        // before SaveChanges runs. The Configuration sets
+        // UsePropertyAccessMode(PropertyAccessMode.Field) for these
+        // navigations, and the InMemory provider (used in unit tests) does
+        // not detect field-level list mutations automatically. PostgreSQL at
+        // runtime uses change-tracking proxies and would also benefit from
+        // an explicit DetectChanges after this kind of replacement pattern.
         repository.DetectChanges();
 
         foreach (var _ in assignment.DomainEvents.OfType<Domain.Events.AssignmentUpdatedEvent>())

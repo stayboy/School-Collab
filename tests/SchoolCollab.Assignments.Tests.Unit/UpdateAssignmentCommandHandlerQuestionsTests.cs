@@ -3,12 +3,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Hybrid;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
 using SchoolCollab.Assignments.Core.Data;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
+using SchoolCollab.Assignments.Core.Services;
 using SchoolCollab.Core.Messaging;
 using SchoolCollab.Core.Tenancy;
 
@@ -48,6 +50,7 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             repo,
             publisher.Object,
             cache,
+            Options.Create(new AttachmentUploadOptions()),
             NullLogger<UpdateAssignmentCommandHandler>.Instance);
     }
 
@@ -78,7 +81,9 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
         Guid id,
         string? aiPromptOverride = null,
         IReadOnlyList<NewQuestionDto>? questions = null,
-        IReadOnlyList<NewAttachmentDto>? attachments = null) =>
+        IReadOnlyList<NewAttachmentDto>? attachments = null,
+        IReadOnlyList<NewContentModuleDto>? contentModules = null,
+        IReadOnlyList<NewResourceDto>? resources = null) =>
         new(
             Id: id,
             Title: "Updated",
@@ -93,7 +98,9 @@ public class UpdateAssignmentCommandHandlerQuestionsTests
             MandatoryReview: true,
             AiPromptOverride: aiPromptOverride,
             Questions: questions,
-            Attachments: attachments);
+            Attachments: attachments,
+            ContentModules: contentModules,
+            Resources: resources);
 
     /// <summary>Capturing fake repository. The EF Core InMemory provider has a known
     /// quirk where a Same-Context Load → Replace-Owned-Children → SaveChanges

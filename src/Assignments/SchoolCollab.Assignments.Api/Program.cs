@@ -22,6 +22,10 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // (e.g. "multipleChoice") — register the converter on the same options block
     // as the other assignment enums so existing callers stay valid.
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<QuestionTypeDto>());
+    // WS-A1 / FR-210-212: content module + AI-generation resource enums
+    // round-trip as strings to keep the wizard's payload self-describing.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ModuleTypeDto>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ResourceKindDto>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
@@ -64,6 +68,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITopicAssignme
     SchoolCollab.Assignments.Api.Services.TopicAssignmentLookupHttpClient>();
 
 builder.Services.AddOpenApi();
+
+// WS-A1 / decision (b): orphan sweep for staged uploads. The
+// StagedFileSweepService is a hosted BackgroundService (sanctioned
+// pre-worker hosted-service seam — no Assignments worker exists yet).
+builder.Services.AddStagedFileSweep();
 
 // Auth + tenancy (OIDC via Keycloak)
 builder.Services.AddAuthAndTenancy(builder.Configuration);
