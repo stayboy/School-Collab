@@ -22,4 +22,6 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt))
             .ToListAsync(ct);
     }
+
+    public void DetectChanges() => Db.ChangeTracker.DetectChanges();
 }

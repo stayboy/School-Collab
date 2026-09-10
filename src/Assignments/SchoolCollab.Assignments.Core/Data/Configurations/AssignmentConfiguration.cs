@@ -58,6 +58,8 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
 
         builder.Property(x => x.PublishedAt);
 
+        builder.Property(x => x.AiPromptOverride).HasMaxLength(4000);
+
 
         builder.HasIndex(x => x.TopicId)
             .HasDatabaseName("ix_assignments_topic_id");
@@ -97,6 +99,7 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
             q.Property(q => q.QuestionType).IsRequired().HasDefaultValue(QuestionType.MultipleChoice);
             q.Property(q => q.DisplayOrder).IsRequired();
             q.Property(q => q.CorrectOptionId);
+            q.Property(q => q.ModelAnswer).HasMaxLength(2000);
 
             q.OwnsMany(q => q.Options, o =>
             {
