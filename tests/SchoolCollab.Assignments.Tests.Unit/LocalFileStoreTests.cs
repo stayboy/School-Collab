@@ -179,10 +179,18 @@ public class LocalFileStoreTests
         // traversal guard: a path that resolves outside the expected
         // root must throw — proving the root is AppContext.BaseDirectory,
         // not CWD or null.
+        //
+        // NOTE: the probe path must be rooted on the *running* OS.
+        // A hardcoded "C:/..." literal is rooted on Windows only —
+        // Path.IsPathRooted("C:/...") is false on Linux, so the guard
+        // under test never fires there (CI failure, PR #229).
+        // A leading directory separator is rooted on every OS.
+        var rootedProbe =
+            Path.DirectorySeparatorChar + "probe-outside-root.txt";
         var act = () =>
         {
             // A rooted path is always rejected regardless of root choice.
-            var _ = store.ResolveWithinRoot("C:/Windows/System32/notepad.exe");
+            var _ = store.ResolveWithinRoot(rootedProbe);
         };
         act.Should().Throw<ArgumentException>();
     }
