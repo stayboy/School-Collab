@@ -56,7 +56,8 @@ public sealed class CreateAssignmentCommandHandler(
             createdByTeacherId: Guid.Empty, // TODO: wire up authenticated teacher ID
             mandatoryReview: command.MandatoryReview,
             assignmentNumber: assignmentNumber,
-            aiPromptOverride: command.AiPromptOverride)
+            aiPromptOverride: command.AiPromptOverride,
+            archiveGraceDays: command.ArchiveGraceDays)
             .WithTenant(tenantProvider);
 
         if (command.Questions is { Count: > 0 })

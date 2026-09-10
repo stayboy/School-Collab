@@ -6,7 +6,24 @@ public enum AssignmentStatusDto
 {
     Draft = 0,
     Published = 1,
-    Closed = 2
+    Closed = 2,
+    /// <summary>Mirror of <c>SchoolCollab.Assignments.Core.Domain.AssignmentStatus.Scheduled</c>
+    /// (spec §3.5 / WS-A2). Serializes as the string "Scheduled".</summary>
+    Scheduled = 3,
+    /// <summary>Mirror of <c>SchoolCollab.Assignments.Core.Domain.AssignmentStatus.Archived</c>
+    /// (spec §7 Q6 — read-only retention). Serializes as the string "Archived".</summary>
+    Archived = 4
+}
+
+/// <summary>Mirror of <c>SchoolCollab.Assignments.Core.Domain.ApprovalStatus</c>
+/// (spec §7 Q2). The wire surface is <c>null</c> when the assignment has
+/// not been submitted for approval yet. Serializes as the string
+/// name (Pending / Approved / Rejected).</summary>
+public enum ApprovalStatusDto
+{
+    Pending = 0,
+    Approved = 1,
+    Rejected = 2
 }
 
 public enum AssignmentTypeDto
@@ -85,7 +102,22 @@ public record AssignmentSummaryDto(
     bool MandatoryReview,
     Guid CreatedByTeacherId,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    /// <summary>When the assignment is scheduled to auto-publish
+    /// (spec §3.5 step 2). Null in any other state.</summary>
+    DateTimeOffset? AvailableFromUtc = null,
+    /// <summary>Days the archive sweep adds to <c>DueDate</c> before
+    /// archiving the assignment (spec §7 Q6).</summary>
+    int ArchiveGraceDays = 30,
+    /// <summary>The approval status when the
+    /// <c>FEATURE:RequireAssignmentApproval</c> flag is on
+    /// (spec §7 Q2). Null when never submitted.</summary>
+    ApprovalStatusDto? ApprovalStatus = null,
+    /// <summary>The user who approved the assignment. Null until
+    /// <see cref="ApprovalStatus"/> is <c>Approved</c>.</summary>
+    Guid? ApprovedBy = null,
+    /// <summary>The UTC moment an approval was granted.</summary>
+    DateTimeOffset? ApprovedAt = null);
 
 public record CreateAssignmentRequest(
     string Title,
@@ -102,7 +134,11 @@ public record CreateAssignmentRequest(
     IReadOnlyList<NewQuestionDto>? Questions = null,
     IReadOnlyList<NewAttachmentDto>? Attachments = null,
     IReadOnlyList<NewContentModuleDto>? ContentModules = null,
-    IReadOnlyList<NewResourceDto>? Resources = null);
+    IReadOnlyList<NewResourceDto>? Resources = null,
+    /// <summary>WS-A2 / spec §7 Q6: days added to <c>DueDate</c>
+    /// before the archive sweep transitions the row to
+    /// <see cref="AssignmentStatusDto.Archived"/>. Defaults to 30.</summary>
+    int ArchiveGraceDays = 30);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -119,7 +155,25 @@ public record UpdateAssignmentRequest(
     IReadOnlyList<NewQuestionDto>? Questions = null,
     IReadOnlyList<NewAttachmentDto>? Attachments = null,
     IReadOnlyList<NewContentModuleDto>? ContentModules = null,
-    IReadOnlyList<NewResourceDto>? Resources = null);
+    IReadOnlyList<NewResourceDto>? Resources = null,
+    /// <summary>WS-A2 / spec §7 Q6: days added to <c>DueDate</c>
+    /// before the archive sweep transitions the row to
+    /// <see cref="AssignmentStatusDto.Archived"/>. Defaults to 30.</summary>
+    int ArchiveGraceDays = 30);
+
+/// <summary>Schedule an assignment to auto-publish at a future
+/// moment (spec §3.5 step 2). The sweep dispatches the existing
+/// publish command when <see cref="AvailableFromUtc"/> arrives.</summary>
+public record ScheduleAssignmentRequest(DateTimeOffset AvailableFromUtc);
+
+/// <summary>Approve a pending assignment (spec §7 Q2). The
+/// <see cref="ApproverId"/> is a placeholder until identity wiring
+/// lands (the <c>ReviewAssignmentRequest.TeacherId</c> posture).</summary>
+public record ApproveAssignmentRequest(Guid ApproverId);
+
+/// <summary>Reject a pending assignment (spec §7 Q2). See
+/// <see cref="ApproveAssignmentRequest"/> for the identity posture.</summary>
+public record RejectAssignmentRequest(Guid ApproverId);
 
 /// <summary>An inbound question option on the create/update request (AI spec §3.2).</summary>
 public record NewQuestionOptionDto(string OptionText, bool IsCorrect);

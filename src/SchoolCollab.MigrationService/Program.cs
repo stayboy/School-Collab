@@ -96,6 +96,7 @@ try
             await SeedEnableGradeLevelSetupOnEnrollDialogAsync(settingsDb, logger);
             await SeedEnableEnrollmentValidationAsync(settingsDb, logger);
             await SeedEnableActivityGroupsAsync(settingsDb, logger);
+            await SeedRequireAssignmentApprovalAsync(settingsDb, logger);
 
             // Seed the default EntityCodeRule blueprints (student/staff/assignment
             // auto-generation rules) — spec §3.7. Idempotent; NULL-tenant shared rows.
@@ -336,6 +337,45 @@ static async Task SeedEnableActivityGroupsAsync(SettingsDbContext db, Microsoft.
     var flag = FeatureFlag.Create(
         key,
         "Enable activity-group management (groups, memberships, SelectedGroups assignment targeting)",
+        null,
+        isEnabled: false);
+    db.FeatureFlags.Add(flag);
+    db.FlagAuditEntries.Add(FlagAuditEntry.Create(
+        tenantId: null,
+        featureFlagId: flag.Id,
+        featureFlagKey: flag.Key,
+        changeKind: FlagChangeKind.Created,
+        previousIsEnabled: null,
+        newIsEnabled: flag.IsEnabled,
+        reason: "Initial seed by migration service",
+        actorId: actorId,
+        actorDisplayName: actorName));
+
+    await db.SaveChangesAsync();
+    logger.LogInformation("Seeded feature flag {Key} (IsEnabled={IsEnabled})", key, flag.IsEnabled);
+}
+
+// WS-A2 / spec §7 Q2: gates the assignment approval workflow. Default
+// OFF — the flag ships dark (tenants opt in via /config-flags, no
+// pilot-tenant override at seed time). Idempotent on the normalised
+// key (same shape as SeedEnableActivityGroupsAsync).
+static async Task SeedRequireAssignmentApprovalAsync(SettingsDbContext db, Microsoft.Extensions.Logging.ILogger logger)
+{
+    const string actorId = "system:migrator";
+    const string actorName = "Migration Service";
+
+    var key = FeatureFlag.NormalizeKey(FeatureFlagKeys.RequireAssignmentApproval);
+
+    var exists = await db.FeatureFlags.AnyAsync(f => f.Key == key);
+    if (exists)
+    {
+        logger.LogInformation("Seed flag {Key} already present; skipping", key);
+        return;
+    }
+
+    var flag = FeatureFlag.Create(
+        key,
+        "Require approval before assignment publish",
         null,
         isEnabled: false);
     db.FeatureFlags.Add(flag);

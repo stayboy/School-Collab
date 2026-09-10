@@ -1,4 +1,5 @@
 using SchoolCollab.Assignments.Core.Domain.Events;
+using SchoolCollab.Assignments.Core.Domain.Exceptions;
 using SchoolCollab.Core.Data;
 using SchoolCollab.Core.Tenancy;
 
@@ -48,6 +49,25 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// <summary>Optional free-text override for the assignment-question-generation
     /// system prompt (spec §3.2 / decision 8). Null falls back to the embedded prompt.</summary>
     public string? AiPromptOverride { get; private set; }
+    /// <summary>When the assignment is scheduled to auto-publish
+    /// (spec §3.5 step 2 / WS-A2). Cleared on unpublish. Null while
+    /// the assignment is in any other state.</summary>
+    public DateTimeOffset? AvailableFromUtc { get; private set; }
+    /// <summary>Days added to <see cref="DueDate"/> to compute the
+    /// archive moment (spec §7 Q6). Defaults to 30 — the archive
+    /// sweep honours per-row overrides.</summary>
+    public int ArchiveGraceDays { get; private set; }
+    /// <summary>The approval status (spec §7 Q2). Null when the
+    /// assignment has not been submitted for approval — the default
+    /// state. Only meaningful when the
+    /// <c>FEATURE:RequireAssignmentApproval</c> flag is on.</summary>
+    public ApprovalStatus? ApprovalStatus { get; private set; }
+    /// <summary>The id of the user who approved the assignment.
+    /// Cleared on <see cref="Reject"/>. Null until the assignment is
+    /// approved.</summary>
+    public Guid? ApprovedBy { get; private set; }
+    /// <summary>The UTC moment an approval was granted.</summary>
+    public DateTimeOffset? ApprovedAt { get; private set; }
     public uint RowVersion { get; private set; }
     public DateTimeOffset CreatedAt { get; private set; }
     public DateTimeOffset UpdatedAt { get; private set; }
@@ -79,7 +99,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         Guid createdByTeacherId = default,
         bool mandatoryReview = true,
         string? assignmentNumber = null,
-        string? aiPromptOverride = null)
+        string? aiPromptOverride = null,
+        int archiveGraceDays = 30)
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
@@ -105,6 +126,9 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             MandatoryReview = mandatoryReview,
             AssignmentNumber = assignmentNumber?.Trim(),
             AiPromptOverride = aiPromptOverride?.Trim(),
+            // WS-A2: archive grace window (spec §7 Q6). Defaults to 30 —
+            // the archive sweep honours per-row overrides.
+            ArchiveGraceDays = archiveGraceDays,
             // TenantId will be set by the command handler via ITenantEntity.WithTenant()
             CreatedAt = now,
             UpdatedAt = now
@@ -117,10 +141,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     public void Update(string title, string? description, AssignmentType assignmentType,
         GradingFormat gradingFormat, TargetAudienceType targetAudienceType,
         Guid topicId, Guid? gradeLevelId, DateTimeOffset? dueDate, decimal? maxScore,
-        bool mandatoryReview, string? aiPromptOverride = null)
+        bool mandatoryReview, string? aiPromptOverride = null, int archiveGraceDays = 30)
     {
-        if (Status != AssignmentStatus.Draft)
-            throw new InvalidOperationException("Only draft assignments can be updated.");
+        if (Status is not (AssignmentStatus.Draft or AssignmentStatus.Scheduled))
+            throw new InvalidOperationException("Only draft or scheduled assignments can be updated.");
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
         if (targetAudienceType == TargetAudienceType.SelectedGrades && !gradeLevelId.HasValue)
@@ -137,14 +161,24 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         MaxScore = maxScore;
         MandatoryReview = mandatoryReview;
         AiPromptOverride = aiPromptOverride?.Trim();
+        ArchiveGraceDays = archiveGraceDays;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentUpdatedEvent(Id, Title));
     }
 
-    public void Publish()
+    public void Publish(bool approvalRequired = false)
     {
+        if (Status == AssignmentStatus.Archived)
+            throw new InvalidOperationException("Archived assignments are read-only.");
         if (Status == AssignmentStatus.Published)
             return;
+
+        // WS-A2 / spec §7 Q2: when the tenant has enabled the approval
+        // flag the publish path is gated on an explicit approve decision.
+        // Serve both immediate publish (Draft) and publish-now (Scheduled)
+        // with the same handler — the window has fired by definition.
+        if (approvalRequired && ApprovalStatus != Domain.ApprovalStatus.Approved)
+            throw new AssignmentApprovalRequiredException("This assignment requires approval before it can be published.");
 
         Status = AssignmentStatus.Published;
         PublishedAt = DateTimeOffset.UtcNow;
@@ -154,22 +188,114 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
 
     public void Unpublish()
     {
-        if (Status != AssignmentStatus.Published)
-            throw new InvalidOperationException("Only published assignments can be unpublished.");
+        if (Status is not (AssignmentStatus.Published or AssignmentStatus.Scheduled))
+            throw new InvalidOperationException("Only published or scheduled assignments can be unpublished.");
 
         Status = AssignmentStatus.Draft;
+        AvailableFromUtc = null;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentUnpublishedEvent(Id, Title));
     }
 
     public void Close()
     {
+        if (Status == AssignmentStatus.Archived)
+            throw new InvalidOperationException("Archived assignments are read-only.");
         if (Status == AssignmentStatus.Closed)
             return;
 
         Status = AssignmentStatus.Closed;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentClosedEvent(Id, Title));
+    }
+
+    /// <summary>Schedules an assignment to auto-publish at
+    /// <paramref name="availableFromUtc"/> (spec §3.5 step 2). Allowed
+    /// from Draft OR Scheduled (reschedule). Past dates are rejected
+    /// with <see cref="ArgumentException"/>. When
+    /// <paramref name="approvalRequired"/> is true the tenant has
+    /// enabled the approval flag — the assignment must already carry
+    /// an <see cref="ApprovalStatus.Approved"/> decision.</summary>
+    public void Schedule(DateTimeOffset availableFromUtc, bool approvalRequired = false)
+    {
+        if (Status is AssignmentStatus.Archived)
+            throw new InvalidOperationException("Archived assignments are read-only.");
+        if (Status is not (AssignmentStatus.Draft or AssignmentStatus.Scheduled))
+            throw new InvalidOperationException("Only draft or scheduled assignments can be scheduled.");
+        if (availableFromUtc <= DateTimeOffset.UtcNow)
+            throw new ArgumentException("Available-from must be in the future.", nameof(availableFromUtc));
+        if (approvalRequired && ApprovalStatus != Domain.ApprovalStatus.Approved)
+            throw new AssignmentApprovalRequiredException("This assignment requires approval before it can be scheduled.");
+
+        AvailableFromUtc = availableFromUtc;
+        Status = AssignmentStatus.Scheduled;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new AssignmentScheduledEvent(Id, Title));
+    }
+
+    /// <summary>Archives the assignment (spec §7 Q6 — read-only
+    /// retention). Idempotent on already-Archived rows; allowed from
+    /// Published OR Closed only. The PublishedAt / DueDate history is
+    /// preserved (the archive sweep never blanks the row).</summary>
+    public void Archive()
+    {
+        if (Status == AssignmentStatus.Archived)
+            return;
+        if (Status is not (AssignmentStatus.Published or AssignmentStatus.Closed))
+            throw new InvalidOperationException("Only published or closed assignments can be archived.");
+
+        Status = AssignmentStatus.Archived;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new AssignmentArchivedEvent(Id, Title));
+    }
+
+    /// <summary>Submits a Draft assignment for approval (spec §7 Q2).
+    /// Any other status is a programming error — the API surface
+    /// routes this only from Draft rows.</summary>
+    public void SubmitForApproval()
+    {
+        if (Status != AssignmentStatus.Draft)
+            throw new InvalidOperationException("Only draft assignments can be submitted for approval.");
+
+        ApprovalStatus = Domain.ApprovalStatus.Pending;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new AssignmentApprovalSubmittedEvent(Id, Title));
+    }
+
+    /// <summary>Approves a pending assignment (spec §7 Q2). Only valid
+    /// when the row is currently <see cref="ApprovalStatus.Pending"/>.
+    /// The empty-approver guard is argument-hygiene — the API surface
+    /// uses <see cref="Guid.Empty"/> as the placeholder until identity
+    /// wiring lands.</summary>
+    public void Approve(Guid approverId)
+    {
+        if (approverId == Guid.Empty)
+            throw new ArgumentException("Approver is required.", nameof(approverId));
+        if (ApprovalStatus != Domain.ApprovalStatus.Pending)
+            throw new InvalidOperationException("Only pending assignments can be approved.");
+
+        ApprovalStatus = Domain.ApprovalStatus.Approved;
+        ApprovedBy = approverId;
+        ApprovedAt = DateTimeOffset.UtcNow;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new AssignmentApprovedEvent(Id, approverId));
+    }
+
+    /// <summary>Rejects a pending assignment (spec §7 Q2). Same posture
+    /// as <see cref="Approve"/>; clears any prior stamps because the
+    /// row is now terminal until the teacher edits and re-submits.</summary>
+    public void Reject(Guid approverId)
+    {
+        if (approverId == Guid.Empty)
+            throw new ArgumentException("Approver is required.", nameof(approverId));
+        if (ApprovalStatus != Domain.ApprovalStatus.Pending)
+            throw new InvalidOperationException("Only pending assignments can be rejected.");
+
+        ApprovalStatus = Domain.ApprovalStatus.Rejected;
+        ApprovedBy = null;
+        ApprovedAt = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+        _domainEvents.Add(new AssignmentRejectedEvent(Id, approverId));
     }
 
     public AssignmentQuestion AddQuestion(string questionText, QuestionType questionType, int displayOrder, string? modelAnswer = null)

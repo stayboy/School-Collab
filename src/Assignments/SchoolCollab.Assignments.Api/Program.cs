@@ -26,6 +26,11 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // round-trip as strings to keep the wizard's payload self-describing.
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ModuleTypeDto>());
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ResourceKindDto>());
+    // WS-A2 / spec §7 Q2: approval status is nullable on the wire — the
+    // converter is registered on the same options block so the field
+    // round-trips as the string name (Pending / Approved / Rejected)
+    // and null stays null.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ApprovalStatusDto>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
@@ -73,6 +78,11 @@ builder.Services.AddOpenApi();
 // StagedFileSweepService is a hosted BackgroundService (sanctioned
 // pre-worker hosted-service seam — no Assignments worker exists yet).
 builder.Services.AddStagedFileSweep();
+
+// WS-A2 / spec §3.5 step 8 / §7 Q6: scheduled-publish + archive
+// sweeps. Same hosted-service seam — pure cores in Services/, hosted
+// services here, Add{Layer}() extension in the api assembly.
+builder.Services.AddAssignmentLifecycleSweeps();
 
 // Auth + tenancy (OIDC via Keycloak)
 builder.Services.AddAuthAndTenancy(builder.Configuration);

@@ -60,6 +60,18 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
 
         builder.Property(x => x.AiPromptOverride).HasMaxLength(4000);
 
+        // ── WS-A2 lifecycle (spec §3.5 step 2 / §7 Q2 / Q6) ─────────────────
+        // Scheduled auto-publish window + per-row archive grace + approval
+        // workflow (nullable ApprovalStatus = not yet submitted). The
+        // ArchiveGraceDays default mirrors the spec's 30-day retention
+        // floor; the EF default ensures existing rows land on a sane value
+        // when the migration backfills NULLs.
+        builder.Property(x => x.AvailableFromUtc);
+        builder.Property(x => x.ArchiveGraceDays).HasDefaultValue(30);
+        builder.Property(x => x.ApprovalStatus);
+        builder.Property(x => x.ApprovedBy);
+        builder.Property(x => x.ApprovedAt);
+
 
         builder.HasIndex(x => x.TopicId)
             .HasDatabaseName("ix_assignments_topic_id");

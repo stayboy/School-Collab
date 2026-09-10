@@ -35,7 +35,11 @@ public sealed class AssignmentsApiClient
                 // enums round-trip as strings on the staging endpoint +
                 // create payload.
                 new JsonStringEnumConverter<ModuleTypeDto>(),
-                new JsonStringEnumConverter<ResourceKindDto>()
+                new JsonStringEnumConverter<ResourceKindDto>(),
+                // WS-A2 / spec §7 Q2: approval status is nullable on the wire
+                // (null = not yet submitted). The string converter serializes
+                // Pending / Approved / Rejected; null stays null.
+                new JsonStringEnumConverter<ApprovalStatusDto>()
             }
         };
     }
@@ -110,6 +114,40 @@ public sealed class AssignmentsApiClient
     {
         _logger.LogInformation("Closing assignment {AssignmentId}", id);
         (await _http.PostAsync($"/assignments/{id}/close", null, ct)).EnsureSuccessStatusCode();
+    }
+
+    // ── WS-A2 / spec §3.5 step 2 + §7 Q2 lifecycle ───────────────────────────
+
+    /// <summary>Schedule an assignment to auto-publish at the given
+    /// UTC moment. The scheduled-publish sweep dispatches the
+    /// existing publish command when the moment arrives.</summary>
+    public async Task ScheduleAsync(Guid id, DateTimeOffset availableFromUtc, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Scheduling assignment {AssignmentId} for {AvailableFromUtc}", id, availableFromUtc);
+        (await _http.PostAsJsonAsync($"/assignments/{id}/schedule", new ScheduleAssignmentRequest(availableFromUtc), _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Submit a draft assignment for approval (spec §7 Q2).</summary>
+    public async Task SubmitForApprovalAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Submitting assignment {AssignmentId} for approval", id);
+        (await _http.PostAsync($"/assignments/{id}/submit-for-approval", null, ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Approve a pending assignment. <paramref name="approverId"/>
+    /// is the identity placeholder — wired to auth in a later phase.</summary>
+    public async Task ApproveAsync(Guid id, Guid approverId, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Approving assignment {AssignmentId}", id);
+        (await _http.PostAsJsonAsync($"/assignments/{id}/approve", new ApproveAssignmentRequest(approverId), _jsonOptions, ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Reject a pending assignment. <paramref name="approverId"/>
+    /// is the identity placeholder — wired to auth in a later phase.</summary>
+    public async Task RejectAsync(Guid id, Guid approverId, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Rejecting assignment {AssignmentId}", id);
+        (await _http.PostAsJsonAsync($"/assignments/{id}/reject", new RejectAssignmentRequest(approverId), _jsonOptions, ct)).EnsureSuccessStatusCode();
     }
 
     public async Task ReviewAsync(Guid id, ReviewAssignmentRequest req, CancellationToken ct = default)

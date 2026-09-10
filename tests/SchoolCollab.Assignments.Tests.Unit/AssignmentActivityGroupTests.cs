@@ -59,6 +59,7 @@ public class AssignmentActivityGroupTests
                new FakeTenantProvider(TenantId),
                broadcaster,
                new FakeNotificationPolicyResolver(),
+               new FakeFeatureFlagService(),
                new FakeHybridCache(),
                NullLogger<PublishAssignmentCommandHandler>.Instance);
 
@@ -118,6 +119,7 @@ public class AssignmentActivityGroupTests
             new FakeTenantProvider(TenantId),
             new FakeBroadcaster(),
             new FakeNotificationPolicyResolver(),
+            new FakeFeatureFlagService(),
             new FakeHybridCache(),
             NullLogger<PublishAssignmentCommandHandler>.Instance);
 
@@ -382,6 +384,10 @@ public class AssignmentActivityGroupTests
         public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default)
             => Task.FromResult(new List<AssignmentSummary>());
         public void DetectChanges() { /* no-op for fake */ }
+        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
+        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSweepCandidate>());
     }
 
     private sealed class FakeSubmissionRepository : ISubmissionRepository

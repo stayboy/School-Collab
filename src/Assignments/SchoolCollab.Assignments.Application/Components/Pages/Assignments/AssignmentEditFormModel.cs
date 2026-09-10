@@ -39,6 +39,13 @@ public sealed class AssignmentEditFormModel
     /// set, the override is sent as a user-role framing message.</summary>
     public string? AiPromptOverride { get; set; }
 
+    /// <summary>WS-A2 (spec §7 Q6): archive grace window in days.
+    /// Persisted on the row so the archive sweep honours per-row
+    /// overrides; the default of 30 mirrors the spec's retention floor.
+    /// Pass-through only — no visible wizard/edit field this round
+    /// (decision (j) recorded adjustment).</summary>
+    public int ArchiveGraceDays { get; set; }
+
     /// <summary>Fixed question page size for the editor + review paginator
     /// (spec §0 decision 9 / FR-240).</summary>
     public const int QuestionPageSize = 5;
@@ -67,6 +74,7 @@ public sealed class AssignmentEditFormModel
         Description = assignment.Description;
         DueDate = assignment.DueDate?.DateTime;
         MaxScore = assignment.MaxScore;
+        ArchiveGraceDays = assignment.ArchiveGraceDays;
     }
 
     /// <summary>

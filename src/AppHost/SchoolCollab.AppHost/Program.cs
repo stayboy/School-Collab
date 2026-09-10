@@ -69,6 +69,12 @@ var assignmentUploadMaxFileBytes  = builder.AddParameter("assignment-upload-max-
 var assignmentUploadMaxTotalBytes = builder.AddParameter("assignment-upload-max-total-bytes");
 var assignmentUploadAllowedExt    = builder.AddParameter("assignment-upload-allowed-extensions");
 
+// WS-A2 / spec §7 Q2: gates the assignment approval workflow. Default OFF
+// (the flag ships dark — tenants opt in via /config-flags). The
+// parameter is the IConfiguration cold-start value; the Settings
+// Config-service row is the runtime authority (tenant-overridable).
+var requireAssignmentApproval = builder.AddParameter("feature-flag-require-assignment-approval");
+
 // AI provider configuration that the `settings-ai` host reads at startup.
 // Centralised here so an operator (or another developer on first clone) can
 // see every knob they may need to set in exactly one place — the AppHost's
@@ -177,6 +183,7 @@ var assignmentsApi = builder.AddProject<Projects.SchoolCollab_Assignments_Api>("
     .WithEnvironment("Assignments__AttachmentUpload__MaxFileSizeBytes", assignmentUploadMaxFileBytes)
     .WithEnvironment("Assignments__AttachmentUpload__MaxTotalSizeBytes", assignmentUploadMaxTotalBytes)
     .WithEnvironment("Assignments__AttachmentUpload__AllowedExtensions", assignmentUploadAllowedExt)
+    .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
     .WaitFor(rabbit)
     .WaitFor(redis)
     .WaitForCompletion(migrator);
@@ -213,6 +220,7 @@ builder.AddProject<Projects.SchoolCollab_Admin>("admin")
     .WithReference(assignmentsApi)
     .WithReference(studentsApi)
     .WithReference(redis)
+    .WithEnvironment("FeatureFlags__FEATURE__RequireAssignmentApproval", requireAssignmentApproval)
     .WaitFor(settingsApi)
     .WaitFor(settingsAi)
     .WaitFor(assignmentsApi)

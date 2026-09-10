@@ -1,0 +1,39 @@
+@* Assignment schedule dialog (WS-A2 / spec §3.5 step 2). Mirrors
+   the structure of PublishDialog.razor: DialogShellBase form-model
+   dialog with a single date input + the shared DialogShellFooter. *@
+@inherits DialogShellBase<ScheduleFormModel, ScheduleResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <p class="dialog-hint">The assignment publishes automatically at 00:00 UTC on the chosen date.</p>
+
+        <FluentDatePicker Label="Available from"
+                          @bind-Value="Model.AvailableFrom"
+                          class="full-width mb-3" />
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Schedule" OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    protected override string SubmitText => "Schedule";
+    protected override string SavingText => "Scheduling...";
+
+    protected override Task<ScheduleResult?> SubmitAsync(ScheduleFormModel model)
+    {
+        if (!model.AvailableFrom.HasValue)
+        {
+            Error = "Pick an available-from date.";
+            return Task.FromResult<ScheduleResult?>(null);
+        }
+
+        // Land at 00:00 UTC of the chosen calendar date — the sweep tick
+        // has a deterministic moment to compare against.
+        var availableFromUtc = new DateTimeOffset(model.AvailableFrom.Value.Date, TimeSpan.Zero);
+        return Task.FromResult<ScheduleResult?>(new ScheduleResult(availableFromUtc));
+    }
+}

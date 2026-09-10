@@ -19,9 +19,9 @@
         {
             <FluentMessageBar Intent="MessageIntent.Error">Assignment not found or is not in Draft status.</FluentMessageBar>
         }
-        else if (_item.Status != AssignmentStatusDto.Draft)
+        else if (_item.Status is not (AssignmentStatusDto.Draft or AssignmentStatusDto.Scheduled))
         {
-            <FluentMessageBar Intent="MessageIntent.Warning">Only Draft assignments can be edited.</FluentMessageBar>
+            <FluentMessageBar Intent="MessageIntent.Warning">Only Draft and Scheduled assignments can be edited.</FluentMessageBar>
             <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="mt-2">Back to List</FluentButton>
         }
         else
@@ -147,7 +147,7 @@
             _item = await Api.GetByIdAsync(Id, ct);
             if (_disposed) return;
 
-            if (_item is not null && _item.Status == AssignmentStatusDto.Draft)
+            if (_item is not null && _item.Status is (AssignmentStatusDto.Draft or AssignmentStatusDto.Scheduled))
             {
                 // Project the assignment DTO into the shared form model via the
                 // tested on-model mapping (AssignmentEditFormModel.LoadFrom).
@@ -209,7 +209,13 @@
                 _item.GradeLevelId,
                 _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
                 _model.MaxScore,
-                _mandatoryReview);
+                _mandatoryReview,
+                AiPromptOverride: null,
+                Questions: null,
+                Attachments: null,
+                ContentModules: null,
+                Resources: null,
+                ArchiveGraceDays: _model.ArchiveGraceDays);
 
             await Api.UpdateAsync(Id, req, ct);
             Nav.NavigateTo("/assignments");

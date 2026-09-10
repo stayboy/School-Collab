@@ -53,7 +53,12 @@ public sealed class ListAssignmentsQueryHandler(
                     s.MandatoryReview,
                     s.CreatedByTeacherId,
                     s.CreatedAt,
-                    s.UpdatedAt)).ToArray();
+                    s.UpdatedAt,
+                    s.AvailableFromUtc,
+                    s.ArchiveGraceDays,
+                    (ApprovalStatusDto?)s.ApprovalStatus,
+                    s.ApprovedBy,
+                    s.ApprovedAt)).ToArray();
             },
             CacheOptions,
             tags: ["assignments"],

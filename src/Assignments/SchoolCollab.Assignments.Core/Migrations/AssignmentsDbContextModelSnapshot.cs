@@ -33,6 +33,24 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("character varying(4000)")
                         .HasColumnName("ai_prompt_override");
 
+                    b.Property<int?>("ApprovalStatus")
+                        .HasColumnType("integer")
+                        .HasColumnName("approval_status");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<Guid?>("ApprovedBy")
+                        .HasColumnType("uuid")
+                        .HasColumnName("approved_by");
+
+                    b.Property<int>("ArchiveGraceDays")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(30)
+                        .HasColumnName("archive_grace_days");
+
                     b.Property<string>("AssignmentNumber")
                         .HasMaxLength(50)
                         .HasColumnType("character varying(50)")
@@ -43,6 +61,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(0)
                         .HasColumnName("assignment_type");
+
+                    b.Property<DateTimeOffset?>("AvailableFromUtc")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("available_from_utc");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("timestamp with time zone")

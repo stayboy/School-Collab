@@ -47,7 +47,8 @@ public sealed class UpdateAssignmentCommandHandler(
             command.DueDate,
             command.MaxScore,
             command.MandatoryReview,
-            command.AiPromptOverride);
+            command.AiPromptOverride,
+            archiveGraceDays: command.ArchiveGraceDays);
 
         // Full-replacement semantics for questions + attachments (decision b):
         // snapshot existing child ids, remove each, then re-add inbound. Re-index

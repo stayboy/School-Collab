@@ -620,3 +620,119 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
 7. **Playwright coverage** — no Assignments Playwright project; family-portal
    E2E rounds may add `SchoolCollab.Assignments.Tests.Playwright` (precedents:
    Settings/Students Playwright projects).
+- `ar-5-lifecycle` — **IN FLIGHT (PLAN PHASE), PAUSED at user request 2026-09-07**. State: branch
+  `stack/5-ar-5-lifecycle` @ `04425760` (round-4 tip; tracked tree clean; PR #223 open in
+  GitHub stack #224 with #218/#219/#221). The parent completed the full design + code
+  exploration (spec §3.5/§7, WS-A2, aggregate/routes/DTOs/Index/Detail/publish-handler/AppHost)
+  and dispatched the orchestrator plan run with adjudicated decisions; plan pass 1 died on a
+  TRANSIENT 502 (dropped provider connection — NOT the 429 quota wall) and was revived
+  mid-authoring (revived run `682e5cc5`, original `a9955d3b`). At pause time the round doc
+  did not exist on disk. The revived run may land `documents/rounds/round-ar-5-lifecycle.md`
+  (header + ## Plan) in the background — if its completion notification arrives, treat the
+  plan phase COMPLETE and hold for the owner's resume; do NOT dispatch the worker without it.
+  **Plan directives (a)–(k) digest (full form = the plan-run task text; the plan doc should
+  carry them):** (a) AssignmentStatus += Scheduled=3/Archived=4 + DTO mirror; sweep all
+  status consumers (Update guard Draft||Scheduled, Unpublish Published||Scheduled→Draft
+  clearing AvailableFromUtc, Close throws on Archived, Publish throws on Archived; Index
+  filter/badges/row-actions; Detail badge/actions); DELETE blocked when Archived (Q6
+  retention). (b) Additive migration AddAssignmentLifecycleAndApproval: AvailableFromUtc
+  DateTimeOffset?, ArchiveGraceDays int default 30, ApprovalStatus int? (0=Pending,1=Approved,
+  2=Rejected), ApprovedBy Guid?, ApprovedAt DateTimeOffset?; new ApprovalStatus enum + DTO
+  mirror. (c) Domain: Schedule(availableFromUtc, approvalRequired=false) from Draft|Scheduled
+  (past dates rejected); Publish(approvalRequired=false) — approval guard: flag on && not
+  Approved → typed AssignmentApprovalRequiredException; PublishNow ≡ early Publish of a
+  Scheduled assignment (no separate method); Archive() from Published|Closed idempotent;
+  SubmitForApproval (Draft→Pending), Approve(approverId) (Pending→Approved+stamps),
+  Reject(approverId) (Pending→Rejected); Update allowed in Scheduled; Create/Update gain
+  archiveGraceDays; new domain events Scheduled/Archived/ApprovalSubmitted/Approved/Rejected
+  mirroring the existing event records. (d) FEATURE:RequireAssignmentApproval —
+  FeatureFlagKeys + AppHost param `feature-flag-require-assignment-approval` + fan-out to
+  assignments-api AND admin + Admin appsettings fallback + MigrationService seed (global
+  default OFF, NO pilot override; mirror EnableActivityGroups precedent) +
+  configuration.md §2/§5 mapping (same round, AGENTS.md rule). (e) Handlers inject
+  IFeatureFlagService and pass approvalRequired into domain; sweeps resolve via the shared
+  command path. (f) Commands: ScheduleAssignment / SubmitAssignmentForApproval /
+  ApproveAssignment(assignmentId, approverId request-field per D-6, Guid.Empty placeholder in
+  UI — TeacherId precedent) / RejectAssignment / ArchiveAssignment (sweep-only, no route);
+  endpoints inherit the group's authenticated-only auth. (g) Sweeps in assignments-api
+  mirroring StagedFileSweeper: ScheduledPublishSweepService (Scheduled && AvailableFromUtc
+  <= now → dispatch PublishAssignmentCommand full flow), ArchiveSweepService ((Published|Closed)
+  && DueDate+ArchiveGraceDays <= now → dispatch ArchiveAssignmentCommand); per-candidate
+  try/catch; repo gains the two candidate-query methods. (h) Endpoints POST /{id}/schedule,
+  /{id}/submit-for-approval, /{id}/approve, /{id}/reject; AssignmentApprovalRequiredException →
+  400 {message}; AssignmentSummaryDto += AvailableFromUtc, ArchiveGraceDays, ApprovalStatus,
+  ApprovedBy, ApprovedAt (repo ListAsync projection + both query handlers);
+  Create/UpdateAssignmentRequest += ArchiveGraceDays default 30. (i) ApiClient: ScheduleAsync,
+  SubmitForApprovalAsync, ApproveAsync, RejectAsync. (j) UI (definite UI round): Index filter
+  +3/+4 + badges + row actions (Scheduled: Edit/Publish now/Unpublish; Archived: Review only;
+  flag-on Draft: Submit for Approval instead of Publish — inject IFeatureFlagService); Detail
+  approval section (FeatureFlagGate: status chip + Submit for Approval / Approve + Reject with
+  confirm) + Schedule dialog (dialog-ui skill pattern, date-only → 00:00 UTC) + Publish now +
+  Cancel schedule; AssignmentEditFormModel ArchiveGraceDays pass-through (no visible field);
+  Create.razor UNTOUCHED. (k) Tests: domain transition matrix (incl. Archived-delete-blocks),
+  handler tests (flag on/off publish guard), sweep tests mirroring StagedFileSweeperTests,
+  bUnit Index/Detail extensions, create/update ArchiveGraceDays threading.
+  **Resume checklist:** (0) if the plan doc is on disk → parent QA it (decisions (a)–(k) all
+  present, expected file list complete, worker/reviewer/acceptance criteria); if the revived
+  run failed → re-dispatch a FRESH plan run (delegate/glm-5.3) with the task directive
+  rebuilt from this digest; (1) worker (minimax-m3, 30-min cap) implements per the plan;
+  (2) parent host steps: patch freeze `diffs-ar-5-lifecycle.patch` (pathspec src tests) +
+  authoritative build + Assignments.Tests.Unit + Assignments.Api.Tests.Unit +
+  ArchitectureTests.Unit; (3) reviewer (kimi-k2.7-code); (4) accept (delegate/glm-5.3);
+  (5) UI-tester pass (deepseek-v4-flash — UI round confirmed: Index/Detail/ScheduleDialog);
+  (6) round-log closure entry; (7) commit only on the owner's explicit "commit" → extend the
+  gh stack to 5 layers (gh stack unstack from a registered branch → gh stack init
+  stack/1..stack/5 → SCHOOLCOLLAB_ALLOW_PUSH=1 gh stack submit --auto --open → PR #5).
+  Operational note: the 502 was transient (resume-the-run is safe); a 429 quota failure
+  would instead warrant a FRESH small-context run per the round-3/4 lessons.
+- `ar-5-lifecycle` — **IN FLIGHT (WORKER DONE), PAUSED ON PROVIDER QUOTA at the reviewer phase 2026-09-08**
+  (ollama.com 429 "session usage limit" — third occurrence this train: rounds 3, 4, now 5; hit the kimi reviewer
+  after 49 turns, before any REVIEW block). **State on disk:** implementation COMPLETE via three worker passes —
+  pass 1 (steps 1–6 backend) + pass 2 (remainder) both minimax-m3, pass 3 (5 failing bUnit tests) COMPLETED VIA THE
+  BUILD-ESCALATION PATTERN (user-mandated 2026-09-07: hung worker interrupted after a runaway `find /` bash blocked
+  28 min; same pass re-dispatched to glm-5.3 on delegate, which found the two GENUINE production defects the new
+  tests exposed: plan decision (j)'s FluentBadge `Appearance.Outline` is invalid in 4.14.2 → Scheduled=Accent /
+  Pending chip=Neutral, and `RowActionsUseMenuService="false"` repo convention for the menu provider in bUnit).
+  Patch frozen: `diffs-ar-5-lifecycle.patch` (68 files, 263 KB); Worker Report persisted in the round doc.
+  **Authoritative (parent-run):** build 0 errors; Assignments.Tests.Unit 330/0 (+74); Api.Tests.Unit 14/0;
+  ArchitectureTests.Unit 20/0. **Remaining:** (1) FRESH reviewer re-dispatch (kimi — do NOT revive the 4M-token
+  failed run; plan+patch+report paths all on disk; the reviewer must also adjudicate the two expected-list files
+  unchanged in the patch: CreateAssignmentCommandHandlerQuestionsTests.cs, AssignmentFormModelMappingsTests.cs);
+  (2) accept run (glm-5.3 delegate) with parent numbers 330/14/20; (3) UI-tester pass (deepseek — definite UI
+  round: Index/Detail/ScheduleDialog surfaces; scope from the round doc's UI-round note); (4) round-log closure;
+  (5) commit only on the owner's "commit" → gh stack extension to 5 layers (unstack from a registered branch →
+  re-init stack/1..stack/5 → submit → PR #5). All remaining child phases share the one ollama.com account —
+  if the quota wall still stands, surface to the owner, do not retry-loop.
+- `ar-5-lifecycle` — **CLOSED 2026-09-08** (`documents/rounds/round-ar-5-lifecycle.md` +
+  `diffs-ar-5-lifecycle.patch`, 70 files). The hardest-provenance round of the train: 3 worker passes (2 timed
+  out at the 30-min cap — pass 3 and the reviewer-rework pass both completed via the user-mandated
+  BUILD-ESCALATION PATTERN, codified in the skill during this round and refined by the user: escalations run
+  on kimi-k2.7-code/reviewer agent, escalated work is re-verified by glm-5.3, the escalator never reviews its
+  own pass), 2 quota walls (plan-phase 429 retry; reviewer 429 after 49 turns → fresh re-dispatch per the
+  do-not-revive-heavy-runs rule). Delivered (WS-A2): AssignmentStatus += Scheduled/Archived + DTO mirror +
+  complete status-consumer sweep (Update Draft||Scheduled, Unpublish clears AvailableFromUtc, Close/Publish
+  Archived guards, delete blocked by the existing Draft-only check); AvailableFromUtc + ArchiveGraceDays +
+  ApprovalStatus/ApprovedBy/ApprovedAt columns + migration 20260907090343_AddAssignmentLifecycleAndApproval;
+  approval workflow (SubmitForApproval/Approve/Reject commands + FEATURE:RequireAssignmentApproval default-off
+  tenant-overridable flag + seeded via MigrationService + AppHost/Admin fan-out + configuration.md §2/§5/§11
+  + publish guard: typed AssignmentApprovalRequiredException → 400; the PLAN's Outline badge decision was an
+  invalid-FluentBadge defect the new bUnit tests caught pre-tester — fixed to Accent/Neutral); two sweeps
+  (ScheduledPublishSweepService + ArchiveSweepService, IgnoreQueryFilters reads + RunWithExplicitTenantAsync
+  dispatch, per-candidate error isolation); 4 new endpoints (schedule/submit-for-approval/approve/reject);
+  ApiClient ScheduleAsync/SubmitForApprovalAsync/ApproveAsync/RejectAsync; Index filter+badges+row actions +
+  flag-gated Draft behavior + visible Approval column; Detail approval section (FeatureFlagGate) + Schedule
+  dialog (date→00:00 UTC) + Publish-now/Cancel-schedule + Archived read-only; ArchiveGraceDays round-trip
+  through the edit form (edit never resets it). Reviewer iteration 1: 9 P1s (2 dead ArchiveGraceDays route
+  forwards, 2 missing 400 catches, 5 binding-test gaps) + 3 P2s → all fixed → re-verification PASS.
+  Tester iteration 1: genuine P1 (flag-on Approved Draft showed "Submit for Approval" — clicking silently
+  revoked the approval Approved→Pending) + 2 P2s (invisible optimistic chip; no rejected-Draft resubmit in
+  Detail) → all fixed → re-verification PASS. Authoritative: build 0 errors; Assignments 353/0 (+97 over
+  the round); Api 14/0; Architecture 20/0.
+  **Residuals (9 accepted at acceptance):** approver Guid.Empty placeholder (D-6); flag-ON exercised by
+  tests only; sweep-interval constants; BackgroundService loops statically reviewed; archive export Phase 5;
+  no integration events for new transitions; real ScheduleDialog picker interaction; the configuration.md
+  patch-artifact staging note (commit-time pathspec pattern); ar-1 EF owned-children verification still open.
+  **Backlog notes (out-of-round):** Index search drops the active status filter (pre-existing pattern,
+  newly reachable); schedule errors render in the approval panel's error bar; cross-page Pending-Draft
+  action inconsistency (Index: Submit-for-Approval, Detail: Approve/Reject).
+  **Next:** round 6 = ar-6-scoring (A3: SubmissionAnswer + scoring engine + attempts + submission extension).
