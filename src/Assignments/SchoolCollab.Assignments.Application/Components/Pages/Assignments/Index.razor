@@ -325,6 +325,31 @@
         }
     }
 
+    // WS-A4 / spec §3.1: duplicate the assignment as a fresh Draft template
+    // copy. Success-only reload — the new Draft appears under the active
+    // filter; a failure surfaces on the landing page error bar (the existing
+    // idiom) with no rollback needed (the source row is untouched).
+    private async Task OnDuplicateAsync(Guid id, string title)
+    {
+        if (_disposed) return;
+
+        try
+        {
+            await Api.DuplicateAsync(id);
+            if (_disposed) return;
+            Toast.ShowSuccess($"Assignment duplicated: '{title} (copy)'.");
+            _items = await LoadAssignmentsAsync(_loadCts?.Token ?? CancellationToken.None);
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to duplicate assignment {AssignmentId}", id);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
     // WS-A2 / spec §7 Q2 — reviewer-rework UI-tester P2: the approval-state
     // chip on a Draft row. Mirrors the Detail page's chip text + appearance
     // so the user sees consistent approval surfaces across the two pages.
@@ -373,6 +398,14 @@
                 {
                     actions.Add(RowAction.Callback("Publish", () => OnPublishAsync(a.Id), FluentIcons.ArrowExportUp));
                 }
+                // WS-A4 / spec §3.1: duplicate any assignment as a fresh Draft
+                // template copy — a Draft can duplicate too.
+                actions.Add(RowAction.Callback(
+                    "Duplicate",
+                    () => OnDuplicateAsync(a.Id, a.Title),
+                    FluentIcons.DocumentCopy,
+                    destructive: true,
+                    confirmMessage: $"Duplicate assignment '{a.Title}'? This creates a new draft copy."));
                 actions.Add(RowAction.Separator());
                 actions.Add(RowAction.Callback(
                     "Delete",
@@ -384,18 +417,44 @@
             case AssignmentStatusDto.Published:
                 actions.Add(RowAction.Callback("Unpublish", () => OnUnpublishAsync(a.Id), FluentIcons.ArrowClockwise));
                 actions.Add(RowAction.Callback("Close", () => OnCloseAsync(a.Id), FluentIcons.Checkmark));
+                // WS-A4 / spec §3.1: duplicating a Published assignment as a
+                // template is the primary use case.
+                actions.Add(RowAction.Callback(
+                    "Duplicate",
+                    () => OnDuplicateAsync(a.Id, a.Title),
+                    FluentIcons.DocumentCopy,
+                    destructive: true,
+                    confirmMessage: $"Duplicate assignment '{a.Title}'? This creates a new draft copy."));
                 break;
             case AssignmentStatusDto.Scheduled:
                 actions.Add(RowAction.Navigate("Edit", $"/assignments/{a.Id}/edit", FluentIcons.Edit));
                 actions.Add(RowAction.Callback("Publish now", () => OnPublishAsync(a.Id), FluentIcons.ArrowExportUp));
                 actions.Add(RowAction.Callback("Unpublish", () => OnUnpublishAsync(a.Id), FluentIcons.ArrowClockwise));
+                actions.Add(RowAction.Callback(
+                    "Duplicate",
+                    () => OnDuplicateAsync(a.Id, a.Title),
+                    FluentIcons.DocumentCopy,
+                    destructive: true,
+                    confirmMessage: $"Duplicate assignment '{a.Title}'? This creates a new draft copy."));
                 break;
             case AssignmentStatusDto.Closed:
                 actions.Add(RowAction.Navigate("Review", $"/assignments/{a.Id}", FluentIcons.Open));
+                actions.Add(RowAction.Callback(
+                    "Duplicate",
+                    () => OnDuplicateAsync(a.Id, a.Title),
+                    FluentIcons.DocumentCopy,
+                    destructive: true,
+                    confirmMessage: $"Duplicate assignment '{a.Title}'? This creates a new draft copy."));
                 break;
             case AssignmentStatusDto.Archived:
                 // Spec §7 Q6: archived is read-only retention — review only.
                 actions.Add(RowAction.Navigate("Review", $"/assignments/{a.Id}", FluentIcons.Open));
+                actions.Add(RowAction.Callback(
+                    "Duplicate",
+                    () => OnDuplicateAsync(a.Id, a.Title),
+                    FluentIcons.DocumentCopy,
+                    destructive: true,
+                    confirmMessage: $"Duplicate assignment '{a.Title}'? This creates a new draft copy."));
                 break;
         }
         return actions;

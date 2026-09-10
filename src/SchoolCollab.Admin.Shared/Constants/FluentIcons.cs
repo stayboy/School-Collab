@@ -46,4 +46,10 @@ public static class FluentIcons
     /// <summary>Vertical "kebab" (⋮) icon — the standard overflow / row-actions
     /// trigger. Used by <see cref="Components.RowActionsMenu"/>.</summary>
     public static readonly Icon MoreVertical = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.MoreVertical();
+
+    /// <summary>Copy-semantic icon for the duplicate-as-template action
+    /// (WS-A4 / spec §3.1). Plain <c>Copy</c> does not exist in the FluentUI
+    /// 4.14.2 icon set; <c>DocumentCopy</c> is the copy-semantic icon that
+    /// does.</summary>
+    public static readonly Icon DocumentCopy = new global::Microsoft.FluentUI.AspNetCore.Components.Icons.Regular.Size20.DocumentCopy();
 }

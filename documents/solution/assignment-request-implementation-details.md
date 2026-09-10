@@ -776,3 +776,11 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   consistent with existing wizard patterns (no action).
   **Next:** round 7 = ar-7-template (A4 duplicate-as-template: DuplicateAssignmentCommand + route + Index/Detail
   actions + pure handler tests).
+
+  **Delivered 2026-09-09:** commit `cab1fb3c` (60 files: 58 round-6 + the two .pi/skills files — the 2026-09-09
+  model-swap tables + escalation-pattern refinements — folded in via a supervisor-approved amend, per the round-5
+  precedent; superseded SHA caee5d24) on `stack/6-ar-6-scoring` → **PR #227** (stack/6 → stack/5). GitHub stack
+  #228 now carries the full 6-layer train: #218 → #219 → #221 → #223 → #225 → #227. Executed by the deepseek
+  commit agent per the AGENTS.md execution model (clean: exact staging, amend anomaly handled per authorization,
+  scratch untracked, no merges). The checkout-block lesson: session-mandated skill edits must be committed with
+  their round or they block the stack branch dance.

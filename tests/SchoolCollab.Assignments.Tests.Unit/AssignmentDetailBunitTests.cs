@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Bunit;
 using FluentAssertions;
+using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
@@ -503,6 +504,114 @@ public class AssignmentDetailBunitTests : BunitContext
             _assignmentGetCount.Should().BeGreaterThanOrEqualTo(2,
                 "the page reloads the assignment after the schedule POST succeeds");
         }, TimeSpan.FromSeconds(15));
+    }
+
+    // ── WS-A4 / spec §3.1 — duplicate-as-template action ─────────────
+
+    [TestMethod]
+    public void Detail_PublishedAssignment_RendersDuplicateButton()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published);
+        SetupGetAssignment(dto);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate",
+                "a Published assignment must render the Duplicate button regardless of status");
+        });
+    }
+
+    [TestMethod]
+    public void Detail_DuplicateClicked_UserConfirms_PostsAndNavigatesToCopy()
+    {
+        var sourceId = Guid.NewGuid();
+        var newId = Guid.NewGuid();
+        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
+        SetupGetAssignment(dto);
+        SetupConfirmDialogResult(confirmed: true);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate"));
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
+            .Respond(HttpStatusCode.Created, "application/json",
+                JsonSerializer.Serialize(new { id = newId }, _apiJsonOptions));
+
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Duplicate").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            _mockHttp.VerifyNoOutstandingExpectation();
+            Services.GetRequiredService<NavigationManager>().Uri.Should().EndWith($"/assignments/{newId}",
+                "confirming duplicate must navigate to the new copy");
+        }, TimeSpan.FromSeconds(15));
+    }
+
+    [TestMethod]
+    public void Detail_DuplicateClicked_UserDeclines_NoPostStaysOnPage()
+    {
+        var sourceId = Guid.NewGuid();
+        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
+        SetupGetAssignment(dto);
+        var dialogMock = SetupConfirmDialogResult(confirmed: false);
+
+        var postCount = 0;
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
+            .Respond(_ =>
+            {
+                postCount++;
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            });
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate"));
+
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Duplicate").Click();
+
+        cut.WaitForAssertion(() => dialogMock.Verify(
+            d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
+                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+            Times.Once));
+
+        postCount.Should().Be(0, "declining the confirm dialog must not fire the duplicate POST");
+        Services.GetRequiredService<NavigationManager>().Uri.Should().Be("http://localhost/",
+            "declining must not navigate away from the source assignment page");
+    }
+
+    [TestMethod]
+    public void Detail_DuplicateClicked_PostFails_ShowsDuplicateError()
+    {
+        var sourceId = Guid.NewGuid();
+        var dto = MakeDto(AssignmentStatusDto.Published) with { Id = sourceId };
+        SetupGetAssignment(dto);
+        SetupConfirmDialogResult(confirmed: true);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+        cut.WaitForAssertion(() =>
+            cut.FindAll("fluent-button").Should().Contain(b => b.TextContent.Trim() == "Duplicate"));
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{sourceId}/duplicate")
+            .Respond(HttpStatusCode.InternalServerError);
+
+        cut.FindAll("fluent-button").Single(b => b.TextContent.Trim() == "Duplicate").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            _mockHttp.VerifyNoOutstandingExpectation();
+            cut.Markup.Should().Contain("fluent-messagebar",
+                "a failing duplicate POST must render the dedicated error bar");
+            cut.Markup.Should().Contain("intent-error",
+                "the rendered message bar must carry the error intent");
+            cut.Markup.Should().MatchRegex("500|Internal Server Error",
+                "the error bar must surface the failure message");
+        }, TimeSpan.FromSeconds(15));
+
+        Services.GetRequiredService<NavigationManager>().Uri.Should().Be("http://localhost/",
+            "a failure must not navigate away from the source assignment");
     }
 
     // ── WS-A3 (spec §3.3): versions table Score + Passed columns ──────────
