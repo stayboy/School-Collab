@@ -33,6 +33,11 @@ public interface ISubmissionRepository
     // Versions + reviews
     void Add(AssignmentSubmissionVersion version);
     void Add(SubmissionReview review);
+    /// <summary>WS-A3 (spec §3.3): structured per-question answer rows
+    /// appended to a submission version. The handler scores before
+    /// adding; one row per <see cref="SubmissionAnswerDto"/> carried in
+    /// the inbound command.</summary>
+    void Add(SubmissionAnswer answer);
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
 

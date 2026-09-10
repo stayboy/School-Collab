@@ -736,3 +736,43 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   newly reachable); schedule errors render in the approval panel's error bar; cross-page Pending-Draft
   action inconsistency (Index: Submit-for-Approval, Detail: Approve/Reject).
   **Next:** round 6 = ar-6-scoring (A3: SubmissionAnswer + scoring engine + attempts + submission extension).
+
+  **Delivered 2026-09-08:** commit `71e7abb3` (76 files: 70 src/tests + round doc + patch + configuration.md +
+  round log + escalation-pattern skill update + the AGENTS.md commit/PR execution-model instruction) on
+  `stack/5-ar-5-lifecycle` → **PR #225** (stack/5 → stack/4). GitHub stack #226 now carries the full
+  5-layer train: #218 → #219 → #221 → #223 → #225. The commit itself was executed by the new
+  deepseek-v4-flash commit agent per the AGENTS.md rule (first run — clean: exact staging, scratch files
+  left untracked, no anomalies).
+- `ar-6-scoring` — **CLOSED 2026-09-09** (`documents/rounds/round-ar-6-scoring.md` + `diffs-ar-6-scoring.patch`,
+  55 files). The longest-provenance round of the train — every operational pattern fired: minimax pass 1 landed the
+  FULL implementation but timed out before tests; pass 2 (remainder) launched a forbidden filesystem-wide `find /`
+  and was interrupted; the kimi escalation ran in two halves (read-only reviewer-shell diagnosis handoff — the
+  shell cannot execute passes, lesson codified in the skill — then write-capable completion on the worker shell,
+  15 test failures → 0, all test-only); the parent's authoritative pass caught a deterministic header-collision
+  defect the escalation's green report missed (the versions-table `<th>Passed</th>` header vs NotContain("Passed")
+  + a vacuously-true Contain in the paired test — parent-fixed row-scoped); the glm-5.3 review (first run of the
+  escalated-work-review rule) returned 1 P1 (ScoringFieldsSection self-rendered wizard chrome — CSS-isolated dead
+  markup) + 3 P2s → deepseek reviewer-rework iteration 1 (the FIRST worker run under the 2026-09-09 model swap)
+  fixed all 4 → glm-5.3 re-verification PASS; accept CLOSED 17/17. The minimax UI-tester pass (first swap tester
+  run) PASSed first pass with zero findings. Delivered (WS-A3): `SubmissionAnswer` standalone tenant entity
+  (per-version answers, migration `20260909002559_AddSubmissionAnswersAndScoring`); version `Score`/`Passed`
+  set at creation; Assignment `PassScore`/`MaxAttempts` draft-only params with guards (PassScore<=MaxScore,
+  MaxAttempts>=1); pure `IScoringEngine`/`ScoringEngine` (MC/TF via CorrectOptionId; ShortAnswer normalized-match
+  only with ModelAnswer; CorrectOptionId-presence discrimination; no-model excluded-not-zeroed; autoScorableCount==0
+  guard; 1pt/question scaled to MaxScore 2dp AwayFromZero; PassScore >= boundary; TeacherGraded never scored);
+  attempt-cap enforcement (typed SubmissionAttemptsExhaustedException → 409; SubmissionAnswerValidationException →
+  400) + teacher override command (AttemptLimitOverriddenAt/By, route-resolution precedent); InstantGraded
+  per-question feedback DTO in the submit response (no correct-answer reveal — deliberate, WS-D additive); contracts
+  threading (answers on submit requests, PassScore/MaxAttempts on create/update/summary); `ScoringFieldsSection.razor`
+  (chrome-free per the rework, w-3 ladder, muted hint) consumed by Create Details + Edit form-container; Detail
+  versions-table Score/Passed columns; ScoringFieldsPassSubmitGate in both submit paths. Authoritative: build 0
+  errors; Assignments 426/0 (+73 over round 5); Api 14/0; Architecture 20/0.
+  **Residuals (8 accepted at acceptance):** D1 module-gating plug point (seam verified in both handlers); permanent
+  attempt-cap override (no un-override); InstantGraded feedback shape per plan decision (g); no ward-facing submit
+  UI (by-design slicing); TeacherId Guid.Empty placeholder (D-6); scoring-contract pins; Content retained; ar-1 EF
+  owned-children verification still open.
+  **Backlog notes (out-of-round):** server-side null-out of stale PassScore/MaxAttempts on a grading-format flip
+  to TeacherGraded (domain question — candidate for WS-D or a later scoring round); Save-as-Draft button gating
+  consistent with existing wizard patterns (no action).
+  **Next:** round 7 = ar-7-template (A4 duplicate-as-template: DuplicateAssignmentCommand + route + Index/Detail
+  actions + pure handler tests).

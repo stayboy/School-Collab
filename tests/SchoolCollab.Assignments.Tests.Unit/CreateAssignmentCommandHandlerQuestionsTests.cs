@@ -69,7 +69,10 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         IReadOnlyList<NewAttachmentDto>? attachments = null,
         IReadOnlyList<NewContentModuleDto>? contentModules = null,
         IReadOnlyList<NewResourceDto>? resources = null,
-        int archiveGraceDays = 30) =>
+        int archiveGraceDays = 30,
+        // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap.
+        decimal? passScore = null,
+        int? maxAttempts = null) =>
         new(
             Title: "Algebra HW",
             Description: null,
@@ -86,7 +89,9 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             Attachments: attachments,
             ContentModules: contentModules,
             Resources: resources,
-            ArchiveGraceDays: archiveGraceDays);
+            ArchiveGraceDays: archiveGraceDays,
+            PassScore: passScore,
+            MaxAttempts: maxAttempts);
 
     private static NewQuestionDto McQuestion(int displayOrder) =>
         new(
@@ -352,5 +357,37 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
         stored.ArchiveGraceDays.Should().Be(7,
             "the explicit ArchiveGraceDays value must thread through to the created aggregate (WS-A2 / decision (j))");
+    }
+
+    // ── WS-A3 / spec §3.3 + §7 Q4: PassScore / MaxAttempts threading ──
+
+    [TestMethod]
+    public async Task HandleAsync_PassScoreAndMaxAttempts_Persisted()
+    {
+        var (db, cache, tenants) = BuildScope("create-scoring-persisted");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        var id = await handler.HandleAsync(SampleCommand(passScore: 80m, maxAttempts: 3));
+
+        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
+        stored.PassScore.Should().Be(80m,
+            "the PassScore must thread through to the created aggregate (WS-A3 / spec §3.3)");
+        stored.MaxAttempts.Should().Be(3,
+            "the MaxAttempts must thread through to the created aggregate (WS-A3 / spec §7 Q4)");
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_PassScoreAndMaxAttempts_DefaultsToNull()
+    {
+        var (db, cache, tenants) = BuildScope("create-scoring-default");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        var id = await handler.HandleAsync(SampleCommand());
+
+        var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
+        stored.PassScore.Should().BeNull();
+        stored.MaxAttempts.Should().BeNull();
     }
 }

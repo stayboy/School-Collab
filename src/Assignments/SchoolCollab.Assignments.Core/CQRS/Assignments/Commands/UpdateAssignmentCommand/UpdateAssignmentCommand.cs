@@ -30,4 +30,10 @@ public sealed record UpdateAssignmentCommand(
     IReadOnlyList<NewResourceDto>? Resources = null,
     /// <summary>WS-A2 (spec §7 Q6): archive grace window in days.
     /// Threaded to <c>Assignment.Update(...)</c>.</summary>
-    int ArchiveGraceDays = 30) : ICommand;
+    int ArchiveGraceDays = 30,
+    /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
+    /// Threaded to <c>Assignment.Update(...)</c>.</summary>
+    decimal? PassScore = null,
+    /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
+    /// Threaded to <c>Assignment.Update(...)</c>.</summary>
+    int? MaxAttempts = null) : ICommand;

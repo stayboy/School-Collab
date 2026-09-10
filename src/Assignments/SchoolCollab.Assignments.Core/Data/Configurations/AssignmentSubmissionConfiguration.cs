@@ -26,6 +26,15 @@ internal sealed class AssignmentSubmissionConfiguration : TenantEntityTypeConfig
         builder.Property(x => x.SubmissionGateId);
         builder.Property(x => x.ReviewState).IsRequired().HasDefaultValue(ReviewState.Pending);
 
+        // ── WS-A3 (spec §7 Q4): teacher override columns ────────────────
+        // When AttemptLimitOverriddenAt is non-null the submission's
+        // MaxAttempts cap is cleared (permanent for the submission;
+        // raising MaxAttempts on a draft assignment also helps via the
+        // standard edit path). AttemptLimitOverriddenBy records the
+        // approver — identity placeholder posture (D-6).
+        builder.Property(x => x.AttemptLimitOverriddenAt);
+        builder.Property(x => x.AttemptLimitOverriddenBy);
+
         // One current submission per (assignment, student) (spec §4.11 / §5).
         builder.HasIndex(x => new { x.TenantId, x.AssignmentId, x.StudentId })
             .IsUnique()

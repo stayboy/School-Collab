@@ -21,7 +21,12 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                 a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
                 a.TopicId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
                 a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
-                a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt))
+                a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
+                // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
+                // cap projected alongside the existing lifecycle fields
+                // so the contract DTOs (and the wire) see the latest draft
+                // values without a separate read.
+                a.PassScore, a.MaxAttempts))
             .ToListAsync(ct);
     }
 

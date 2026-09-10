@@ -38,6 +38,12 @@ public class SubmissionEngineTests
 
     private static ITenantProvider TenantProvider() => new FakeTenantProvider(TenantId);
     private static HybridCache Cache() => new FakeHybridCache();
+    // WS-A3: the submission handlers gain an assignment repo
+    // (on-behalf) + a scoring engine. Default to a fake assignment
+    // repo carrying the test's NewAssignment() and a real
+    // ScoringEngine — pure, no DI dependencies.
+    private static FakeAssignmentRepository AssignmentRepo(Assignment assignment) => new() { Assignment = assignment };
+    private static IScoringEngine Scoring() => new ScoringEngine();
 
     private static Assignment NewAssignment(bool mandatoryReview = true)
     {
@@ -182,9 +188,11 @@ public class SubmissionEngineTests
         var enabledGate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId);
         enabledGate.Review(GuardianId, approve: true, null); // guardian reviewed → enabled
 
+        var assignment = NewAssignment();
         var submissionRepo = new FakeSubmissionRepository { GateToReturn = enabledGate, SubmissionToReturn = null };
+        var assignmentRepo = AssignmentRepo(assignment);
         var handler = new SubmitAssignmentOnBehalfCommandHandler(
-            submissionRepo, TenantProvider(), NullLogger<SubmitAssignmentOnBehalfCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<SubmitAssignmentOnBehalfCommandHandler>.Instance);
 
         await handler.HandleAsync(new SubmitAssignmentOnBehalfCommand(AssignmentId, StudentId, GuardianId, "my work"));
 
@@ -200,8 +208,9 @@ public class SubmissionEngineTests
     {
         var disabledGate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId); // not reviewed
         var submissionRepo = new FakeSubmissionRepository { GateToReturn = disabledGate };
+        var assignmentRepo = AssignmentRepo(NewAssignment());
         var handler = new SubmitAssignmentOnBehalfCommandHandler(
-            submissionRepo, TenantProvider(), NullLogger<SubmitAssignmentOnBehalfCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<SubmitAssignmentOnBehalfCommandHandler>.Instance);
 
         var act = async () => await handler.HandleAsync(new SubmitAssignmentOnBehalfCommand(AssignmentId, StudentId, GuardianId, "x"));
         await act.Should().ThrowAsync<InvalidOperationException>();
@@ -312,8 +321,9 @@ public class SubmissionEngineTests
         enabledGate.Review(GuardianId, approve: true, null);
 
         var submissionRepo = new FakeSubmissionRepository { GateToReturn = enabledGate, SubmissionToReturn = null };
+        var assignmentRepo = AssignmentRepo(NewAssignment());
         var handler = new SubmitAssignmentOnBehalfCommandHandler(
-            submissionRepo, TenantProvider(), NullLogger<SubmitAssignmentOnBehalfCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<SubmitAssignmentOnBehalfCommandHandler>.Instance);
 
         await handler.HandleAsync(new SubmitAssignmentOnBehalfCommand(AssignmentId, StudentId, GuardianId, "v1"));
         submissionRepo.SubmissionToReturn = submissionRepo.AddedSubmissions[0]; // simulate persistence for call 2
@@ -330,10 +340,10 @@ public class SubmissionEngineTests
     public async Task CreateStudentSubmission_AllowedWhenNotMandatory()
     {
         var assignment = NewAssignment(mandatoryReview: false);
-        var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
+        var assignmentRepo = AssignmentRepo(assignment);
         var submissionRepo = new FakeSubmissionRepository();
         var handler = new CreateStudentSubmissionCommandHandler(
-            assignmentRepo, submissionRepo, TenantProvider(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
 
         await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "my work"));
 
@@ -347,11 +357,11 @@ public class SubmissionEngineTests
     public async Task CreateStudentSubmission_RejectedWhenMandatoryAndGateDisabled()
     {
         var assignment = NewAssignment(); // MandatoryReview = true
-        var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
+        var assignmentRepo = AssignmentRepo(assignment);
         var gate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId); // not reviewed → disabled
         var submissionRepo = new FakeSubmissionRepository { GateToReturn = gate };
         var handler = new CreateStudentSubmissionCommandHandler(
-            assignmentRepo, submissionRepo, TenantProvider(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
 
         var act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "x"));
         await act.Should().ThrowAsync<UnauthorizedAccessException>();
@@ -361,12 +371,12 @@ public class SubmissionEngineTests
     public async Task CreateStudentSubmission_AllowedWhenMandatoryAndGateEnabled()
     {
         var assignment = NewAssignment(); // MandatoryReview = true
-        var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
+        var assignmentRepo = AssignmentRepo(assignment);
         var gate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId);
         gate.Review(GuardianId, approve: true, null); // enabled
         var submissionRepo = new FakeSubmissionRepository { GateToReturn = gate };
         var handler = new CreateStudentSubmissionCommandHandler(
-            assignmentRepo, submissionRepo, TenantProvider(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
 
         await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "my work"));
 
@@ -596,6 +606,13 @@ public class SubmissionEngineTests
         public void Update(AssignmentSubmission s) => UpdatedSubmissions.Add(s);
         public void Add(AssignmentSubmissionVersion v) => AddedVersions.Add(v);
         public void Add(SubmissionReview r) => AddedReviews.Add(r);
+        // WS-A3 (spec §3.3): structured per-version answer rows. The
+        // existing tests don't exercise the scoring path; the new
+        // CreateStudentSubmissionScoringHandlerTests /
+        // SubmitAssignmentOnBehalfScoringHandlerTests own the deep
+        // assertions.
+        public List<SubmissionAnswer> AddedAnswers { get; } = new();
+        public void Add(SubmissionAnswer a) => AddedAnswers.Add(a);
         public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
         public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid t, CancellationToken ct = default)
             => Task.FromResult(Array.Empty<SubmissionForReviewDto>());

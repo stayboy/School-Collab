@@ -58,7 +58,12 @@ public sealed class ListAssignmentsQueryHandler(
                     s.ArchiveGraceDays,
                     (ApprovalStatusDto?)s.ApprovalStatus,
                     s.ApprovedBy,
-                    s.ApprovedAt)).ToArray();
+                    s.ApprovedAt,
+                    // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
+                    // attempt cap projected alongside the existing
+                    // lifecycle fields.
+                    s.PassScore,
+                    s.MaxAttempts)).ToArray();
             },
             CacheOptions,
             tags: ["assignments"],

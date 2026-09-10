@@ -12,9 +12,9 @@ strings; bare ids resolve only when unique.
 | Role | pi default |
 |---|---|
 | Orchestrator | `ollama/glm-5.3-flash:cloud` |
-| Worker | `ollama/minimax-m3:cloud` |
+| Worker | `ollama/deepseek-v4-flash:0731-cloud` |
 | Reviewer | `ollama/kimi-k2.7-code:cloud` |
-| UI Tester | `ollama/deepseek-v4-flash:0731-cloud` |
+| UI Tester | `ollama/minimax-m3:cloud` |
 
 ## Cline profile — switch to `clinepass` first
 
@@ -24,16 +24,16 @@ switch the Cline session's provider to `clinepass`, then use:
 | Role | pi default | clinepass equivalent |
 |---|---|---|
 | Orchestrator | `ollama/glm-5.3-flash:cloud` | `cline-pass/glm-5.3` |
-| Worker | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
+| Worker | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` |
 | Reviewer | `ollama/kimi-k2.7-code:cloud` | `cline-pass/kimi-k2.7-code` |
-| UI Tester | `ollama/deepseek-v4-flash:0731-cloud` | `cline-pass/deepseek-v4-flash` |
+| UI Tester | `ollama/minimax-m3:cloud` | `cline-pass/minimax-m3` |
 
 Substitutes stored under `clinepass` — use only when a listed equivalent is
 unavailable, and substitute **within the same tier** (fast generalist /
 implementer / deep verifier):
 
 - `cline-pass/kimi-k3` — stronger reviewer
-- `cline-pass/deepseek-v4-pro` — stronger UI tester
+- `cline-pass/deepseek-v4-pro` — stronger worker
 - `cline-pass/glm-5.2`
 - `cline-pass/kimi-k2.6`
 - `cline-pass/qwen3.8-max`, `cline-pass/qwen3.7-max`, `cline-pass/qwen3.7-plus`

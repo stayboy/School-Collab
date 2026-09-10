@@ -1,0 +1,40 @@
+@using SchoolCollab.Assignments.Contracts
+@using Microsoft.FluentUI.AspNetCore.Components
+
+@*
+    WS-A3 (spec §3.3 / §7 Q4): the Pass Score + Max Attempts inputs
+    rendered ONLY for AutoGraded / InstantGraded grading formats (the
+    `QuestionsPassSubmitGate` conditional precedent — the fields are
+    hidden for TeacherGraded so a teacher authoring a TeacherGraded
+    assignment never sees them). The wizard's Details step, the Edit
+    page, and any future owner renders this component directly — the
+    conditional + the validation live in the component itself so the
+    pages' diffs stay minimal (decision (h) recorded adjustment:
+    shipped as a section component rather than inline wizard markup so
+    bUnit assertions target a stable surface).
+*@
+
+@if (GradingFormat is GradingFormatDto.AutoGraded or GradingFormatDto.InstantGraded)
+{
+    <p class="muted">Set the pass threshold and attempt cap. Leave blank for no pass threshold / unlimited attempts.</p>
+
+    <FormRow Label="Pass Score" For="scoringFieldsPassScore">
+        <FluentNumberField Id="scoringFieldsPassScore" @bind-Value="Model.PassScore" Class="w-3" />
+    </FormRow>
+    <FormRow Label="Max Attempts" For="scoringFieldsMaxAttempts">
+        <FluentNumberField Id="scoringFieldsMaxAttempts" @bind-Value="Model.MaxAttempts" Class="w-3" />
+    </FormRow>
+}
+
+@code {
+    /// <summary>The shared form model (PassScore + MaxAttempts live
+    /// here so the wizard's <c>ToCreateRequest</c> projection and
+    /// <c>ScoringFieldsPassSubmitGate</c> pick them up automatically).</summary>
+    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
+
+    /// <summary>The currently selected grading format. When this is
+    /// <see cref="GradingFormatDto.TeacherGraded"/> the section renders
+    /// nothing — a TeacherGraded assignment does not carry a pass
+    /// threshold or attempt cap (scoring is reviewer-driven).</summary>
+    [Parameter, EditorRequired] public GradingFormatDto GradingFormat { get; set; }
+}

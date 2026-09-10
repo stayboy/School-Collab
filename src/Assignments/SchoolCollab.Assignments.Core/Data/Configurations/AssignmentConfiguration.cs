@@ -45,6 +45,16 @@ internal sealed class AssignmentConfiguration : TenantEntityTypeConfigurationBas
         builder.Property(x => x.MaxScore)
             .HasPrecision(5, 2);
 
+        // ── WS-A3 (spec §3.3 + §7 Q4): pass score + max attempts ────────
+        // PassScore is the threshold at which a submission is considered
+        // passed (null = no pass/fail signal). MaxAttempts is the cap on
+        // submission attempts (null = unlimited; >= 1 when set). Both
+        // are draft-only fields (set at create / update) — mirroring the
+        // MaxScore posture above.
+        builder.Property(x => x.PassScore)
+            .HasPrecision(5, 2);
+        builder.Property(x => x.MaxAttempts);
+
         builder.Property(x => x.Status)
             .IsRequired()
             .HasDefaultValue(AssignmentStatus.Draft);

@@ -48,7 +48,11 @@ public sealed class UpdateAssignmentCommandHandler(
             command.MaxScore,
             command.MandatoryReview,
             command.AiPromptOverride,
-            archiveGraceDays: command.ArchiveGraceDays);
+            archiveGraceDays: command.ArchiveGraceDays,
+            // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
+            // cap — named args preserve the existing call style.
+            passScore: command.PassScore,
+            maxAttempts: command.MaxAttempts);
 
         // Full-replacement semantics for questions + attachments (decision b):
         // snapshot existing child ids, remove each, then re-add inbound. Re-index

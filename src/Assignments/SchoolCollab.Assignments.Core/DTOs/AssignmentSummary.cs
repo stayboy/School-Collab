@@ -31,4 +31,10 @@ public record AssignmentSummary(
     Guid? ApprovedBy = null,
     /// <summary>WS-A2 (spec §7 Q2): when an approval was granted.
     /// Cleared on <see cref="Assignment.Reject"/>.</summary>
-    DateTimeOffset? ApprovedAt = null);
+    DateTimeOffset? ApprovedAt = null,
+    /// <summary>WS-A3 (spec §3.3): pass/fail score threshold.
+    /// Null = no pass/fail signal.</summary>
+    decimal? PassScore = null,
+    /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
+    /// Null = unlimited.</summary>
+    int? MaxAttempts = null);

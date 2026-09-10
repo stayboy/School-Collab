@@ -61,7 +61,12 @@ public sealed class GetAssignmentByIdQueryHandler(
                     assignment.ArchiveGraceDays,
                     (ApprovalStatusDto?)assignment.ApprovalStatus,
                     assignment.ApprovedBy,
-                    assignment.ApprovedAt);
+                    assignment.ApprovedAt,
+                    // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
+                    // attempt cap projected alongside the existing
+                    // lifecycle fields.
+                    assignment.PassScore,
+                    assignment.MaxAttempts);
             },
             CacheOptions,
             tags: ["assignments"],

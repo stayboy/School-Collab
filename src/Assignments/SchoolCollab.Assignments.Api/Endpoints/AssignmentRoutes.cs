@@ -26,6 +26,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentsQuer
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentRecipients;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListSubmissionsByAssignment;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.EnableStudentSubmission;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.OverrideStudentSubmissionAttempts;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
@@ -73,7 +74,11 @@ public static class AssignmentRoutes
                     req.Attachments,
                     req.ContentModules,
                     req.Resources,
-                    req.ArchiveGraceDays);
+                    req.ArchiveGraceDays,
+                    // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
+                    // attempt cap on the wire surface.
+                    req.PassScore,
+                    req.MaxAttempts);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
@@ -113,7 +118,11 @@ public static class AssignmentRoutes
                     req.Attachments,
                     req.ContentModules,
                     req.Resources,
-                    req.ArchiveGraceDays);
+                    req.ArchiveGraceDays,
+                    // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
+                    // attempt cap on the wire surface.
+                    req.PassScore,
+                    req.MaxAttempts);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }
@@ -442,7 +451,7 @@ public static class AssignmentRoutes
         {
             try
             {
-                await handler.HandleAsync(new SubmitAssignmentOnBehalfCommand(id, studentId, req.GuardianId, req.Content), ct);
+                await handler.HandleAsync(new SubmitAssignmentOnBehalfCommand(id, studentId, req.GuardianId, req.Content, req.Answers), ct);
                 return Results.NoContent();
             }
             catch (GuardianSubmissionGateNotFoundException)
@@ -453,6 +462,20 @@ public static class AssignmentRoutes
             {
                 return Results.BadRequest(new { ex.Message });
             }
+            // WS-A3 (spec §3.3 + §7 Q4): on-behalf parity with the
+            // student path — 409 cap, 400 answers, 404 assignment.
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (SubmissionAttemptsExhaustedException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            catch (SubmissionAnswerValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
         });
 
         // Student self-submit (spec §9: POST /assignments/{id}/students/{studentId}/submission).
@@ -460,21 +483,65 @@ public static class AssignmentRoutes
             Guid id,
             Guid studentId,
             [FromBody] CreateStudentSubmissionRequest req,
-            [FromServices] ICommandHandler<CreateStudentSubmissionCommand> handler,
+            [FromServices] ICommandHandler<CreateStudentSubmissionCommand, SubmissionFeedbackDto?> handler,
             CancellationToken ct) =>
         {
             try
             {
-                await handler.HandleAsync(new CreateStudentSubmissionCommand(id, studentId, req.Content), ct);
-                return Results.NoContent();
+                var feedback = await handler.HandleAsync(new CreateStudentSubmissionCommand(id, studentId, req.Content, req.Answers), ct);
+                // WS-A3 (spec §3.3): InstantGraded → 200 with feedback envelope;
+                // AutoGraded / TeacherGraded → 204 NoContent.
+                return feedback is null ? Results.NoContent() : Results.Ok(feedback);
             }
             catch (AssignmentNotFoundException)
             {
                 return Results.NotFound();
             }
+            // WS-A3 / spec §7 Q4: cap exhausted → 409.
+            catch (SubmissionAttemptsExhaustedException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            // WS-A3 / spec §3.3: answer validation → 400 (matches the
+            // group's catch pattern).
+            catch (SubmissionAnswerValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
             catch (UnauthorizedAccessException ex)
             {
                 return Results.Problem(ex.Message, statusCode: 403);
+            }
+        });
+
+        // WS-A3 (spec §7 Q4) — teacher override on the MaxAttempts cap
+        // for one submission. Route resolves (assignmentId, studentId) →
+        // submission and 404s before dispatching (the enable-submission
+        // route resolution precedent). The handler dispatches the
+        // submission-id-precise command (decision (f) recorded
+        // adjustment).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/override-attempts", async (
+            Guid id,
+            Guid studentId,
+            [FromBody] OverrideStudentSubmissionAttemptsRequest req,
+            [FromServices] ISubmissionRepository submissionRepo,
+            [FromServices] ICommandHandler<OverrideStudentSubmissionAttemptsCommand> handler,
+            CancellationToken ct) =>
+        {
+            var submission = await submissionRepo.GetSubmissionByAssignmentStudentAsync(id, studentId, ct);
+            if (submission is null) return Results.NotFound();
+            try
+            {
+                await handler.HandleAsync(new OverrideStudentSubmissionAttemptsCommand(submission.Id, req.TeacherId), ct);
+                return Results.NoContent();
+            }
+            catch (SubmissionNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
             }
         });
 
