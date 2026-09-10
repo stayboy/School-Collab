@@ -1,0 +1,42 @@
+/* Scoped styles for the AI Question Generation section. The wizard's
+   wizard-section / wizard-section-header / wizard-hint chrome is reused
+   from Create.razor.css — only the section's own controls are styled
+   here. */
+
+.question-generation-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.question-generation-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.question-generation-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 1.25rem;
+}
+
+.question-generation-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1rem;
+    align-items: center;
+    padding-bottom: 0.5rem;
+}
+
+.question-generation-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.question-generation-progress {
+    width: 20px;
+    height: 20px;
+}

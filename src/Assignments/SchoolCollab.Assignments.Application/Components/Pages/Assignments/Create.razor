@@ -138,6 +138,7 @@
                                 <p class="wizard-card-desc">Students see results immediately on submission.</p>
                             </li>
                         </ul>
+                        <p class="wizard-hint">@QuestionGenerationGate.HintText(_selectedType, _selectedGradingFormat)</p>
                     </section>
 
                     <section class="wizard-section">
@@ -282,6 +283,33 @@
                             </FluentStack>
                         </FluentEditForm>
                     </section>
+
+                    @* Generation section is gated (FR-220 / EC-3); the editor is
+                       always available so a teacher with a gate-closed
+                       combination (Manual / TeacherGraded, etc.) can still
+                       hand-add questions — the step-1 DisabledHint promises
+                       this. *@
+                    @if (QuestionGenerationGate.IsEnabled(_selectedType, _selectedGradingFormat) || _model.Questions.Count > 0)
+                    {
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Sparkle)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>AI Question Generation</h3>
+                                    <p class="wizard-hint">Generate a starter set of questions, then edit them below before submitting.</p>
+                                </div>
+                            </div>
+
+                            <QuestionGenerationSection Model="_model"
+                                                      GateEnabled="QuestionGenerationGate.IsEnabled(_selectedType, _selectedGradingFormat)"
+                                                      TopicId="@(_selectedSubject is null ? null : Guid.Parse(_selectedSubject.Value))"
+                                                      TopicName="@_selectedSubject?.Label"
+                                                      GradeLevelId="@(_selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value))"
+                                                      OnQuestionsChanged="OnWizardQuestionsChanged" />
+                        </section>
+                    }
+
+                    <QuestionEditorSection Model="_model" Changed="OnWizardQuestionsChanged" />
                 </FluentWizardStep>
 
                 @* ── Step 3: Review & Submit ── *@
@@ -342,6 +370,29 @@
                             </div>
                         </div>
 
+                        <section class="wizard-section">
+                            <div class="wizard-section-header">
+                                <FluentIcon Icon="@(Icons.Regular.Size24.Eye)" Color="@Color.Accent" />
+                                <div>
+                                    <h3>Questions</h3>
+                                    <p class="wizard-hint">Review the questions before submitting.</p>
+                                </div>
+                            </div>
+                            <QuestionReviewList Model="_model" />
+                            <FluentButton Appearance="Appearance.Outline"
+                                          IconStart="@FluentIcons.ArrowLeft"
+                                          OnClick="@(() => GoToStepAsync(1))"
+                                          class="mt-2">
+                                Edit questions
+                            </FluentButton>
+                        </section>
+
+                        @{ var gatePasses = _model.QuestionsPassSubmitGate(_selectedGradingFormat, out var gateError); }
+                        @if (!gatePasses)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3 mb-3">@gateError</FluentMessageBar>
+                        }
+
                         @if (!string.IsNullOrEmpty(_error))
                         {
                             <FluentMessageBar Intent="MessageIntent.Error" class="mt-3 mb-3">@_error</FluentMessageBar>
@@ -378,7 +429,7 @@
                     {
                         <FluentButton Appearance="Appearance.Accent"
                                       IconStart="@FluentIcons.Save"
-                                      Disabled="@_saving" OnClick="SubmitAsync"
+                                      Disabled="@(_saving || !CanSubmitQuestions())" OnClick="SubmitAsync"
                                       class="ms-2">
                             @(_saving ? "Saving…" : "Save as Draft")
                         </FluentButton>
@@ -395,7 +446,7 @@
 @code {
     private FluentWizard? _wizard;
     private int _stepIndex;
-    private readonly FormModel _model = new();
+    private readonly AssignmentEditFormModel _model = new();
     private bool _saving;
     private string? _error;
     private string? _step1Error;
@@ -691,18 +742,23 @@
                 }
             }
 
+            // Defense in depth: the Save-as-Draft button's Disabled already
+            // guards this, but the click handler can also be reached through
+            // Enter-key submission paths.
+            if (!_model.QuestionsPassSubmitGate(_selectedGradingFormat, out var gateError))
+            {
+                _error = gateError;
+                return;
+            }
+
             Logger.LogInformation("User initiated create for assignment {Title}", _model.Title);
 
-            var req = new CreateAssignmentRequest(
-                _model.Title!,
-                _model.Description,
+            var req = _model.ToCreateRequest(
                 _selectedType ?? AssignmentTypeDto.Manual,
                 _selectedGradingFormat,
                 _selectedTargetAudience,
                 Guid.Parse(_selectedSubject.Value),
                 _selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value),
-                _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
-                _model.MaxScore,
                 _mandatoryReview);
 
             var assignmentId = await Api.CreateAsync(req, ct);
@@ -712,7 +768,9 @@
                 await Api.LinkAssignmentGroupsAsync(assignmentId, _selectedGroupIds.ToList(), ct);
             }
 
-            Logger.LogInformation("Assignment {AssignmentId} created, questions will be added in future update", assignmentId);
+            Logger.LogInformation(
+                "Assignment {AssignmentId} created with {QuestionCount} questions and {AttachmentCount} attachments",
+                assignmentId, _model.Questions.Count, _model.Attachments.Count);
             Nav.NavigateTo("/assignments");
         }
         catch (OperationCanceledException) { }
@@ -728,6 +786,17 @@
         }
     }
 
+    /// <summary>Client-side submit gate mirror used by the Save-as-Draft
+    /// button's <c>Disabled</c> attribute (FR-252 / EC-3).</summary>
+    private bool CanSubmitQuestions() =>
+        _model.QuestionsPassSubmitGate(_selectedGradingFormat, out _);
+
+    /// <summary>EventCallback invoked by the Step-2 child components when
+    /// the question list changes — the page is the orchestrator and uses
+    /// the callback to re-render so the review step's totals and the
+    /// submit gate stay fresh.</summary>
+    private Task OnWizardQuestionsChanged() => Task.CompletedTask;
+
     private Task GoToStepAsync(int stepIndex) =>
         _wizard?.GoToStepAsync(stepIndex) ?? Task.CompletedTask;
 
@@ -739,17 +808,5 @@
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
-    }
-
-    private sealed class FormModel
-    {
-        [System.ComponentModel.DataAnnotations.Required]
-        public string? Title { get; set; }
-
-        public string? Description { get; set; }
-
-        public DateTime? DueDate { get; set; }
-
-        public decimal? MaxScore { get; set; }
     }
 }

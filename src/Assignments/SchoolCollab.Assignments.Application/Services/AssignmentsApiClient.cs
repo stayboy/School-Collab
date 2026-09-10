@@ -29,7 +29,8 @@ public sealed class AssignmentsApiClient
                 new JsonStringEnumConverter<ContactOwnerTypeDto>(),
                 new JsonStringEnumConverter<ContactChannelDto>(),
                 new JsonStringEnumConverter<GuardianRoleDto>(),
-                new JsonStringEnumConverter<SubmissionSourceDto>()
+                new JsonStringEnumConverter<SubmissionSourceDto>(),
+                new JsonStringEnumConverter<QuestionTypeDto>()
             }
         };
     }

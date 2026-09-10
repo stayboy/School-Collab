@@ -1,0 +1,187 @@
+@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
+@using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Assignments.Application.Services
+@using SchoolCollab.AI.Abstractions
+@implements IDisposable
+@inject IAssignmentQuestionGenerator QuestionGenerator
+@inject ILogger<QuestionGenerationSection> Logger
+
+<section class="question-generation-section">
+    <div class="question-generation-controls">
+        <FluentTextArea @bind-Value="Model.AiPromptOverride"
+                        Label="Additional guidance for the AI (optional)"
+                        MaxLength="4000"
+                        Rows="3"
+                        class="full-width" />
+
+        <div class="question-generation-row">
+            <FluentNumberField @bind-Value="_questionCount"
+                               Label="Number of questions"
+                               Min="1"
+                               Max="30"
+                               Class="w-3" />
+
+            <div class="question-generation-types" role="group" aria-label="Question types">
+                <FluentCheckbox @bind-Value="_includeMultipleChoice" Label="@EnumHelper.GetDescription(QuestionTypeDto.MultipleChoice)" />
+                <FluentCheckbox @bind-Value="_includeTrueFalse" Label="@EnumHelper.GetDescription(QuestionTypeDto.TrueFalse)" />
+                <FluentCheckbox @bind-Value="_includeShortAnswer" Label="@EnumHelper.GetDescription(QuestionTypeDto.ShortAnswer)" />
+            </div>
+        </div>
+
+        <div class="question-generation-actions">
+            <FluentButton Appearance="Appearance.Accent"
+                          Disabled="@(!GateEnabled || _generating)"
+                          OnClick="OnGenerateAsync"
+                          Tooltip="@(GateEnabled ? null : QuestionGenerationGate.DisabledTooltip)">
+                @(_generating ? "Generating…" : "Generate")
+            </FluentButton>
+
+            @if (_generating)
+            {
+                <FluentProgressRing class="question-generation-progress" />
+                <FluentButton Appearance="Appearance.Neutral"
+                              OnClick="OnCancelAsync">
+                    Cancel
+                </FluentButton>
+            }
+        </div>
+
+        @if (!string.IsNullOrEmpty(_generationError))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_generationError</FluentMessageBar>
+        }
+    </div>
+</section>
+
+@code {
+    /// <summary>The form model that owns the prompt override and the question
+    /// list the generated questions are appended to.</summary>
+    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
+
+    /// <summary>True when the type + grading format combination supports
+    /// AI question generation (FR-220 / EC-3).</summary>
+    [Parameter] public bool GateEnabled { get; set; }
+
+    /// <summary>The selected subject's id, passed into the generation
+    /// request's <see cref="QuestionGenerationRequest.TopicId"/>. Null
+    /// short-circuits the call with a friendly "select a subject"
+    /// message.</summary>
+    [Parameter] public Guid? TopicId { get; set; }
+
+    /// <summary>The selected subject's display name, passed into
+    /// <see cref="QuestionGenerationRequest.TopicName"/>.</summary>
+    [Parameter] public string? TopicName { get; set; }
+
+    /// <summary>The selected grade level's id, passed into the
+    /// generation request when known.</summary>
+    [Parameter] public Guid? GradeLevelId { get; set; }
+
+    /// <summary>Raised after a successful append so the page can re-render
+    /// review counts and the submit gate. The page is the
+    /// orchestrator; this component owns the generation call only.</summary>
+    [Parameter] public EventCallback OnQuestionsChanged { get; set; }
+
+    private int _questionCount = 5;
+    private bool _includeMultipleChoice = true;
+    private bool _includeTrueFalse = true;
+    private bool _includeShortAnswer = true;
+    private bool _generating;
+    private string? _generationError;
+    private CancellationTokenSource? _generateCts;
+
+    private async Task OnGenerateAsync()
+    {
+        if (!GateEnabled || _generating)
+        {
+            return;
+        }
+        if (_questionCount < 1)
+        {
+            // EC-10: zero (or negative) count = no call. Min="1" on the
+            // number field normally prevents this, but guard here too so a
+            // pasted value cannot slip through.
+            return;
+        }
+        if (TopicId is null)
+        {
+            _generationError = "Select a subject before generating questions.";
+            return;
+        }
+
+        _generating = true;
+        _generationError = null;
+        _generateCts?.Cancel();
+        _generateCts?.Dispose();
+        _generateCts = new CancellationTokenSource();
+        var ct = _generateCts.Token;
+
+        // Build the type set; null = "all" (server-side balanced default per FR-221).
+        IReadOnlyList<GeneratedQuestionType>? types = null;
+        var picked = new List<GeneratedQuestionType>(3);
+        if (_includeMultipleChoice) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.MultipleChoice));
+        if (_includeTrueFalse) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.TrueFalse));
+        if (_includeShortAnswer) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.ShortAnswer));
+        if (picked.Count > 0) types = picked;
+
+        var request = new QuestionGenerationRequest(
+            TopicId: TopicId.Value,
+            TopicName: TopicName ?? string.Empty,
+            GradeLevelId: GradeLevelId,
+            ContextStrands: null,
+            QuestionCount: _questionCount,
+            Types: types,
+            PromptOverride: Model.AiPromptOverride);
+
+        Logger.LogInformation(
+            "Requesting {Count} questions for topic {TopicName}",
+            _questionCount, request.TopicName);
+
+        try
+        {
+            var questions = await QuestionGenerator.GenerateAsync(request, ct);
+            Model.AppendGenerated(questions);
+            await OnQuestionsChanged.InvokeAsync();
+        }
+        catch (QuestionGenerationFailed ex)
+        {
+            // EC-1 / EC-8: friendly text from the typed exception; the
+            // still-enabled Generate button is the retry.
+            _generationError = ex.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            // EC-2: cancel leaves the list untouched; nothing to surface.
+        }
+        catch (Exception ex)
+        {
+            // Catch-all (P2 tester finding): non-typed failures must not
+            // escape to the page-level ErrorBoundary and permanently
+            // replace the wizard. Log the exception and surface the
+            // same friendly error state — the still-enabled Generate
+            // button is the retry. The message is intentionally
+            // user-facing: a transient infrastructure blip the teacher
+            // can try again from.
+            Logger.LogError(
+                ex,
+                "Unexpected error generating questions for topic {TopicName}",
+                request.TopicName);
+            _generationError = "Something went wrong while generating questions. Please try again.";
+        }
+        finally
+        {
+            _generating = false;
+        }
+    }
+
+    private void OnCancelAsync()
+    {
+        _generateCts?.Cancel();
+    }
+
+    public void Dispose()
+    {
+        _generateCts?.Cancel();
+        _generateCts?.Dispose();
+        _generateCts = null;
+    }
+}

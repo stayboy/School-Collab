@@ -1,0 +1,3358 @@
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
+index 34e26284..bb45b774 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentEditFormModel.cs
+@@ -1,11 +1,16 @@
++using SchoolCollab.AI.Abstractions;
+ using SchoolCollab.Assignments.Contracts;
+ 
+ namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
+ 
+ /// <summary>
+-/// Form model for the assignment edit page. The DTO → form-model projection
+-/// (<see cref="From"/> / <see cref="LoadFrom"/>) lives on the model itself so
+-/// it is discoverable and unit-testable — see
++/// Form model for the assignment edit / create flow. Carries the
++/// page-level fields (Title, Description, DueDate, MaxScore) used by
++/// the wizard AND the question/attachment editor rows required by AI
++/// spec §3.5 / §10 (phases 7–8). The DTO → form-model projection
++/// (<see cref="From"/> / <see cref="LoadFrom"/>) and the create-request
++/// projection (<see cref="ToCreateRequest"/>) live on the model itself
++/// so they are discoverable and unit-testable — see
+ /// documents/solution/dto-form-model-mapping.md.
+ /// </summary>
+ public sealed class AssignmentEditFormModel
+@@ -19,9 +24,30 @@ public sealed class AssignmentEditFormModel
+ 
+     public decimal? MaxScore { get; set; }
+ 
++    /// <summary>The editable question rows owned by this form model
++    /// (spec §3.5). Always non-null; the list starts empty.</summary>
++    public List<QuestionEditorRow> Questions { get; } = [];
++
++    /// <summary>The attachment metadata rows (spec §3.5 model half).
++    /// The Step-2 Resources UI section, the upload control, and the
++    /// stage-at-submit (EC-4) are owned by ar-4-modules-resources
++    /// (decision (a)).</summary>
++    public List<AttachmentEditorRow> Attachments { get; } = [];
++
++    /// <summary>Optional free-text prompt override (FR-230 / decision 8).
++    /// When blank, the AI host loads the embedded system prompt. When
++    /// set, the override is sent as a user-role framing message.</summary>
++    public string? AiPromptOverride { get; set; }
++
++    /// <summary>Fixed question page size for the editor + review paginator
++    /// (spec §0 decision 9 / FR-240).</summary>
++    public const int QuestionPageSize = 5;
++
+     /// <summary>
+     /// Projects an <see cref="AssignmentSummaryDto"/> into a brand-new, fully-
+-    /// populated <see cref="AssignmentEditFormModel"/>.
++    /// populated <see cref="AssignmentEditFormModel"/>. The question/attachment
++    /// collections start empty — this round only persists them on create
++    /// (FR-250/251); the edit page is a later round (round doc §Out).
+     /// </summary>
+     public static AssignmentEditFormModel From(AssignmentSummaryDto assignment)
+     {
+@@ -42,4 +68,249 @@ public sealed class AssignmentEditFormModel
+         DueDate = assignment.DueDate?.DateTime;
+         MaxScore = assignment.MaxScore;
+     }
++
++    /// <summary>
++    /// Projects this form model into a <see cref="CreateAssignmentRequest"/>
++    /// that the API client submits. Page-level values that live outside the
++    /// model (type, grading, audience, subject, grade level, mandatory
++    /// review) are passed in as arguments — the student-model precedent
++    /// (documents/solution/dto-form-model-mapping.md). Re-indexes
++    /// <c>DisplayOrder</c> to 0..n over the whole question list (EC-7).
++    /// Returns <c>Questions</c>/<c>Attachments</c> as <c>null</c> when the
++    /// collections are empty (the wire contract's default).
++    /// </summary>
++    public CreateAssignmentRequest ToCreateRequest(
++        AssignmentTypeDto assignmentType,
++        GradingFormatDto gradingFormat,
++        TargetAudienceTypeDto targetAudienceType,
++        Guid topicId,
++        Guid? gradeLevelId,
++        bool mandatoryReview)
++    {
++        IReadOnlyList<NewQuestionDto>? questions = null;
++        if (Questions.Count > 0)
++        {
++            var list = new List<NewQuestionDto>(Questions.Count);
++            for (var i = 0; i < Questions.Count; i++)
++            {
++                var row = Questions[i];
++                IReadOnlyList<NewQuestionOptionDto>? options = null;
++                if (row.Type is QuestionTypeDto.MultipleChoice or QuestionTypeDto.TrueFalse)
++                {
++                    var optionList = new List<NewQuestionOptionDto>(row.Options.Count);
++                    for (var j = 0; j < row.Options.Count; j++)
++                    {
++                        var isCorrect = row.CorrectOptionIndex == j;
++                        optionList.Add(new NewQuestionOptionDto(row.Options[j].OptionText ?? string.Empty, isCorrect));
++                    }
++                    options = optionList;
++                }
++                list.Add(new NewQuestionDto(
++                    QuestionText: row.QuestionText ?? string.Empty,
++                    QuestionType: row.Type,
++                    DisplayOrder: i,
++                    Options: options,
++                    ModelAnswer: row.ModelAnswer));
++            }
++            questions = list;
++        }
++
++        IReadOnlyList<NewAttachmentDto>? attachments = null;
++        if (Attachments.Count > 0)
++        {
++            attachments = Attachments
++                .Select(a => new NewAttachmentDto(
++                    a.FileName ?? string.Empty,
++                    a.ContentType ?? string.Empty,
++                    a.FileSize,
++                    a.StoragePath ?? string.Empty))
++                .ToList();
++        }
++
++        return new CreateAssignmentRequest(
++            Title: Title ?? string.Empty,
++            Description: Description,
++            AssignmentType: assignmentType,
++            GradingFormat: gradingFormat,
++            TargetAudienceType: targetAudienceType,
++            TopicId: topicId,
++            GradeLevelId: gradeLevelId,
++            DueDate: DueDate.HasValue ? new DateTimeOffset(DueDate.Value, TimeSpan.Zero) : null,
++            MaxScore: MaxScore,
++            MandatoryReview: mandatoryReview,
++            AiPromptOverride: AiPromptOverride,
++            Questions: questions,
++            Attachments: attachments);
++    }
++
++    /// <summary>
++    /// Client-side submit gate mirroring the server-side
++    /// <c>QuestionOptionDtoValidator</c> rules (FR-252) plus the
++    /// auto-graded/instant-feedback minimum (zero questions → fail for
++    /// those grading formats). Returns the first violation found (or
++    /// <c>null</c> when the form passes).
++    /// </summary>
++    public bool QuestionsPassSubmitGate(GradingFormatDto gradingFormat, out string? error)
++    {
++        if (Questions.Count == 0)
++        {
++            if (gradingFormat is GradingFormatDto.AutoGraded or GradingFormatDto.InstantGraded)
++            {
++                error = "Auto-scored and instant-feedback assignments need at least one question.";
++                return false;
++            }
++            error = null;
++            return true;
++        }
++
++        for (var i = 0; i < Questions.Count; i++)
++        {
++            var row = Questions[i];
++            var n = i + 1; // 1-based for user-facing messages
++
++            if (string.IsNullOrWhiteSpace(row.QuestionText))
++            {
++                error = $"Question {n} needs text.";
++                return false;
++            }
++
++            switch (row.Type)
++            {
++                case QuestionTypeDto.MultipleChoice:
++                {
++                    if (row.Options.Count < 2)
++                    {
++                        error = $"Question {n} needs at least 2 options.";
++                        return false;
++                    }
++                    for (var j = 0; j < row.Options.Count; j++)
++                    {
++                        if (string.IsNullOrWhiteSpace(row.Options[j].OptionText))
++                        {
++                            error = $"Question {n} has an empty option.";
++                            return false;
++                        }
++                    }
++                    if (row.CorrectOptionIndex is not int correct || correct < 0 || correct >= row.Options.Count)
++                    {
++                        error = $"Question {n} needs one correct option.";
++                        return false;
++                    }
++                    break;
++                }
++                case QuestionTypeDto.TrueFalse:
++                {
++                    if (!HasCanonicalTrueFalseOptions(row))
++                    {
++                        error = $"Question {n} must have exactly True and False options.";
++                        return false;
++                    }
++                    if (row.CorrectOptionIndex is not int correct || correct < 0 || correct >= row.Options.Count)
++                    {
++                        error = $"Question {n} needs one correct option.";
++                        return false;
++                    }
++                    break;
++                }
++                case QuestionTypeDto.ShortAnswer:
++                default:
++                    // No option rules for ShortAnswer.
++                    break;
++            }
++        }
++
++        error = null;
++        return true;
++    }
++
++    /// <summary>True iff the row carries exactly the canonical
++    /// <c>"True"</c>/<c>"False"</c> options in any order (case-insensitive).
++    /// Used by <see cref="QuestionsPassSubmitGate"/>.</summary>
++    private static bool HasCanonicalTrueFalseOptions(QuestionEditorRow row)
++    {
++        if (row.Options.Count != 2) return false;
++        var a = row.Options[0].OptionText?.Trim();
++        var b = row.Options[1].OptionText?.Trim();
++        var aIsTrue = string.Equals(a, "True", StringComparison.OrdinalIgnoreCase);
++        var aIsFalse = string.Equals(a, "False", StringComparison.OrdinalIgnoreCase);
++        var bIsTrue = string.Equals(b, "True", StringComparison.OrdinalIgnoreCase);
++        var bIsFalse = string.Equals(b, "False", StringComparison.OrdinalIgnoreCase);
++        return (aIsTrue && bIsFalse) || (aIsFalse && bIsTrue);
++    }
++
++    /// <summary>Returns the question page slice (FR-240). Clamps
++    /// <paramref name="pageIndex"/> to the valid range so a stale
++    /// page-index from before a removal/append cannot escape the
++    /// data set.</summary>
++    public IReadOnlyList<QuestionEditorRow> GetQuestionPage(int pageIndex, int pageSize = QuestionPageSize)
++    {
++        if (Questions.Count == 0)
++        {
++            return [];
++        }
++        var pageCount = Math.Max(1, (Questions.Count + pageSize - 1) / pageSize);
++        var clamped = pageIndex < 0 ? 0 : Math.Min(pageIndex, pageCount - 1);
++        return Questions
++            .Skip(clamped * pageSize)
++            .Take(pageSize)
++            .ToList();
++    }
++
++    /// <summary>Total page count for the current question list using
++    /// <see cref="QuestionPageSize"/>. Always at least 1 so callers
++    /// that pin <c>CurrentPageIndex = 0</c> never go negative.</summary>
++    public int QuestionPageCount(int pageSize = QuestionPageSize)
++    {
++        return Math.Max(1, (Questions.Count + pageSize - 1) / pageSize);
++    }
++
++    /// <summary>Appends a hand-written question (decision (d): never
++    /// replaces; the teacher prunes rows explicitly). Re-indexes
++    /// <c>DisplayOrder</c> 0..n over the whole list (EC-7).</summary>
++    public void AddQuestion(QuestionEditorRow row)
++    {
++        Questions.Add(row);
++        ReindexQuestions();
++    }
++
++    /// <summary>Removes the question at <paramref name="index"/>, then
++    /// re-indexes <c>DisplayOrder</c> 0..n over the whole list (EC-7).
++    /// Out-of-range indices are ignored so a stale click cannot
++    /// throw inside the editor.</summary>
++    public void RemoveQuestionAt(int index)
++    {
++        if (index < 0 || index >= Questions.Count)
++        {
++            return;
++        }
++        Questions.RemoveAt(index);
++        ReindexQuestions();
++    }
++
++    /// <summary>Appends generated questions to the list (never replaces;
++    /// see decision (d)). Maps each DTO via
++    /// <see cref="QuestionEditorRow.FromGenerated"/>, then re-indexes
++    /// <c>DisplayOrder</c> 0..n (EC-7).</summary>
++    public void AppendGenerated(IReadOnlyList<GeneratedQuestionDto> generated)
++    {
++        if (generated is null || generated.Count == 0)
++        {
++            return;
++        }
++        foreach (var dto in generated)
++        {
++            Questions.Add(QuestionEditorRow.FromGenerated(dto));
++        }
++        ReindexQuestions();
++    }
++
++    /// <summary>Re-assigns <c>DisplayOrder</c> 0..n over the whole list
++    /// (EC-7). Called by every mutating helper.</summary>
++    private void ReindexQuestions()
++    {
++        for (var i = 0; i < Questions.Count; i++)
++        {
++            Questions[i].DisplayOrder = i;
++        }
++    }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentQuestionEditorRows.cs b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentQuestionEditorRows.cs
+new file mode 100644
+index 00000000..7f29cd82
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/AssignmentQuestionEditorRows.cs
+@@ -0,0 +1,227 @@
++using SchoolCollab.AI.Abstractions;
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Assignments.Application.Components.Pages.Assignments;
++
++/// <summary>
++/// One editable option row inside a <see cref="QuestionEditorRow"/>.
++/// Plain data — correctness is tracked on the parent question via
++/// <see cref="QuestionEditorRow.CorrectOptionIndex"/> (the single
++/// source of truth, radio-friendly; null = no correct option picked).
++/// </summary>
++public sealed class OptionEditorRow
++{
++    /// <summary>The option's text. May be blank while the teacher is still typing.</summary>
++    public string? OptionText { get; set; }
++}
++
++/// <summary>
++/// One editable question row held in
++/// <see cref="AssignmentEditFormModel.Questions"/>. Mirrors the spec §3.5
++/// shape: question text, type discriminator, options, a single
++/// correct-option index, optional model answer for ShortAnswer, and the
++/// <see cref="DisplayOrder"/> that gets re-indexed 0..n over the whole
++/// list after every mutation (EC-7).
++/// </summary>
++public sealed class QuestionEditorRow
++{
++    /// <summary>The question prompt text. May be blank while the teacher types.</summary>
++    public string? QuestionText { get; set; }
++
++    /// <summary>The wire-format question type (matches
++    /// <see cref="QuestionTypeDto"/> in <c>SchoolCollab.Assignments.Contracts</c>).</summary>
++    public QuestionTypeDto Type { get; set; }
++
++    /// <summary>Stable, contiguous display order across the question list
++    /// (EC-7). The form model re-indexes 0..n after every mutation.</summary>
++    public int DisplayOrder { get; set; }
++
++    /// <summary>The option rows. Always non-null; the contents depend on
++    /// <see cref="Type"/> (MultipleChoice has user rows, TrueFalse has the
++    /// canonical two, ShortAnswer has none).</summary>
++    public List<OptionEditorRow> Options { get; } = [];
++
++    /// <summary>Index into <see cref="Options"/> for the correct option.
++    /// Null = no correct option picked (the submit gate rejects this for
++    /// MC/TF per FR-252 / EC-5). -1 / out-of-range is also treated as
++    /// "no correct option" by the gate.</summary>
++    public int? CorrectOptionIndex { get; set; }
++
++    /// <summary>Teacher reference for ShortAnswer questions (decision (c)):
++    /// editable in the wizard, round-trips through
++    /// <c>NewQuestionDto.ModelAnswer</c> at submit.</summary>
++    public string? ModelAnswer { get; set; }
++
++    /// <summary>Max options for a MultipleChoice question (spec §4.3 / EC-5 note).</summary>
++    public const int MaxOptions = 6;
++
++    /// <summary>Min options for a MultipleChoice question.</summary>
++    public const int MinOptions = 2;
++
++    /// <summary>Appends a blank option row, capped at <see cref="MaxOptions"/>
++    /// for MultipleChoice rows (TrueFalse is fixed at two canonical rows,
++    /// ShortAnswer has none).</summary>
++    public void AddOption()
++    {
++        if (Type == QuestionTypeDto.MultipleChoice && Options.Count >= MaxOptions)
++        {
++            return;
++        }
++        Options.Add(new OptionEditorRow());
++    }
++
++    /// <summary>Removes the option at <paramref name="index"/> and clears
++    /// <see cref="CorrectOptionIndex"/> when it pointed at or after the
++    /// removed index (so correctness never silently re-points at a
++    /// neighbouring option).</summary>
++    public void RemoveOptionAt(int index)
++    {
++        if (index < 0 || index >= Options.Count)
++        {
++            return;
++        }
++        Options.RemoveAt(index);
++        if (CorrectOptionIndex is int correct)
++        {
++            if (correct == index)
++            {
++                CorrectOptionIndex = null;
++            }
++            else if (correct > index)
++            {
++                CorrectOptionIndex = correct - 1;
++            }
++        }
++    }
++
++    /// <summary>Applies a type change to this row. Per spec §7 "type change
++    /// resets options": the option list and correct pick are reset, then
++    /// the canonical defaults are seeded for the new type (TrueFalse gets
++    /// exactly the two "True" / "False" rows with no correct pick per
++    /// EC-5; MultipleChoice gets two blank option rows so the teacher
++    /// never lands on a 0-option MC row — mirrors
++    /// <see cref="NewMultipleChoice"/>; ShortAnswer leaves the list
++    /// empty). The submit gate still enforces one correct pick and
++    /// non-empty option text, so seeding is a convenience only.</summary>
++    public void ApplyTypeChange(QuestionTypeDto newType)
++    {
++        Type = newType;
++        Options.Clear();
++        CorrectOptionIndex = null;
++        ModelAnswer = null;
++
++        switch (newType)
++        {
++            case QuestionTypeDto.TrueFalse:
++                Options.Add(new OptionEditorRow { OptionText = "True" });
++                Options.Add(new OptionEditorRow { OptionText = "False" });
++                break;
++            case QuestionTypeDto.MultipleChoice:
++                Options.Add(new OptionEditorRow());
++                Options.Add(new OptionEditorRow());
++                break;
++            case QuestionTypeDto.ShortAnswer:
++            default:
++                // Empty; the teacher authors the model answer from scratch.
++                break;
++        }
++    }
++
++    /// <summary>Factory for a fresh hand-written MultipleChoice question with
++    /// two blank option rows (the minimum to enter the editor).</summary>
++    public static QuestionEditorRow NewMultipleChoice()
++    {
++        var row = new QuestionEditorRow
++        {
++            Type = QuestionTypeDto.MultipleChoice,
++        };
++        row.Options.Add(new OptionEditorRow());
++        row.Options.Add(new OptionEditorRow());
++        return row;
++    }
++
++    /// <summary>Maps a <see cref="GeneratedQuestionDto"/> from the AI host
++    /// into an editable row (decision (b) — the only place the two
++    /// int-mirrored enums are bridged).</summary>
++    public static QuestionEditorRow FromGenerated(GeneratedQuestionDto dto)
++    {
++        var row = new QuestionEditorRow
++        {
++            QuestionText = dto.Text,
++            Type = FromGeneratedType(dto.Type),
++            ModelAnswer = dto.ModelAnswer,
++        };
++        if (dto.Options is not null)
++        {
++            for (var i = 0; i < dto.Options.Count; i++)
++            {
++                var opt = dto.Options[i];
++                row.Options.Add(new OptionEditorRow { OptionText = opt.Text });
++                if (opt.IsCorrect && row.CorrectOptionIndex is null)
++                {
++                    row.CorrectOptionIndex = i;
++                }
++            }
++        }
++        return row;
++    }
++
++    /// <summary>Maps the AI wire-format enum to the
++    /// <see cref="QuestionTypeDto"/> used by the form model. Decision (b)
++    /// — explicit three-case switch (no implicit int conversion) so a
++    /// future enum value addition is caught at compile time.</summary>
++    public static QuestionTypeDto FromGeneratedType(GeneratedQuestionType generated)
++    {
++        return generated switch
++        {
++            GeneratedQuestionType.MultipleChoice => QuestionTypeDto.MultipleChoice,
++            GeneratedQuestionType.TrueFalse => QuestionTypeDto.TrueFalse,
++            GeneratedQuestionType.ShortAnswer => QuestionTypeDto.ShortAnswer,
++            _ => throw new ArgumentOutOfRangeException(nameof(generated), generated, "Unknown GeneratedQuestionType value."),
++        };
++    }
++
++    /// <summary>Maps the form-model <see cref="QuestionTypeDto"/> to the
++    /// AI wire-format enum. Inverse of <see cref="FromGeneratedType"/>.</summary>
++    public static GeneratedQuestionType ToGeneratedType(QuestionTypeDto type)
++    {
++        return type switch
++        {
++            QuestionTypeDto.MultipleChoice => GeneratedQuestionType.MultipleChoice,
++            QuestionTypeDto.TrueFalse => GeneratedQuestionType.TrueFalse,
++            QuestionTypeDto.ShortAnswer => GeneratedQuestionType.ShortAnswer,
++            _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown QuestionTypeDto value."),
++        };
++    }
++}
++
++/// <summary>
++/// One row in the <see cref="AssignmentEditFormModel.Attachments"/> list.
++/// The visible form-model half of spec §3.5 (FR-210–212) lands now; the
++/// Step-2 Resources UI section, the upload control, and the staging-at-
++/// submit (EC-4) are owned by ar-4-modules-resources (decision (a)).
++/// <see cref="UploadStream"/> is documented as ar-4-consumed and is
++/// unused this round by design.
++/// </summary>
++public sealed class AttachmentEditorRow
++{
++    /// <summary>The original file name (e.g. <c>"syllabus.pdf"</c>).</summary>
++    public string? FileName { get; set; }
++
++    /// <summary>The MIME content type (e.g. <c>"application/pdf"</c>).</summary>
++    public string? ContentType { get; set; }
++
++    /// <summary>The file size in bytes (signed 64-bit; allowlists + caps
++    /// enforced at the API boundary per FR-210).</summary>
++    public long FileSize { get; set; }
++
++    /// <summary>The opaque storage path returned by the file-store
++    /// staging endpoint. Populated by ar-4 before submit (EC-4).</summary>
++    public string? StoragePath { get; set; }
++
++    /// <summary>The transient in-memory stream. Held only between
++    /// file-pick and stage-at-submit; <c>null</c> after the row is
++    /// staged. <strong>ar-4-only</strong> — unused this round by
++    /// design (decision (a) carries the upload UI).</summary>
++    public System.IO.Stream? UploadStream { get; set; }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Create.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Create.razor
+index ebd3694e..d34aed95 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Create.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/Create.razor
+@@ -138,6 +138,7 @@
+                                 <p class="wizard-card-desc">Students see results immediately on submission.</p>
+                             </li>
+                         </ul>
++                        <p class="wizard-hint">@QuestionGenerationGate.HintText(_selectedType, _selectedGradingFormat)</p>
+                     </section>
+ 
+                     <section class="wizard-section">
+@@ -282,6 +283,33 @@
+                             </FluentStack>
+                         </FluentEditForm>
+                     </section>
++
++                    @* Generation section is gated (FR-220 / EC-3); the editor is
++                       always available so a teacher with a gate-closed
++                       combination (Manual / TeacherGraded, etc.) can still
++                       hand-add questions — the step-1 DisabledHint promises
++                       this. *@
++                    @if (QuestionGenerationGate.IsEnabled(_selectedType, _selectedGradingFormat) || _model.Questions.Count > 0)
++                    {
++                        <section class="wizard-section">
++                            <div class="wizard-section-header">
++                                <FluentIcon Icon="@(Icons.Regular.Size24.Sparkle)" Color="@Color.Accent" />
++                                <div>
++                                    <h3>AI Question Generation</h3>
++                                    <p class="wizard-hint">Generate a starter set of questions, then edit them below before submitting.</p>
++                                </div>
++                            </div>
++
++                            <QuestionGenerationSection Model="_model"
++                                                      GateEnabled="QuestionGenerationGate.IsEnabled(_selectedType, _selectedGradingFormat)"
++                                                      TopicId="@(_selectedSubject is null ? null : Guid.Parse(_selectedSubject.Value))"
++                                                      TopicName="@_selectedSubject?.Label"
++                                                      GradeLevelId="@(_selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value))"
++                                                      OnQuestionsChanged="OnWizardQuestionsChanged" />
++                        </section>
++                    }
++
++                    <QuestionEditorSection Model="_model" Changed="OnWizardQuestionsChanged" />
+                 </FluentWizardStep>
+ 
+                 @* ── Step 3: Review & Submit ── *@
+@@ -342,6 +370,29 @@
+                             </div>
+                         </div>
+ 
++                        <section class="wizard-section">
++                            <div class="wizard-section-header">
++                                <FluentIcon Icon="@(Icons.Regular.Size24.Eye)" Color="@Color.Accent" />
++                                <div>
++                                    <h3>Questions</h3>
++                                    <p class="wizard-hint">Review the questions before submitting.</p>
++                                </div>
++                            </div>
++                            <QuestionReviewList Model="_model" />
++                            <FluentButton Appearance="Appearance.Outline"
++                                          IconStart="@FluentIcons.ArrowLeft"
++                                          OnClick="@(() => GoToStepAsync(1))"
++                                          class="mt-2">
++                                Edit questions
++                            </FluentButton>
++                        </section>
++
++                        @{ var gatePasses = _model.QuestionsPassSubmitGate(_selectedGradingFormat, out var gateError); }
++                        @if (!gatePasses)
++                        {
++                            <FluentMessageBar Intent="MessageIntent.Error" class="mt-3 mb-3">@gateError</FluentMessageBar>
++                        }
++
+                         @if (!string.IsNullOrEmpty(_error))
+                         {
+                             <FluentMessageBar Intent="MessageIntent.Error" class="mt-3 mb-3">@_error</FluentMessageBar>
+@@ -378,7 +429,7 @@
+                     {
+                         <FluentButton Appearance="Appearance.Accent"
+                                       IconStart="@FluentIcons.Save"
+-                                      Disabled="@_saving" OnClick="SubmitAsync"
++                                      Disabled="@(_saving || !CanSubmitQuestions())" OnClick="SubmitAsync"
+                                       class="ms-2">
+                             @(_saving ? "Saving…" : "Save as Draft")
+                         </FluentButton>
+@@ -395,7 +446,7 @@
+ @code {
+     private FluentWizard? _wizard;
+     private int _stepIndex;
+-    private readonly FormModel _model = new();
++    private readonly AssignmentEditFormModel _model = new();
+     private bool _saving;
+     private string? _error;
+     private string? _step1Error;
+@@ -691,18 +742,23 @@
+                 }
+             }
+ 
++            // Defense in depth: the Save-as-Draft button's Disabled already
++            // guards this, but the click handler can also be reached through
++            // Enter-key submission paths.
++            if (!_model.QuestionsPassSubmitGate(_selectedGradingFormat, out var gateError))
++            {
++                _error = gateError;
++                return;
++            }
++
+             Logger.LogInformation("User initiated create for assignment {Title}", _model.Title);
+ 
+-            var req = new CreateAssignmentRequest(
+-                _model.Title!,
+-                _model.Description,
++            var req = _model.ToCreateRequest(
+                 _selectedType ?? AssignmentTypeDto.Manual,
+                 _selectedGradingFormat,
+                 _selectedTargetAudience,
+                 Guid.Parse(_selectedSubject.Value),
+                 _selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value),
+-                _model.DueDate.HasValue ? new DateTimeOffset(_model.DueDate.Value, TimeSpan.Zero) : null,
+-                _model.MaxScore,
+                 _mandatoryReview);
+ 
+             var assignmentId = await Api.CreateAsync(req, ct);
+@@ -712,7 +768,9 @@
+                 await Api.LinkAssignmentGroupsAsync(assignmentId, _selectedGroupIds.ToList(), ct);
+             }
+ 
+-            Logger.LogInformation("Assignment {AssignmentId} created, questions will be added in future update", assignmentId);
++            Logger.LogInformation(
++                "Assignment {AssignmentId} created with {QuestionCount} questions and {AttachmentCount} attachments",
++                assignmentId, _model.Questions.Count, _model.Attachments.Count);
+             Nav.NavigateTo("/assignments");
+         }
+         catch (OperationCanceledException) { }
+@@ -728,6 +786,17 @@
+         }
+     }
+ 
++    /// <summary>Client-side submit gate mirror used by the Save-as-Draft
++    /// button's <c>Disabled</c> attribute (FR-252 / EC-3).</summary>
++    private bool CanSubmitQuestions() =>
++        _model.QuestionsPassSubmitGate(_selectedGradingFormat, out _);
++
++    /// <summary>EventCallback invoked by the Step-2 child components when
++    /// the question list changes — the page is the orchestrator and uses
++    /// the callback to re-render so the review step's totals and the
++    /// submit gate stay fresh.</summary>
++    private Task OnWizardQuestionsChanged() => Task.CompletedTask;
++
+     private Task GoToStepAsync(int stepIndex) =>
+         _wizard?.GoToStepAsync(stepIndex) ?? Task.CompletedTask;
+ 
+@@ -740,16 +809,4 @@
+         _loadCts?.Dispose();
+         _loadCts = null;
+     }
+-
+-    private sealed class FormModel
+-    {
+-        [System.ComponentModel.DataAnnotations.Required]
+-        public string? Title { get; set; }
+-
+-        public string? Description { get; set; }
+-
+-        public DateTime? DueDate { get; set; }
+-
+-        public decimal? MaxScore { get; set; }
+-    }
+ }
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionEditorSection.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionEditorSection.razor
+new file mode 100644
+index 00000000..ea06ad8a
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionEditorSection.razor
+@@ -0,0 +1,210 @@
++@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
++@using Microsoft.FluentUI.AspNetCore.Components
++@implements IDisposable
++@inject IDialogService DialogService
++@inject ILogger<QuestionEditorSection> Logger
++
++<section class="question-editor-section">
++    <div class="question-editor-toolbar">
++        <span class="question-editor-count">@Model.Questions.Count question(s)</span>
++        <FluentButton Appearance="Appearance.Accent"
++                      IconStart="@FluentIcons.Add"
++                      OnClick="OnAddQuestionAsync">
++            Add question
++        </FluentButton>
++    </div>
++
++    @if (Model.Questions.Count == 0)
++    {
++        <FluentMessageBar Intent="MessageIntent.Info">No questions yet. Add a question to get started.</FluentMessageBar>
++    }
++    else
++    {
++        <div class="question-editor-pages">
++            @foreach (var (row, index) in _currentPage.Select((r, i) => (r, i)))
++            {
++                var absoluteIndex = _paginationState.CurrentPageIndex * AssignmentEditFormModel.QuestionPageSize + index;
++                <div class="question-editor-card" @key="row">
++                    <div class="question-editor-card-header">
++                        <span class="question-editor-position">#@(absoluteIndex + 1)</span>
++                        <span class="question-editor-card-spacer" aria-hidden="true"></span>
++                        <FluentButton Appearance="Appearance.Stealth"
++                                      OnClick="@(() => OnRemoveQuestionAsync(absoluteIndex))"
++                                      aria-label="Remove question">
++                            Remove
++                        </FluentButton>
++                    </div>
++
++                    <FluentTextField @bind-Value="row.QuestionText"
++                                     Label="Question *"
++                                     class="full-width" />
++
++                    <DropdownForEnum TEnum="QuestionTypeDto"
++                                     @bind-SelectedValue="row.Type"
++                                     @bind-SelectedValue:after="() => OnTypeChanged(row)"
++                                     Label="Type"
++                                     Class="w-3" />
++
++                    @switch (row.Type)
++                    {
++                        case QuestionTypeDto.MultipleChoice:
++                        {
++                            <div class="question-editor-options">
++                                <span class="question-editor-sublabel">Options (pick the correct one)</span>
++                                <FluentRadioGroup TValue="int" Name="@RadioGroupKey(row)">
++                                    @for (var i = 0; i < row.Options.Count; i++)
++                                    {
++                                        var opt = row.Options[i];
++                                        var optIndex = i;
++                                        <div class="question-editor-option-row" @key="opt">
++                                            <FluentRadio Value="@optIndex"
++                                                         Group="@RadioGroupKey(row)"
++                                                         Checked="@(row.CorrectOptionIndex == optIndex)"
++                                                         CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, optIndex, v)))"
++                                                         aria-label="Mark as correct option" />
++                                            <FluentTextField @bind-Value="opt.OptionText"
++                                                             Placeholder="@($"Option {optIndex + 1}")"
++                                                             class="full-width" />
++                                            @if (row.Options.Count > QuestionEditorRow.MinOptions)
++                                            {
++                                                <FluentButton Appearance="Appearance.Stealth"
++                                                              OnClick="@(() => row.RemoveOptionAt(optIndex))"
++                                                              aria-label="Remove option">
++                                                    ×
++                                                </FluentButton>
++                                            }
++                                        </div>
++                                    }
++                                </FluentRadioGroup>
++                                <FluentButton Appearance="Appearance.Outline"
++                                              Disabled="@(row.Options.Count >= QuestionEditorRow.MaxOptions)"
++                                              OnClick="@(() => row.AddOption())">
++                                    Add option
++                                </FluentButton>
++                            </div>
++                            break;
++                        }
++                        case QuestionTypeDto.TrueFalse:
++                        {
++                            <div class="question-editor-options">
++                                <span class="question-editor-sublabel">Correct answer</span>
++                                <FluentRadioGroup TValue="int" Name="@RadioGroupKey(row)">
++                                    <FluentRadio Value="0"
++                                                 Label="True"
++                                                 Checked="@(row.CorrectOptionIndex == 0)"
++                                                 CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, 0, v)))" />
++                                    <FluentRadio Value="1"
++                                                 Label="False"
++                                                 Checked="@(row.CorrectOptionIndex == 1)"
++                                                 CheckedChanged="@(EventCallback.Factory.Create<bool>(this, v => OnCorrectOptionChanged(row, 1, v)))" />
++                                </FluentRadioGroup>
++                            </div>
++                            break;
++                        }
++                        case QuestionTypeDto.ShortAnswer:
++                        {
++                            <FluentTextArea @bind-Value="row.ModelAnswer"
++                                            Label="Model answer (teacher reference)"
++                                            Rows="2"
++                                            class="full-width" />
++                            break;
++                        }
++                    }
++                </div>
++            }
++        </div>
++
++        <FluentPaginator State="@_paginationState" />
++    }
++</section>
++
++@code {
++    /// <summary>The form model that owns the question list being edited.</summary>
++    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
++
++    /// <summary>Raised when the model was mutated (add / remove / type
++    /// change / option edit) so the page can re-render review counts and
++    /// the submit gate. Child-write re-render trap (blazor-components.md
++    /// "Share form fields…" §6): the EventCallback invoke re-renders the
++    /// receiver, which a raw binding into the parent's model object
++    /// would not do.</summary>
++    [Parameter] public EventCallback Changed { get; set; }
++
++    private readonly PaginationState _paginationState = new()
++    {
++        ItemsPerPage = AssignmentEditFormModel.QuestionPageSize,
++    };
++    private IReadOnlyList<QuestionEditorRow> _currentPage = [];
++
++    protected override void OnParametersSet()
++    {
++        // Track the paginator's total so it follows appends/removals
++        // (FR-240). PaginationState's setters are async in this
++        // FluentUI version, so fire-and-forget is acceptable here —
++        // OnParametersSet already runs on the renderer thread; the
++        // paginator UI catches up after.
++        _ = _paginationState.SetTotalItemCountAsync(Model.Questions.Count);
++        if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
++        {
++            _ = _paginationState.SetCurrentPageIndexAsync(Math.Max(0, Model.QuestionPageCount() - 1));
++        }
++        _currentPage = Model.GetQuestionPage(_paginationState.CurrentPageIndex);
++    }
++
++    private async Task OnAddQuestionAsync()
++    {
++        Model.AddQuestion(QuestionEditorRow.NewMultipleChoice());
++        await _paginationState.SetCurrentPageIndexAsync(Model.QuestionPageCount() - 1);
++        await Changed.InvokeAsync();
++    }
++
++    private async Task OnRemoveQuestionAsync(int index)
++    {
++        var confirmed = await DialogService.ShowConfirmDialogAsync(
++            "Remove this question?",
++            "Remove",
++            "Cancel",
++            "Remove question");
++        if (!confirmed)
++        {
++            return;
++        }
++        Model.RemoveQuestionAt(index);
++        if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
++        {
++            await _paginationState.SetCurrentPageIndexAsync(Math.Max(0, Model.QuestionPageCount() - 1));
++        }
++        await Changed.InvokeAsync();
++    }
++
++    private async Task OnTypeChanged(QuestionEditorRow row)
++    {
++        // ApplyTypeChange resets options and the correct pick per spec §7.
++        row.ApplyTypeChange(row.Type);
++        await Changed.InvokeAsync();
++    }
++
++    private async Task OnCorrectOptionChanged(QuestionEditorRow row, int index, bool isChecked)
++    {
++        if (isChecked)
++        {
++            row.CorrectOptionIndex = index;
++        }
++        else if (row.CorrectOptionIndex == index)
++        {
++            // Allow clearing the correct pick (radio-uncheck). The
++            // submit gate will then reject the row.
++            row.CorrectOptionIndex = null;
++        }
++        await Changed.InvokeAsync();
++    }
++
++    /// <summary>Stable radio group key per question row, so each row's
++    /// <c>FluentRadio</c> group is independent.</summary>
++    private static string RadioGroupKey(QuestionEditorRow row) => $"q-{row.DisplayOrder}";
++
++    public void Dispose()
++    {
++        // No unmanaged resources; the paginator is owned by Blazor.
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionEditorSection.razor.css b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionEditorSection.razor.css
+new file mode 100644
+index 00000000..276c38af
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionEditorSection.razor.css
+@@ -0,0 +1,71 @@
++/* Scoped styles for the paginated question editor. The wizard's
++   wizard-section / wizard-section-header / wizard-hint chrome is
++   reused from Create.razor.css — only this component's own
++   toolbar / cards / option rows are styled here. */
++
++.question-editor-section {
++    display: flex;
++    flex-direction: column;
++    gap: 1rem;
++}
++
++.question-editor-toolbar {
++    display: flex;
++    align-items: center;
++    gap: 1rem;
++}
++
++.question-editor-count {
++    font-weight: 600;
++    color: var(--neutral-foreground-hint);
++}
++
++.question-editor-pages {
++    display: flex;
++    flex-direction: column;
++    gap: 1rem;
++}
++
++.question-editor-card {
++    border: 1px solid var(--neutral-stroke);
++    border-radius: 10px;
++    padding: 1rem;
++    background: var(--neutral-fill);
++    display: flex;
++    flex-direction: column;
++    gap: 0.75rem;
++}
++
++.question-editor-card-header {
++    display: flex;
++    align-items: center;
++    gap: 0.5rem;
++}
++
++.question-editor-position {
++    font-weight: 700;
++    color: var(--neutral-foreground-hint);
++}
++
++.question-editor-card-spacer {
++    flex: 1;
++}
++
++.question-editor-options {
++    display: flex;
++    flex-direction: column;
++    gap: 0.5rem;
++    margin-top: 0.25rem;
++}
++
++.question-editor-sublabel {
++    font-size: 0.85rem;
++    color: var(--neutral-foreground-hint);
++    font-weight: 600;
++}
++
++.question-editor-option-row {
++    display: flex;
++    align-items: center;
++    gap: 0.5rem;
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionGenerationSection.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionGenerationSection.razor
+new file mode 100644
+index 00000000..e2455f59
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionGenerationSection.razor
+@@ -0,0 +1,187 @@
++@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
++@using SchoolCollab.Assignments.Application.Helpers
++@using SchoolCollab.Assignments.Application.Services
++@using SchoolCollab.AI.Abstractions
++@implements IDisposable
++@inject IAssignmentQuestionGenerator QuestionGenerator
++@inject ILogger<QuestionGenerationSection> Logger
++
++<section class="question-generation-section">
++    <div class="question-generation-controls">
++        <FluentTextArea @bind-Value="Model.AiPromptOverride"
++                        Label="Additional guidance for the AI (optional)"
++                        MaxLength="4000"
++                        Rows="3"
++                        class="full-width" />
++
++        <div class="question-generation-row">
++            <FluentNumberField @bind-Value="_questionCount"
++                               Label="Number of questions"
++                               Min="1"
++                               Max="30"
++                               Class="w-3" />
++
++            <div class="question-generation-types" role="group" aria-label="Question types">
++                <FluentCheckbox @bind-Value="_includeMultipleChoice" Label="@EnumHelper.GetDescription(QuestionTypeDto.MultipleChoice)" />
++                <FluentCheckbox @bind-Value="_includeTrueFalse" Label="@EnumHelper.GetDescription(QuestionTypeDto.TrueFalse)" />
++                <FluentCheckbox @bind-Value="_includeShortAnswer" Label="@EnumHelper.GetDescription(QuestionTypeDto.ShortAnswer)" />
++            </div>
++        </div>
++
++        <div class="question-generation-actions">
++            <FluentButton Appearance="Appearance.Accent"
++                          Disabled="@(!GateEnabled || _generating)"
++                          OnClick="OnGenerateAsync"
++                          Tooltip="@(GateEnabled ? null : QuestionGenerationGate.DisabledTooltip)">
++                @(_generating ? "Generating…" : "Generate")
++            </FluentButton>
++
++            @if (_generating)
++            {
++                <FluentProgressRing class="question-generation-progress" />
++                <FluentButton Appearance="Appearance.Neutral"
++                              OnClick="OnCancelAsync">
++                    Cancel
++                </FluentButton>
++            }
++        </div>
++
++        @if (!string.IsNullOrEmpty(_generationError))
++        {
++            <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_generationError</FluentMessageBar>
++        }
++    </div>
++</section>
++
++@code {
++    /// <summary>The form model that owns the prompt override and the question
++    /// list the generated questions are appended to.</summary>
++    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
++
++    /// <summary>True when the type + grading format combination supports
++    /// AI question generation (FR-220 / EC-3).</summary>
++    [Parameter] public bool GateEnabled { get; set; }
++
++    /// <summary>The selected subject's id, passed into the generation
++    /// request's <see cref="QuestionGenerationRequest.TopicId"/>. Null
++    /// short-circuits the call with a friendly "select a subject"
++    /// message.</summary>
++    [Parameter] public Guid? TopicId { get; set; }
++
++    /// <summary>The selected subject's display name, passed into
++    /// <see cref="QuestionGenerationRequest.TopicName"/>.</summary>
++    [Parameter] public string? TopicName { get; set; }
++
++    /// <summary>The selected grade level's id, passed into the
++    /// generation request when known.</summary>
++    [Parameter] public Guid? GradeLevelId { get; set; }
++
++    /// <summary>Raised after a successful append so the page can re-render
++    /// review counts and the submit gate. The page is the
++    /// orchestrator; this component owns the generation call only.</summary>
++    [Parameter] public EventCallback OnQuestionsChanged { get; set; }
++
++    private int _questionCount = 5;
++    private bool _includeMultipleChoice = true;
++    private bool _includeTrueFalse = true;
++    private bool _includeShortAnswer = true;
++    private bool _generating;
++    private string? _generationError;
++    private CancellationTokenSource? _generateCts;
++
++    private async Task OnGenerateAsync()
++    {
++        if (!GateEnabled || _generating)
++        {
++            return;
++        }
++        if (_questionCount < 1)
++        {
++            // EC-10: zero (or negative) count = no call. Min="1" on the
++            // number field normally prevents this, but guard here too so a
++            // pasted value cannot slip through.
++            return;
++        }
++        if (TopicId is null)
++        {
++            _generationError = "Select a subject before generating questions.";
++            return;
++        }
++
++        _generating = true;
++        _generationError = null;
++        _generateCts?.Cancel();
++        _generateCts?.Dispose();
++        _generateCts = new CancellationTokenSource();
++        var ct = _generateCts.Token;
++
++        // Build the type set; null = "all" (server-side balanced default per FR-221).
++        IReadOnlyList<GeneratedQuestionType>? types = null;
++        var picked = new List<GeneratedQuestionType>(3);
++        if (_includeMultipleChoice) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.MultipleChoice));
++        if (_includeTrueFalse) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.TrueFalse));
++        if (_includeShortAnswer) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.ShortAnswer));
++        if (picked.Count > 0) types = picked;
++
++        var request = new QuestionGenerationRequest(
++            TopicId: TopicId.Value,
++            TopicName: TopicName ?? string.Empty,
++            GradeLevelId: GradeLevelId,
++            ContextStrands: null,
++            QuestionCount: _questionCount,
++            Types: types,
++            PromptOverride: Model.AiPromptOverride);
++
++        Logger.LogInformation(
++            "Requesting {Count} questions for topic {TopicName}",
++            _questionCount, request.TopicName);
++
++        try
++        {
++            var questions = await QuestionGenerator.GenerateAsync(request, ct);
++            Model.AppendGenerated(questions);
++            await OnQuestionsChanged.InvokeAsync();
++        }
++        catch (QuestionGenerationFailed ex)
++        {
++            // EC-1 / EC-8: friendly text from the typed exception; the
++            // still-enabled Generate button is the retry.
++            _generationError = ex.Message;
++        }
++        catch (OperationCanceledException)
++        {
++            // EC-2: cancel leaves the list untouched; nothing to surface.
++        }
++        catch (Exception ex)
++        {
++            // Catch-all (P2 tester finding): non-typed failures must not
++            // escape to the page-level ErrorBoundary and permanently
++            // replace the wizard. Log the exception and surface the
++            // same friendly error state — the still-enabled Generate
++            // button is the retry. The message is intentionally
++            // user-facing: a transient infrastructure blip the teacher
++            // can try again from.
++            Logger.LogError(
++                ex,
++                "Unexpected error generating questions for topic {TopicName}",
++                request.TopicName);
++            _generationError = "Something went wrong while generating questions. Please try again.";
++        }
++        finally
++        {
++            _generating = false;
++        }
++    }
++
++    private void OnCancelAsync()
++    {
++        _generateCts?.Cancel();
++    }
++
++    public void Dispose()
++    {
++        _generateCts?.Cancel();
++        _generateCts?.Dispose();
++        _generateCts = null;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionGenerationSection.razor.css b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionGenerationSection.razor.css
+new file mode 100644
+index 00000000..aea33105
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionGenerationSection.razor.css
+@@ -0,0 +1,42 @@
++/* Scoped styles for the AI Question Generation section. The wizard's
++   wizard-section / wizard-section-header / wizard-hint chrome is reused
++   from Create.razor.css — only the section's own controls are styled
++   here. */
++
++.question-generation-section {
++    display: flex;
++    flex-direction: column;
++    gap: 1rem;
++}
++
++.question-generation-controls {
++    display: flex;
++    flex-direction: column;
++    gap: 1rem;
++}
++
++.question-generation-row {
++    display: flex;
++    flex-wrap: wrap;
++    align-items: flex-end;
++    gap: 1.25rem;
++}
++
++.question-generation-types {
++    display: flex;
++    flex-wrap: wrap;
++    gap: 1rem;
++    align-items: center;
++    padding-bottom: 0.5rem;
++}
++
++.question-generation-actions {
++    display: flex;
++    align-items: center;
++    gap: 0.75rem;
++}
++
++.question-generation-progress {
++    width: 20px;
++    height: 20px;
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionReviewList.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionReviewList.razor
+new file mode 100644
+index 00000000..86aca3c0
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionReviewList.razor
+@@ -0,0 +1,99 @@
++@using Icons = Microsoft.FluentUI.AspNetCore.Components.Icons
++@using Microsoft.FluentUI.AspNetCore.Components
++@using SchoolCollab.Assignments.Application.Helpers
++
++<section class="question-review-section">
++    <div class="question-review-summary">
++        <span>@Model.Questions.Count question(s)</span>
++        <span class="question-review-resources">
++            @if (Model.Attachments.Count == 0)
++            {
++                <span>Resources: none yet</span>
++            }
++            else
++            {
++                <span>Resources: @Model.Attachments.Count file(s)</span>
++            }
++        </span>
++    </div>
++
++    @if (Model.Questions.Count == 0)
++    {
++        <FluentMessageBar Intent="MessageIntent.Info">No questions yet.</FluentMessageBar>
++    }
++    else
++    {
++        <div class="question-review-list">
++            @foreach (var (row, index) in _currentPage.Select((r, i) => (r, i)))
++            {
++                var absoluteIndex = _paginationState.CurrentPageIndex * AssignmentEditFormModel.QuestionPageSize + index;
++                <div class="question-review-card" @key="row">
++                    <div class="question-review-card-header">
++                        <span class="question-review-position">#@(absoluteIndex + 1)</span>
++                        <FluentBadge Appearance="Appearance.Accent">@EnumHelper.GetDescription(row.Type)</FluentBadge>
++                    </div>
++
++                    <div class="question-review-text">@row.QuestionText</div>
++
++                    @switch (row.Type)
++                    {
++                        case QuestionTypeDto.MultipleChoice:
++                        case QuestionTypeDto.TrueFalse:
++                        {
++                            <ul class="question-review-options">
++                                @for (var i = 0; i < row.Options.Count; i++)
++                                {
++                                    var opt = row.Options[i];
++                                    var isCorrect = row.CorrectOptionIndex == i;
++                                    <li class="@(isCorrect ? "question-review-option is-correct" : "question-review-option")" @key="opt">
++                                        @if (isCorrect)
++                                        {
++                                            <FluentIcon Icon="@(Icons.Regular.Size20.CheckmarkCircle)" Color="@Color.Accent" />
++                                        }
++                                        else
++                                        {
++                                            <span class="question-review-option-bullet" aria-hidden="true"></span>
++                                        }
++                                        <span>@opt.OptionText</span>
++                                    </li>
++                                }
++                            </ul>
++                            break;
++                        }
++                        case QuestionTypeDto.ShortAnswer:
++                        {
++                            <div class="question-review-model-answer">
++                                <span class="question-review-sublabel">Model answer:</span>
++                                <span>@(string.IsNullOrWhiteSpace(row.ModelAnswer) ? "—" : row.ModelAnswer)</span>
++                            </div>
++                            break;
++                        }
++                    }
++                </div>
++            }
++        </div>
++
++        <FluentPaginator State="@_paginationState" />
++    }
++</section>
++
++@code {
++    /// <summary>The form model the review list reads from.</summary>
++    [Parameter, EditorRequired] public AssignmentEditFormModel Model { get; set; } = default!;
++
++    private readonly PaginationState _paginationState = new()
++    {
++        ItemsPerPage = AssignmentEditFormModel.QuestionPageSize,
++    };
++    private IReadOnlyList<QuestionEditorRow> _currentPage = [];
++
++    protected override void OnParametersSet()
++    {
++        _ = _paginationState.SetTotalItemCountAsync(Model.Questions.Count);
++        if (_paginationState.CurrentPageIndex >= Model.QuestionPageCount())
++        {
++            _ = _paginationState.SetCurrentPageIndexAsync(Math.Max(0, Model.QuestionPageCount() - 1));
++        }
++        _currentPage = Model.GetQuestionPage(_paginationState.CurrentPageIndex);
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionReviewList.razor.css b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionReviewList.razor.css
+new file mode 100644
+index 00000000..0533a451
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/QuestionReviewList.razor.css
+@@ -0,0 +1,88 @@
++/* Scoped styles for the read-only Review question list. The wizard's
++   wizard-section / wizard-section-header / wizard-hint chrome is
++   reused from Create.razor.css — only this component's own
++   summary row / cards / options list are styled here. */
++
++.question-review-section {
++    display: flex;
++    flex-direction: column;
++    gap: 1rem;
++}
++
++.question-review-summary {
++    display: flex;
++    align-items: center;
++    gap: 1.5rem;
++    font-weight: 600;
++    color: var(--neutral-foreground-hint);
++}
++
++.question-review-list {
++    display: flex;
++    flex-direction: column;
++    gap: 0.75rem;
++}
++
++.question-review-card {
++    border: 1px solid var(--neutral-stroke);
++    border-radius: 10px;
++    padding: 1rem;
++    background: var(--neutral-fill);
++    display: flex;
++    flex-direction: column;
++    gap: 0.5rem;
++}
++
++.question-review-card-header {
++    display: flex;
++    align-items: center;
++    gap: 0.75rem;
++}
++
++.question-review-position {
++    font-weight: 700;
++    color: var(--neutral-foreground-hint);
++}
++
++.question-review-text {
++    font-size: 1rem;
++}
++
++.question-review-options {
++    list-style: none;
++    margin: 0;
++    padding: 0;
++    display: flex;
++    flex-direction: column;
++    gap: 0.35rem;
++}
++
++.question-review-option {
++    display: flex;
++    align-items: center;
++    gap: 0.5rem;
++    color: var(--neutral-foreground-hint);
++}
++
++.question-review-option.is-correct {
++    color: var(--accent-foreground, #e65100);
++    font-weight: 600;
++}
++
++.question-review-option-bullet {
++    width: 20px;
++    height: 20px;
++    display: inline-block;
++}
++
++.question-review-model-answer {
++    display: flex;
++    gap: 0.5rem;
++    align-items: baseline;
++}
++
++.question-review-sublabel {
++    font-size: 0.85rem;
++    color: var(--neutral-foreground-hint);
++    font-weight: 600;
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Helpers/QuestionGenerationGate.cs b/src/Assignments/SchoolCollab.Assignments.Application/Helpers/QuestionGenerationGate.cs
+new file mode 100644
+index 00000000..a536b375
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Helpers/QuestionGenerationGate.cs
+@@ -0,0 +1,44 @@
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Assignments.Application.Helpers;
++
++/// <summary>
++/// Pure, UI- and test-friendly gate that decides whether AI question
++/// generation is offered for a given <see cref="AssignmentTypeDto"/> +
++/// <see cref="GradingFormatDto"/> combination (spec §0 decision 2 /
++/// FR-220). Also owns the user-facing hint + tooltip strings the wizard
++/// and the bUnit tests both bind to so wording cannot drift.
++/// </summary>
++public static class QuestionGenerationGate
++{
++    /// <summary>Step-1 hint shown when AI generation IS available
++    /// (Digital/SemiManual + AutoGraded/InstantGraded).</summary>
++    public const string EnabledHint =
++        "AI question generation will be available in the Details step.";
++
++    /// <summary>Step-1 hint shown when AI generation is NOT available
++    /// (Manual any grading, or any type with TeacherGraded). The teacher
++    /// may still hand-write questions in the editor.</summary>
++    public const string DisabledHint =
++        "AI question generation is not available for this combination — questions can still be added by hand once started.";
++
++    /// <summary>Tooltip on the disabled Generate button (EC-3).</summary>
++    public const string DisabledTooltip =
++        "AI question generation is available for Online and Hybrid assignments with Auto Scored or Instant Feedback grading.";
++
++    /// <summary>Returns <c>true</c> when AI question generation should be
++    /// offered for the given type + grading format combination (FR-220).</summary>
++    public static bool IsEnabled(AssignmentTypeDto? assignmentType, GradingFormatDto gradingFormat)
++    {
++        var typeOk = assignmentType is AssignmentTypeDto.Digital or AssignmentTypeDto.SemiManual;
++        var gradingOk = gradingFormat is GradingFormatDto.AutoGraded or GradingFormatDto.InstantGraded;
++        return typeOk && gradingOk;
++    }
++
++    /// <summary>Step-1 hint text that updates live with the user's
++    /// selection (FR-220). Null assignments default to "not enabled".</summary>
++    public static string HintText(AssignmentTypeDto? assignmentType, GradingFormatDto gradingFormat)
++    {
++        return IsEnabled(assignmentType, gradingFormat) ? EnabledHint : DisabledHint;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+index 35397dfb..f0dd3dbd 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+@@ -29,7 +29,8 @@ public sealed class AssignmentsApiClient
+                 new JsonStringEnumConverter<ContactOwnerTypeDto>(),
+                 new JsonStringEnumConverter<ContactChannelDto>(),
+                 new JsonStringEnumConverter<GuardianRoleDto>(),
+-                new JsonStringEnumConverter<SubmissionSourceDto>()
++                new JsonStringEnumConverter<SubmissionSourceDto>(),
++                new JsonStringEnumConverter<QuestionTypeDto>()
+             }
+         };
+     }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentCreateBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentCreateBunitTests.cs
+new file mode 100644
+index 00000000..f0577558
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentCreateBunitTests.cs
+@@ -0,0 +1,173 @@
++using System.Net;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using RichardSzalay.MockHttp;
++using CreatePage = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Create;
++using SchoolCollab.Assignments.Application.Helpers;
++using SchoolCollab.Assignments.Application.Services;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Students.Application.Services;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// bUnit + Moq + RichardSzalay.MockHttp coverage for the Create.razor
++/// wizard's question-generation gate plumbing (FR-220 / decision (a) —
++/// the Resources UI does not land this round, so the form model
++/// half-attachment is the only attachment surface under test here).
++///
++/// Per the round-3 plan's binding coverage list:
++/// <list type="bullet">
++///   <item>QuestionGenerationGate truth table (pure methods, no render)</item>
++///   <item>Default step-1 markup shows DisabledHint under Manual / TeacherGraded</item>
++///   <item>Clicking the Digital and AutoGraded cards flips the hint to EnabledHint (FR-220 hint updates)</item>
++/// </list>
++///
++/// The wizard uses FluentUI's <c>FluentWizard</c> web component, which
++/// does not always render step content under bUnit. The gating
++/// assertions are bound to the <see cref="QuestionGenerationGate"/>
++/// constants and the <c>HintText</c> method (decision per plan:
++/// do NOT sink time into wizard-navigation testing).
++/// </summary>
++[TestClass]
++public class AssignmentCreateBunitTests : BunitContext
++{
++    private readonly MockHttpMessageHandler _mockHttp;
++    private readonly JsonSerializerOptions _apiJsonOptions;
++
++    public AssignmentCreateBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++
++        _apiJsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
++        {
++            Converters =
++            {
++                new JsonStringEnumConverter<AssignmentTypeDto>(),
++                new JsonStringEnumConverter<AssignmentStatusDto>(),
++                new JsonStringEnumConverter<GradingFormatDto>(),
++                new JsonStringEnumConverter<TargetAudienceTypeDto>(),
++                new JsonStringEnumConverter<QuestionTypeDto>(),
++            }
++        };
++
++        _mockHttp = new MockHttpMessageHandler();
++        var httpClient = _mockHttp.ToHttpClient();
++        httpClient.BaseAddress = new Uri("http://localhost");
++
++        Services.AddSingleton(httpClient);
++        Services.AddSingleton<AssignmentsApiClient>();
++        Services.AddSingleton<StudentsApiClient>();
++        // CodedValuesApiClient is required by StudentsApiClient's ctor;
++        // Create.razor injects both. Register with the same HttpClient.
++        Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
++        Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
++        Services.AddSingleton(Mock.Of<ILogger<StudentsApiClient>>());
++        Services.AddSingleton(Mock.Of<ILogger<CreatePage>>());
++    }
++
++    private void SetupGradeLevels(params GradeLevelDto[] grades)
++    {
++        _mockHttp.When(HttpMethod.Get, "http://localhost/students/grade-levels")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(grades, _apiJsonOptions));
++    }
++
++    private void SetupActivityGroups(params ActivityGroupDto[] groups)
++    {
++        _mockHttp.When(HttpMethod.Get, "http://localhost/students/activity-groups*")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(groups, _apiJsonOptions));
++    }
++
++    [TestMethod]
++    public void QuestionGenerationGate_IsEnabled_TruthTable_FR220()
++    {
++        // Enabled: Digital/SemiManual + AutoGraded/InstantGraded
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded).Should().BeTrue();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Digital, GradingFormatDto.InstantGraded).Should().BeTrue();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.SemiManual, GradingFormatDto.AutoGraded).Should().BeTrue();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.SemiManual, GradingFormatDto.InstantGraded).Should().BeTrue();
++
++        // Manual any: never enabled
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Manual, GradingFormatDto.AutoGraded).Should().BeFalse();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Manual, GradingFormatDto.InstantGraded).Should().BeFalse();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded).Should().BeFalse();
++
++        // Any type with TeacherGraded: never enabled
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded).Should().BeFalse();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.SemiManual, GradingFormatDto.TeacherGraded).Should().BeFalse();
++
++        // Null assignment type: never enabled
++        QuestionGenerationGate.IsEnabled(null, GradingFormatDto.AutoGraded).Should().BeFalse();
++    }
++
++    [TestMethod]
++    public void QuestionGenerationGate_HintText_TracksGate()
++    {
++        QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded)
++            .Should().Be(QuestionGenerationGate.EnabledHint);
++        QuestionGenerationGate.HintText(AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded)
++            .Should().Be(QuestionGenerationGate.DisabledHint);
++    }
++
++    [TestMethod]
++    public void QuestionGenerationGate_DisabledTooltip_HasStableCopy()
++    {
++        // The wizard + the bUnit tests both bind to this constant so the
++        // wording cannot drift.
++        QuestionGenerationGate.DisabledTooltip.Should().Contain("Auto Scored");
++    }
++
++    [TestMethod]
++    public void Create_DefaultMarkup_ShowsDisabledHint_UnderManualTeacherGraded()
++    {
++        SetupGradeLevels();
++        SetupActivityGroups();
++
++        var cut = Render<CreatePage>();
++
++        // Default state: Manual + TeacherGraded → gate closed → DisabledHint
++        // The hint is a <p class="wizard-hint"> so the string is rendered
++        // somewhere in the markup (we don't depend on a specific
++        // FluentWizard step being visible — see plan fallback).
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain(QuestionGenerationGate.DisabledHint);
++        }, TimeSpan.FromSeconds(5));
++    }
++
++    [TestMethod]
++    public void Create_HintText_ReflectsSelectionViaGate()
++    {
++        // Unit-style binding to the gate's own state machine rather than
++        // driving the FluentWizard step UI (FluentWizard step content
++        // does not reliably render under bUnit — see plan fallback).
++        // The wizard's step-1 hint binds to QuestionGenerationGate.HintText
++        // directly, so verifying the gate's outputs under every cell
++        // proves the hint will follow.
++        foreach (AssignmentTypeDto type in Enum.GetValues<AssignmentTypeDto>())
++        {
++            foreach (GradingFormatDto grading in Enum.GetValues<GradingFormatDto>())
++            {
++                var enabled = QuestionGenerationGate.IsEnabled(type, grading);
++                var hint = QuestionGenerationGate.HintText(type, grading);
++                if (enabled)
++                {
++                    hint.Should().Be(QuestionGenerationGate.EnabledHint,
++                        "an enabled gate must show the EnabledHint");
++                }
++                else
++                {
++                    hint.Should().Be(QuestionGenerationGate.DisabledHint,
++                        "a disabled gate must show the DisabledHint");
++                }
++            }
++        }
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentFormModelMappingsTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentFormModelMappingsTests.cs
+index 1da578c9..e0bbd1e2 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentFormModelMappingsTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentFormModelMappingsTests.cs
+@@ -1,6 +1,8 @@
+ using FluentAssertions;
+ using Microsoft.VisualStudio.TestTools.UnitTesting;
++using SchoolCollab.AI.Abstractions;
+ using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
++using SchoolCollab.Assignments.Application.Helpers;
+ using SchoolCollab.Assignments.Contracts;
+ 
+ namespace SchoolCollab.Assignments.Tests.Unit;
+@@ -9,11 +11,17 @@ namespace SchoolCollab.Assignments.Tests.Unit;
+ /// Unit tests for the DTO → form-model projection on
+ /// <see cref="AssignmentEditFormModel"/>
+ /// (<see cref="AssignmentEditFormModel.LoadFrom"/> /
+-/// <see cref="AssignmentEditFormModel.From"/>) used by the assignment edit page.
+-/// Keeping the projection in a named, tested method (rather than inline
+-/// field-by-field assignments in the razor) makes the mapping easy to verify and
+-/// keeps it in lockstep with both types — see
+-/// documents/solution/dto-form-model-mapping.md.
++/// <see cref="AssignmentEditFormModel.From"/>) used by the assignment edit page,
++/// plus the round-3 additions: editor-row mapping
++/// (<see cref="QuestionEditorRow.FromGenerated"/> / type converters /
++/// <see cref="QuestionEditorRow.ApplyTypeChange"/>),
++/// <see cref="AssignmentEditFormModel.ToCreateRequest"/>,
++/// <see cref="AssignmentEditFormModel.QuestionsPassSubmitGate"/>,
++/// <see cref="AssignmentEditFormModel.GetQuestionPage"/>, and the
++/// add/remove/append mutations. Keeping the projection in named, tested
++/// methods (rather than inline field-by-field assignments in the razor)
++/// makes the mapping easy to verify and keeps it in lockstep with both
++/// types — see documents/solution/dto-form-model-mapping.md.
+ /// </summary>
+ [TestClass]
+ public class AssignmentFormModelMappingsTests
+@@ -102,4 +110,688 @@ public class AssignmentFormModelMappingsTests
+         model.DueDate.Should().Be(assignment.DueDate!.Value.DateTime);
+         model.MaxScore.Should().Be(assignment.MaxScore);
+     }
+-}
+\ No newline at end of file
++
++    // ── QuestionEditorRow.FromGenerated / type converters (decision (b)) ──
++
++    [TestMethod]
++    public void QuestionEditorRow_FromGenerated_MultipleChoice_PreservesOptionOrderAndCorrectIndex()
++    {
++        var dto = new GeneratedQuestionDto(
++            Text: "Pick A.",
++            Type: GeneratedQuestionType.MultipleChoice,
++            Options: new[]
++            {
++                new GeneratedQuestionOptionDto("A", IsCorrect: true),
++                new GeneratedQuestionOptionDto("B"),
++                new GeneratedQuestionOptionDto("C"),
++            });
++
++        var row = QuestionEditorRow.FromGenerated(dto);
++
++        row.QuestionText.Should().Be("Pick A.");
++        row.Type.Should().Be(QuestionTypeDto.MultipleChoice);
++        row.Options.Should().HaveCount(3);
++        row.Options[0].OptionText.Should().Be("A");
++        row.Options[1].OptionText.Should().Be("B");
++        row.Options[2].OptionText.Should().Be("C");
++        row.CorrectOptionIndex.Should().Be(0, "the only IsCorrect option is at index 0");
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_FromGenerated_TrueFalse_HasTwoOptionsAndCorrectIndex()
++    {
++        var dto = new GeneratedQuestionDto(
++            Text: "Photosynthesis requires sunlight.",
++            Type: GeneratedQuestionType.TrueFalse,
++            Options: new[]
++            {
++                new GeneratedQuestionOptionDto("True", IsCorrect: true),
++                new GeneratedQuestionOptionDto("False"),
++            });
++
++        var row = QuestionEditorRow.FromGenerated(dto);
++
++        row.Type.Should().Be(QuestionTypeDto.TrueFalse);
++        row.Options.Should().HaveCount(2);
++        row.Options[0].OptionText.Should().Be("True");
++        row.Options[1].OptionText.Should().Be("False");
++        row.CorrectOptionIndex.Should().Be(0);
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_FromGenerated_ShortAnswer_NoOptions_ModelAnswerMapped()
++    {
++        var dto = new GeneratedQuestionDto(
++            Text: "Name the main product of photosynthesis.",
++            Type: GeneratedQuestionType.ShortAnswer,
++            Options: null,
++            ModelAnswer: "Glucose");
++
++        var row = QuestionEditorRow.FromGenerated(dto);
++
++        row.Type.Should().Be(QuestionTypeDto.ShortAnswer);
++        row.Options.Should().BeEmpty();
++        row.ModelAnswer.Should().Be("Glucose");
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_FromGenerated_ShortAnswer_NullModelAnswerStaysNull()
++    {
++        var dto = new GeneratedQuestionDto(
++            Text: "MC question",
++            Type: GeneratedQuestionType.MultipleChoice,
++            Options: new[] { new GeneratedQuestionOptionDto("A", IsCorrect: true) });
++
++        var row = QuestionEditorRow.FromGenerated(dto);
++
++        row.ModelAnswer.Should().BeNull("ModelAnswer must default to null when not supplied — preserves the prior contract");
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_FromGeneratedType_RoundTripsAllValues()
++    {
++        foreach (var value in Enum.GetValues<GeneratedQuestionType>())
++        {
++            var mapped = QuestionEditorRow.FromGeneratedType(value);
++            var back = QuestionEditorRow.ToGeneratedType(mapped);
++            back.Should().Be(value, "the two enums are int-mirrored but the explicit switch must round-trip");
++        }
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_ToGeneratedType_RoundTripsAllValues()
++    {
++        foreach (var value in Enum.GetValues<QuestionTypeDto>())
++        {
++            var mapped = QuestionEditorRow.ToGeneratedType(value);
++            var back = QuestionEditorRow.FromGeneratedType(mapped);
++            back.Should().Be(value);
++        }
++    }
++
++    // ── QuestionEditorRow.ApplyTypeChange (EC-5) ──────────────────────
++
++    [TestMethod]
++    public void QuestionEditorRow_ApplyTypeChange_TrueFalse_AutoFillsCanonicalOptions()
++    {
++        var row = QuestionEditorRow.NewMultipleChoice();
++        row.QuestionText = "TF?";
++        row.CorrectOptionIndex = 1;
++
++        row.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++
++        row.Type.Should().Be(QuestionTypeDto.TrueFalse);
++        row.Options.Should().HaveCount(2);
++        row.Options[0].OptionText.Should().Be("True");
++        row.Options[1].OptionText.Should().Be("False");
++        row.CorrectOptionIndex.Should().BeNull("EC-5: TF type change leaves the correct pick unset");
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_ApplyTypeChange_ShortAnswer_ClearsOptions()
++    {
++        var row = QuestionEditorRow.NewMultipleChoice();
++        row.QuestionText = "Name it.";
++
++        row.ApplyTypeChange(QuestionTypeDto.ShortAnswer);
++
++        row.Type.Should().Be(QuestionTypeDto.ShortAnswer);
++        row.Options.Should().BeEmpty();
++        row.CorrectOptionIndex.Should().BeNull();
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_ApplyTypeChange_MultipleChoice_SeedsTwoBlankOptionsAndClearsCorrect()
++    {
++        // Tester iteration 1 fix (P2): switching to MultipleChoice must
++        // mirror NewMultipleChoice — two blank option rows so the teacher
++        // never lands on a 0-option MC row. CorrectOptionIndex still
++        // resets (the submit gate re-enforces correctness on submit).
++        var row = new QuestionEditorRow
++        {
++            Type = QuestionTypeDto.TrueFalse,
++            QuestionText = "?",
++            Options = { new OptionEditorRow { OptionText = "True" }, new OptionEditorRow { OptionText = "False" } },
++            CorrectOptionIndex = 0,
++        };
++
++        row.ApplyTypeChange(QuestionTypeDto.MultipleChoice);
++
++        row.Type.Should().Be(QuestionTypeDto.MultipleChoice);
++        row.Options.Should().HaveCount(2, "the MC switch seeds two blank option rows");
++        row.Options[0].OptionText.Should().BeNull("the seeded rows are blank for the teacher to author");
++        row.Options[1].OptionText.Should().BeNull();
++        row.CorrectOptionIndex.Should().BeNull("the correct pick is cleared on a type switch");
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_NewMultipleChoice_HasTwoBlankOptions()
++    {
++        var row = QuestionEditorRow.NewMultipleChoice();
++
++        row.Type.Should().Be(QuestionTypeDto.MultipleChoice);
++        row.Options.Should().HaveCount(2);
++        row.Options[0].OptionText.Should().BeNull();
++        row.Options[1].OptionText.Should().BeNull();
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_RemoveOptionAt_ClearsCorrectWhenItPointsAtRemovedIndex()
++    {
++        var row = QuestionEditorRow.NewMultipleChoice();
++        row.Options[0].OptionText = "A";
++        row.Options[1].OptionText = "B";
++        row.CorrectOptionIndex = 0;
++
++        row.RemoveOptionAt(0);
++
++        row.Options.Should().HaveCount(1);
++        row.CorrectOptionIndex.Should().BeNull("removing the correct row clears the pick");
++    }
++
++    [TestMethod]
++    public void QuestionEditorRow_RemoveOptionAt_ShiftsCorrectWhenItPointsAfterRemovedIndex()
++    {
++        var row = new QuestionEditorRow { Type = QuestionTypeDto.MultipleChoice };
++        row.Options.Add(new OptionEditorRow { OptionText = "A" });
++        row.Options.Add(new OptionEditorRow { OptionText = "B" });
++        row.Options.Add(new OptionEditorRow { OptionText = "C" });
++        row.CorrectOptionIndex = 2;
++
++        row.RemoveOptionAt(0);
++
++        row.Options.Should().HaveCount(2);
++        row.CorrectOptionIndex.Should().Be(1, "removing index 0 shifts the correct index 2 → 1");
++    }
++
++    // ── AssignmentEditFormModel.ToCreateRequest ────────────────────────
++
++    [TestMethod]
++    public void ToCreateRequest_EmptyQuestionsAndAttachments_NullLists_AndAiPromptOverrideRoundTrips()
++    {
++        var model = new AssignmentEditFormModel
++        {
++            Title = "T",
++            Description = "D",
++            AiPromptOverride = "Be concise",
++        };
++
++        var req = model.ToCreateRequest(
++            assignmentType: AssignmentTypeDto.Digital,
++            gradingFormat: GradingFormatDto.AutoGraded,
++            targetAudienceType: TargetAudienceTypeDto.AllStudents,
++            topicId: TopicId,
++            gradeLevelId: null,
++            mandatoryReview: true);
++
++        req.Title.Should().Be("T");
++        req.Description.Should().Be("D");
++        req.Questions.Should().BeNull("an empty collection projects to the wire default (null)");
++        req.Attachments.Should().BeNull();
++        req.AiPromptOverride.Should().Be("Be concise");
++    }
++
++    [TestMethod]
++    public void ToCreateRequest_NullAiPromptOverride_StaysNull()
++    {
++        var model = new AssignmentEditFormModel { Title = "T" };
++
++        var req = model.ToCreateRequest(
++            AssignmentTypeDto.Manual,
++            GradingFormatDto.TeacherGraded,
++            TargetAudienceTypeDto.AllStudents,
++            TopicId,
++            null,
++            true);
++
++        req.AiPromptOverride.Should().BeNull();
++        req.Questions.Should().BeNull();
++        req.Attachments.Should().BeNull();
++    }
++
++    [TestMethod]
++    public void ToCreateRequest_TwoQuestions_ReindexesDisplayOrderAndMapsIsCorrect()
++    {
++        var model = new AssignmentEditFormModel { Title = "T" };
++        var mc = new QuestionEditorRow
++        {
++            Type = QuestionTypeDto.MultipleChoice,
++            QuestionText = "MC?",
++            CorrectOptionIndex = 1,
++        };
++        mc.Options.Add(new OptionEditorRow { OptionText = "A" });
++        mc.Options.Add(new OptionEditorRow { OptionText = "B" });
++        var tf = new QuestionEditorRow
++        {
++            Type = QuestionTypeDto.TrueFalse,
++            QuestionText = "TF?",
++            CorrectOptionIndex = 0,
++        };
++        tf.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++        model.Questions.Add(mc);
++        model.Questions.Add(tf);
++
++        var req = model.ToCreateRequest(
++            AssignmentTypeDto.Digital,
++            GradingFormatDto.AutoGraded,
++            TargetAudienceTypeDto.AllStudents,
++            TopicId,
++            null,
++            true);
++
++        req.Questions.Should().NotBeNull();
++        req.Questions!.Should().HaveCount(2);
++        req.Questions[0].QuestionType.Should().Be(QuestionTypeDto.MultipleChoice);
++        req.Questions[0].DisplayOrder.Should().Be(0, "EC-7: DisplayOrder is re-indexed 0..n in the projection");
++        req.Questions[0].Options.Should().NotBeNull();
++        req.Questions[0].Options!.Should().HaveCount(2);
++        req.Questions[0].Options![0].IsCorrect.Should().BeFalse("index 1 is the correct option, not 0");
++        req.Questions[0].Options![1].IsCorrect.Should().BeTrue();
++        req.Questions[1].QuestionType.Should().Be(QuestionTypeDto.TrueFalse);
++        req.Questions[1].DisplayOrder.Should().Be(1);
++        req.Questions[1].Options!.Should().HaveCount(2);
++    }
++
++    [TestMethod]
++    public void ToCreateRequest_ShortAnswerQuestion_OptionsNull_ModelAnswerMapped()
++    {
++        var model = new AssignmentEditFormModel { Title = "T" };
++        model.Questions.Add(new QuestionEditorRow
++        {
++            Type = QuestionTypeDto.ShortAnswer,
++            QuestionText = "Name it.",
++            ModelAnswer = "Glucose",
++        });
++
++        var req = model.ToCreateRequest(
++            AssignmentTypeDto.Digital,
++            GradingFormatDto.AutoGraded,
++            TargetAudienceTypeDto.AllStudents,
++            TopicId,
++            null,
++            true);
++
++        req.Questions![0].Options.Should().BeNull("ShortAnswer questions have no options on the wire");
++        req.Questions[0].ModelAnswer.Should().Be("Glucose");
++    }
++
++    [TestMethod]
++    public void ToCreateRequest_OneAttachment_FieldsMapped()
++    {
++        var model = new AssignmentEditFormModel { Title = "T" };
++        model.Attachments.Add(new AttachmentEditorRow
++        {
++            FileName = "syllabus.pdf",
++            ContentType = "application/pdf",
++            FileSize = 12345,
++            StoragePath = "tenants/x/assignments/y/syllabus.pdf",
++        });
++
++        var req = model.ToCreateRequest(
++            AssignmentTypeDto.Digital,
++            GradingFormatDto.AutoGraded,
++            TargetAudienceTypeDto.AllStudents,
++            TopicId,
++            null,
++            true);
++
++        req.Attachments.Should().NotBeNull();
++        req.Attachments!.Should().HaveCount(1);
++        req.Attachments[0].FileName.Should().Be("syllabus.pdf");
++        req.Attachments[0].ContentType.Should().Be("application/pdf");
++        req.Attachments[0].FileSize.Should().Be(12345);
++        req.Attachments[0].StoragePath.Should().Be("tenants/x/assignments/y/syllabus.pdf");
++    }
++
++    // ── AssignmentEditFormModel.QuestionsPassSubmitGate ─────────────────
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_ZeroQuestionsTeacherGraded_Passes()
++    {
++        var model = new AssignmentEditFormModel();
++        var ok = model.QuestionsPassSubmitGate(GradingFormatDto.TeacherGraded, out var error);
++        ok.Should().BeTrue();
++        error.Should().BeNull();
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_ZeroQuestionsAutoGraded_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var ok = model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error);
++        ok.Should().BeFalse();
++        error.Should().Contain("at least one question");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_ZeroQuestionsInstantGraded_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var ok = model.QuestionsPassSubmitGate(GradingFormatDto.InstantGraded, out var error);
++        ok.Should().BeFalse();
++        error.Should().Contain("at least one question");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_MultipleChoiceNoCorrect_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = QuestionEditorRow.NewMultipleChoice();
++        q.QuestionText = "Pick one.";
++        q.Options[0].OptionText = "A";
++        q.Options[1].OptionText = "B";
++        model.Questions.Add(q);
++
++        var ok = model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error);
++        ok.Should().BeFalse();
++        error.Should().Contain("needs one correct option");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_MultipleChoiceCorrectIndexOutOfRange_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = QuestionEditorRow.NewMultipleChoice();
++        q.QuestionText = "Pick one.";
++        q.Options[0].OptionText = "A";
++        q.Options[1].OptionText = "B";
++        q.CorrectOptionIndex = 5; // out of range
++        model.Questions.Add(q);
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeFalse();
++        error.Should().Contain("needs one correct option");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_MultipleChoiceLessThanTwoOptions_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = new QuestionEditorRow { Type = QuestionTypeDto.MultipleChoice, QuestionText = "Q?" };
++        q.Options.Add(new OptionEditorRow { OptionText = "A" });
++        q.CorrectOptionIndex = 0;
++        model.Questions.Add(q);
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeFalse();
++        error.Should().Contain("at least 2 options");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_MultipleChoiceBlankOption_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = QuestionEditorRow.NewMultipleChoice();
++        q.QuestionText = "Pick one.";
++        q.Options[0].OptionText = "A";
++        q.Options[1].OptionText = "  ";
++        q.CorrectOptionIndex = 0;
++        model.Questions.Add(q);
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeFalse();
++        error.Should().Contain("empty option");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_BlankQuestionText_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = QuestionEditorRow.NewMultipleChoice();
++        q.Options[0].OptionText = "A";
++        q.Options[1].OptionText = "B";
++        q.CorrectOptionIndex = 0;
++        // QuestionText left null
++        model.Questions.Add(q);
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeFalse();
++        error.Should().Contain("needs text");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_TrueFalseCanonicalPairWithCorrect_Passes()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = new QuestionEditorRow { Type = QuestionTypeDto.TrueFalse, QuestionText = "TF?" };
++        q.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++        q.CorrectOptionIndex = 0;
++        model.Questions.Add(q);
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeTrue();
++        error.Should().BeNull();
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_TrueFalseMissingCorrect_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = new QuestionEditorRow { Type = QuestionTypeDto.TrueFalse, QuestionText = "TF?" };
++        q.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++        q.CorrectOptionIndex = null;
++        model.Questions.Add(q);
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeFalse();
++        error.Should().Contain("needs one correct option");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_TrueFalseNonCanonicalLabels_Fails()
++    {
++        var model = new AssignmentEditFormModel();
++        var q = new QuestionEditorRow { Type = QuestionTypeDto.TrueFalse, QuestionText = "TF?" };
++        q.Options.Add(new OptionEditorRow { OptionText = "Yes" });
++        q.Options.Add(new OptionEditorRow { OptionText = "No" });
++        q.CorrectOptionIndex = 0;
++        model.Questions.Add(q);
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeFalse();
++        error.Should().Contain("True and False");
++    }
++
++    [TestMethod]
++    public void QuestionsPassSubmitGate_ShortAnswerBare_Passes()
++    {
++        var model = new AssignmentEditFormModel();
++        model.Questions.Add(new QuestionEditorRow
++        {
++            Type = QuestionTypeDto.ShortAnswer,
++            QuestionText = "Name it.",
++        });
++
++        model.QuestionsPassSubmitGate(GradingFormatDto.AutoGraded, out var error).Should().BeTrue();
++        error.Should().BeNull();
++    }
++
++    // ── AddQuestion / RemoveQuestionAt / AppendGenerated (decision (d)) ─
++
++    [TestMethod]
++    public void AddQuestion_AppendsAndReindexesDisplayOrder()
++    {
++        var model = new AssignmentEditFormModel();
++        var a = QuestionEditorRow.NewMultipleChoice();
++        var b = QuestionEditorRow.NewMultipleChoice();
++        a.DisplayOrder = 7; // pre-existing index to prove re-index happens
++        model.Questions.Add(a);
++
++        model.AddQuestion(b);
++
++        model.Questions.Should().HaveCount(2);
++        model.Questions[0].Should().BeSameAs(a);
++        model.Questions[1].Should().BeSameAs(b);
++        model.Questions[0].DisplayOrder.Should().Be(0, "DisplayOrder is re-indexed 0..n over the whole list (EC-7)");
++        model.Questions[1].DisplayOrder.Should().Be(1);
++    }
++
++    [TestMethod]
++    public void RemoveQuestionAt_ReindexesDisplayOrder()
++    {
++        var model = new AssignmentEditFormModel();
++        var a = new QuestionEditorRow { QuestionText = "A" };
++        var b = new QuestionEditorRow { QuestionText = "B" };
++        var c = new QuestionEditorRow { QuestionText = "C" };
++        a.DisplayOrder = 5; b.DisplayOrder = 6; c.DisplayOrder = 7;
++        model.Questions.Add(a);
++        model.Questions.Add(b);
++        model.Questions.Add(c);
++
++        model.RemoveQuestionAt(1);
++
++        model.Questions.Should().HaveCount(2);
++        model.Questions[0].Should().BeSameAs(a);
++        model.Questions[1].Should().BeSameAs(c);
++        model.Questions[0].DisplayOrder.Should().Be(0);
++        model.Questions[1].DisplayOrder.Should().Be(1);
++    }
++
++    [TestMethod]
++    public void RemoveQuestionAt_OutOfRange_IsNoOp()
++    {
++        var model = new AssignmentEditFormModel();
++        model.Questions.Add(QuestionEditorRow.NewMultipleChoice());
++
++        model.RemoveQuestionAt(99);
++
++        model.Questions.Should().HaveCount(1, "RemoveQuestionAt must silently ignore out-of-range indices");
++    }
++
++    [TestMethod]
++    public void AppendGenerated_KeepsExistingRowsAndReindexes()
++    {
++        var model = new AssignmentEditFormModel();
++        var existing = QuestionEditorRow.NewMultipleChoice();
++        existing.QuestionText = "Hand-written";
++        model.Questions.Add(existing);
++
++        var generated = new[]
++        {
++            new GeneratedQuestionDto("Q1?", GeneratedQuestionType.MultipleChoice, new[] { new GeneratedQuestionOptionDto("A", true) }),
++            new GeneratedQuestionDto("Q2?", GeneratedQuestionType.TrueFalse, new[]
++            {
++                new GeneratedQuestionOptionDto("True", true), new GeneratedQuestionOptionDto("False"),
++            }),
++        };
++
++        model.AppendGenerated(generated);
++
++        model.Questions.Should().HaveCount(3, "decision (d): generate twice = append, never replace");
++        model.Questions[0].QuestionText.Should().Be("Hand-written", "pre-existing rows survive ahead of the appended ones");
++        model.Questions[0].DisplayOrder.Should().Be(0);
++        model.Questions[1].QuestionText.Should().Be("Q1?");
++        model.Questions[1].DisplayOrder.Should().Be(1);
++        model.Questions[2].QuestionText.Should().Be("Q2?");
++        model.Questions[2].DisplayOrder.Should().Be(2);
++    }
++
++    [TestMethod]
++    public void AppendGenerated_EmptyList_IsNoOp()
++    {
++        var model = new AssignmentEditFormModel();
++        model.AppendGenerated([]);
++        model.Questions.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public void AppendGenerated_OnEmptyList_IndexesFromZero()
++    {
++        var model = new AssignmentEditFormModel();
++        model.AppendGenerated(new[]
++        {
++            new GeneratedQuestionDto("Q?", GeneratedQuestionType.ShortAnswer, null, "Ans"),
++        });
++        model.Questions.Should().HaveCount(1);
++        model.Questions[0].DisplayOrder.Should().Be(0);
++    }
++
++    // ── GetQuestionPage ────────────────────────────────────────────────
++
++    [TestMethod]
++    public void QuestionPageSize_DefaultIsFive()
++    {
++        AssignmentEditFormModel.QuestionPageSize.Should().Be(5, "FR-240: page size is fixed at 5");
++    }
++
++    [TestMethod]
++    public void GetQuestionPage_TwelveRows_Slices5_5_2()
++    {
++        var model = new AssignmentEditFormModel();
++        for (var i = 0; i < 12; i++)
++        {
++            model.Questions.Add(new QuestionEditorRow { QuestionText = $"Q{i + 1}" });
++        }
++
++        model.GetQuestionPage(0).Select(r => r.QuestionText).Should().Equal("Q1", "Q2", "Q3", "Q4", "Q5");
++        model.GetQuestionPage(1).Select(r => r.QuestionText).Should().Equal("Q6", "Q7", "Q8", "Q9", "Q10");
++        model.GetQuestionPage(2).Select(r => r.QuestionText).Should().Equal("Q11", "Q12");
++    }
++
++    [TestMethod]
++    public void GetQuestionPage_EmptyList_ReturnsEmpty()
++    {
++        var model = new AssignmentEditFormModel();
++        model.GetQuestionPage(0).Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public void GetQuestionPage_OutOfRangePageIndex_ClampsToLastPage()
++    {
++        var model = new AssignmentEditFormModel();
++        for (var i = 0; i < 7; i++)
++        {
++            model.Questions.Add(new QuestionEditorRow { QuestionText = $"Q{i + 1}" });
++        }
++
++        model.GetQuestionPage(99).Should().HaveCount(2, "page 99 clamps to the last page (rows 6–7)");
++    }
++
++    [TestMethod]
++    public void GetQuestionPage_NegativePageIndex_ClampsToFirst()
++    {
++        var model = new AssignmentEditFormModel();
++        model.Questions.Add(new QuestionEditorRow { QuestionText = "Q1" });
++        model.Questions.Add(new QuestionEditorRow { QuestionText = "Q2" });
++
++        model.GetQuestionPage(-3).Select(r => r.QuestionText).Should().Equal("Q1", "Q2");
++    }
++
++    [TestMethod]
++    public void QuestionPageCount_AlwaysAtLeastOne()
++    {
++        var model = new AssignmentEditFormModel();
++        model.QuestionPageCount().Should().Be(1, "an empty list still has a single (empty) page so callers can pin CurrentPageIndex=0");
++        model.Questions.Add(new QuestionEditorRow());
++        model.QuestionPageCount().Should().Be(1);
++        for (var i = 0; i < 4; i++) model.Questions.Add(new QuestionEditorRow());
++        model.QuestionPageCount().Should().Be(1);
++        model.Questions.Add(new QuestionEditorRow());
++        model.QuestionPageCount().Should().Be(2);
++    }
++
++    // ── QuestionGenerationGate (FR-220) ────────────────────────────────
++
++    [TestMethod]
++    public void QuestionGenerationGate_IsEnabled_TruthTable()
++    {
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded).Should().BeTrue();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Digital, GradingFormatDto.InstantGraded).Should().BeTrue();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.SemiManual, GradingFormatDto.AutoGraded).Should().BeTrue();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.SemiManual, GradingFormatDto.InstantGraded).Should().BeTrue();
++
++        // Manual type: never enabled.
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Manual, GradingFormatDto.AutoGraded).Should().BeFalse();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Manual, GradingFormatDto.InstantGraded).Should().BeFalse();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded).Should().BeFalse();
++
++        // Any type with TeacherGraded: never enabled.
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.Digital, GradingFormatDto.TeacherGraded).Should().BeFalse();
++        QuestionGenerationGate.IsEnabled(AssignmentTypeDto.SemiManual, GradingFormatDto.TeacherGraded).Should().BeFalse();
++
++        // Null assignment type: never enabled.
++        QuestionGenerationGate.IsEnabled(null, GradingFormatDto.AutoGraded).Should().BeFalse();
++    }
++
++    [TestMethod]
++    public void QuestionGenerationGate_HintText_SelectsEnabledOrDisabled()
++    {
++        QuestionGenerationGate.HintText(AssignmentTypeDto.Digital, GradingFormatDto.AutoGraded)
++            .Should().Be(QuestionGenerationGate.EnabledHint);
++        QuestionGenerationGate.HintText(AssignmentTypeDto.Manual, GradingFormatDto.TeacherGraded)
++            .Should().Be(QuestionGenerationGate.DisabledHint);
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/QuestionEditorSectionBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/QuestionEditorSectionBunitTests.cs
+new file mode 100644
+index 00000000..09387fca
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/QuestionEditorSectionBunitTests.cs
+@@ -0,0 +1,351 @@
++using Bunit;
++using FluentAssertions;
++using Microsoft.AspNetCore.Components;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using SchoolCollab.Admin.Shared.Components.Dialogs;
++using SchoolCollab.AI.Abstractions;
++using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// bUnit coverage for <see cref="QuestionEditorSection"/> (paginated
++/// editable question list). Per the round-3 plan's binding coverage list:
++/// <list type="bullet">
++///   <item>Model with 12 questions → first render shows the first 5
++///     question texts + total "12" (FR-240).</item>
++///   <item>Type-specific rendering: MC row shows option inputs + correct
++///     radio controls; TF row shows True/False radios (no option-text
++///     inputs); ShortAnswer row shows the "Model answer (teacher
++///     reference)" field (FR-241 / decision (c)).</item>
++///   <item>Type change via the row's type selector → ApplyTypeChange
++///     effects visible (TF auto-fill, EC-5).</item>
++///   <item>Add-question click → row count grows (and Changed fires);
++///     Remove-question click → the ShowConfirmDialogAsync confirmation
++///     is requested (mock IDialogService); on decline the row stays.</item>
++/// </list>
++///
++/// Follows the in-round convention from <c>AssignmentCreateBunitTests</c>
++/// (MSTest + FluentAssertions + bUnit). Mocks IDialogService via Moq
++/// following the ContactsEditorTests pattern.
++/// </summary>
++[TestClass]
++public class QuestionEditorSectionBunitTests : BunitContext
++{
++    public QuestionEditorSectionBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++        Services.AddSingleton(Mock.Of<ILogger<QuestionEditorSection>>());
++    }
++
++    private IRenderedComponent<QuestionEditorSection> RenderEditor(
++        AssignmentEditFormModel model,
++        EventCallback? changed = null)
++    {
++        return Render<QuestionEditorSection>(parameters =>
++        {
++            parameters.Add(p => p.Model, model);
++            parameters.Add(p => p.Changed, changed ?? EventCallback.Empty);
++        });
++    }
++
++    private static AssignmentEditFormModel SeedModel(int questionCount)
++    {
++        var model = new AssignmentEditFormModel();
++        for (var i = 0; i < questionCount; i++)
++        {
++            model.Questions.Add(new QuestionEditorRow
++            {
++                QuestionText = $"Q{i + 1}",
++                Type = QuestionTypeDto.MultipleChoice,
++            });
++            // give each MC question two blank option rows (matches NewMultipleChoice)
++            model.Questions[i].Options.Add(new OptionEditorRow());
++            model.Questions[i].Options.Add(new OptionEditorRow());
++        }
++        return model;
++    }
++
++    [TestMethod]
++    public void TwelveQuestions_FirstRender_ShowsFirstFiveTextsAndTotal()
++    {
++        var model = SeedModel(12);
++
++        var cut = RenderEditor(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Q1");
++            cut.Markup.Should().Contain("Q5");
++            cut.Markup.Should().NotContain(">Q6<", "page 1 must only render the first 5 rows");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("12 question(s)",
++                "FR-240: the toolbar total reflects the model's question count");
++        });
++    }
++
++    [TestMethod]
++    public void MultipleChoiceRow_ShowsOptionInputsAndCorrectRadioControls()
++    {
++        var model = new AssignmentEditFormModel();
++        var mc = new QuestionEditorRow
++        {
++            QuestionText = "MC?",
++            Type = QuestionTypeDto.MultipleChoice,
++        };
++        mc.Options.Add(new OptionEditorRow { OptionText = "First" });
++        mc.Options.Add(new OptionEditorRow { OptionText = "Second" });
++        model.Questions.Add(mc);
++
++        var cut = RenderEditor(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("First");
++            cut.Markup.Should().Contain("Second");
++            cut.Markup.Should().Contain("Add option",
++                "an Add-option button is rendered for MultipleChoice rows");
++            cut.Markup.Should().Contain("Mark as correct option",
++                "a radio control lets the teacher pick the correct option (EC-5)");
++        });
++    }
++
++    [TestMethod]
++    public void TrueFalseRow_ShowsTrueFalseRadios_NoOptionTextInputs()
++    {
++        var model = new AssignmentEditFormModel();
++        var tf = new QuestionEditorRow { QuestionText = "TF?" };
++        tf.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++        model.Questions.Add(tf);
++
++        var cut = RenderEditor(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("True");
++            cut.Markup.Should().Contain("False");
++            cut.Markup.Should().NotContain("Add option",
++                "TrueFalse is fixed at two canonical options — no Add-option affordance");
++        });
++    }
++
++    [TestMethod]
++    public void ShortAnswerRow_ShowsModelAnswerTextArea()
++    {
++        var model = new AssignmentEditFormModel();
++        model.Questions.Add(new QuestionEditorRow
++        {
++            QuestionText = "Name it.",
++            Type = QuestionTypeDto.ShortAnswer,
++            ModelAnswer = "Reference answer",
++        });
++
++        var cut = RenderEditor(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Model answer (teacher reference)",
++                "FR-241 / decision (c): the ShortAnswer model answer is editable in the wizard");
++        });
++    }
++
++    [TestMethod]
++    public void EmptyModel_RendersZeroState_WithAddQuestionAffordance()
++    {
++        // Tester iteration 1 fix (P1): the editor must always render with
++        // its "Add question" affordance when there are zero questions,
++        // regardless of the generation gate state. This is the path the
++        // step-1 DisabledHint promises (hand-add is always available).
++        var model = new AssignmentEditFormModel();
++
++        var cut = RenderEditor(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("No questions yet. Add a question to get started.",
++                "the editor surfaces a friendly empty state instead of being hidden");
++            cut.Markup.Should().Contain("Add question",
++                "the Add-question affordance is always available so the teacher can hand-add rows");
++            cut.Markup.Should().Contain("0 question(s)",
++                "the toolbar total reflects the empty model");
++        });
++    }
++
++    [TestMethod]
++    public void ApplyTypeChange_ToMultipleChoice_SeedsTwoBlankOptions()
++    {
++        // Tester iteration 1 fix (P2): switching a ShortAnswer row to
++        // MultipleChoice must seed two blank option rows, mirroring
++        // NewMultipleChoice — so the teacher never lands on a 0-option
++        // MC row.
++        var row = new QuestionEditorRow
++        {
++            QuestionText = "MC?",
++            Type = QuestionTypeDto.ShortAnswer,
++            ModelAnswer = "old reference",
++        };
++        row.ApplyTypeChange(QuestionTypeDto.MultipleChoice);
++
++        row.Type.Should().Be(QuestionTypeDto.MultipleChoice);
++        row.Options.Should().HaveCount(2,
++            "MC type switch seeds two blank option rows mirroring NewMultipleChoice");
++        row.Options[0].OptionText.Should().BeNull();
++        row.Options[1].OptionText.Should().BeNull();
++        row.CorrectOptionIndex.Should().BeNull("the correct pick is cleared on a type switch");
++        row.ModelAnswer.Should().BeNull("the SA model answer is cleared on a type switch");
++    }
++
++    [TestMethod]
++    public void ApplyTypeChange_ToTrueFalse_SeedsCanonicalPair()
++    {
++        // Tester iteration 1 fix (P2): switching a MultipleChoice row to
++        // TrueFalse must seed exactly two canonical options ("True" /
++        // "False") — the same behaviour as the existing EC-5 path.
++        var row = QuestionEditorRow.NewMultipleChoice();
++        row.QuestionText = "TF?";
++        row.Options[0].OptionText = "A";
++        row.Options[1].OptionText = "B";
++        row.CorrectOptionIndex = 0;
++
++        row.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++
++        row.Type.Should().Be(QuestionTypeDto.TrueFalse);
++        row.Options.Should().HaveCount(2);
++        row.Options[0].OptionText.Should().Be("True");
++        row.Options[1].OptionText.Should().Be("False");
++        row.CorrectOptionIndex.Should().BeNull(
++            "EC-5: TF switch leaves the correct pick unset (submit gate enforces correctness)");
++    }
++
++    [TestMethod]
++    public void TypeChange_OnRow_AppliesTypeChangeEffects()
++    {
++        var model = new AssignmentEditFormModel();
++        var mc = new QuestionEditorRow { QuestionText = "?" };
++        mc.Options.Add(new OptionEditorRow { OptionText = "A" });
++        mc.Options.Add(new OptionEditorRow { OptionText = "B" });
++        mc.CorrectOptionIndex = 0;
++        model.Questions.Add(mc);
++
++        var cut = RenderEditor(model);
++
++        // Mutate the row directly via the model — the editor's
++        // @bind-SelectedValue:after callback is hard to drive under bUnit
++        // for a DropdownForEnum (web-component), so we assert the model
++        // mutation is the one the editor would have produced.
++        // EC-5: switching to TrueFalse auto-fills the canonical two rows
++        // and clears the correct pick.
++        mc.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++
++        cut.WaitForAssertion(() =>
++        {
++            mc.Options.Should().HaveCount(2);
++            mc.Options[0].OptionText.Should().Be("True");
++            mc.Options[1].OptionText.Should().Be("False");
++            mc.CorrectOptionIndex.Should().BeNull(
++                "EC-5: TF type change leaves the correct pick unset");
++            mc.Type.Should().Be(QuestionTypeDto.TrueFalse);
++        });
++    }
++
++    [TestMethod]
++    public void AddQuestion_Click_RowCountGrowsAndChangedFires()
++    {
++        var model = SeedModel(2);
++
++        var changedFired = 0;
++        var cb = EventCallback.Factory.Create(this, () => changedFired++);
++        var cut = RenderEditor(model, cb);
++
++        var addButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Add question", StringComparison.Ordinal));
++        addButton.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            model.Questions.Should().HaveCount(3, "Add question appends a new row");
++            changedFired.Should().Be(1, "the Changed EventCallback fires after add");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            model.Questions[2].Type.Should().Be(QuestionTypeDto.MultipleChoice,
++                "Add question seeds a fresh MultipleChoice row");
++            model.Questions[2].Options.Should().HaveCount(2,
++                "the new row has the two blank option rows NewMultipleChoice creates");
++        });
++    }
++
++    [TestMethod]
++    public void RemoveQuestion_ConfirmationRequested_OnConfirmRowRemoved()
++    {
++        var model = SeedModel(3);
++
++        var dialogRef = new Mock<IDialogReference>();
++        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Ok<object?>(null!)));
++        var dialogMock = new Mock<IDialogService>();
++        dialogMock
++            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
++                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
++            .ReturnsAsync(dialogRef.Object);
++        Services.AddSingleton(dialogMock.Object);
++
++        var cut = RenderEditor(model);
++
++        var removeButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Remove", StringComparison.Ordinal) && b.TextContent.Trim() != "Remove option");
++        removeButton.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            dialogMock.Verify(
++                d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
++                    It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
++                Times.Once,
++                "remove must request the destructive confirmation dialog");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            model.Questions.Should().HaveCount(2, "on confirm, the row is removed");
++        });
++    }
++
++    [TestMethod]
++    public void RemoveQuestion_OnDecline_RowStays()
++    {
++        var model = SeedModel(3);
++
++        var dialogRef = new Mock<IDialogReference>();
++        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(DialogResult.Cancel()));
++        var dialogMock = new Mock<IDialogService>();
++        dialogMock
++            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
++                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
++            .ReturnsAsync(dialogRef.Object);
++        Services.AddSingleton(dialogMock.Object);
++
++        var cut = RenderEditor(model);
++
++        var removeButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Remove", StringComparison.Ordinal) && b.TextContent.Trim() != "Remove option");
++        removeButton.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            dialogMock.Verify(
++                d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
++                    It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
++                Times.Once);
++        });
++        cut.WaitForAssertion(() =>
++        {
++            model.Questions.Should().HaveCount(3, "on cancel, the row stays");
++        });
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/QuestionGenerationSectionBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/QuestionGenerationSectionBunitTests.cs
+new file mode 100644
+index 00000000..f59ad508
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/QuestionGenerationSectionBunitTests.cs
+@@ -0,0 +1,403 @@
++using Bunit;
++using FluentAssertions;
++using Microsoft.AspNetCore.Components;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using SchoolCollab.AI.Abstractions;
++using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
++using SchoolCollab.Assignments.Application.Helpers;
++using SchoolCollab.Assignments.Application.Services;
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// bUnit coverage for <see cref="QuestionGenerationSection"/> (Step-2
++/// AI generation controls). Per the round-3 plan's binding coverage list:
++/// <list type="bullet">
++///   <item>GateEnabled=true + fake generator returning 3 dtos → rows
++///     appended, OnQuestionsChanged invoked, error cleared.</item>
++///   <item>GateEnabled=false → Generate disabled + DisabledTooltip; no
++///     generator call.</item>
++///   <item>Fake throws <see cref="QuestionGenerationFailed"/> → the
++///     message renders, Generate remains enabled for retry, second click
++///     calls again.</item>
++///   <item>TopicId null → click shows "Select a subject…" and the fake
++///     records zero calls; count field has min="1".</item>
++///   <item>Cancel: fake awaits Task.Delay(…, ct); Generate then Cancel →
++///     OperationCanceledException swallowed, Model.Questions unchanged,
++///     no error bar (EC-2).</item>
++/// </list>
++///
++/// Follows the in-round convention from <c>AssignmentCreateBunitTests</c>
++/// (MSTest + FluentAssertions + bUnit). Uses
++/// <see cref="FakeQuestionGenerator"/> (an inline fake) per the plan;
++/// Moq only for <see cref="ILogger{T}"/>.
++/// </summary>
++[TestClass]
++public class QuestionGenerationSectionBunitTests : BunitContext
++{
++    public QuestionGenerationSectionBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++        Services.AddSingleton(Mock.Of<ILogger<QuestionGenerationSection>>());
++    }
++
++    private IRenderedComponent<QuestionGenerationSection> RenderSection(
++        AssignmentEditFormModel model,
++        FakeQuestionGenerator fake,
++        bool gateEnabled = true,
++        Guid? topicId = null,
++        string? topicName = null,
++        Guid? gradeLevelId = null,
++        EventCallback? onQuestionsChanged = null)
++    {
++        Services.AddSingleton<IAssignmentQuestionGenerator>(fake);
++
++        return Render<QuestionGenerationSection>(parameters =>
++        {
++            parameters.Add(p => p.Model, model);
++            parameters.Add(p => p.GateEnabled, gateEnabled);
++            parameters.Add(p => p.TopicId, topicId);
++            parameters.Add(p => p.TopicName, topicName);
++            parameters.Add(p => p.GradeLevelId, gradeLevelId);
++            parameters.Add(p => p.OnQuestionsChanged,
++                onQuestionsChanged ?? EventCallback.Empty);
++        });
++    }
++
++    [TestMethod]
++    public void GateEnabled_GenerateClick_AppendsRowsAndInvokesOnQuestionsChanged()
++    {
++        var model = new AssignmentEditFormModel();
++        // Pre-seed a hand-written row to verify append-on-generate (decision (d)).
++        var seed = QuestionEditorRow.NewMultipleChoice();
++        seed.QuestionText = "Hand-written";
++        model.Questions.Add(seed);
++
++        var fake = new FakeQuestionGenerator();
++        var changedFired = 0;
++        var cb = EventCallback.Factory.Create(this, () => changedFired++);
++        var topicId = Guid.NewGuid();
++
++        var cut = RenderSection(
++            model,
++            fake,
++            gateEnabled: true,
++            topicId: topicId,
++            topicName: "Photosynthesis",
++            gradeLevelId: null,
++            onQuestionsChanged: cb);
++
++        // Find and click the Generate button. The button text is "Generate"
++        // (only "Generating…" while a call is in flight).
++        var generateButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++        generateButton.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            fake.GenerateCalls.Should().Be(1, "the Generate button calls the generator exactly once");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            model.Questions.Should().HaveCount(4, "1 pre-seeded + 3 generated rows");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            model.Questions[0].QuestionText.Should().Be("Hand-written",
++                "the pre-seeded row survives ahead of the appended ones (decision (d))");
++            model.Questions[1].QuestionText.Should().Be("G-Q1");
++            model.Questions[2].QuestionText.Should().Be("G-Q2");
++            model.Questions[3].QuestionText.Should().Be("G-Q3");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            changedFired.Should().Be(1, "OnQuestionsChanged fires after a successful append");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            for (var i = 0; i < model.Questions.Count; i++)
++            {
++                model.Questions[i].DisplayOrder.Should().Be(i,
++                    "DisplayOrder is re-indexed 0..n (EC-7)");
++            }
++        });
++    }
++
++    [TestMethod]
++    public void GateDisabled_GenerateButton_IsDisabledAndShowsTooltip_NoGeneratorCall()
++    {
++        var model = new AssignmentEditFormModel();
++        var fake = new FakeQuestionGenerator();
++
++        var cut = RenderSection(
++            model,
++            fake,
++            gateEnabled: false,
++            topicId: Guid.NewGuid(),
++            topicName: "Topic");
++
++        var generateButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++        generateButton.HasAttribute("disabled").Should().BeTrue(
++            "EC-3: the Generate button must be disabled when the gate is closed");
++        cut.Markup.Should().Contain(QuestionGenerationGate.DisabledTooltip,
++            "the DisabledTooltip text is rendered for the user");
++
++        // Click is a no-op when disabled — the button is a fluent web component,
++        // and bUnit click on a disabled button does not dispatch the event. Even
++        // if it did, the OnGenerateAsync guard `if (!GateEnabled || _generating) return;`
++        // makes the fake unreachable.
++        try
++        {
++            generateButton.Click();
++        }
++        catch
++        {
++            // Disabled buttons throw on click in some browsers / bUnit versions;
++            // that's still a guarantee no call was made.
++        }
++
++        fake.GenerateCalls.Should().Be(0, "no generator call when gate is closed");
++        model.Questions.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public void GeneratorThrowsQuestionGenerationFailed_MessageRenders_GenerateRemainsEnabled_RetryCallsAgain()
++    {
++        var model = new AssignmentEditFormModel();
++        var fake = new FakeQuestionGenerator
++        {
++            NextException = new QuestionGenerationFailed("Provider rate-limited; please try again."),
++        };
++        var topicId = Guid.NewGuid();
++
++        var cut = RenderSection(
++            model,
++            fake,
++            gateEnabled: true,
++            topicId: topicId,
++            topicName: "Topic");
++
++        var generateButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++        generateButton.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            fake.GenerateCalls.Should().Be(1);
++        });
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Provider rate-limited; please try again.",
++                "EC-1/EC-8: the typed exception's message is rendered for the user");
++            model.Questions.Should().BeEmpty("a failed generation does not append rows");
++        });
++
++        // After the failure the Generate button must remain enabled so the user
++        // can retry — the EC-1/EC-8 contract.
++        cut.WaitForAssertion(() =>
++        {
++            var retryButton = cut.FindAll("fluent-button")
++                .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++            retryButton.HasAttribute("disabled").Should().BeFalse(
++                "the Generate button must remain enabled after a failure so the user can retry");
++        });
++
++        // Switch the fake back to a successful response and click again.
++        fake.NextException = null;
++        var retryButton2 = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++        retryButton2.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            fake.GenerateCalls.Should().Be(2, "a retry clicks the button again");
++            model.Questions.Should().HaveCount(3, "a successful retry appends rows");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().NotContain("Provider rate-limited; please try again.",
++                "the error message clears on a subsequent successful append");
++        });
++    }
++
++    [TestMethod]
++    public void TopicIdNull_ClickShowsSelectASubject_NoGeneratorCall()
++    {
++        var model = new AssignmentEditFormModel();
++        var fake = new FakeQuestionGenerator();
++
++        var cut = RenderSection(
++            model,
++            fake,
++            gateEnabled: true,
++            topicId: null, // <-- the no-call guarantee
++            topicName: null);
++
++        var generateButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++        generateButton.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Select a subject before generating questions.",
++                "a null TopicId surfaces a friendly 'select a subject' message");
++        });
++
++        fake.GenerateCalls.Should().Be(0,
++            "TopicId null must short-circuit BEFORE the generator is called (no-call guarantee)");
++        model.Questions.Should().BeEmpty();
++
++        // The count field renders with min=\"1\" (EC-10 unreachable-zero).
++        cut.Markup.Should().Contain("min=\"1\"",
++            "EC-10: the count field's HTML attribute is min=1 so zero is unreachable via the input");
++    }
++
++    [TestMethod]
++    public void GeneratorThrowsUnhandledException_FriendlyErrorRenders_GenerateRemainsEnabled()
++    {
++        // Tester iteration 1 fix (P2): a non-typed exception (e.g.
++        // HttpRequestException, JsonException, ObjectDisposedException)
++        // must not escape to the page-level ErrorBoundary — it would
++        // permanently replace the wizard. The catch-all in the section
++        // logs + surfaces the same friendly error state with retry.
++        var model = new AssignmentEditFormModel();
++        var fake = new FakeQuestionGenerator
++        {
++            NextException = new InvalidOperationException("upstream blew up"),
++        };
++        var topicId = Guid.NewGuid();
++
++        var cut = RenderSection(
++            model,
++            fake,
++            gateEnabled: true,
++            topicId: topicId,
++            topicName: "Topic");
++
++        var generateButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++        generateButton.Click();
++
++        cut.WaitForAssertion(() =>
++        {
++            fake.GenerateCalls.Should().Be(1, "the first click reaches the generator");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain(
++                "Something went wrong while generating questions. Please try again.",
++                "the catch-all surfaces a friendly retryable message — no exception escapes to ErrorBoundary");
++            model.Questions.Should().BeEmpty("a failed generation does not append rows");
++        });
++
++        // After the failure the Generate button must remain enabled so
++        // the user can retry (the EC-1/EC-8 contract).
++        cut.WaitForAssertion(() =>
++        {
++            var retryButton = cut.FindAll("fluent-button")
++                .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++            retryButton.HasAttribute("disabled").Should().BeFalse(
++                "the Generate button must remain enabled after a non-typed failure so the user can retry");
++        });
++    }
++
++    [TestMethod]
++    public void Cancel_OperationCanceledException_Swallowed_ListUnchanged_NoErrorBar_EC2()
++    {
++        var model = new AssignmentEditFormModel();
++        var seed = QuestionEditorRow.NewMultipleChoice();
++        seed.QuestionText = "Pre-existing";
++        model.Questions.Add(seed);
++
++        var fake = new FakeQuestionGenerator
++        {
++            Delay = TimeSpan.FromMilliseconds(500), // give Cancel time to fire
++        };
++
++        var topicId = Guid.NewGuid();
++        var cut = RenderSection(
++            model,
++            fake,
++            gateEnabled: true,
++            topicId: topicId,
++            topicName: "Topic");
++
++        var generateButton = cut.FindAll("fluent-button")
++            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal));
++        generateButton.Click();
++
++        // While the call is in flight, the Cancel button is rendered.
++        cut.WaitForAssertion(() =>
++        {
++            var cancelButton = cut.FindAll("fluent-button")
++                .FirstOrDefault(b => b.TextContent.Trim().StartsWith("Cancel", StringComparison.Ordinal));
++            cancelButton.Should().NotBeNull(
++                "the Cancel button renders while the generator is awaiting");
++            cancelButton!.Click();
++        });
++
++        cut.WaitForAssertion(() =>
++        {
++            fake.GenerateCalls.Should().Be(1, "the generate call did fire before the cancel");
++            model.Questions.Should().HaveCount(1,
++                "EC-2: cancel leaves the question list untouched");
++            model.Questions[0].QuestionText.Should().Be("Pre-existing");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.ToLowerInvariant().Should().NotContain("error",
++                "EC-2: cancel does NOT surface an error message");
++        });
++    }
++
++    // ── Fake IAssignmentQuestionGenerator ──────────────────────────────
++
++    /// <summary>Hand-rolled fake (per the plan: fakes for non-HTTP
++    /// interfaces; Moq only for ILogger-style seams). Stands in for
++    /// <see cref="IAssignmentQuestionGenerator"/> in bUnit tests so the
++    /// question-generation flow can be exercised deterministically.</summary>
++    private sealed class FakeQuestionGenerator : IAssignmentQuestionGenerator
++    {
++        public FakeQuestionGenerator()
++        {
++            NextResults = new List<GeneratedQuestionDto>
++            {
++                new("G-Q1", GeneratedQuestionType.MultipleChoice,
++                    new[] { new GeneratedQuestionOptionDto("A", true), new GeneratedQuestionOptionDto("B") }),
++                new("G-Q2", GeneratedQuestionType.TrueFalse,
++                    new[] { new GeneratedQuestionOptionDto("True", true), new GeneratedQuestionOptionDto("False") }),
++                new("G-Q3", GeneratedQuestionType.ShortAnswer, null, "model"),
++            };
++        }
++
++        public int GenerateCalls { get; private set; }
++
++        public TimeSpan Delay { get; set; } = TimeSpan.Zero;
++
++        public Exception? NextException { get; set; }
++
++        public IReadOnlyList<GeneratedQuestionDto> NextResults { get; set; }
++
++        public async Task<IReadOnlyList<GeneratedQuestionDto>> GenerateAsync(
++            QuestionGenerationRequest request,
++            CancellationToken ct = default)
++        {
++            GenerateCalls++;
++            if (Delay > TimeSpan.Zero)
++            {
++                await Task.Delay(Delay, ct);
++            }
++            if (NextException is not null)
++            {
++                throw NextException;
++            }
++            return NextResults;
++        }
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/QuestionReviewListBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/QuestionReviewListBunitTests.cs
+new file mode 100644
+index 00000000..7782e0ae
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/QuestionReviewListBunitTests.cs
+@@ -0,0 +1,174 @@
++using Bunit;
++using FluentAssertions;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using SchoolCollab.AI.Abstractions;
++using SchoolCollab.Assignments.Application.Components.Pages.Assignments;
++using SchoolCollab.Assignments.Application.Helpers;
++using SchoolCollab.Assignments.Contracts;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// bUnit coverage for <see cref="QuestionReviewList"/> (paged read-only
++/// Review list). Per the round-3 plan's binding coverage list:
++/// <list type="bullet">
++///   <item>Model with 12 questions → 5 rows on page 1 in DisplayOrder
++///     order + total; type badges via EnumHelper; the correct option is
++///     marked; ShortAnswer model answer text shows; "Resources: none yet"
++///     renders (decision (a) consequence).</item>
++///   <item>Empty model → the "No questions yet." info bar.</item>
++/// </list>
++///
++/// Follows the in-round convention from <c>AssignmentCreateBunitTests</c>
++/// (MSTest + FluentAssertions + bUnit). The review list is read-only —
++/// no event callbacks, no IAssignmentQuestionGenerator dependency —
++/// so the test setup is the minimum needed.
++/// </summary>
++[TestClass]
++public class QuestionReviewListBunitTests : BunitContext
++{
++    public QuestionReviewListBunitTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++    }
++
++    private IRenderedComponent<QuestionReviewList> RenderReview(
++        AssignmentEditFormModel model)
++    {
++        return Render<QuestionReviewList>(parameters =>
++        {
++            parameters.Add(p => p.Model, model);
++        });
++    }
++
++    [TestMethod]
++    public void TwelveQuestions_Page1ShowsFiveRowsInDisplayOrderWithCorrectMarked()
++    {
++        var model = new AssignmentEditFormModel();
++        // Row 0: MultipleChoice, "Pick A", correct at index 0.
++        var mc = new QuestionEditorRow
++        {
++            QuestionText = "Pick A",
++            Type = QuestionTypeDto.MultipleChoice,
++        };
++        mc.Options.Add(new OptionEditorRow { OptionText = "A" });
++        mc.Options.Add(new OptionEditorRow { OptionText = "B" });
++        mc.CorrectOptionIndex = 0;
++        model.Questions.Add(mc);
++        // Row 1: TrueFalse, correct = False (index 1).
++        var tf = new QuestionEditorRow { QuestionText = "TF?" };
++        tf.ApplyTypeChange(QuestionTypeDto.TrueFalse);
++        tf.CorrectOptionIndex = 1;
++        model.Questions.Add(tf);
++        // Row 2: ShortAnswer, with model answer.
++        model.Questions.Add(new QuestionEditorRow
++        {
++            QuestionText = "Name it.",
++            Type = QuestionTypeDto.ShortAnswer,
++            ModelAnswer = "Glucose",
++        });
++        // Rows 3-11: padding so 12 total exist.
++        for (var i = 3; i < 12; i++)
++        {
++            model.Questions.Add(new QuestionEditorRow { QuestionText = $"Pad {i + 1}" });
++        }
++
++        var cut = RenderReview(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("12 question(s)",
++                "the summary row reflects the model's question count");
++            cut.Markup.Should().Contain("Resources: none yet",
++                "decision (a): the attachment summary renders 'none yet' this round");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Pick A");
++            cut.Markup.Should().Contain("TF?");
++            cut.Markup.Should().Contain("Name it.");
++            cut.Markup.Should().Contain("Pad 4");
++            cut.Markup.Should().Contain("Pad 5");
++            cut.Markup.Should().NotContain("Pad 6",
++                "page 1 only renders the first 5 rows");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            // Type badges use EnumHelper.GetDescription — the enum members
++            // don't carry [Description] for QuestionTypeDto, so the default
++            // member name ("MultipleChoice"/"TrueFalse"/"ShortAnswer") is used.
++            cut.Markup.Should().Contain("MultipleChoice");
++            cut.Markup.Should().Contain("TrueFalse");
++            cut.Markup.Should().Contain("ShortAnswer");
++        });
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("is-correct",
++                "the correct option on the MC row is marked with the .is-correct class");
++            cut.Markup.Should().Contain("Glucose",
++                "ShortAnswer model answer text is rendered");
++        });
++    }
++
++    [TestMethod]
++    public void EmptyModel_RendersNoQuestionsYetInfoBar()
++    {
++        var model = new AssignmentEditFormModel();
++
++        var cut = RenderReview(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("No questions yet.",
++                "an empty model renders the friendly info bar");
++            cut.Markup.Should().Contain("Resources: none yet",
++                "the attachment summary is still rendered on an empty model");
++        });
++    }
++
++    [TestMethod]
++    public void ShortAnswerRow_RendersModelAnswer()
++    {
++        var model = new AssignmentEditFormModel();
++        model.Questions.Add(new QuestionEditorRow
++        {
++            QuestionText = "Name the main product of photosynthesis.",
++            Type = QuestionTypeDto.ShortAnswer,
++            ModelAnswer = "Glucose",
++        });
++
++        var cut = RenderReview(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Model answer:");
++            cut.Markup.Should().Contain("Glucose",
++                "the model answer text is rendered next to the 'Model answer:' sublabel");
++        });
++    }
++
++    [TestMethod]
++    public void ShortAnswerRow_BlankModelAnswer_RendersDash()
++    {
++        var model = new AssignmentEditFormModel();
++        model.Questions.Add(new QuestionEditorRow
++        {
++            QuestionText = "Q?",
++            Type = QuestionTypeDto.ShortAnswer,
++            // ModelAnswer left null/blank
++        });
++
++        var cut = RenderReview(model);
++
++        cut.WaitForAssertion(() =>
++        {
++            cut.Markup.Should().Contain("Model answer:");
++            cut.Markup.Should().Contain("—",
++                "a blank model answer renders an em-dash placeholder");
++        });
++    }
++}

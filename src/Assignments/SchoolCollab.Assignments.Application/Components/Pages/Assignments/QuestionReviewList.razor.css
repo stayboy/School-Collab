@@ -1,0 +1,88 @@
+/* Scoped styles for the read-only Review question list. The wizard's
+   wizard-section / wizard-section-header / wizard-hint chrome is
+   reused from Create.razor.css — only this component's own
+   summary row / cards / options list are styled here. */
+
+.question-review-section {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.question-review-summary {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    font-weight: 600;
+    color: var(--neutral-foreground-hint);
+}
+
+.question-review-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.question-review-card {
+    border: 1px solid var(--neutral-stroke);
+    border-radius: 10px;
+    padding: 1rem;
+    background: var(--neutral-fill);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.question-review-card-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.question-review-position {
+    font-weight: 700;
+    color: var(--neutral-foreground-hint);
+}
+
+.question-review-text {
+    font-size: 1rem;
+}
+
+.question-review-options {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+}
+
+.question-review-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--neutral-foreground-hint);
+}
+
+.question-review-option.is-correct {
+    color: var(--accent-foreground, #e65100);
+    font-weight: 600;
+}
+
+.question-review-option-bullet {
+    width: 20px;
+    height: 20px;
+    display: inline-block;
+}
+
+.question-review-model-answer {
+    display: flex;
+    gap: 0.5rem;
+    align-items: baseline;
+}
+
+.question-review-sublabel {
+    font-size: 0.85rem;
+    color: var(--neutral-foreground-hint);
+    font-weight: 600;
+}
