@@ -162,6 +162,21 @@ public sealed class AssignmentsApiClient
         (await _http.DeleteAsync($"/assignments/{id}", ct)).EnsureSuccessStatusCode();
     }
 
+    /// <summary>Duplicate an assignment as a fresh Draft template copy
+    /// (WS-A4 / spec §3.1). The no-body POST mirrors the Unpublish/Close
+    /// precedent; the Created response's <c>{"id": ...}</c> body is parsed
+    /// via the private <see cref="IdResponse"/> record (NOT
+    /// <c>ReadFromJsonAsync&lt;Guid&gt;</c>, which throws on the object body).</summary>
+    public async Task<Guid> DuplicateAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Duplicating assignment {AssignmentId}", id);
+        var response = await _http.PostAsync($"/assignments/{id}/duplicate", null, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<IdResponse>(_jsonOptions, ct);
+        _logger.LogInformation("Assignment {AssignmentId} duplicated to {NewAssignmentId}", id, result!.Id);
+        return result!.Id;
+    }
+
     // ── Phase 7: recipients + submissions + review/gate (spec §8/§9/§12) ─────
 
     public async Task<AssignmentRecipientDto[]?> GetRecipientsAsync(Guid id, CancellationToken ct = default)
@@ -290,4 +305,11 @@ public sealed class AssignmentsApiClient
         response.EnsureSuccessStatusCode();
         throw new InvalidOperationException("Unreachable: EnsureSuccessStatusCode returned without throwing.");
     }
+
+    /// <summary>Private envelope for the duplicate route's Created body
+    /// (<c>{"id": ...}</c>) — the StudentsApiClient precedent. The create
+    /// path's literal <c>ReadFromJsonAsync&lt;Guid&gt;</c> throws a
+    /// <see cref="System.Text.Json.JsonException"/> on this object body; the
+    /// duplicate uses this working record instead.</summary>
+    private sealed record IdResponse(Guid Id);
 }

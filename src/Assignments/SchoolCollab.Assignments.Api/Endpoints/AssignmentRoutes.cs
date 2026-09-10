@@ -7,6 +7,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CloseAssignmentCom
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.DeleteAssignmentCommand;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.DuplicateAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.PublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RejectAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.ReviewAssignmentCommand;
@@ -349,6 +350,22 @@ public static class AssignmentRoutes
             catch (InvalidOperationException ex)
             {
                 return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        group.MapPost("/{id:guid}/duplicate", async (
+            Guid id,
+            [FromServices] ICommandHandler<DuplicateAssignmentCommand, Guid> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var newId = await handler.HandleAsync(new DuplicateAssignmentCommand(id), ct);
+                return Results.Created($"/assignments/{newId}", new { id = newId });
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
             }
         });
 

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Bunit;
@@ -11,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
+using SchoolCollab.Admin.Shared.Components.Dialogs;
 using IndexPage = SchoolCollab.Assignments.Application.Components.Pages.Assignments.Index;
 using SchoolCollab.Assignments.Application.Services;
 using SchoolCollab.Assignments.Contracts;
@@ -581,10 +583,11 @@ public class AssignmentIndexBunitTests : BunitContext
     [TestMethod]
     public async Task Index_ArchivedRow_Renders()
     {
+        var id = Guid.NewGuid();
         SetupListResponse(new[]
         {
             new AssignmentSummaryDto(
-                Guid.NewGuid(), "Math HW", null, AssignmentTypeDto.Digital,
+                id, "Math HW", null, AssignmentTypeDto.Digital,
                 GradingFormatDto.TeacherGraded, TargetAudienceTypeDto.AllStudents,
                 Guid.NewGuid(), "Math", null, null, AssignmentStatusDto.Archived,
                 null, null, true, Guid.NewGuid(), DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
@@ -594,13 +597,197 @@ public class AssignmentIndexBunitTests : BunitContext
             TimeSpan.FromSeconds(15));
         cut.Markup.Should().Contain("Archived", "the Status badge maps Archived via the page badge ternary");
 
-        // Decision (j) / spec §7 Q6: archived rows are read-only — exactly one
-        // action (Review), rendered as the labeled single-action button; never
-        // the kebab.
-        cut.Markup.Should().Contain(">Review</fluent-button>",
-            "the single read-only Review action renders as a labeled button");
-        cut.FindAll("fluent-button[title=\"Assignment actions\"]").Should().BeEmpty(
-            "archived rows never show the kebab");
+        // WS-A4 / spec §3.1: archived rows now carry Review + Duplicate, so
+        // they render via the kebab menu instead of a single labeled button.
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        items.Should().Contain("Review");
+        items.Should().Contain("Duplicate");
+    }
+
+    /// <summary>Replaces the registered <see cref="IDialogService"/> (the real
+    /// FluentUI one added by <c>AddFluentUIComponents</c>) with the mock so the
+    /// page's injection resolves it — <c>GetRequiredService</c> returns the
+    /// FIRST registration, so the real service must be removed, not shadowed.</summary>
+    private void ReplaceDialogService(Mock<IDialogService> dialogMock)
+    {
+        var existing = Services.Where(s => s.ServiceType == typeof(IDialogService)).ToList();
+        foreach (var s in existing) Services.Remove(s);
+        Services.AddSingleton(dialogMock.Object);
+    }
+
+    /// <summary>Mocks the confirm dialog (<c>ShowConfirmDialogAsync</c> resolves
+    /// to <c>ShowDialogAsync&lt;ConfirmDialog, ConfirmDialogContent&gt;</c>) at the
+    /// requested outcome — the ResourcesSectionBunitTests /
+    /// AssignmentDetailBunitTests pattern.</summary>
+    private Mock<IDialogService> SetupConfirmDialogResult(bool confirmed)
+    {
+        var dialogRef = new Mock<IDialogReference>();
+        var result = confirmed
+            ? DialogResult.Ok<object?>(null)
+            : DialogResult.Cancel();
+        dialogRef.SetupGet(r => r.Result).Returns(Task.FromResult(result));
+        var dialogMock = new Mock<IDialogService>();
+        dialogMock
+            .Setup(d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
+                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()))
+            .ReturnsAsync(dialogRef.Object);
+        ReplaceDialogService(dialogMock);
+        return dialogMock;
+    }
+
+    /// <summary>Replaces the registered <see cref="IToastService"/> with a mock
+    /// so success toasts can be asserted directly.</summary>
+    private Mock<IToastService> ReplaceToastService()
+    {
+        var existing = Services.Where(s => s.ServiceType == typeof(IToastService)).ToList();
+        foreach (var s in existing) Services.Remove(s);
+        var mock = new Mock<IToastService>();
+        Services.AddSingleton(mock.Object);
+        return mock;
+    }
+
+    // ── WS-A4 / spec §3.1 — duplicate-as-template row action ───────
+
+    [TestMethod]
+    public async Task Index_PublishedRow_ShowsDuplicateAction()
+    {
+        var id = Guid.NewGuid();
+        SetupListResponse([MakeRow(id, "Math HW", AssignmentStatusDto.Published)]);
+
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
+            TimeSpan.FromSeconds(15));
+
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        var items = cut.FindAll("fluent-menu-item").Select(i => i.TextContent.Trim()).ToList();
+        items.Should().Contain("Duplicate",
+            "a Published row must offer the Duplicate-as-template action");
+    }
+
+    [TestMethod]
+    public async Task Index_DuplicateClicked_UserConfirms_PostsToastsAndReloads()
+    {
+        var id = Guid.NewGuid();
+        var newId = Guid.NewGuid();
+        var listGetCount = 0;
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments*")
+            .Respond(_ =>
+            {
+                listGetCount++;
+                var json = JsonSerializer.Serialize(
+                    new[] { MakeRow(id, "Math HW", AssignmentStatusDto.Published) },
+                    _apiJsonOptions);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+            });
+
+        SetupConfirmDialogResult(confirmed: true);
+        var toastMock = ReplaceToastService();
+
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
+            TimeSpan.FromSeconds(15));
+
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/duplicate")
+            .Respond(HttpStatusCode.Created, "application/json",
+                JsonSerializer.Serialize(new { id = newId }, _apiJsonOptions));
+
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            _mockHttp.VerifyNoOutstandingExpectation();
+            listGetCount.Should().BeGreaterThanOrEqualTo(2,
+                "a successful duplicate must reload the assignment list");
+        }, TimeSpan.FromSeconds(15));
+
+        toastMock.Verify(
+            t => t.ShowSuccess(
+                It.Is<string>(s => s.Contains("duplicated", StringComparison.OrdinalIgnoreCase)),
+                It.IsAny<int?>(),
+                It.IsAny<string?>(),
+                It.IsAny<EventCallback<ToastResult>?>()),
+            Times.Once);
+    }
+
+    [TestMethod]
+    public async Task Index_DuplicateClicked_UserDeclines_NoPostNoReload()
+    {
+        var id = Guid.NewGuid();
+        var listGetCount = 0;
+        var postCount = 0;
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments*")
+            .Respond(_ =>
+            {
+                listGetCount++;
+                var json = JsonSerializer.Serialize(
+                    new[] { MakeRow(id, "Math HW", AssignmentStatusDto.Published) },
+                    _apiJsonOptions);
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(json, Encoding.UTF8, "application/json")
+                };
+            });
+        _mockHttp.When(HttpMethod.Post, $"http://localhost/assignments/{id}/duplicate")
+            .Respond(_ =>
+            {
+                postCount++;
+                return new HttpResponseMessage(HttpStatusCode.Created);
+            });
+
+        var dialogMock = SetupConfirmDialogResult(confirmed: false);
+
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
+            TimeSpan.FromSeconds(15));
+
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+
+        cut.WaitForAssertion(() => dialogMock.Verify(
+            d => d.ShowDialogAsync<ConfirmDialog, ConfirmDialogContent>(
+                It.IsAny<ConfirmDialogContent>(), It.IsAny<DialogParameters>()),
+            Times.Once));
+
+        postCount.Should().Be(0, "declining the confirm dialog must not fire the duplicate POST");
+        listGetCount.Should().Be(1, "declining must not reload the assignment list");
+    }
+
+    [TestMethod]
+    public async Task Index_DuplicateClicked_PostFails_ShowsErrorNoToast()
+    {
+        var id = Guid.NewGuid();
+        SetupListResponse([MakeRow(id, "Math HW", AssignmentStatusDto.Published)]);
+
+        SetupConfirmDialogResult(confirmed: true);
+        var toastMock = ReplaceToastService();
+
+        var cut = Render<IndexPage>();
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Math HW"),
+            TimeSpan.FromSeconds(15));
+
+        cut.Find("fluent-button[title=\"Assignment actions\"]").Click();
+
+        _mockHttp.Expect(HttpMethod.Post, $"http://localhost/assignments/{id}/duplicate")
+            .Respond(HttpStatusCode.InternalServerError);
+
+        cut.FindAll("fluent-menu-item").Single(i => i.TextContent.Trim() == "Duplicate").Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            _mockHttp.VerifyNoOutstandingExpectation();
+            cut.Markup.Should().MatchRegex("Something went wrong|500",
+                "a failing duplicate POST must surface the error on the landing page");
+        }, TimeSpan.FromSeconds(15));
+
+        toastMock.Verify(
+            t => t.ShowSuccess(It.IsAny<string>(), It.IsAny<int?>(), It.IsAny<string?>(), It.IsAny<EventCallback<ToastResult>?>()),
+            Times.Never);
     }
 
     /// <summary>Test host that renders the page-toolbar SectionOutlet so the

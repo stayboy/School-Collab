@@ -124,6 +124,16 @@
                                     @(_cancelling ? "Cancelling…" : "Cancel schedule")
                                 </FluentButton>
                             }
+                            @* WS-A4 / spec §3.1: duplicate the assignment as a fresh
+                               Draft template copy. Rendered regardless of status — it
+                               is a read-only-on-source operation. *@
+                            <FluentButton Appearance="Appearance.Outline" OnClick="OnDuplicateAsync" Disabled="@_duplicating" class="ms-2">
+                                @(_duplicating ? "Duplicating…" : "Duplicate")
+                            </FluentButton>
+                            @if (!string.IsNullOrEmpty(_duplicateError))
+                            {
+                                <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_duplicateError</FluentMessageBar>
+                            }
                         </div>
 
                         @* WS-A2 / spec §7 Q2 — approval panel (flag-gated).
@@ -345,6 +355,12 @@
     private bool _submittingForApproval;
     private bool _actingOnApproval;
     private string? _approvalError;
+
+    // WS-A4 / spec §3.1: duplicate-as-template action state. The failure
+    // surfaces on a dedicated _duplicateError bar (Detail never renders the
+    // generic _error field).
+    private bool _duplicating;
+    private string? _duplicateError;
 
     // Closed-assignment review (existing AssignmentReview)
     private bool _submittingReview;
@@ -609,6 +625,36 @@
         finally
         {
             if (!_disposed) _actingOnApproval = false;
+        }
+    }
+
+    // WS-A4 / spec §3.1: duplicate the assignment as a fresh Draft template
+    // copy, then navigate to the copy so the teacher can edit it. A failure
+    // surfaces on the dedicated _duplicateError bar (no navigation).
+    private async Task OnDuplicateAsync()
+    {
+        if (_item is null) return;
+        if (!await DialogService.ShowConfirmDialogAsync($"Duplicate assignment '{_item.Title}'? This creates a new draft copy.", primaryText: "Duplicate"))
+            return;
+        _duplicating = true;
+        _duplicateError = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+
+        try
+        {
+            var newId = await Api.DuplicateAsync(Id, ct);
+            Nav.NavigateTo($"/assignments/{newId}");
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to duplicate assignment {AssignmentId}", Id);
+            _duplicateError = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _duplicating = false;
         }
     }
 
