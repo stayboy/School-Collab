@@ -202,7 +202,7 @@ public sealed class AIChatEngine
             // surface it as a structured ChatUpdate.Error instead of throwing an HTTP 500.
             if (streamError is not null)
             {
-                yield return new ChatUpdate.Error(FormatProviderError(streamError));
+                yield return new ChatUpdate.Error(ProviderErrorFormatter.Format(streamError));
                 yield break;
             }
 
@@ -347,26 +347,4 @@ public sealed class AIChatEngine
 
     private static string CleanForHistory(string text) => AiTextCleaner.CleanForHistory(text);
     private static string CleanForDisplay(string text) => AiTextCleaner.CleanForDisplay(text);
-
-    /// <summary>
-    /// Formats a provider/transport exception into a concise, user-facing message,
-    /// mapping common HTTP statuses (401/403/429/5xx) to actionable guidance.
-    /// </summary>
-    private static string FormatProviderError(Exception ex)
-    {
-        var status = ex switch
-        {
-            ClientResultException cre => (int?)cre.Status,
-            HttpRequestException hre => (int?)hre.StatusCode,
-            _ => null
-        };
-
-        return status switch
-        {
-            401 or 403 => "The AI provider rejected the request as unauthorised. Please check that a valid OpenRouter API key is configured (OpenRouter:ApiKey).",
-            429 => "The AI provider rate-limited the request. Please wait a moment and try again.",
-            >= 500 => $"The AI provider returned a server error (HTTP {status}). Please try again in a moment.",
-            _ => $"The AI chat could not be completed: {ex.Message}"
-        };
-    }
 }

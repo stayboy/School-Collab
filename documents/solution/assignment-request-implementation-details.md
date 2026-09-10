@@ -492,6 +492,40 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   must use write-capable agents (`delegate`/`worker` — `oracle` is read-only); the
   parent runs all host steps itself (`runs.host` is unavailable in raw
   workflowScript); the worker child cap is 30 min — resume via the retained run id.
+- `ar-2-ai-endpoint` — **PAUSED 2026-09-05 before implementation** (user request).
+  State: branch `stack/2-ar-2-ai-endpoint` @ `f594d0eb` (clean — only the four known
+  untracked leftovers in documents/rounds/); PR #218 (round 1) open on GitHub
+  awaiting Build & Test CI + the owner's merge go; the round-2 plan-phase run was
+  interrupted before `documents/rounds/round-ar-2-ai-endpoint.md` existed — **no
+  round-2 artifacts on disk, no code changes**.
+  **Resume checklist:** (0) the paused plan run can be revived directly — `subagent({
+  action: "resume", id: "089ff786-1301-4a35-850c-413f8f74c1c2", message: "continue
+  authoring documents/rounds/round-ar-2-ai-endpoint.md per your original task" })` —
+  or discard it and re-run the phase per (1); (1) re-run the Tier-3 plan phase with a write-capable agent
+  (delegate/glm-5.3) for scope AI-spec §10 phases 5–6 per this doc §2 WS-B1 + §3
+  row 2 — the plan must resolve: endpoint engine approach (direct IChatClient vs
+  per-endpoint AIChatEngine), prompt-file/provider location, error contract
+  (typed `QuestionGenerationFailed`), endpoint auth posture, DTO placement;
+  (2) worker (minimax-m3, 30-min cap) implements phases 5–6 + §11 AI tests;
+  (3) parent runs host steps (patch freeze, authoritative build/tests);
+  (4) reviewer (kimi-k2.7-code); (5) accept (delegate/glm-5.3). PR #218 must be
+  green (and merged, on the owner's go) before the stack-2 PR submits; extend the
+  gh stack via `gh stack unstack` + re-init (gh-stack-pr-train skill pitfall 5).
+- `ar-2-ai-endpoint` — **CLOSED 2026-09-05** (`documents/rounds/round-ar-2-ai-endpoint.md`
+  + `diffs-ar-2-ai-endpoint.patch`). Resumed from pause via the revived plan run
+  (checklist step 0). Delivered (AI-spec §10 phases 5–6): prompt file +
+  `AssignmentQuestionGenerationSystemPromptProvider`; direct-IChatClient
+  `AssignmentQuestionGenerationService` + endpoint `POST /api/ai/assignments/questions`
+  (§4.3 schema validation; 400/502 + `{"error":…}` contract);
+  `ProviderErrorFormatter` extraction from `AIChatEngine` (byte-identical);
+  `IAssignmentQuestionGenerator` seam + typed `QuestionGenerationFailed`;
+  DTOs/`GeneratedQuestionType` in `AI.Abstractions`. 22 files, 2000 insertions /
+  25 deletions. Authoritative: build 0 errors; Settings.Tests.Unit 485/0 (39 new),
+  Assignments.Tests.Unit 129/0 (8 new), ArchitectureTests.Unit 20/0. Reviewer PASS
+  on the first pass — **zero rework iterations**.
+  **Carried follow-ups:** anonymous AI-host endpoints (accepted posture pending the
+  identity round); flip `propagateTenant:false` when WS-B2 org-level prompts land;
+  live-model probe folds into round 3; ar-1 EF owned-children verification still open.
 
 ---
 
