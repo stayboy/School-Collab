@@ -199,6 +199,7 @@
                     </section>
 
                     <FluentCheckbox @bind-Value="_mandatoryReview" Label="Require guardian review before student submits" class="mt-3" />
+                    <FluentCheckbox @bind-Value="_requiresSignature" Label="Require guardian signature after completion" class="mt-3" />
 
                     @if (!string.IsNullOrEmpty(_step1Error))
                     {
@@ -477,6 +478,10 @@
     private GradingFormatDto _selectedGradingFormat = GradingFormatDto.TeacherGraded;
     private TargetAudienceTypeDto _selectedTargetAudience = TargetAudienceTypeDto.AllStudents;
     private bool _mandatoryReview = true;
+    // WS-C1 (spec §7 Q1): guardian-signature checkbox. Pre-filled from the
+    // resolved grade/tenant default (best-effort, fail-open); the author may
+    // override; the final value is submitted with create.
+    private bool _requiresSignature;
 
     // Grade Level dropdown state
     private GradeLevelDto[]? _gradeLevels;
@@ -587,6 +592,12 @@
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load grade levels");
         }
+
+        // WS-C1 (spec §7 Q1): pre-fill the guardian-signature checkbox from
+        // the tenant default (no grade selected yet). Best-effort + fail-open:
+        // a resolver/endpoint failure leaves the checkbox at its current value
+        // and the author sets it manually (no error bar).
+        await ResolveSignatureDefaultAsync(null);
     }
 
     private async Task OnGradeLevelChangedAsync(GradeLevelOption? option)
@@ -603,10 +614,11 @@
 
         _loadingSubjects = true;
         var ct = _loadCts?.Token ?? CancellationToken.None;
+        Guid gradeLevelId = default;
 
         try
         {
-            var gradeLevelId = Guid.Parse(option.Value);
+            gradeLevelId = Guid.Parse(option.Value);
             var effectiveDate = _model.DueDate.HasValue
                 ? DateOnly.FromDateTime(_model.DueDate.Value)
                 : DateOnly.FromDateTime(DateTime.UtcNow);
@@ -624,10 +636,40 @@
         {
             if (_disposed) return;
             Logger.LogError(ex, "Failed to load subjects for grade {GradeId}", option.Value);
+            return;
         }
         finally
         {
             _loadingSubjects = false;
+        }
+
+        // WS-C1 (spec §7 Q1): re-resolve the pre-fill for the newly selected
+        // grade. Switching grade re-fills the checkbox (the author's prior
+        // override is intentionally replaced — mirrors the subject-list reset
+        // on grade change). Null option ⇒ resolve null ⇒ back to tenant default.
+        // Only reached when the grade parsed and the subject list loaded
+        // without error (a load failure/progress-ring cleanup returns above).
+        await ResolveSignatureDefaultAsync(gradeLevelId);
+    }
+
+    /// <summary>
+    /// WS-C1 (spec §7 Q1): resolves the effective guardian-signature default
+    /// and pre-fills <see cref="_requiresSignature"/>. Fail-open: any endpoint
+    /// failure is logged as a warning and the checkbox keeps its current value
+    /// (the author always sees and can set it).
+    /// </summary>
+    private async Task ResolveSignatureDefaultAsync(Guid? gradeLevelId)
+    {
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _requiresSignature = await Api.GetSignatureDefaultAsync(gradeLevelId, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Signature-default pre-fill failed for grade {GradeLevelId}", gradeLevelId);
         }
     }
 
@@ -790,7 +832,8 @@
                 _selectedTargetAudience,
                 Guid.Parse(_selectedSubject.Value),
                 _selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value),
-                _mandatoryReview);
+                _mandatoryReview,
+                _requiresSignature);
 
             var assignmentId = await Api.CreateAsync(req, ct);
 

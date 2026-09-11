@@ -52,7 +52,9 @@ public sealed class UpdateAssignmentCommandHandler(
             // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
             // cap — named args preserve the existing call style.
             passScore: command.PassScore,
-            maxAttempts: command.MaxAttempts);
+            maxAttempts: command.MaxAttempts,
+            // WS-C1 (spec §7 Q1): guardian-signature round-trip, thread-through.
+            requiresSignature: command.RequiresSignature);
 
         // Full-replacement semantics for questions + attachments (decision b):
         // snapshot existing child ids, remove each, then re-add inbound. Re-index

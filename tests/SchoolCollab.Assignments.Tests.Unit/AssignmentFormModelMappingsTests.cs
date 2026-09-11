@@ -967,4 +967,35 @@ public class AssignmentFormModelMappingsTests
         ok.Should().BeFalse();
         error.Should().Contain("Pass score cannot be negative");
     }
+
+    // ── WS-C1 (spec §7 Q1): guardian-signature round-trip + threading ──
+
+    [TestMethod]
+    public void LoadFrom_CarriesRequiresSignature()
+    {
+        var assignment = MakeAssignment() with { RequiresSignature = true };
+        var model = new AssignmentEditFormModel();
+
+        model.LoadFrom(assignment);
+
+        model.RequiresSignature.Should().BeTrue(
+            "LoadFrom must project RequiresSignature so the edit page never resets the flag (WS-C1)");
+    }
+
+    [TestMethod]
+    public void ToCreateRequest_ThreadsRequiresSignature()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+
+        var req = model.ToCreateRequest(
+            AssignmentTypeDto.Digital,
+            GradingFormatDto.TeacherGraded,
+            TargetAudienceTypeDto.AllStudents,
+            TopicId,
+            null,
+            true,
+            requiresSignature: true);
+
+        req.RequiresSignature.Should().BeTrue("ToCreateRequest must thread the author-overridden signature flag (WS-C1)");
+    }
 }

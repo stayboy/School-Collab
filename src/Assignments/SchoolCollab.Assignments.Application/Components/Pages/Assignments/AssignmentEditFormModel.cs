@@ -59,6 +59,11 @@ public sealed class AssignmentEditFormModel
     /// as <see cref="PassScore"/> — hidden for TeacherGraded.</summary>
     public int? MaxAttempts { get; set; }
 
+    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
+    /// required after completion. Round-trips through create/update so
+    /// the edit page never silently resets the flag.</summary>
+    public bool RequiresSignature { get; set; }
+
     /// <summary>Fixed question page size for the editor + review paginator
     /// (spec §0 decision 9 / FR-240).</summary>
     public const int QuestionPageSize = 5;
@@ -92,6 +97,8 @@ public sealed class AssignmentEditFormModel
         // — round-trip so the edit page never resets them to defaults.
         PassScore = assignment.PassScore;
         MaxAttempts = assignment.MaxAttempts;
+        // WS-C1 (spec §7 Q1): guardian-signature snapshot round-trip.
+        RequiresSignature = assignment.RequiresSignature;
     }
 
     /// <summary>
@@ -110,7 +117,8 @@ public sealed class AssignmentEditFormModel
         TargetAudienceTypeDto targetAudienceType,
         Guid topicId,
         Guid? gradeLevelId,
-        bool mandatoryReview)
+        bool mandatoryReview,
+        bool requiresSignature = false)
     {
         IReadOnlyList<NewQuestionDto>? questions = null;
         if (Questions.Count > 0)
@@ -169,7 +177,9 @@ public sealed class AssignmentEditFormModel
             // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
             // cap threaded to the wire surface.
             PassScore: PassScore,
-            MaxAttempts: MaxAttempts);
+            MaxAttempts: MaxAttempts,
+            // WS-C1 (spec §7 Q1): guardian-signature snapshot.
+            RequiresSignature: requiresSignature);
     }
 
     /// <summary>

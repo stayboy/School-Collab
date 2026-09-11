@@ -70,6 +70,15 @@ public static class ModuleServices
             client.BaseAddress = new Uri("https+http://settings-api"))
             .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
 
+        // AssignmentPolicyApiClient (tenant-global default guardian-signature
+        // policy) — same settings-api base address. TenantAssignmentPolicy is a
+        // STRICT tenant entity: reads/writes MUST resolve the selected tenant or
+        // they hit the wrong tenant (same symptom class as the notification
+        // client above). WS-C1 / spec §7 Q1.
+        services.AddHttpClient<AssignmentPolicyApiClient>(client =>
+            client.BaseAddress = new Uri("https+http://settings-api"))
+            .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+
         // VisibleTenantService: read tenant_id claim to decide whether the
         // signed-in user has a real tenant (used by the Edit page to gate
         // the per-tenant override UI). The Students module also registers

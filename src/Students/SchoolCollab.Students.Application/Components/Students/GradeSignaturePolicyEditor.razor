@@ -1,0 +1,162 @@
+@namespace SchoolCollab.Students.Application.Components.Students
+@using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Admin.Shared.Services
+@using SchoolCollab.Students.Application.Services
+@using SchoolCollab.Students.Core.DTOs
+
+@* Per-grade Guardian Signature policy editor (WS-C1 / spec §7 Q1).
+   Compact single-setting editor: the tenant-global default toggles
+   immediately; the grade override is a tri-state select (Inherit global /
+   Require signature / No signature required) that saves immediately — no
+   dialog: a single boolean does not warrant the notification-policy dialog
+   apparatus. Null override = inherit the tenant default. Uses existing
+   utility classes only (no <style> block, no inline style, no .razor.css). *@
+
+@if (_loading)
+{
+    <FluentProgressRing />
+}
+else if (!string.IsNullOrEmpty(_error))
+{
+    <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+}
+else
+{
+    <div class="signature-policy-row">
+        <div class="signature-policy-setting">
+            <FluentSwitch Value="@(_tenantDefault?.RequiresSignatureDefault ?? false)"
+                          ValueChanged="@(v => _ = ToggleTenantDefaultAsync(v))"
+                          Disabled="@_busy"
+                          Title="Guardian signature required by default for newly created assignments in this tenant" />
+            <span>Required by default (tenant)</span>
+        </div>
+        <div class="signature-policy-setting">
+            @* Tri-state override — raw FluentSelect: three static options over a
+               bool? (inherit / require / no) with no enum or dto-backed list, so
+               the shared dropdown wrappers do not apply (dropdown-ui skill §1). *@
+            <FluentSelect TOption="OverrideOption"
+                          Items="@OverrideOptions"
+                          OptionText="@(o => o.Label)"
+                          OptionValue="@(o => o.Value)"
+                          SelectedOption="@SelectedOverrideOption"
+                          SelectedOptionChanged="@(o => _ = OnOverrideChangedAsync(o))"
+                          Disabled="@_busy"
+                          Class="w-8"
+                          Title="Guardian-signature override for this grade (null = inherit the tenant default)" />
+            @if (_gradeOverride?.RequiresSignatureDefault is null)
+            {
+                <FluentBadge Appearance="Appearance.Lightweight" Class="ms-2">Inherit global</FluentBadge>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Tri-state option for the grade signature override select.</summary>
+    internal sealed record OverrideOption(string Value, string Label);
+
+    private static readonly OverrideOption[] OverrideOptions =
+    [
+        new("inherit", "Inherit global"),
+        new("require", "Require signature"),
+        new("no", "No signature required"),
+    ];
+
+    [Parameter] public Guid GradeLevelId { get; set; }
+
+    [Inject] private StudentsApiClient Api { get; set; } = default!;
+    [Inject] private AssignmentPolicyApiClient SettingsApi { get; set; } = default!;
+    [Inject] private ILogger<GradeSignaturePolicyEditor> Logger { get; set; } = default!;
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private TenantAssignmentPolicyDto? _tenantDefault;
+    private GradeAssignmentPolicyDto? _gradeOverride;
+
+    private OverrideOption? SelectedOverrideOption
+    {
+        get => _gradeOverride?.RequiresSignatureDefault switch
+        {
+            true => OverrideOptions[1],
+            false => OverrideOptions[2],
+            _ => OverrideOptions[0],
+        };
+    }
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _error = null; // clear any stale failure before refetching
+        StateHasChanged();
+        try
+        {
+            var tenantTask = SettingsApi.GetAsync();
+            var gradeTask = Api.GetGradeAssignmentPolicyAsync(GradeLevelId);
+            await Task.WhenAll(tenantTask, gradeTask);
+            _tenantDefault = tenantTask.Result;
+            _gradeOverride = gradeTask.Result;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load guardian-signature policy for grade {Grade}", GradeLevelId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleTenantDefaultAsync(bool requiresSignatureDefault)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            await SettingsApi.UpsertAsync(requiresSignatureDefault);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update guardian-signature tenant default");
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnOverrideChangedAsync(OverrideOption? option)
+    {
+        if (_busy) return;
+        _busy = true;
+        try
+        {
+            // "inherit" ⇒ null (no override row / inherit the tenant default).
+            var value = option?.Value switch
+            {
+                "require" => true,
+                "no" => false,
+                _ => (bool?)null,
+            };
+            await Api.UpsertGradeAssignmentPolicyAsync(GradeLevelId, value);
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to update guardian-signature override for grade {Grade}", GradeLevelId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+}

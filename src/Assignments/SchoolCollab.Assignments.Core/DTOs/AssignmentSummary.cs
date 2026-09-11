@@ -37,4 +37,8 @@ public record AssignmentSummary(
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Null = unlimited.</summary>
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
+    /// required after completion. Projected so the summary list
+    /// reports the create-time snapshot.</summary>
+    bool RequiresSignature = false);

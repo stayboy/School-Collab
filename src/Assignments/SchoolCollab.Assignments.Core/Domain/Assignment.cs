@@ -49,6 +49,11 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// submission. Validated &gt;= 1 when set (a 0-attempt assignment
     /// would deadlock the literal cap check).</summary>
     public int? MaxAttempts { get; private set; }
+    /// <summary>WS-C1 / spec §7 Q1 — whether a guardian signature is required
+    /// after completion. Snapshotted at create from the resolved grade/tenant
+    /// default via the wizard pre-fill; the author may override. Defaults to
+    /// <see langword="false"/> when not supplied.</summary>
+    public bool RequiresSignature { get; private set; }
     public AssignmentStatus Status { get; private set; }
     public Guid CreatedByTeacherId { get; private set; }
     /// <summary>
@@ -121,7 +126,11 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         /// <summary>WS-A3 (spec §7 Q4): max submission attempts. Null
         /// means unlimited. When set must be &gt;= 1 (a 0-attempt
         /// assignment would deadlock the literal cap check).</summary>
-        int? maxAttempts = null)
+        int? maxAttempts = null,
+        /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
+        /// required after completion. Snapshotted from the resolved
+        /// grade/tenant default; the author may override.</summary>
+        bool requiresSignature = false)
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
@@ -147,6 +156,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             MaxScore = maxScore,
             PassScore = passScore,
             MaxAttempts = maxAttempts,
+            RequiresSignature = requiresSignature,
             Status = AssignmentStatus.Draft,
             CreatedByTeacherId = createdByTeacherId,
             // Mandatory review is the default (spec §4.7); callers may opt out.
@@ -175,7 +185,10 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         decimal? passScore = null,
         /// <summary>WS-A3 (spec §7 Q4): max submission attempts. Null
         /// means unlimited. When set must be &gt;= 1.</summary>
-        int? maxAttempts = null)
+        int? maxAttempts = null,
+        /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
+        /// required after completion. Round-trips the create-time snapshot.</summary>
+        bool requiresSignature = false)
     {
         if (Status is not (AssignmentStatus.Draft or AssignmentStatus.Scheduled))
             throw new InvalidOperationException("Only draft or scheduled assignments can be updated.");
@@ -199,6 +212,7 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         MaxScore = maxScore;
         PassScore = passScore;
         MaxAttempts = maxAttempts;
+        RequiresSignature = requiresSignature;
         MandatoryReview = mandatoryReview;
         AiPromptOverride = aiPromptOverride?.Trim();
         ArchiveGraceDays = archiveGraceDays;

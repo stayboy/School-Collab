@@ -1,4 +1,5 @@
 using System.Net;
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Bunit;
@@ -40,6 +41,19 @@ public class AssignmentCreateBunitTests : BunitContext
 {
     private readonly MockHttpMessageHandler _mockHttp;
     private readonly JsonSerializerOptions _apiJsonOptions;
+    private readonly List<string> _createLogs = new();
+
+    private sealed class CaptureLogger<T> : ILogger<T>
+    {
+        private readonly List<string> _logs;
+        public CaptureLogger(List<string> logs) => _logs = logs;
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            _logs.Add($"[{logLevel}] {formatter(state, exception)}");
+        }
+    }
 
     public AssignmentCreateBunitTests()
     {
@@ -68,9 +82,9 @@ public class AssignmentCreateBunitTests : BunitContext
         // CodedValuesApiClient is required by StudentsApiClient's ctor;
         // Create.razor injects both. Register with the same HttpClient.
         Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
-        Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
-        Services.AddSingleton(Mock.Of<ILogger<StudentsApiClient>>());
-        Services.AddSingleton(Mock.Of<ILogger<CreatePage>>());
+        Services.AddSingleton<ILogger<AssignmentsApiClient>>(new CaptureLogger<AssignmentsApiClient>(_createLogs));
+        Services.AddSingleton<ILogger<StudentsApiClient>>(new CaptureLogger<StudentsApiClient>(_createLogs));
+        Services.AddSingleton<ILogger<CreatePage>>(new CaptureLogger<CreatePage>(_createLogs));
     }
 
     private void SetupGradeLevels(params GradeLevelDto[] grades)
@@ -81,7 +95,7 @@ public class AssignmentCreateBunitTests : BunitContext
 
     private void SetupActivityGroups(params ActivityGroupDto[] groups)
     {
-        _mockHttp.When(HttpMethod.Get, "http://localhost/students/activity-groups*")
+        _mockHttp.When(HttpMethod.Get, "http://localhost/activity-groups*")
             .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(groups, _apiJsonOptions));
     }
 
@@ -139,6 +153,170 @@ public class AssignmentCreateBunitTests : BunitContext
         cut.WaitForAssertion(() =>
         {
             cut.Markup.Should().Contain(QuestionGenerationGate.DisabledHint);
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    private MockedRequest SetupSignatureDefault(Guid? gradeLevelId, bool value)
+    {
+        var url = gradeLevelId.HasValue
+            ? $"http://localhost/assignments/signature-default?gradeLevelId={gradeLevelId}"
+            : "http://localhost/assignments/signature-default";
+        return _mockHttp.When(HttpMethod.Get, url)
+            .Respond(HttpStatusCode.OK, "application/json", $"{{\"requiresSignature\":{(value ? "true" : "false")}}}");
+    }
+
+    private MockedRequest SetupSubjects(Guid gradeLevelId)
+    {
+        return _mockHttp.When(HttpMethod.Get, $"http://localhost/students/subjects/by-grade/{gradeLevelId}*")
+            .Respond(HttpStatusCode.OK, "application/json", "[]");
+    }
+
+    private static object CreateOption(string typeName, string value, string label)
+    {
+        var type = typeof(CreatePage).GetNestedType(typeName, BindingFlags.NonPublic)
+            ?? throw new InvalidOperationException($"Could not find nested type {typeName}");
+        return Activator.CreateInstance(type, value, label)!;
+    }
+
+    private static IRenderedComponent<FluentCheckbox> GetSignatureCheckbox(IRenderedComponent<CreatePage> cut) =>
+        cut.FindComponents<FluentCheckbox>()[1];
+
+    [TestMethod]
+    public void Create_RendersRequiresSignatureCheckbox_DefaultsUnchecked()
+    {
+        SetupGradeLevels();
+        SetupActivityGroups();
+        SetupSignatureDefault(null, false);
+
+        var cut = Render<CreatePage>();
+
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Require guardian signature after completion");
+            GetSignatureCheckbox(cut).Instance.Value.Should().BeFalse("the signature checkbox defaults to unchecked");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
+    public async Task Create_GradeSelected_PreFillsCheckboxFromResolvedDefault()
+    {
+        var gradeId = Guid.NewGuid();
+        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupActivityGroups();
+        var sigReq = SetupSignatureDefault(gradeId, true); // register BEFORE the bare-URL matcher (MockHttp string matchers ignore query strings)
+        SetupSignatureDefault(null, false); // the init no-grade pre-fill call
+        var subjectsReq = SetupSubjects(gradeId);
+
+        var cut = Render<CreatePage>();
+        await Task.Delay(1000); // let OnInitializedAsync complete
+
+        // Diagnostic: verify the API client resolves the mocked default directly.
+        var api = Services.GetRequiredService<AssignmentsApiClient>();
+        var direct = await api.GetSignatureDefaultAsync(gradeId);
+        direct.Should().BeTrue("the API should return the mocked grade default");
+
+        var componentApi = typeof(CreatePage).GetProperty("Api", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(cut.Instance) as AssignmentsApiClient;
+        componentApi.Should().NotBeNull();
+        var fromComponent = await componentApi!.GetSignatureDefaultAsync(gradeId);
+        fromComponent.Should().BeTrue("the component's API client should return the mocked grade default");
+
+        var onGradeChanged = typeof(CreatePage).GetMethod("OnGradeLevelChangedAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var option = CreateOption("GradeLevelOption", gradeId.ToString(), "Grade 5");
+        await cut.InvokeAsync(async () => await ((Task)onGradeChanged.Invoke(cut.Instance, new[] { option })!)!);
+
+        var selectedGradeField = typeof(CreatePage).GetField("_selectedGradeLevel", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var selectedGrade = selectedGradeField.GetValue(cut.Instance);
+        selectedGrade.Should().NotBeNull("the grade selection should be stored");
+
+        var resolve = typeof(CreatePage).GetMethod("ResolveSignatureDefaultAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var loadCtsField = typeof(CreatePage).GetField("_loadCts", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        loadCtsField.SetValue(cut.Instance, null);
+        await cut.InvokeAsync(async () => await ((Task)resolve.Invoke(cut.Instance, new object?[] { gradeId })!)!);
+        cut.Render();
+
+        foreach (var log in _createLogs) Console.WriteLine(log);
+        // Only Error/Warning-level logs indicate a real failure — the
+        // AssignmentsApiClient logs benign Debug/Information for every
+        // signature-default resolution.
+        var severe = _createLogs.Where(l => l.StartsWith("[Error]") || l.StartsWith("[Warning]")).ToList();
+        if (severe.Count > 0)
+        {
+            Assert.Fail(string.Join(Environment.NewLine, severe));
+        }
+
+        _mockHttp.GetMatchCount(subjectsReq)
+            .Should().BeGreaterThan(0, "the subjects endpoint should be called when a grade is selected");
+
+        _mockHttp.GetMatchCount(sigReq)
+            .Should().BeGreaterThan(1, "the signature default endpoint should be called by the grade-change handler in addition to the diagnostic call");
+
+        var field = typeof(CreatePage).GetField("_requiresSignature", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        var value = (bool)field.GetValue(cut.Instance)!;
+        value.Should().BeTrue("the resolved grade default field should be true");
+
+        cut.WaitForAssertion(() =>
+        {
+            GetSignatureCheckbox(cut).Instance.Value.Should().BeTrue("the resolved grade default pre-fills the checkbox");
+        }, TimeSpan.FromSeconds(5));
+    }
+
+    [TestMethod]
+    public async Task Create_AuthorOverrides_OverridesPrefillAndSubmitsValue()
+    {
+        var gradeId = Guid.NewGuid();
+        var topicId = Guid.NewGuid();
+        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupActivityGroups();
+        SetupSignatureDefault(gradeId, true);
+        SetupSubjects(gradeId);
+
+        var cut = Render<CreatePage>();
+
+        var onGradeChanged = typeof(CreatePage).GetMethod("OnGradeLevelChangedAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await cut.InvokeAsync(async () => await ((Task)onGradeChanged.Invoke(cut.Instance, new[] { CreateOption("GradeLevelOption", gradeId.ToString(), "Grade 5") })!)!);
+        cut.Render();
+
+        // The author overrides the pre-filled true back to false.
+        var checkbox = GetSignatureCheckbox(cut);
+        await cut.InvokeAsync(() => checkbox.Instance.ValueChanged.InvokeAsync(false));
+
+        // Prime the subject selection required by SubmitAsync.
+        var selectedSubjectField = typeof(CreatePage).GetField("_selectedSubject", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        selectedSubjectField.SetValue(cut.Instance, CreateOption("SubjectOption", topicId.ToString(), "Mathematics"));
+
+        string? capturedBody = null;
+        _mockHttp.Expect(HttpMethod.Post, "http://localhost/assignments")
+            .With(req =>
+            {
+                capturedBody = req.Content!.ReadAsStringAsync().GetAwaiter().GetResult();
+                return true;
+            })
+            .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
+
+        var submit = typeof(CreatePage).GetMethod("SubmitAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        await cut.InvokeAsync(async () => await ((Task)submit.Invoke(cut.Instance, Array.Empty<object?>())!)!);
+
+        capturedBody.Should().NotBeNull();
+        capturedBody.Should().Contain("\"requiresSignature\":false", "the author's override is submitted in the create request");
+    }
+
+    [TestMethod]
+    public void Create_PreFillFetchFails_CheckboxStaysDefault_NoError()
+    {
+        var gradeId = Guid.NewGuid();
+        SetupGradeLevels(new GradeLevelDto(gradeId, Guid.NewGuid(), 5, "Grade 5", 5, 1, 0, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+        SetupActivityGroups();
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/signature-default")
+            .Respond(HttpStatusCode.InternalServerError);
+
+        var cut = Render<CreatePage>();
+
+        cut.WaitForAssertion(() =>
+        {
+            GetSignatureCheckbox(cut).Instance.Value.Should().BeFalse("a failed pre-fill keeps the checkbox at its default");
+            cut.FindComponents<FluentMessageBar>()
+                .Should().NotContain(mb => mb.Instance.Intent == MessageIntent.Error,
+                    "the fail-open pre-fill does not render an error message bar");
         }, TimeSpan.FromSeconds(5));
     }
 

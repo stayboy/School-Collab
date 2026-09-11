@@ -14,6 +14,8 @@ using SchoolCollab.Students.Core.CQRS.Teachers.Queries.ListTeachersForGradeLevel
 using SchoolCollab.Students.Core.CQRS.TopicAssignments.Queries.ListGradeTopicCurriculumByGrade;
 using SchoolCollab.Students.Core.CQRS.GradeNotificationPolicies.Commands.UpsertGradeNotificationPolicy;
 using SchoolCollab.Students.Core.CQRS.GradeNotificationPolicies.Queries.GetGradeNotificationPolicy;
+using SchoolCollab.Students.Core.CQRS.GradeAssignmentPolicies.Commands.UpsertGradeAssignmentPolicy;
+using SchoolCollab.Students.Core.CQRS.GradeAssignmentPolicies.Queries.GetGradeAssignmentPolicy;
 
 namespace SchoolCollab.Students.Api.Endpoints;
 
@@ -197,6 +199,32 @@ public static class GradeLevelRoutes
             catch (ArgumentOutOfRangeException ex) { return Results.BadRequest(new { ex.Message }); }
         });
 
+        // ── Per-grade guardian-signature override (null = inherit tenant default; WS-C1) ──
+        group.MapGet("/grade-levels/{id:guid}/assignment-policy", async (
+            Guid id,
+            [FromServices] SchoolCollab.Core.CQRS.IQueryHandler<GetGradeAssignmentPolicy, SchoolCollab.Students.Core.DTOs.GradeAssignmentPolicyDto?> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(new GetGradeAssignmentPolicy(id), ct);
+            return result is null ? Results.NoContent() : Results.Ok(result);
+        });
+
+        group.MapPut("/grade-levels/{id:guid}/assignment-policy", async (
+            Guid id,
+            [FromBody] UpsertGradeAssignmentPolicyRequest req,
+            [FromServices] SchoolCollab.Core.CQRS.ICommandHandler<UpsertGradeAssignmentPolicy, SchoolCollab.Students.Core.DTOs.GradeAssignmentPolicyDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new UpsertGradeAssignmentPolicy(
+                    id,
+                    req.RequiresSignatureDefault), ct);
+                return Results.Ok(result);
+            }
+            catch (GradeLevelNotFoundException) { return Results.NotFound(); }
+        });
+
         return group;
     }
 }
@@ -206,6 +234,7 @@ internal record UpdateGradeLevelRequest(int Level, string Name, int DisplayOrder
 internal record GetOrCreateGradeLevelRequest(Guid CodedValueId, int Level, string Name, int DisplayOrder,
     int? MinAge = null, int? MaxAge = null, Guid? AllowedGenderCodedValueId = null);
 internal record SetEnrollmentBlockedRequest(bool Blocked);
+internal record UpsertGradeAssignmentPolicyRequest(bool? RequiresSignatureDefault);
 internal record UpsertGradeNotificationPolicyRequest(
     SchoolCollab.Core.Notifications.NotificationChannel[]? PreferredChannelOrder,
     SchoolCollab.Core.Notifications.NotificationChannel[]? BlockedChannels,

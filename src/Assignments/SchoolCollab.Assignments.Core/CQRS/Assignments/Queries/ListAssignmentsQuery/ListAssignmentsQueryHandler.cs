@@ -63,7 +63,10 @@ public sealed class ListAssignmentsQueryHandler(
                     // attempt cap projected alongside the existing
                     // lifecycle fields.
                     s.PassScore,
-                    s.MaxAttempts)).ToArray();
+                    s.MaxAttempts,
+                    // WS-C1 (spec §7 Q1): guardian-signature flag — must be
+                    // mapped or every summary reports false.
+                    s.RequiresSignature)).ToArray();
             },
             CacheOptions,
             tags: ["assignments"],
