@@ -957,6 +957,24 @@ public sealed class StudentsApiClient : IContactsClient
         response.EnsureSuccessStatusCode();
     }
 
+    // ── Per-grade guardian-signature override (null = inherit tenant default; WS-C1) ──
+
+    public async Task<GradeAssignmentPolicyDto?> GetGradeAssignmentPolicyAsync(Guid gradeLevelId, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/students/grade-levels/{gradeLevelId}/assignment-policy", ct);
+        if (response.StatusCode is HttpStatusCode.NoContent or HttpStatusCode.NotFound) return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<GradeAssignmentPolicyDto>(ct);
+    }
+
+    public async Task UpsertGradeAssignmentPolicyAsync(Guid gradeLevelId, bool? requiresSignatureDefault, CancellationToken ct = default)
+    {
+        var response = await _http.PutAsJsonAsync(
+            $"/students/grade-levels/{gradeLevelId}/assignment-policy",
+            new UpsertGradeAssignmentPolicyRequest(requiresSignatureDefault), ct);
+        response.EnsureSuccessStatusCode();
+    }
+
     /// <summary>
     /// Blocks or unblocks a grade level from being used for student enrollment
     /// (the landing page's enrollment toggle). Throws on non-success (NotFound
@@ -1949,3 +1967,7 @@ public sealed record UpsertGradeNotificationPolicyRequest(
     int? LinkValidityDays,
     TimeOnly? SendoutTimeOfDay,
     int? SendoutIntervalMinutes);
+
+/// <summary>Upsert request for a per-grade guardian-signature override (null = inherit
+/// the tenant default). Mirrors the Students API shape (WS-C1 / spec §7 Q1).</summary>
+public sealed record UpsertGradeAssignmentPolicyRequest(bool? RequiresSignatureDefault);

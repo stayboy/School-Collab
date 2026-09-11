@@ -36,4 +36,8 @@ public sealed record UpdateAssignmentCommand(
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Threaded to <c>Assignment.Update(...)</c>.</summary>
-    int? MaxAttempts = null) : ICommand;
+    int? MaxAttempts = null,
+    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
+    /// required after completion. Threaded to
+    /// <c>Assignment.Update(...)</c>.</summary>
+    bool RequiresSignature = false) : ICommand;

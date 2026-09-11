@@ -549,6 +549,62 @@ namespace SchoolCollab.Students.Core.Migrations
                     b.ToTable("contact_subscriptions", (string)null);
                 });
 
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeAssignmentPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("deleted_at");
+
+                    b.Property<Guid>("GradeLevelId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("grade_level_id");
+
+                    b.Property<bool>("IsDeleted")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(false)
+                        .HasColumnName("is_deleted");
+
+                    b.Property<bool?>("RequiresSignatureDefault")
+                        .HasColumnType("boolean")
+                        .HasColumnName("requires_signature_default");
+
+                    b.Property<uint>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("xid")
+                        .HasColumnName("xmin");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.HasKey("Id")
+                        .HasName("pk_grade_assignment_policies");
+
+                    b.HasIndex("GradeLevelId")
+                        .HasDatabaseName("ix_grade_assignment_policies_grade_level_id");
+
+                    b.HasIndex("TenantId", "GradeLevelId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_grade_assignment_policies_tenant_grade")
+                        .HasFilter("is_deleted = false");
+
+                    b.ToTable("grade_assignment_policies", (string)null);
+                });
+
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeLevel", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1908,6 +1964,16 @@ namespace SchoolCollab.Students.Core.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired()
                         .HasConstraintName("fk_activity_group_memberships_students_student_id");
+                });
+
+            modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeAssignmentPolicy", b =>
+                {
+                    b.HasOne("SchoolCollab.Students.Core.Domain.GradeLevel", null)
+                        .WithMany()
+                        .HasForeignKey("GradeLevelId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired()
+                        .HasConstraintName("fk_grade_assignment_policies_grade_levels_grade_level_id");
                 });
 
             modelBuilder.Entity("SchoolCollab.Students.Core.Domain.GradeNotificationPolicy", b =>

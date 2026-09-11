@@ -69,6 +69,29 @@ public sealed class AssignmentsApiClient
         return await response.Content.ReadFromJsonAsync<AssignmentSummaryDto>(_jsonOptions, ct);
     }
 
+    /// <summary>
+    /// Resolves the effective guardian-signature default for the create wizard
+    /// (WS-C1 / spec §7 Q1). <paramref name="gradeLevelId"/> null resolves the
+    /// tenant-global default; a grade id resolves the grade override falling back
+    /// to the tenant default. Always succeeds (the API resolves fail-open to
+    /// <see langword="false"/>); an unreachable endpoint surfaces as
+    /// <see cref="HttpRequestException"/> for the caller to log + ignore.
+    /// </summary>
+    public async Task<bool> GetSignatureDefaultAsync(Guid? gradeLevelId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Resolving signature default for grade {GradeLevelId}", gradeLevelId);
+        var url = gradeLevelId.HasValue
+            ? $"/assignments/signature-default?gradeLevelId={gradeLevelId}"
+            : "/assignments/signature-default";
+        var response = await _http.GetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<SignatureDefaultResponse>(_jsonOptions, ct);
+        _logger.LogInformation(
+            "Resolved signature default {RequiresSignature} for grade {GradeLevelId}",
+            result?.RequiresSignature ?? false, gradeLevelId);
+        return result?.RequiresSignature ?? false;
+    }
+
     public async Task<Guid> CreateAsync(CreateAssignmentRequest req, CancellationToken ct = default)
     {
         _logger.LogInformation("Creating assignment with title {Title}", req.Title);
@@ -312,4 +335,9 @@ public sealed class AssignmentsApiClient
     /// <see cref="System.Text.Json.JsonException"/> on this object body; the
     /// duplicate uses this working record instead.</summary>
     private sealed record IdResponse(Guid Id);
+
+    /// <summary>Private envelope for the <c>/assignments/signature-default</c>
+    /// route's always-200 body (<c>{"requiresSignature": ...}</c>) — the round-7
+    /// <see cref="IdResponse"/> camel-case precedent.</summary>
+    private sealed record SignatureDefaultResponse(bool RequiresSignature);
 }

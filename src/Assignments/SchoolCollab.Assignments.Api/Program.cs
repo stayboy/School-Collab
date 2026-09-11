@@ -61,6 +61,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IContactResolv
 builder.Services.AddHttpClient("settings-api");
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationPolicyResolver,
     SchoolCollab.Assignments.Api.Services.NotificationPolicyResolver>();
+// Guardian-signature default resolver (WS-C1 / spec §7 Q1): reads the tenant
+// default (Settings API) + grade override (Students API), resolves effective
+// for the create-wizard pre-fill. Same named clients as the notification resolver.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ISignatureDefaultResolver,
+    SchoolCollab.Assignments.Api.Services.SignatureDefaultResolver>();
 
 // Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
 // port (Assignments → Students) for the link command and SelectedGroups publish.

@@ -66,7 +66,8 @@ public sealed class DuplicateAssignmentCommandHandler(
             aiPromptOverride: source.AiPromptOverride,
             archiveGraceDays: source.ArchiveGraceDays,
             passScore: source.PassScore,
-            maxAttempts: source.MaxAttempts)
+            maxAttempts: source.MaxAttempts,
+            requiresSignature: source.RequiresSignature)
             .WithTenant(tenantProvider);
 
         // Children copied IN ORDER via the aggregate's Add* factories (the

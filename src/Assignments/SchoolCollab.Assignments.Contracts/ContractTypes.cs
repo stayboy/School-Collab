@@ -123,7 +123,11 @@ public record AssignmentSummaryDto(
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Null = unlimited.</summary>
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
+    /// after completion. Snapshotted at create from the resolved grade/tenant
+    /// default; the author may override. Defaults to false in pre-WS-C1 data.</summary>
+    bool RequiresSignature = false);
 
 public record CreateAssignmentRequest(
     string Title,
@@ -150,7 +154,10 @@ public record CreateAssignmentRequest(
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Null = unlimited.</summary>
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
+    /// after completion. Threaded to <c>Assignment.Create</c>.</summary>
+    bool RequiresSignature = false);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -177,7 +184,10 @@ public record UpdateAssignmentRequest(
     decimal? PassScore = null,
     /// <summary>WS-A3 (spec §7 Q4): max submission attempts.
     /// Null = unlimited.</summary>
-    int? MaxAttempts = null);
+    int? MaxAttempts = null,
+    /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
+    /// after completion. Threaded to <c>Assignment.Update</c>.</summary>
+    bool RequiresSignature = false);
 
 /// <summary>Schedule an assignment to auto-publish at a future
 /// moment (spec §3.5 step 2). The sweep dispatches the existing

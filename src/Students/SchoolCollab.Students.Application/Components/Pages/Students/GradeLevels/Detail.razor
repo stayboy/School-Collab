@@ -197,6 +197,15 @@
                             </div>
                             <GradeNotificationPolicyEditor GradeLevelId="@Id" />
                         </FluentCard>
+
+                        @* ── Guardian Signature card (WS-C1 / spec §7 Q1) ──── *@
+                        <FluentCard class="detail-card">
+                            <div class="notification-title">
+                                <FluentIcon Icon="@(Icons.Regular.Size20.DocumentSignature)" />
+                                <h3>Guardian Signature</h3>
+                            </div>
+                            <GradeSignaturePolicyEditor GradeLevelId="@Id" />
+                        </FluentCard>
                     }
                 </ChildContent>
                 <Fallback>

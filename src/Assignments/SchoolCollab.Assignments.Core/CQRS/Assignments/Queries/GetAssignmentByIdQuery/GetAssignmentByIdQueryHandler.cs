@@ -66,7 +66,10 @@ public sealed class GetAssignmentByIdQueryHandler(
                     // attempt cap projected alongside the existing
                     // lifecycle fields.
                     assignment.PassScore,
-                    assignment.MaxAttempts);
+                    assignment.MaxAttempts,
+                    // WS-C1 (spec §7 Q1): guardian-signature flag — must be
+                    // mapped or every read reports false.
+                    assignment.RequiresSignature);
             },
             CacheOptions,
             tags: ["assignments"],

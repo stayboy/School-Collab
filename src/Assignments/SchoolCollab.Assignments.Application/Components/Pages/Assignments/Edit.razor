@@ -84,6 +84,10 @@
                     <FluentCheckbox Id="assignmentEditMandatoryReview" @bind-Value="_mandatoryReview" Label="Require guardian review before student submits" />
                 </FormRow>
 
+                <FormRow Label="Guardian signature" For="assignmentEditRequiresSignature">
+                    <FluentCheckbox Id="assignmentEditRequiresSignature" @bind-Value="_requiresSignature" Label="Require guardian signature after completion" />
+                </FormRow>
+
                 @if (!string.IsNullOrEmpty(_error))
                 {
                     <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
@@ -111,6 +115,7 @@
     private bool _saving;
     private string? _error;
     private bool _mandatoryReview = true;
+    private bool _requiresSignature;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -173,6 +178,7 @@
                 // tested on-model mapping (AssignmentEditFormModel.LoadFrom).
                 _model.LoadFrom(_item);
                 _mandatoryReview = _item.MandatoryReview;
+                _requiresSignature = _item.RequiresSignature;
                 _selectedType = _typeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
                 _selectedGradingFormat = _gradingFormatOptions.FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
                 _selectedTargetAudience = _targetAudienceOptions.FirstOrDefault(o => o.Value == ((int)_item.TargetAudienceType).ToString());
@@ -252,7 +258,10 @@
                 // pattern from round 5 (an edit never drops the loaded
                 // values).
                 PassScore: _model.PassScore,
-                MaxAttempts: _model.MaxAttempts);
+                MaxAttempts: _model.MaxAttempts,
+                // WS-C1 (spec §7 Q1): guardian-signature round-trip — an edit
+                // without this would silently reset the flag to false.
+                RequiresSignature: _requiresSignature);
 
             await Api.UpdateAsync(Id, req, ct);
             Nav.NavigateTo("/assignments");

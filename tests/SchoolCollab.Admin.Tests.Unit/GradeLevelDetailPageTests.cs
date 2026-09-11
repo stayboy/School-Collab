@@ -173,6 +173,9 @@ public class GradeLevelDetailPageTests : BunitContext
         handler.Map("GET", "/api/settings/notification-policy", HttpStatusCode.NoContent, "");
         handler.Map("GET", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.NoContent, "");
         handler.Map("PUT", $"/students/grade-levels/{gradeId}/notification-policy", HttpStatusCode.OK, "");
+        // Guardian Signature editor: no tenant default / no grade override.
+        handler.Map("GET", "/api/settings/assignment-policy", HttpStatusCode.NoContent, "");
+        handler.Map("GET", $"/students/grade-levels/{gradeId}/assignment-policy", HttpStatusCode.NoContent, "");
 
         var http = new HttpClient(handler) { BaseAddress = new Uri("https://localhost:1234") };
         Services.AddSingleton<AuthenticationStateProvider>(auth);
@@ -184,6 +187,7 @@ public class GradeLevelDetailPageTests : BunitContext
         // injects IContactsClient, which the app maps to StudentsApiClient.
         Services.AddSingleton<IContactsClient>(api);
         Services.AddSingleton(new NotificationPolicyApiClient(http));
+        Services.AddSingleton(new AssignmentPolicyApiClient(http));
         Services.AddSingleton(new VisibleTenantService(auth, NullLogger<VisibleTenantService>.Instance));
 
         return (handler, gradeId);
@@ -963,6 +967,18 @@ public class GradeLevelDetailPageTests : BunitContext
             "the editor is wrapped in a Notification & Delivery card below the section cards");
         source.Should().Contain("Notification &amp; Delivery",
             "the card is titled 'Notification & Delivery'");
+    }
+
+    [TestMethod]
+    public void Detail_RendersSignaturePolicyCard()
+    {
+        // Precedent: Detail_NotificationEditor_IsWired uses ReadDetailSource().
+        var source = ReadDetailSource();
+
+        source.Should().Contain("GradeSignaturePolicyEditor",
+            "the guardian-signature card hosts the per-grade signature policy editor component");
+        source.Should().Contain("Guardian Signature",
+            "the card is titled 'Guardian Signature'");
     }
 
     private sealed class StubFlagService : IFeatureFlagService

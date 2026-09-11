@@ -57,6 +57,19 @@ public static class AssignmentRoutes
             return result is null ? Results.NotFound() : Results.Ok(result);
         });
 
+        // ── Effective guardian-signature default (WS-C1 / spec §7 Q1) ──
+        // The literal segment wins over the {id:guid} template above (a
+        // non-GUID segment never matches a guid route), so the always-200
+        // fail-open resolution is reachable by the create-wizard pre-fill.
+        group.MapGet("/signature-default", async (
+            [FromQuery] Guid? gradeLevelId,
+            [FromServices] SchoolCollab.Assignments.Core.Services.ISignatureDefaultResolver resolver,
+            CancellationToken ct) =>
+        {
+            var requiresSignature = await resolver.ResolveRequiresSignatureDefaultAsync(gradeLevelId, ct);
+            return Results.Ok(new { requiresSignature });
+        });
+
         group.MapPost("/", async (
             [FromBody] CreateAssignmentRequest req,
             [FromServices] ICommandHandler<CreateAssignmentCommand, Guid> handler,
@@ -79,7 +92,9 @@ public static class AssignmentRoutes
                     // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
                     // attempt cap on the wire surface.
                     req.PassScore,
-                    req.MaxAttempts);
+                    req.MaxAttempts,
+                    // WS-C1 (spec §7 Q1): guardian-signature snapshot.
+                    req.RequiresSignature);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
@@ -123,7 +138,9 @@ public static class AssignmentRoutes
                     // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold +
                     // attempt cap on the wire surface.
                     req.PassScore,
-                    req.MaxAttempts);
+                    req.MaxAttempts,
+                    // WS-C1 (spec §7 Q1): guardian-signature round-trip.
+                    req.RequiresSignature);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }

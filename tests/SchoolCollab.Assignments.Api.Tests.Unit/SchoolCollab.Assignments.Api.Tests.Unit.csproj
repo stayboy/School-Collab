@@ -12,6 +12,7 @@
     <PackageReference Include="MSTest" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="RichardSzalay.MockHttp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Api\SchoolCollab.Assignments.Api.csproj" />

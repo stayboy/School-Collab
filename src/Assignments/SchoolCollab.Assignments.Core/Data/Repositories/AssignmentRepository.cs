@@ -26,7 +26,9 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                 // cap projected alongside the existing lifecycle fields
                 // so the contract DTOs (and the wire) see the latest draft
                 // values without a separate read.
-                a.PassScore, a.MaxAttempts))
+                a.PassScore, a.MaxAttempts,
+                // WS-C1 (spec §7 Q1): guardian-signature snapshot.
+                a.RequiresSignature))
             .ToListAsync(ct);
     }
 
