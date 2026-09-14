@@ -67,6 +67,17 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.INotificationP
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ISignatureDefaultResolver,
     SchoolCollab.Assignments.Api.Services.SignatureDefaultResolver>();
 
+// Guardian sign-off consent language (WS-C1/C2 / spec §3.2 line 53): tenant
+// consent-text override from the Settings API, fail-open to the embedded
+// default. Same settings-api named client as the resolvers above.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ISignatureConsentTextResolver,
+    SchoolCollab.Assignments.Api.Services.SignatureConsentTextResolver>();
+
+// Student directory port for the sign-off surfaces (WS-C1 / spec §5 + §7 Q5):
+// ward names + guardian links from the Students API.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IStudentDirectory,
+    SchoolCollab.Assignments.Api.Services.StudentDirectoryHttpClient>();
+
 // Phase 3 (spec activity-group-enrollment.md FR-20..22): activity-group lookup
 // port (Assignments → Students) for the link command and SelectedGroups publish.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IActivityGroupLookup,

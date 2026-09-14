@@ -317,6 +317,16 @@
                             </table>
                         }
                     </FluentTab>
+
+                    @* WS-C1 (spec §3.2 line 51): guardian sign-off card. The tab is
+                       gated so the card renders NOTHING when the assignment does not
+                       require a signature (the section self-loads its own data). *@
+                    @if (_item.RequiresSignature)
+                    {
+                        <FluentTab Label="Guardian Sign-off">
+                            <SignOffSection AssignmentId="@Id" RequiresSignature="true" />
+                        </FluentTab>
+                    }
                 </FluentTabs>
             </div>
         }

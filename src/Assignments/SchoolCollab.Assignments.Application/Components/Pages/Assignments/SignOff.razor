@@ -1,0 +1,234 @@
+@* WS-C2 guardian e-sign page (spec §3.2 line 50) — the v1 C2 surface. The page
+   is reachable by URL only (no identity yet — the D-6/E1 rounds relocate it
+   behind real auth + deep links with the route + command unchanged; the acting
+   guardian self-selects below, which is the documented v1 dev posture, NOT an
+   auth hole). Consumes exactly ONE aggregate (GetSignOffContextAsync) — no
+   other cross-context call. Styling: existing app.css utilities + FluentUI
+   components only — no inline style, no new .razor.css (round decision (h)). *@
+@page "/assignments/{AssignmentId:guid}/students/{StudentId:guid}/sign-off"
+@using SchoolCollab.Assignments.Contracts
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject AssignmentsApiClient Api
+@inject NavigationManager Nav
+@inject ILogger<SignOff> Logger
+@implements IDisposable
+
+<PageTitle>Sign off — @_context?.AssignmentTitle</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (_context is null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">Assignment or student not found.</FluentMessageBar>
+            <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="mt-2">Back to assignments</FluentButton>
+        }
+        else
+        {
+            <div class="mt-3">
+                <div>
+                    <h2>Sign off — @_context.AssignmentTitle</h2>
+                    <FluentBadge Appearance="@ContextStatusAppearance(_context)">
+                        @ContextStatusLabel(_context)
+                    </FluentBadge>
+                </div>
+
+                @if (_context.SignOffState == SignOffStateDto.Signed || _context.FinalizedAt is not null)
+                {
+                    @* Already-signed view: the idempotent second visit is a VIEW, not
+                       a 409 page — the 409 only fires on a second POST. *@
+                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-3">
+                        This sign-off has been completed
+                        @(_context.FinalizedAt is not null
+                            ? $"and finalized on {_context.FinalizedAt.Value.ToLocalTime():g}."
+                            : $"on {_context.SignedAt?.ToLocalTime():g}.")
+                    </FluentMessageBar>
+                    <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="mt-3">Back to assignments</FluentButton>
+                }
+                else
+                {
+                    @* Review summary (current version + score/result) *@
+                    <FluentStack Orientation="Orientation.Vertical" Gap="0.5rem" class="mt-3">
+                        <div><span class="muted">Ward:</span> @_context.StudentName</div>
+                        <div><span class="muted">Current version:</span> @(_context.CurrentVersionNumber > 0 ? _context.CurrentVersionNumber.ToString() : "—")</div>
+                        <div><span class="muted">Score:</span> @(_context.Score?.ToString("0.##") ?? "—")</div>
+                        <div><span class="muted">Result:</span> @(_context.Passed is null ? "—" : _context.Passed.Value ? "Passed" : "Failed")</div>
+                    </FluentStack>
+
+                    @* Consent block (spec §3.2 line 53 — the presented text is captured
+                       server-side on the audit event; the checkbox is client-only) *@
+                    <FluentCard class="mt-4">
+                        <FluentStack Orientation="Orientation.Vertical" Gap="0.75rem">
+                            <h5>Guardian sign-off consent</h5>
+                            <div>@_context.ConsentText</div>
+                            <FluentCheckbox @bind-Value="_consentChecked"
+                                            Label="I have read and understand the above consent"
+                                            aria-label="Confirm I have read and understand the consent" />
+                        </FluentStack>
+                    </FluentCard>
+
+                    @* Acting-guardian self-select (v1 dev posture — see header comment) *@
+                    <FluentStack Orientation="Orientation.Vertical" Gap="0.5rem" class="mt-4">
+                        <h5>Signing as (guardian) *</h5>
+                        @if (_context.Guardians.Count == 0)
+                        {
+                            <FluentMessageBar Intent="MessageIntent.Warning">No linked guardians found for this ward.</FluentMessageBar>
+                        }
+                        else
+                        {
+                            <DropdownComponent TItem="WardGuardianDto" TValue="Guid?"
+                                               Items="@_context.Guardians"
+                                               @bind-SelectedValue="_selectedGuardianId"
+                                               OptionText="@(g => g.DisplayName)"
+                                               OptionValue="@(g => g.GuardianId)"
+                                               Placeholder="— Select your guardian profile —"
+                                               Width="FieldWidth.W9" />
+                        }
+                    </FluentStack>
+
+                    @* Signature method (typed or click — spec §3.2 line 50) *@
+                    <FluentStack Orientation="Orientation.Vertical" Gap="0.5rem" class="mt-4">
+                        <h5>Signature method</h5>
+                        <FluentRadioGroup @bind-Value="_signatureType">
+                            <FluentRadio Value="@SignatureTypeDto.Typed">Type my full name</FluentRadio>
+                            <FluentRadio Value="@SignatureTypeDto.Click">Click to sign</FluentRadio>
+                        </FluentRadioGroup>
+                    </FluentStack>
+
+                    @if (_signatureType == SignatureTypeDto.Typed)
+                    {
+                        <FluentTextField @bind-Value="_typedSignature"
+                                         Label="Type your full name *"
+                                         Placeholder="e.g. Jane Doe"
+                                         MaxLength="200"
+                                         aria-label="Type your full name to sign"
+                                         class="mt-4 w-9" />
+                    }
+
+                    @if (!string.IsNullOrEmpty(_error))
+                    {
+                        <FluentMessageBar Intent="MessageIntent.Error" class="mt-3">@_error</FluentMessageBar>
+                    }
+
+                    <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="mt-4">
+                        <FluentButton Appearance="Appearance.Accent"
+                                      OnClick="SubmitSignAsync"
+                                      Disabled="@(_busy || !_consentChecked || !_selectedGuardianId.HasValue || (_signatureType == SignatureTypeDto.Typed && string.IsNullOrWhiteSpace(_typedSignature)))">
+                            @(_busy ? "Signing…" : _signatureType == SignatureTypeDto.Typed ? "Sign" : "Click to sign")
+                        </FluentButton>
+                        <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Cancel</FluentButton>
+                    </FluentStack>
+                }
+            </div>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    [Parameter] public Guid AssignmentId { get; set; }
+
+    [Parameter] public Guid StudentId { get; set; }
+
+    private SignOffContextDto? _context;
+    private bool _loading = true;
+    private bool _busy;
+    private string? _error;
+    private bool _consentChecked;
+    private Guid? _selectedGuardianId;
+    private SignatureTypeDto _signatureType = SignatureTypeDto.Typed;
+    private string? _typedSignature;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        try
+        {
+            _context = await Api.GetSignOffContextAsync(AssignmentId, StudentId, _loadCts.Token);
+            if (_disposed) return;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load sign-off context for {AssignmentId}/{StudentId}", AssignmentId, StudentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _loading = false;
+        }
+    }
+
+    private async Task SubmitSignAsync()
+    {
+        if (_busy || _context is null) return;
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            await Api.SignOffAsync(AssignmentId, StudentId, new SignOffSubmissionRequest(
+                _selectedGuardianId!.Value,
+                _signatureType,
+                _signatureType == SignatureTypeDto.Typed ? _typedSignature : null), ct);
+
+            // Success state: re-load the context (renders the read-only Signed view).
+            _context = await Api.GetSignOffContextAsync(AssignmentId, StudentId, ct);
+            Logger.LogInformation("Guardian {GuardianId} signed off assignment {AssignmentId} / student {StudentId}",
+                _selectedGuardianId.Value, AssignmentId, StudentId);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to sign off {AssignmentId}/{StudentId}", AssignmentId, StudentId);
+            _error = ex.Message;
+
+            // Idempotent second attempt: the server 409s, refresh to the signed view.
+            if (ex is HttpRequestException && _error?.Contains("already been signed", StringComparison.OrdinalIgnoreCase) == true)
+            {
+                _context = await Api.GetSignOffContextAsync(AssignmentId, StudentId, ct);
+            }
+        }
+        finally
+        {
+            if (!_disposed) { _busy = false; StateHasChanged(); }
+        }
+    }
+
+    private void Cancel() => Nav.NavigateTo("/assignments");
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+
+    // FluentUI 4.14.2 FluentBadge render-safe triad only (the Detail.razor WS-A2
+    // documented deviation — Outline/Warning/Success crash the page).
+    private static string ContextStatusLabel(SignOffContextDto ctx) => ctx.SignOffState switch
+    {
+        SignOffStateDto.Signed when ctx.FinalizedAt is not null => "Finalized",
+        SignOffStateDto.Signed => "Signed",
+        SignOffStateDto.AwaitingSignature => "Awaiting signature",
+        _ => "None"
+    };
+
+    private static Appearance ContextStatusAppearance(SignOffContextDto ctx) => ctx.SignOffState switch
+    {
+        SignOffStateDto.Signed when ctx.FinalizedAt is not null => Appearance.Neutral,
+        SignOffStateDto.Signed => Appearance.Accent,
+        SignOffStateDto.AwaitingSignature => Appearance.Lightweight,
+        _ => Appearance.Neutral
+    };
+}

@@ -389,6 +389,14 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasDefaultValue(0)
                         .HasColumnName("current_version_number");
 
+                    b.Property<Guid?>("ExpectedSignerGuardianId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("expected_signer_guardian_id");
+
+                    b.Property<DateTimeOffset?>("FinalizedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("finalized_at");
+
                     b.Property<DateTimeOffset>("LastSubmittedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("last_submitted_at");
@@ -404,6 +412,14 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("xid")
                         .HasColumnName("xmin");
+
+                    b.Property<int>("SignOffState")
+                        .HasColumnType("integer")
+                        .HasColumnName("sign_off_state");
+
+                    b.Property<DateTimeOffset?>("SignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("signed_at");
 
                     b.Property<Guid>("StudentId")
                         .HasColumnType("uuid")
@@ -654,6 +670,82 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasDatabaseName("uq_guardian_submission_gates_tenant_assignment_student");
 
                     b.ToTable("guardian_submission_gates", (string)null);
+                });
+
+            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SignatureEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<Guid>("AssignmentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("assignment_id");
+
+                    b.Property<string>("CertificateStoragePath")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("certificate_storage_path");
+
+                    b.Property<string>("ConsentTextShown")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("character varying(4000)")
+                        .HasColumnName("consent_text_shown");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("created_at");
+
+                    b.Property<string>("IpAddress")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)")
+                        .HasColumnName("ip_address");
+
+                    b.Property<int>("SignatureType")
+                        .HasColumnType("integer")
+                        .HasColumnName("signature_type");
+
+                    b.Property<DateTimeOffset>("SignedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("signed_at");
+
+                    b.Property<Guid>("SignerGuardianId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("signer_guardian_id");
+
+                    b.Property<Guid>("StudentId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("student_id");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("tenant_id");
+
+                    b.Property<string>("TypedSignature")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)")
+                        .HasColumnName("typed_signature");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("updated_at");
+
+                    b.Property<string>("UserAgent")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)")
+                        .HasColumnName("user_agent");
+
+                    b.HasKey("Id")
+                        .HasName("pk_signature_events");
+
+                    b.HasIndex("AssignmentId", "StudentId")
+                        .IsUnique()
+                        .HasDatabaseName("ix_signature_events_assignment_student");
+
+                    b.ToTable("signature_events", (string)null);
                 });
 
             modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>

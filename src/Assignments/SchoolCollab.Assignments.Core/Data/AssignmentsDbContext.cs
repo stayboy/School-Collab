@@ -26,6 +26,9 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     // AssignmentSubmissionVersion aggregate side (cascade on version
     // delete) — no navigation on either side.
     public DbSet<SubmissionAnswer> SubmissionAnswers => Set<SubmissionAnswer>();
+    // WS-C1 (spec §5 line 96): append-only guardian signature audit rows
+    // (immutable — see SignatureEvent). Standalone tenant entity.
+    public DbSet<SignatureEvent> SignatureEvents => Set<SignatureEvent>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -57,6 +60,8 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         // WS-A3: structured per-question submission answers. Same explicit
         // configuration pattern — constructor-injected tenant-id accessor.
         modelBuilder.ApplyConfiguration(new SubmissionAnswerConfiguration(() => CurrentTenantId));
+        // WS-C1: guardian signature audit rows (immutable, standalone).
+        modelBuilder.ApplyConfiguration(new SignatureEventConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
 
         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed

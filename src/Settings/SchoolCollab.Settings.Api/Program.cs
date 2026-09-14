@@ -72,6 +72,8 @@ app.MapEntityCodeRuleEndpoints(featureFlags);
 app.MapNotificationPolicyEndpoints(featureFlags);
 // Guardian-signature default (WS-C1 / spec §7 Q1).
 app.MapAssignmentPolicyEndpoints(featureFlags);
+// Guardian sign-off consent text (WS-C2 / spec §3.2).
+app.MapSignatureConsentTextEndpoints(featureFlags);
 
 app.Run();
 

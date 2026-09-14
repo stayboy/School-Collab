@@ -460,6 +460,7 @@ public record SubmissionReviewDto(
     DateTimeOffset CreatedAt);
 
 /// <summary>A submission with its version history + review (spec §4.11/§4.13).</summary>
+/// <summary>A submission with its version history + review (spec §4.11/§4.13).</summary>
 public record SubmissionDetailDto(
     Guid SubmissionId,
     Guid AssignmentId,
@@ -468,6 +469,75 @@ public record SubmissionDetailDto(
     ReviewStateDto ReviewState,
     DateTimeOffset LastSubmittedAt,
     SubmissionVersionDto[] Versions,
-    SubmissionReviewDto? Review);
+    SubmissionReviewDto? Review,
+    /// <summary>WS-C1 (spec §3.2 line 51): the guardian sign-off stage for the (assignment, ward) pair.</summary>
+    SignOffStateDto SignOffState = SignOffStateDto.None,
+    /// <summary>WS-C1: UTC moment the guardian signed (null until Signed).</summary>
+    DateTimeOffset? SignedAt = null,
+    /// <summary>WS-C1/C4: UTC moment the teacher finalized (null until Finalized).</summary>
+    DateTimeOffset? FinalizedAt = null,
+    /// <summary>WS-C1: advisory expected signer (null = any linked guardian may sign).</summary>
+    Guid? ExpectedSignerGuardianId = null);
 
 public record EnableStudentSubmissionRequest(Guid? ReviewerGuardianId);
+
+// ── WS-C1/C2: guardian sign-off (spec §3.2 / §5 / §6) ───────────────────────
+
+/// <summary>Mirror of <c>SchoolCollab.Assignments.Core.Domain.SignOffState</c> (WS-C1 / spec §3.2 line 51).</summary>
+public enum SignOffStateDto
+{
+    None = 0,
+    AwaitingSignature = 1,
+    Signed = 2
+}
+
+/// <summary>Mirror of <c>SchoolCollab.Assignments.Core.Domain.SignatureType</c> (WS-C2 / spec §3.2 line 50).</summary>
+public enum SignatureTypeDto
+{
+    Typed = 0,
+    Click = 1
+}
+
+/// <summary>One per-(assignment, ward) sign-off status row for the teacher surface (WS-C1).</summary>
+public record SignOffStatusDto(
+    Guid StudentId,
+    string StudentName,
+    Guid? ExpectedSignerGuardianId,
+    string? ExpectedSignerName,
+    Guid? SignerGuardianId,
+    string? SignerName,
+    SignOffStateDto SignOffState,
+    DateTimeOffset? SignedAt,
+    DateTimeOffset? FinalizedAt,
+    bool Delivered,
+    bool Opened,
+    int? CurrentVersionNumber,
+    decimal? Score,
+    bool? Passed);
+
+/// <summary>One ward guardian option for the sign page self-select + reassign dialog (WS-C2).</summary>
+public record WardGuardianDto(Guid GuardianId, string DisplayName, bool IsPrimary);
+
+/// <summary>The aggregate the guardian sign page consumes (WS-C2) — ONE cross-context call.</summary>
+public record SignOffContextDto(
+    Guid AssignmentId,
+    Guid StudentId,
+    string AssignmentTitle,
+    string StudentName,
+    SignOffStateDto SignOffState,
+    DateTimeOffset? SignedAt,
+    DateTimeOffset? FinalizedAt,
+    int? CurrentVersionNumber,
+    decimal? Score,
+    bool? Passed,
+    string ConsentText,
+    IReadOnlyList<WardGuardianDto> Guardians);
+
+/// <summary>Guardian e-sign request body (WS-C2 / spec §3.2). TypedSignature required only for Typed.</summary>
+public record SignOffSubmissionRequest(
+    Guid GuardianId,
+    SignatureTypeDto SignatureType,
+    string? TypedSignature = null);
+
+/// <summary>Teacher reassign-signer request body (WS-C1, Q5).</summary>
+public record ReassignSignOffRequest(Guid NewGuardianId);

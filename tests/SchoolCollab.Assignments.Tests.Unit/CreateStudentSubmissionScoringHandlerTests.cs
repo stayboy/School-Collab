@@ -85,6 +85,11 @@ public class CreateStudentSubmissionScoringHandlerTests
         public void Add(AssignmentSubmissionVersion v) => AddedVersions.Add(v);
         public void Add(SubmissionReview r) => AddedReviews.Add(r);
         public void Add(SubmissionAnswer a) => AddedAnswers.Add(a);
+        public void Add(SignatureEvent e) { }
+        public Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<SignatureEvent?>(null);
+        public Task<List<AssignmentSubmission>> ListSubmissionEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmission>());
+        public Task<List<AssignmentRecipient>> ListRecipientEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(new List<AssignmentRecipient>());
+        public Task<List<AssignmentSubmissionVersion>> ListVersionsForSubmissionIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmissionVersion>());
         public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
         public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid t, CancellationToken ct = default)
             => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
@@ -119,12 +124,14 @@ public class CreateStudentSubmissionScoringHandlerTests
     private static Assignment NewAutoGradedAssignment(
         decimal? maxScore = null,
         decimal? passScore = null,
-        int? maxAttempts = null)
+        int? maxAttempts = null,
+        bool requiresSignature = false)
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital,
             GradingFormat.AutoGraded, TargetAudienceType.AllStudents,
             TopicId, null, null, maxScore, TeacherId,
-            mandatoryReview: false, passScore: passScore, maxAttempts: maxAttempts)
+            mandatoryReview: false, passScore: passScore, maxAttempts: maxAttempts,
+            requiresSignature: requiresSignature)
             .WithTenant(new FakeTenantProvider(TenantId));
         var q1 = a.AddQuestion("Q1?", QuestionType.MultipleChoice, 0);
         var q1a = q1.AddOption("A", isCorrect: true);
@@ -469,5 +476,56 @@ public class CreateStudentSubmissionScoringHandlerTests
         var act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "x"));
 
         await act.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    // ── WS-C1 trigger (spec §3.2 line 51) ────────────────────────────────
+    // The submit handler moves a new submission to AwaitingSignature when the
+    // assignment RequiresSignature; idempotent across retries.
+
+    [TestMethod]
+    public async Task SetsAwaitingSignature_WhenRequiresSignature()
+    {
+        var assignment = NewAutoGradedAssignment(requiresSignature: true);
+        var subRepo = new FakeSubmissionRepository();
+        var scoring = new RecordingScoringEngine();
+
+        var handler = NewHandler(assignment, subRepo, scoring);
+        await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "x"));
+
+        subRepo.AddedSubmissions.Should().HaveCount(1);
+        subRepo.AddedSubmissions[0].SignOffState.Should().Be(SignOffState.AwaitingSignature);
+    }
+
+    [TestMethod]
+    public async Task StaysNone_WhenNotRequired()
+    {
+        var assignment = NewAutoGradedAssignment(requiresSignature: false);
+        var subRepo = new FakeSubmissionRepository();
+        var scoring = new RecordingScoringEngine();
+
+        var handler = NewHandler(assignment, subRepo, scoring);
+        await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "x"));
+
+        subRepo.AddedSubmissions.Should().HaveCount(1);
+        subRepo.AddedSubmissions[0].SignOffState.Should().Be(SignOffState.None);
+    }
+
+    [TestMethod]
+    public async Task StaysAwaiting_OnRetryWhenAlreadyAwaiting()
+    {
+        // A pre-existing AwaitingSignature submission: re-submit must not throw
+        // (the domain method's None-only guard is gated behind the state check)
+        // and must keep the state.
+        var assignment = NewAutoGradedAssignment(requiresSignature: true);
+        var existing = AssignmentSubmission.Create(TenantId, AssignmentId, StudentId, null);
+        existing.MarkAwaitingSignature();
+        var subRepo = new FakeSubmissionRepository { SubmissionToReturn = existing };
+        var scoring = new RecordingScoringEngine();
+
+        var handler = NewHandler(assignment, subRepo, scoring);
+        await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "y"));
+
+        existing.SignOffState.Should().Be(SignOffState.AwaitingSignature);
+        subRepo.UpdatedSubmissions.Should().Contain(existing);
     }
 }

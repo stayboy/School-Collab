@@ -39,7 +39,11 @@ public sealed class AssignmentsApiClient
                 // WS-A2 / spec §7 Q2: approval status is nullable on the wire
                 // (null = not yet submitted). The string converter serializes
                 // Pending / Approved / Rejected; null stays null.
-                new JsonStringEnumConverter<ApprovalStatusDto>()
+                new JsonStringEnumConverter<ApprovalStatusDto>(),
+                // WS-C1/C2: sign-off + signature-type enums round-trip as
+                // strings on the sign-off routes.
+                new JsonStringEnumConverter<SignOffStateDto>(),
+                new JsonStringEnumConverter<SignatureTypeDto>()
             }
         };
     }
@@ -260,6 +264,75 @@ public sealed class AssignmentsApiClient
             _jsonOptions,
             ct)).EnsureSuccessStatusCode();
     }
+
+    // ── WS-C1/C2: guardian sign-off (spec §3.2 / §5 / §6) ────────────────────
+
+    /// <summary>Resolves the consent language the sign page presents (WS-C2).
+    /// The API always resolves (fail-open) to a usable string — the tenant
+    /// override or the embedded default.</summary>
+    public async Task<string> GetSignatureConsentTextAsync(CancellationToken ct = default)
+    {
+        _logger.LogDebug("Resolving signature consent text");
+        var response = await _http.GetAsync("/assignments/signature-consent-text", ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<SignatureConsentTextResponse>(_jsonOptions, ct);
+        return result?.ConsentText ?? "";
+    }
+
+    /// <summary>Per-ward sign-off status rows for the teacher surface (WS-C1).
+    /// 404 on a missing assignment.</summary>
+    public async Task<IReadOnlyList<SignOffStatusDto>?> ListSignOffStatusesAsync(Guid assignmentId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Listing sign-off statuses for assignment {AssignmentId}", assignmentId);
+        var response = await _http.GetAsync($"/assignments/{assignmentId}/sign-off-statuses", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<IReadOnlyList<SignOffStatusDto>>(_jsonOptions, ct);
+    }
+
+    /// <summary>The aggregate the guardian sign page consumes (WS-C2) — one call.</summary>
+    public async Task<SignOffContextDto?> GetSignOffContextAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting sign-off context for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
+        var response = await _http.GetAsync($"/assignments/{assignmentId}/students/{studentId}/sign-off", ct);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SignOffContextDto>(_jsonOptions, ct);
+    }
+
+    /// <summary>Guardian e-signs a ward's submission (WS-C2). Returns the refreshed status row.</summary>
+    public async Task<SignOffStatusDto> SignOffAsync(Guid assignmentId, Guid studentId, SignOffSubmissionRequest request, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Signing off student {StudentId} for assignment {AssignmentId}", studentId, assignmentId);
+        var response = await _http.PostAsJsonAsync(
+            $"/assignments/{assignmentId}/students/{studentId}/sign-off", request, _jsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+        return (await response.Content.ReadFromJsonAsync<SignOffStatusDto>(_jsonOptions, ct))!;
+    }
+
+    /// <summary>Teacher reassigns the expected signer (WS-C1).</summary>
+    public async Task ReassignSignerAsync(Guid assignmentId, Guid studentId, Guid newGuardianId, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Reassigning signer for student {StudentId} / assignment {AssignmentId}", studentId, assignmentId);
+        (await _http.PostAsJsonAsync(
+            $"/assignments/{assignmentId}/students/{studentId}/sign-off/reassign",
+            new ReassignSignOffRequest(newGuardianId),
+            _jsonOptions,
+            ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>Teacher finalizes a signed sign-off (WS-C1/C4).</summary>
+    public async Task FinalizeSignOffAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
+    {
+        _logger.LogInformation("Finalizing sign-off for student {StudentId} / assignment {AssignmentId}", studentId, assignmentId);
+        (await _http.PostAsync(
+            $"/assignments/{assignmentId}/students/{studentId}/sign-off/finalize", null, ct)).EnsureSuccessStatusCode();
+    }
+
+    /// <summary>WS-C2 — the wire response of the always-200 consent-text route.</summary>
+    private sealed record SignatureConsentTextResponse(string ConsentText);
 
     // ── WS-A1 / FR-210-212: stage one resource file (EC-4 stage-at-selection) ──
 
