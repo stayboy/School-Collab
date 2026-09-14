@@ -126,6 +126,18 @@ public sealed class CreateStudentSubmissionCommandHandler(
         }
 
         submission.RecordSubmission(newVersion, SubmissionSource.Student, null, now);
+
+        // WS-C1 (spec §3.2 line 51): on the first submission of an assignment that
+        // requires a guardian signature, move the sign-off stage to
+        // AwaitingSignature. Idempotent — a repeat submission keeps the existing
+        // stage (guarded by the domain method's None-only check); a submission on
+        // an assignment whose flag was enabled only AFTER earlier submissions stays
+        // None until the next submission (recorded, not a defect).
+        if (assignment.RequiresSignature && submission.SignOffState is SignOffState.None)
+        {
+            submission.MarkAwaitingSignature();
+        }
+
         submissionRepository.Update(submission);
         await submissionRepository.SaveChangesAsync(cancellationToken);
 

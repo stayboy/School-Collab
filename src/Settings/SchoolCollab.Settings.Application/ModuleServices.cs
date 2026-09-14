@@ -79,6 +79,15 @@ public static class ModuleServices
             client.BaseAddress = new Uri("https+http://settings-api"))
             .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
 
+        // SignatureConsentTextApiClient (tenant-level guardian sign-off consent
+        // text) — same pattern. TenantSignatureConsentText is a STRICT tenant
+        // entity: reads/writes MUST resolve the selected tenant or they hit the
+        // wrong tenant (same symptom class as the clients above). WS-C2 / spec
+        // §3.2.
+        services.AddHttpClient<SignatureConsentTextApiClient>(client =>
+            client.BaseAddress = new Uri("https+http://settings-api"))
+            .AddHttpMessageHandler<TenantPropagationDelegatingHandler>();
+
         // VisibleTenantService: read tenant_id claim to decide whether the
         // signed-in user has a real tenant (used by the Edit page to gate
         // the per-tenant override UI). The Students module also registers

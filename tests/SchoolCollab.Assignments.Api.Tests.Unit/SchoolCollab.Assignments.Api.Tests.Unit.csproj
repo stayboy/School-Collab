@@ -13,6 +13,11 @@
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
     <PackageReference Include="RichardSzalay.MockHttp" />
+    <!-- Route-level wiring tests (SignOffRoutesTests): a minimal in-process
+         host via TestServer (no Testcontainers — Program is never started).
+         Already centrally managed for the *.Tests.Integration projects; no new
+         package version is introduced (CPM unchanged). -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Assignments\SchoolCollab.Assignments.Api\SchoolCollab.Assignments.Api.csproj" />

@@ -1,0 +1,235 @@
+@using SchoolCollab.Assignments.Contracts
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using Microsoft.FluentUI.AspNetCore.Components
+@inject AssignmentsApiClient Api
+@inject IDialogService DialogService
+@inject ILogger<SignOffSection> Logger
+@implements IDisposable
+
+@* WS-C1 teacher surface (spec §3.2 line 51): the per-ward guardian sign-off
+   card on the Assignments Detail page. Renders nothing when the assignment
+   does not require a signature. Self-loads its own data; Detail passes only
+   the assignment id + the gate flag; OnChanged is optional (detail re-load
+   hook for future cross-card refresh). *@
+
+@if (RequiresSignature)
+{
+    <div class="mt-4">
+        <h4>Guardian sign-off</h4>
+
+        @if (_busy)
+        {
+            <FluentProgressRing />
+        }
+        else if (!string.IsNullOrEmpty(_error))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+        }
+        else if (_rows is null || _rows.Count == 0)
+        {
+            <FluentMessageBar Intent="MessageIntent.Info">No submissions yet.</FluentMessageBar>
+        }
+        else
+        {
+            <table class="mt-3">
+                <thead>
+                    <tr>
+                        <th>Student</th>
+                        <th>Status</th>
+                        <th>Expected signer</th>
+                        <th>Signed by</th>
+                        <th>Delivery</th>
+                        <th>Version</th>
+                        <th>Score</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var row in _rows)
+                    {
+                        <tr @key="row.StudentId">
+                            <td>@row.StudentName</td>
+                            <td>
+                                <FluentBadge Appearance="@StatusAppearance(row)">
+                                    @StatusLabel(row)
+                                </FluentBadge>
+                            </td>
+                            <td>@(row.ExpectedSignerName ?? "—")</td>
+                            <td>@(row.SignerName ?? "—")</td>
+                            <td>
+                                @if (row.Delivered)
+                                {
+                                    <FluentBadge Appearance="Appearance.Neutral" Title="Delivered">Delivered</FluentBadge>
+                                }
+                                @if (row.Opened)
+                                {
+                                    <FluentBadge Appearance="Appearance.Neutral" Title="Opened">Opened</FluentBadge>
+                                }
+                                @if (!row.Delivered && !row.Opened)
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                            <td>@row.CurrentVersionNumber</td>
+                            <td>@(row.Score?.ToString("0.##") ?? "—")</td>
+                            <td>
+                                <FluentAnchor Href="@($"/assignments/{AssignmentId}/students/{row.StudentId}/sign-off")">
+                                    Open sign-off page
+                                </FluentAnchor>
+                                @if (row.SignOffState == SignOffStateDto.AwaitingSignature)
+                                {
+                                    <FluentButton Appearance="Appearance.Outline"
+                                                  OnClick="@(() => OpenReassignDialogAsync(row))"
+                                                  class="ms-2">Reassign signer</FluentButton>
+                                }
+                                @if (row.SignOffState == SignOffStateDto.Signed && row.FinalizedAt is null)
+                                {
+                                    <FluentButton Appearance="Appearance.Outline"
+                                                  Title="Finalize the sign-off (marks the locked state)"
+                                                  OnClick="@(() => FinalizeAsync(row))"
+                                                  class="ms-2"
+                                                  Disabled="@_finalizing">Finalize</FluentButton>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public Guid AssignmentId { get; set; }
+
+    [Parameter] public bool RequiresSignature { get; set; }
+
+    /// <summary>Optional hook for the hosting page to re-fetch after a change (kept
+    /// no-op in Detail — this section reloads itself after each action).</summary>
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private List<SignOffStatusDto>? _rows;
+    private bool _busy = true;
+    private bool _finalizing;
+    private string? _error;
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _loadCts = new CancellationTokenSource();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        if (_disposed || !RequiresSignature) return;
+        _busy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            var result = await Api.ListSignOffStatusesAsync(AssignmentId, ct);
+            if (_disposed) return;
+            _rows = result is null ? null : [.. result];
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to load sign-off statuses for assignment {AssignmentId}", AssignmentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) { _busy = false; StateHasChanged(); }
+        }
+    }
+
+    private async Task OpenReassignDialogAsync(SignOffStatusDto row)
+    {
+        if (_disposed) return;
+        try
+        {
+            // The dialog stays dumb: it receives the ward's guardians + student name
+            // and returns the picked guardian id. Guardians come from the context
+            // aggregate (one call) — NOT a separate fetch inside the dialog.
+            var context = await Api.GetSignOffContextAsync(AssignmentId, row.StudentId, _loadCts?.Token ?? CancellationToken.None);
+            if (context is null) return;
+
+            var picked = await DialogService.ShowShellDialogAsync<ReassignSignerDialog, ReassignSignerFormModel, ReassignSignerResult>(
+                new ReassignSignerFormModel(row.StudentName, [.. context.Guardians]),
+                $"Reassign signer — {row.StudentName}",
+                DialogSize.Small);
+
+            if (picked is not null)
+            {
+                await Api.ReassignSignerAsync(AssignmentId, row.StudentId, picked.GuardianId, _loadCts?.Token ?? CancellationToken.None);
+                await LoadAsync();
+                await OnChanged.InvokeAsync();
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to reassign signer for assignment {AssignmentId} / student {StudentId}", AssignmentId, row.StudentId);
+            _error = ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task FinalizeAsync(SignOffStatusDto row)
+    {
+        if (_disposed || _finalizing) return;
+        _finalizing = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            await Api.FinalizeSignOffAsync(AssignmentId, row.StudentId, ct);
+            await LoadAsync();
+            await OnChanged.InvokeAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to finalize sign-off for assignment {AssignmentId} / student {StudentId}", AssignmentId, row.StudentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) _finalizing = false;
+        }
+    }
+
+    private static string StatusLabel(SignOffStatusDto row) => row.SignOffState switch
+    {
+        SignOffStateDto.AwaitingSignature => "Awaiting signature",
+        SignOffStateDto.Signed when row.FinalizedAt is not null => "Finalized",
+        SignOffStateDto.Signed => "Signed",
+        _ => "None"
+    };
+
+    // FluentUI 4.14.2 FluentBadge render-validates Appearance to Accent / Neutral /
+    // Lightweight only (Outline/Warning/Success crash the page — the Detail.razor
+    // WS-A2 documented deviation). The round doc's "warning/success/accent" mapping
+    // is therefore mapped onto the render-safe triad: AwaitingSignature =
+    // Lightweight (pending), Signed = Accent (strong), Finalized = Neutral (terminal).
+    private static Appearance StatusAppearance(SignOffStatusDto row) => row.SignOffState switch
+    {
+        SignOffStateDto.AwaitingSignature => Appearance.Lightweight,
+        SignOffStateDto.Signed when row.FinalizedAt is not null => Appearance.Neutral,
+        SignOffStateDto.Signed => Appearance.Accent,
+        _ => Appearance.Neutral
+    };
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}

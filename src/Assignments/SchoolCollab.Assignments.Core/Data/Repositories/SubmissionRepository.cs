@@ -36,6 +36,40 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
     public void Add(AssignmentSubmission submission) => db.AssignmentSubmissions.Add(submission);
     public void Update(AssignmentSubmission submission) => db.AssignmentSubmissions.Update(submission);
 
+    // WS-C1 sign-off (spec §5 / §6 NFR line 115): audit-event persistence + raw
+    // entity reads for the sign-off query handlers.
+    public void Add(SignatureEvent signatureEvent) => db.SignatureEvents.Add(signatureEvent);
+
+    public Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(
+        Guid assignmentId, Guid studentId, CancellationToken ct = default) =>
+        db.SignatureEvents.FirstOrDefaultAsync(
+            e => e.AssignmentId == assignmentId && e.StudentId == studentId, ct);
+
+    public Task<List<AssignmentSubmission>> ListSubmissionEntitiesByAssignmentAsync(
+        Guid assignmentId, CancellationToken ct = default) =>
+        db.AssignmentSubmissions
+            .Where(s => s.AssignmentId == assignmentId)
+            .OrderBy(s => s.StudentId)
+            .ToListAsync(ct);
+
+    public Task<List<AssignmentRecipient>> ListRecipientEntitiesByAssignmentAsync(
+        Guid assignmentId, CancellationToken ct = default) =>
+        db.AssignmentRecipients
+            .Where(r => r.AssignmentId == assignmentId)
+            .ToListAsync(ct);
+
+    public Task<List<AssignmentSubmissionVersion>> ListVersionsForSubmissionIdsAsync(
+        IReadOnlyList<Guid> submissionIds, CancellationToken ct = default)
+    {
+        if (submissionIds.Count == 0)
+        {
+            return Task.FromResult(new List<AssignmentSubmissionVersion>());
+        }
+        return db.AssignmentSubmissionVersions
+            .Where(v => submissionIds.Contains(v.SubmissionId))
+            .ToListAsync(ct);
+    }
+
     public void Add(AssignmentSubmissionVersion version) => db.AssignmentSubmissionVersions.Add(version);
     public void Add(SubmissionReview review) => db.SubmissionReviews.Add(review);
     // WS-A3 (spec §3.3): append a structured answer row to the DbContext
@@ -147,7 +181,13 @@ internal sealed class SubmissionRepository(AssignmentsDbContext db) : ISubmissio
             (ReviewStateDto)(int)submission.ReviewState,
             submission.LastSubmittedAt,
             versions,
-            review);
+            review,
+            // WS-C1 (spec §3.2 line 51): the four sign-off fields ride on the
+            // submission-detail DTO (named-arg trailing position).
+            (SignOffStateDto)(int)submission.SignOffState,
+            submission.SignedAt,
+            submission.FinalizedAt,
+            submission.ExpectedSignerGuardianId);
     }
 
     public async Task<GuardianGateDto?> GetGuardianGateAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)

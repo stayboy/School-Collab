@@ -53,6 +53,7 @@ public class AssignmentDetailBunitTests : BunitContext
                 new JsonStringEnumConverter<GradingFormatDto>(),
                 new JsonStringEnumConverter<TargetAudienceTypeDto>(),
                 new JsonStringEnumConverter<ApprovalStatusDto>(),
+                new JsonStringEnumConverter<SignOffStateDto>(),
             }
         };
 
@@ -106,9 +107,15 @@ public class AssignmentDetailBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<AssignmentRecipientDto>(), _apiJsonOptions));
         _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/submissions")
             .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<SubmissionForReviewDto>(), _apiJsonOptions));
+        // WS-C1: SignOffSection self-loads the per-ward status rows when the
+        // assignment requires a signature. Empty by default so the render
+        // gate is the only observable (a real status table is covered by
+        // SignOffSectionBunitTests).
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{dto.Id}/sign-off-statuses")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(Array.Empty<SignOffStatusDto>(), _apiJsonOptions));
     }
 
-    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30) =>
+    private static AssignmentSummaryDto MakeDto(AssignmentStatusDto status, ApprovalStatusDto? approvalStatus = null, DateTimeOffset? availableFromUtc = null, DateTimeOffset? dueDate = null, int archiveGraceDays = 30, bool requiresSignature = false) =>
         new(
             Id: Guid.NewGuid(),
             Title: "Math HW",
@@ -129,7 +136,8 @@ public class AssignmentDetailBunitTests : BunitContext
             UpdatedAt: DateTimeOffset.UtcNow,
             AvailableFromUtc: availableFromUtc,
             ArchiveGraceDays: archiveGraceDays,
-            ApprovalStatus: approvalStatus);
+            ApprovalStatus: approvalStatus,
+            RequiresSignature: requiresSignature);
 
     [TestMethod]
     public void Detail_Scheduled_RendersScheduledBadgeAndActions()
@@ -758,5 +766,30 @@ public class AssignmentDetailBunitTests : BunitContext
             cells[4].TextContent.Trim().Should().Be("\u2014", "null Passed renders the em-dash placeholder");
             cut.Markup.Should().NotContain("Failed", "no Failed value label when Passed is null");
         });
+    }
+
+    /// <summary>WS-C1 decision (g) render gate: the "Guardian Sign-off" tab (and
+    /// the self-loading <c>SignOffSection</c> inside it) is present only when the
+    /// assignment snapshotted <see cref="AssignmentSummaryDto.RequiresSignature"/>;
+    /// an ordinary assignment renders no trace of the card.</summary>
+    [TestMethod]
+    public void SignOffCard_RenderGate_ByRequiresSignature()
+    {
+        var withSignature = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
+        SetupGetAssignment(withSignature);
+
+        var gated = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, withSignature.Id));
+
+        gated.WaitForAssertion(() => gated.Markup.Should().Contain("Guardian Sign-off",
+            "the card renders when RequiresSignature is true (WS-C1 / spec §3.2 line 51)"));
+
+        var withoutSignature = MakeDto(AssignmentStatusDto.Published, requiresSignature: false);
+        SetupGetAssignment(withoutSignature);
+
+        var plain = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, withoutSignature.Id));
+
+        plain.WaitForAssertion(() => plain.Markup.Should().Contain("Math HW"));
+        plain.Markup.Should().NotContain("Guardian Sign-off",
+            "the card renders NOTHING when the assignment does not require a signature");
     }
 }

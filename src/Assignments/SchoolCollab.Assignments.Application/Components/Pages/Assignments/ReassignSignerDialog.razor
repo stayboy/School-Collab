@@ -1,0 +1,48 @@
+@* WS-C1 (Q5 delegation) — teacher reassigns the expected signer of a sign-off.
+   Dumb dialog by design: receives the ward's guardian options + student name as
+   the form model (the hosting SignOffSection loaded the context aggregate), the
+   teacher picks one guardian, and the dialog returns the picked guardian id.
+   Dialog context: spec §3.2 (expected signer). *@
+@inherits DialogShellBase<ReassignSignerFormModel, ReassignSignerResult>
+@using SchoolCollab.Admin.Shared.Components.Dialogs
+@using SchoolCollab.Assignments.Contracts
+@using Microsoft.FluentUI.AspNetCore.Components
+
+<div class="dialog-container">
+    <EditForm Model="Model" OnValidSubmit="HandleSubmitAsync">
+        <DataAnnotationsValidator />
+
+        <p class="dialog-hint">
+            Reassign the expected signer for @Model.StudentName. Any linked guardian of
+            the ward may still sign; this simply records the expected signer.
+        </p>
+
+        <FormRow Label="New expected signer" Required>
+            <DropdownComponent TItem="WardGuardianDto" TValue="Guid?"
+                               Items="@Model.Guardians"
+                               @bind-SelectedValue="Model.SelectedGuardianId"
+                               OptionText="@(g => g.DisplayName)"
+                               OptionValue="@(g => g.GuardianId)"
+                               Placeholder="— Select a guardian —"
+                               Width="FieldWidth.W9" />
+        </FormRow>
+
+        <DialogShellFooter Saving="@Saving" Error="@Error" SubmitText="Reassign" OnCancel="HandleCancelAsync" />
+    </EditForm>
+</div>
+
+@code {
+    protected override string SubmitText => "Reassign";
+    protected override string SavingText => "Reassigning...";
+
+    protected override Task<ReassignSignerResult?> SubmitAsync(ReassignSignerFormModel model)
+    {
+        if (!model.SelectedGuardianId.HasValue)
+        {
+            Error = "Pick the new expected signer.";
+            return Task.FromResult<ReassignSignerResult?>(null);
+        }
+
+        return Task.FromResult<ReassignSignerResult?>(new ReassignSignerResult(model.SelectedGuardianId.Value));
+    }
+}

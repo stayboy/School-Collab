@@ -43,6 +43,9 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     // ── Assignment policy (global per-tenant guardian-signature default, WS-C1) ──
     public DbSet<TenantAssignmentPolicy> TenantAssignmentPolicies => Set<TenantAssignmentPolicy>();
 
+    /// <summary>Guardian sign-off consent text override (WS-C2 / spec §3.2). One row per tenant; null = embedded default.</summary>
+    public DbSet<TenantSignatureConsentText> TenantSignatureConsentTexts => Set<TenantSignatureConsentText>();
+
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -94,6 +97,7 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
         // Notification policy configuration (tenant-scoped)
         modelBuilder.ApplyConfiguration(new TenantNotificationPolicyConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantAssignmentPolicyConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TenantSignatureConsentTextConfiguration(() => CurrentTenantId));
 
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<SettingsDbContext>()));
 

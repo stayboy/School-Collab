@@ -30,6 +30,18 @@ public interface ISubmissionRepository
     void Add(AssignmentSubmission submission);
     void Update(AssignmentSubmission submission);
 
+    // WS-C1 sign-off (spec §5 / §6 NFR line 115): audit-event persistence + the
+    // raw entity reads the sign-off query handlers project over (names are
+    // resolved via IStudentDirectory at the handler, not the repo).
+    void Add(SignatureEvent signatureEvent);
+    Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default);
+    Task<List<AssignmentSubmission>> ListSubmissionEntitiesByAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
+    Task<List<AssignmentRecipient>> ListRecipientEntitiesByAssignmentAsync(Guid assignmentId, CancellationToken ct = default);
+    /// <summary>WS-C1 — bulk fetch of submission versions for a set of submission
+    /// ids (the sign-off list projection reads each current version's
+    /// Score/Passed without N+1 queries).</summary>
+    Task<List<AssignmentSubmissionVersion>> ListVersionsForSubmissionIdsAsync(IReadOnlyList<Guid> submissionIds, CancellationToken ct = default);
+
     // Versions + reviews
     void Add(AssignmentSubmissionVersion version);
     void Add(SubmissionReview review);

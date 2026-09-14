@@ -28,6 +28,8 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListAssignmentRecip
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.ListSubmissionsByAssignment;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.EnableStudentSubmission;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.OverrideStudentSubmissionAttempts;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
@@ -68,6 +70,19 @@ public static class AssignmentRoutes
         {
             var requiresSignature = await resolver.ResolveRequiresSignatureDefaultAsync(gradeLevelId, ct);
             return Results.Ok(new { requiresSignature });
+        });
+
+        // ── Guardian sign-off consent language (WS-C1/C2 / spec §3.2 line 53) ──
+        // Always 200 + the resolved consent text (tenant override or embedded
+        // default via the fail-open resolver) so the sign page is never blocked.
+        // Literal segment wins over the {id:guid} template (the /signature-default
+        // precedent).
+        group.MapGet("/signature-consent-text", async (
+            [FromServices] SchoolCollab.Assignments.Core.Services.ISignatureConsentTextResolver resolver,
+            CancellationToken ct) =>
+        {
+            var consentText = await resolver.ResolveConsentTextAsync(ct);
+            return Results.Ok(new { consentText });
         });
 
         group.MapPost("/", async (
@@ -611,6 +626,158 @@ public static class AssignmentRoutes
             [FromServices] IQueryHandler<GetSubmissionsForReview, SubmissionForReviewDto[]> handler,
             CancellationToken ct) =>
             Results.Ok(await handler.HandleAsync(new GetSubmissionsForReview(teacherId), ct)));
+
+        // ── WS-C1/C2: guardian sign-off (spec §3.2 / §5 / §6) ───────────────────
+
+        // Per-ward sign-off status rows for the teacher surface (the card on
+        // Detail). 404 when the assignment is missing.
+        group.MapGet("/{id:guid}/sign-off-statuses", async (
+            Guid id,
+            [FromServices] IQueryHandler<ListSignOffStatusesQuery, IReadOnlyList<SignOffStatusDto>> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var statuses = await handler.HandleAsync(new ListSignOffStatusesQuery(id), ct);
+                return Results.Ok(statuses);
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        // Guardian e-signs a ward's submission. Captures the caller IP + user-agent
+        // at the endpoint and threads them into the command for the audit event
+        // (spec §3.2 line 53 / §6 auditability line 116). Returns the refreshed
+        // per-ward status row (200).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/sign-off", async (
+            Guid id,
+            Guid studentId,
+            [FromBody] SignOffSubmissionRequest req,
+            HttpContext http,
+            [FromServices] ICommandHandler<SignOffSubmissionCommand, SignOffStatusDto> handler,
+            CancellationToken ct) =>
+        {
+            var ip = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            var userAgent = http.Request.Headers.UserAgent.ToString();
+            try
+            {
+                var result = await handler.HandleAsync(new SignOffSubmissionCommand(
+                    id, studentId, req.GuardianId,
+                    (SignatureType)(int)req.SignatureType,
+                    req.TypedSignature,
+                    ip, userAgent), ct);
+                return Results.Ok(result);
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (SubmissionNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (SubmissionAlreadySignedException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            catch (SubmissionSignOffStateException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            catch (SubmissionLockedException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            catch (GuardianNotAuthorizedException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // Teacher reassigns the expected signer to another linked guardian.
+        group.MapPost("/{id:guid}/students/{studentId:guid}/sign-off/reassign", async (
+            Guid id,
+            Guid studentId,
+            [FromBody] ReassignSignOffRequest req,
+            [FromServices] ICommandHandler<ReassignSignOffCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new ReassignSignOffCommand(id, studentId, req.NewGuardianId), ct);
+                return Results.NoContent();
+            }
+            catch (SubmissionNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (GuardianNotAuthorizedException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            catch (SubmissionSignOffStateException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+        });
+
+        // Teacher finalizes a signed sign-off (C4 locking; teacher action only).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/sign-off/finalize", async (
+            Guid id,
+            Guid studentId,
+            [FromServices] ICommandHandler<FinalizeSignOffCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new FinalizeSignOffCommand(id, studentId), ct);
+                return Results.NoContent();
+            }
+            catch (SubmissionNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (SubmissionSignOffStateException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+        });
+
+        // The single aggregate the guardian sign page consumes (one call).
+        group.MapGet("/{id:guid}/students/{studentId:guid}/sign-off", async (
+            Guid id,
+            Guid studentId,
+            [FromServices] IQueryHandler<GetSignOffContextQuery, SignOffContextDto> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new GetSignOffContextQuery(id, studentId), ct);
+                return Results.Ok(result);
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (SubmissionNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (SubmissionSignOffStateException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
+        });
 
         group.MapGet("/{id:guid}/gates/student/{studentId:guid}", async (
             Guid id,
