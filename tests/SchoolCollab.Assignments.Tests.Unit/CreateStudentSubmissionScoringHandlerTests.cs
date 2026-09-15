@@ -33,6 +33,8 @@ public class CreateStudentSubmissionScoringHandlerTests
 
     private static readonly Guid Q1 = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid Q2 = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static readonly Guid RequiredModuleId = Guid.Parse("c1111111-1111-1111-1111-111111111111");
+    private static readonly Guid OptionalModuleId = Guid.Parse("c2222222-2222-2222-2222-222222222222");
     private static readonly Guid OptA = Guid.Parse("a1111111-1111-1111-1111-111111111111");
     private static readonly Guid OptB = Guid.Parse("b1111111-1111-1111-1111-111111111111");
 
@@ -99,6 +101,19 @@ public class CreateStudentSubmissionScoringHandlerTests
             => Task.FromResult(Array.Empty<AssignmentRecipientDto>());
         public Task<SubmissionDetailDto?> GetSubmissionDetailAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<SubmissionDetailDto?>(null);
         public Task<GuardianGateDto?> GetGuardianGateAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<GuardianGateDto?>(null);
+    }
+
+    private sealed class FakeModuleProgressRepository : IModuleProgressRepository
+    {
+        public List<ModuleProgress> Rows { get; } = new();
+        public Task<ModuleProgress?> GetAsync(Guid a, Guid s, Guid m, CancellationToken ct = default)
+            => Task.FromResult(Rows.FirstOrDefault(p => p.AssignmentId == a && p.StudentId == s && p.ContentModuleId == m));
+        public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
+            => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
+        public void Add(ModuleProgress p) => Rows.Add(p);
+        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSummary>());
+        public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
     }
 
     private sealed class RecordingScoringEngine : IScoringEngine
@@ -182,12 +197,86 @@ public class CreateStudentSubmissionScoringHandlerTests
     private static CreateStudentSubmissionCommandHandler NewHandler(
         Assignment assignment,
         FakeSubmissionRepository subRepo,
-        IScoringEngine scoring)
+        IScoringEngine scoring,
+        FakeModuleProgressRepository? moduleRepo = null)
     {
         var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
         return new CreateStudentSubmissionCommandHandler(
-            assignmentRepo, subRepo, new FakeTenantProvider(TenantId),
+            assignmentRepo, subRepo, moduleRepo ?? new FakeModuleProgressRepository(), new FakeTenantProvider(TenantId),
             scoring, NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+    }
+
+    // WS-D1 (spec §3.3): a TeacherGraded, no-mandatory-review assignment carrying
+    // one required (video, 80% threshold) + one optional (guide) module.
+    private static Assignment NewModuleGatedAssignment()
+    {
+        var a = Assignment.Create("Gated", null, AssignmentType.Digital,
+            GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
+            TopicId, null, null, null, TeacherId, mandatoryReview: false)
+            .WithTenant(new FakeTenantProvider(TenantId));
+        var req = a.AddModule(ModuleType.Video, "https://video", title: "Req", minCompletionThresholdPercent: 80, isRequired: true);
+        var opt = a.AddModule(ModuleType.Guide, "https://guide", title: "Opt", minCompletionThresholdPercent: 100, isRequired: false);
+        SetId(req, RequiredModuleId);
+        SetId(opt, OptionalModuleId);
+        return a;
+    }
+
+    // ── WS-D1 (spec §3.3): server-side module gate ───────────────────────
+
+    [TestMethod]
+    public async Task NoModules_Passes()
+    {
+        var assignment = NewTeacherGradedAssignment();
+        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine());
+        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
+        await act.Should().NotThrowAsync();
+    }
+
+    [TestMethod]
+    public async Task RequiredIncomplete_Blocks()
+    {
+        var assignment = NewModuleGatedAssignment();
+        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine());
+        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
+        await act.Should().ThrowAsync<RequiredModuleIncompleteException>();
+    }
+
+    [TestMethod]
+    public async Task RequiredComplete_Passes()
+    {
+        var assignment = NewModuleGatedAssignment();
+        var moduleRepo = new FakeModuleProgressRepository();
+        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, RequiredModuleId, 100, 80));
+        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine(), moduleRepo);
+        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
+        await act.Should().NotThrowAsync();
+    }
+
+    [TestMethod]
+    public async Task OptionalIncomplete_Passes()
+    {
+        var assignment = NewModuleGatedAssignment();
+        var moduleRepo = new FakeModuleProgressRepository();
+        // Required module complete; only the OPTIONAL module is below its threshold
+        // — an incomplete optional module does not block submission.
+        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, RequiredModuleId, 100, 80));
+        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, OptionalModuleId, 50, 100));
+        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine(), moduleRepo);
+
+        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
+        await act.Should().NotThrowAsync();
+    }
+
+    [TestMethod]
+    public async Task ThresholdExactly_Meets_Passes()
+    {
+        var assignment = NewModuleGatedAssignment();
+        var moduleRepo = new FakeModuleProgressRepository();
+        // 80% == the 80 threshold → CompletedAt stamped on create → passes.
+        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, RequiredModuleId, 80, 80));
+        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine(), moduleRepo);
+        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
+        await act.Should().NotThrowAsync();
     }
 
     private static IReadOnlyList<SubmissionAnswerDto> SampleAnswers() =>

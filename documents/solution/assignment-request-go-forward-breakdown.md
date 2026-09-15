@@ -60,7 +60,7 @@
 | Spec feature | State | Reusable asset / gap |
 |---|---|---|
 | Modules (video → guide → questions) | ✅ | `ContentModule` entity + aggregate `AddModule` + `MinCompletionThresholdPercent` validation + wizard Resources UI shipped (ar-4). |
-| Gating (unlock questions after module complete) | ❌ | Per-(ward, module) progress tracking net-new. |
+| Gating (unlock questions after module complete) | 🟡 | **Server half landed (ar-12)**: per-(ward, module) `ModuleProgress` (monotonic, idempotent, `CompletedAt` stamped at `MinCompletionThresholdPercent`) + `RequiredModuleIncompleteException` → 409 on submission + ward queries exposing `QuestionsUnlocked`/`HasLockedModules`. **Remaining:** the player UI lock affordances + progress heartbeats (slice 2b). |
 | Question types | ✅ | `QuestionType` (MultipleChoice/TrueFalse/ShortAnswer) + `AssignmentQuestion`/`QuestionOption` with `CorrectOptionId`, wired into create/update + AI generation + wizard editor (ar-1…ar-3). |
 | Pass threshold + retries | ✅ | `IScoringEngine` + `PassScore` + `MaxAttempts` + per-question structured answers + teacher attempt-override shipped (ar-6). |
 | Immediate vs held feedback | ✅ | `InstantGraded` returns the per-question feedback envelope at submit; `AutoGraded`/`TeacherGraded` hold feedback (ar-6). |
@@ -224,8 +224,10 @@ within a phase.
   duplicates it; lifecycle demo Draft→Scheduled→Published→Closed→Archived with approval
   gate on; `dotnet build`/`dotnet test` green; architecture tests green.
 
-### Phase 2 — Ward completion experience (WS-A5, WS-D, WS-F1/F2)
-- [ ] F1 host + auth modes; D1 module progress + gating; D2 ward player; A5 ward queries.
+### Phase 2 — Ward completion experience (WS-A5, WS-D, WS-F1/F2) — **in progress** (ar-12 landed the WS-D1 core + WS-A5 queries; player UI + F1 open)
+- [x] **D1 core + A5 (ar-12, 2026-09-15)**: `ModuleProgress` entity + additive migration, idempotent monotonic `Record`, server-side required-module gate on submission (409, `GuardianSubmissionGate` untouched), `POST /{id}/students/{sid}/modules/{moduleId}/progress`, ward view `GET /{id}/students/{sid}/modules` (`QuestionsUnlocked`), ward list `GET /students/{sid}/assignments` (`HasLockedModules`). 26 files, 1,691/0. Round: `rounds/round-ar-12-ward-gating-core.md`.
+- [ ] F1 host + auth modes; D2 ward player UI (binds `QuestionsUnlocked`/`PercentComplete`); F2 ward list experience.
+  **Carried from ar-12:** ward-list read lives on `IModuleProgressRepository` (cohesion P2 — migrate in 2b); ward-list targeting is recipient-link only (grade/group cross-context resolution → 2b); ward-list N+1 enrichment acceptable for v1.
 - **Accept:** a ward (authenticated in-app) opens a published AR, completes modules in
   order, questions unlock per thresholds, submits answers, gets auto-scored result with
   retry per policy; unit + bUnit coverage for gating engine and player states.
@@ -279,9 +281,11 @@ within a phase.
 ## 6. Immediate next actions
 
 1. ~~Stakeholder pass on decisions~~ — done (Phase 0 complete).
-2. Execution mode chosen by the user: **full four-agent rounds (Tier 3)** for AR
-   implementation; round slicing lives in
+2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10,
+   light round (Tiers 1–2) for ar-11; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. On the user's go: start round `ar-1-ai-spec-core` — orchestrator authors the round
-   doc per the `orchestrator-worker-reviewer` skill; worker implements
-   `assignment-creation-with-ai.md` §10 phases 1–4.
+3. **Current (2026-09-15):** merge the open train — #232 (ar-10) then #233 (ar-11), each
+   on owner instruction — then fire the **Phase 2 ward experience** round
+   (WS-A5/D1/D2/F1/F2 — the largest remaining spec gap) under a fresh execution-mode
+   menu. After that: Phase 4 WS-E delivery, D-6 identity before Phase 5 WS-G
+   (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).

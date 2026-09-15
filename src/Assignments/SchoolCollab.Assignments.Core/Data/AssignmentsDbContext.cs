@@ -29,6 +29,10 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
     // WS-C1 (spec §5 line 96): append-only guardian signature audit rows
     // (immutable — see SignatureEvent). Standalone tenant entity.
     public DbSet<SignatureEvent> SignatureEvents => Set<SignatureEvent>();
+    // WS-D1 (spec §3.3): per-ward content-module progress (video watch % /
+    // guide scroll-complete) — the gating seam for required modules. Standalone
+    // tenant entity (ar-4 pattern); FK declared from ContentModuleConfiguration side.
+    public DbSet<ModuleProgress> ModuleProgress => Set<ModuleProgress>();
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -62,6 +66,8 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext> 
         modelBuilder.ApplyConfiguration(new SubmissionAnswerConfiguration(() => CurrentTenantId));
         // WS-C1: guardian signature audit rows (immutable, standalone).
         modelBuilder.ApplyConfiguration(new SignatureEventConfiguration(() => CurrentTenantId));
+        // WS-D1: per-ward module progress. Same explicit configuration pattern.
+        modelBuilder.ApplyConfiguration(new ModuleProgressConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
 
         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed

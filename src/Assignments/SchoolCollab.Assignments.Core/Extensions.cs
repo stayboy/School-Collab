@@ -45,6 +45,7 @@ public static class Extensions
 
         services.AddScoped<IAssignmentRepository, AssignmentRepository>();
         services.AddScoped<ISubmissionRepository, SubmissionRepository>();
+        services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
         services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
         // WS-A3 (spec §3.3): pure scoring engine for AutoGraded /

@@ -17,6 +17,16 @@ public static class AssignmentEndpoints
 
         group.MapAssignmentRoutes();
 
+        // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
+        // /students group so the resource path is GET /students/{studentId}/assignments
+        // (not under /assignments). Same auth posture as the assignments group.
+        var wardGroup = app.MapGroup("/students");
+        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
+        {
+            wardGroup.RequireAuthorization();
+        }
+        wardGroup.MapWardAssignmentRoutes();
+
         // Phase 3 (spec activity-group-enrollment.md §7.3): assignment ↔ group
         // link endpoints + the FR-6 delete-guard query. Gated behind
         // FEATURE:EnableActivityGroups (flag OFF by default — dark launch).

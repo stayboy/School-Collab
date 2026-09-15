@@ -274,6 +274,52 @@ public record ContentModuleDto(
     int MinCompletionThresholdPercent,
     bool IsRequired);
 
+// ── WS-D1 (spec §3.3) + WS-A5 (ward-facing surfaces) ────────────────
+
+/// <summary>WS-D1 (spec §3.3) — the ward's submission state on an assignment
+/// as surfaced to the ward list. NotStarted/InProgress/Completed map from the
+/// <c>AssignmentSubmission</c> row + its <c>FinalizedAt</c>.</summary>
+public enum WardSubmissionStateDto
+{
+    [Description("Not started")] NotStarted = 0,
+    [Description("In progress")] InProgress = 1,
+    [Description("Completed")] Completed = 2
+}
+
+/// <summary>WS-D1 — one module on a ward's assignment view, merged with the
+/// ward's per-module progress (decision (e)). The 2b player binds to
+/// <see cref="PercentComplete"/> / <see cref="CompletedAt"/>.</summary>
+public record WardModuleViewDto(
+    Guid ModuleId,
+    ModuleTypeDto ModuleType,
+    string? Title,
+    string Url,
+    int DisplayOrder,
+    int MinCompletionThresholdPercent,
+    bool IsRequired,
+    int PercentComplete,
+    DateTimeOffset? CompletedAt);
+
+/// <summary>WS-D1/WS-A5 — the ward-facing view of a single assignment: its
+/// modules with per-ward progress + the questions-unlocked gate flag.</summary>
+public record WardAssignmentViewDto(
+    Guid AssignmentId,
+    string Title,
+    DateTimeOffset? DueDate,
+    bool QuestionsUnlocked,
+    IReadOnlyList<WardModuleViewDto> Modules);
+
+/// <summary>WS-A5 — one row in a ward's assignment list.</summary>
+public record WardAssignmentListItemDto(
+    Guid Id,
+    string Title,
+    DateTimeOffset? DueDate,
+    WardSubmissionStateDto State,
+    bool HasLockedModules);
+
+/// <summary>WS-D1 — route body for <c>POST …/modules/{moduleId}/progress</c>.</summary>
+public record RecordModuleProgressRequest(int Percent);
+
 /// <summary>An inbound AI-generation input on the create/update request
 /// (WS-A1 / spec §3.2 / FR-211). The kind matrix is validator-owned —
 /// each kind has a different required-field shape (Url OR StoragePath,
