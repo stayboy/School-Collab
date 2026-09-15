@@ -45,6 +45,25 @@ public class SubmissionEngineTests
     private static FakeAssignmentRepository AssignmentRepo(Assignment assignment) => new() { Assignment = assignment };
     private static IScoringEngine Scoring() => new ScoringEngine();
 
+    // WS-D1 (spec §3.3): empty module-progress repo for submission tests whose
+    // assignments carry no required modules (the gate is additive — a no-module
+    // assignment always passes). Gate-specific seeding lives in
+    // CreateStudentSubmissionScoringHandlerTests.
+    private static FakeModuleProgressRepository ModuleProgressRepo() => new();
+
+    private sealed class FakeModuleProgressRepository : IModuleProgressRepository
+    {
+        public List<ModuleProgress> Rows { get; } = new();
+        public Task<ModuleProgress?> GetAsync(Guid a, Guid s, Guid m, CancellationToken ct = default)
+            => Task.FromResult(Rows.FirstOrDefault(p => p.AssignmentId == a && p.StudentId == s && p.ContentModuleId == m));
+        public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
+            => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
+        public void Add(ModuleProgress p) => Rows.Add(p);
+        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
+            => Task.FromResult(new List<AssignmentSummary>());
+        public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
+    }
+
     private static Assignment NewAssignment(bool mandatoryReview = true)
     {
         var a = Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
@@ -343,7 +362,7 @@ public class SubmissionEngineTests
         var assignmentRepo = AssignmentRepo(assignment);
         var submissionRepo = new FakeSubmissionRepository();
         var handler = new CreateStudentSubmissionCommandHandler(
-            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, ModuleProgressRepo(), TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
 
         await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "my work"));
 
@@ -361,7 +380,7 @@ public class SubmissionEngineTests
         var gate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId); // not reviewed → disabled
         var submissionRepo = new FakeSubmissionRepository { GateToReturn = gate };
         var handler = new CreateStudentSubmissionCommandHandler(
-            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, ModuleProgressRepo(), TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
 
         var act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "x"));
         await act.Should().ThrowAsync<UnauthorizedAccessException>();
@@ -376,7 +395,7 @@ public class SubmissionEngineTests
         gate.Review(GuardianId, approve: true, null); // enabled
         var submissionRepo = new FakeSubmissionRepository { GateToReturn = gate };
         var handler = new CreateStudentSubmissionCommandHandler(
-            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+            assignmentRepo, submissionRepo, ModuleProgressRepo(), TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
 
         await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "my work"));
 

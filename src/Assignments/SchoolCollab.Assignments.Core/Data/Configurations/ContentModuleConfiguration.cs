@@ -36,5 +36,13 @@ internal sealed class ContentModuleConfiguration : TenantEntityTypeConfiguration
 
         builder.HasIndex(x => new { x.TenantId, x.AssignmentId })
             .HasDatabaseName("ix_assignment_content_modules_tenant_assignment");
+
+        // WS-D1 (decision (a)): per-ward progress rows are keyed by module. FK
+        // declared once from the parent side — cascade removes a module's
+        // progress rows (module removal only happens during draft edit, before
+        // distribution) — no navigation on either side.
+        builder.HasMany<ModuleProgress>().WithOne()
+            .HasForeignKey(p => p.ContentModuleId)
+            .OnDelete(DeleteBehavior.Cascade);
     }
 }

@@ -1,0 +1,2818 @@
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+index 6b601751..b0997656 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/AssignmentEndpoints.cs
+@@ -17,6 +17,16 @@ public static class AssignmentEndpoints
+ 
+         group.MapAssignmentRoutes();
+ 
++        // WS-A5 (spec §3.3): the ward assignment list, mounted under a sibling
++        // /students group so the resource path is GET /students/{studentId}/assignments
++        // (not under /assignments). Same auth posture as the assignments group.
++        var wardGroup = app.MapGroup("/students");
++        if (!featureFlags.IsEnabled(FeatureFlagKeys.DisableOIDCAuth))
++        {
++            wardGroup.RequireAuthorization();
++        }
++        wardGroup.MapWardAssignmentRoutes();
++
+         // Phase 3 (spec activity-group-enrollment.md §7.3): assignment ↔ group
+         // link endpoints + the FR-6 delete-guard query. Gated behind
+         // FEATURE:EnableActivityGroups (flag OFF by default — dark launch).
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index 5e5bd618..137694cf 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -32,6 +32,8 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.EnableStudentSubmi
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.OverrideStudentSubmissionAttempts;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
+ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RecordModuleProgress;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
+@@ -666,6 +668,12 @@ public static class AssignmentRoutes
+             {
+                 return Results.Problem(ex.Message, statusCode: 409);
+             }
++            // WS-D1 / spec §3.3: required content modules not completed → 409
++            // (the module-progress gate on submission).
++            catch (RequiredModuleIncompleteException ex)
++            {
++                return Results.Problem(ex.Message, statusCode: 409);
++            }
+             // WS-A3 / spec §3.3: answer validation → 400 (matches the
+             // group's catch pattern).
+             catch (SubmissionAnswerValidationException ex)
+@@ -975,6 +983,58 @@ public static class AssignmentRoutes
+             }
+         }).DisableAntiforgery();
+ 
++        // ── WS-D1 (spec §3.3): per-ward module-progress heartbeats ─────
++        // 204 on a recorded/upserted report; 404 when the assignment or the
++        // module is missing. Same auth posture as the other student-scoped
++        // routes (token-auth re-scoping is F1 / slice 2b — recorded OUT).
++        group.MapPost("/{id:guid}/students/{studentId:guid}/modules/{moduleId:guid}/progress", async (
++            Guid id,
++            Guid studentId,
++            Guid moduleId,
++            [FromBody] RecordModuleProgressRequest req,
++            [FromServices] ICommandHandler<RecordModuleProgressCommand, bool> handler,
++            CancellationToken ct) =>
++        {
++            try
++            {
++                var ok = await handler.HandleAsync(new RecordModuleProgressCommand(id, studentId, moduleId, req.Percent), ct);
++                return ok ? Results.NoContent() : Results.NotFound();
++            }
++            catch (AssignmentNotFoundException)
++            {
++                return Results.NotFound();
++            }
++        });
++
++        // WS-D1/WS-A5: the ward-facing assignment view — modules with per-ward
++        // progress + the questions-unlocked gate flag (the 2b player binds to this).
++        group.MapGet("/{id:guid}/students/{studentId:guid}/modules", async (
++            Guid id,
++            Guid studentId,
++            [FromServices] IQueryHandler<GetWardAssignmentView, WardAssignmentViewDto?> handler,
++            CancellationToken ct) =>
++        {
++            var result = await handler.HandleAsync(new GetWardAssignmentView(id, studentId), ct);
++            return result is null ? Results.NotFound() : Results.Ok(result);
++        });
++
++        return group;
++    }
++
++    /// <summary>WS-A5 — the ward assignment list, mounted under a sibling
++    /// <c>/students</c> group (not under <c>/assignments</c>) so the resource
++    /// path is <c>GET /students/{studentId}/assignments</c> exactly.</summary>
++    public static RouteGroupBuilder MapWardAssignmentRoutes(this RouteGroupBuilder group)
++    {
++        group.MapGet("/{studentId:guid}/assignments", async (
++            Guid studentId,
++            [FromServices] IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]> handler,
++            CancellationToken ct) =>
++        {
++            var result = await handler.HandleAsync(new ListWardAssignments(studentId), ct);
++            return Results.Ok(result);
++        });
++
+         return group;
+     }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+index e7d0d295..68a5f9ee 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+@@ -274,6 +274,52 @@ public record ContentModuleDto(
+     int MinCompletionThresholdPercent,
+     bool IsRequired);
+ 
++// ── WS-D1 (spec §3.3) + WS-A5 (ward-facing surfaces) ────────────────
++
++/// <summary>WS-D1 (spec §3.3) — the ward's submission state on an assignment
++/// as surfaced to the ward list. NotStarted/InProgress/Completed map from the
++/// <c>AssignmentSubmission</c> row + its <c>FinalizedAt</c>.</summary>
++public enum WardSubmissionStateDto
++{
++    [Description("Not started")] NotStarted = 0,
++    [Description("In progress")] InProgress = 1,
++    [Description("Completed")] Completed = 2
++}
++
++/// <summary>WS-D1 — one module on a ward's assignment view, merged with the
++/// ward's per-module progress (decision (e)). The 2b player binds to
++/// <see cref="PercentComplete"/> / <see cref="CompletedAt"/>.</summary>
++public record WardModuleViewDto(
++    Guid ModuleId,
++    ModuleTypeDto ModuleType,
++    string? Title,
++    string Url,
++    int DisplayOrder,
++    int MinCompletionThresholdPercent,
++    bool IsRequired,
++    int PercentComplete,
++    DateTimeOffset? CompletedAt);
++
++/// <summary>WS-D1/WS-A5 — the ward-facing view of a single assignment: its
++/// modules with per-ward progress + the questions-unlocked gate flag.</summary>
++public record WardAssignmentViewDto(
++    Guid AssignmentId,
++    string Title,
++    DateTimeOffset? DueDate,
++    bool QuestionsUnlocked,
++    IReadOnlyList<WardModuleViewDto> Modules);
++
++/// <summary>WS-A5 — one row in a ward's assignment list.</summary>
++public record WardAssignmentListItemDto(
++    Guid Id,
++    string Title,
++    DateTimeOffset? DueDate,
++    WardSubmissionStateDto State,
++    bool HasLockedModules);
++
++/// <summary>WS-D1 — route body for <c>POST …/modules/{moduleId}/progress</c>.</summary>
++public record RecordModuleProgressRequest(int Percent);
++
+ /// <summary>An inbound AI-generation input on the create/update request
+ /// (WS-A1 / spec §3.2 / FR-211). The kind matrix is validator-owned —
+ /// each kind has a different required-field shape (Url OR StoragePath,
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateStudentSubmission/CreateStudentSubmissionCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateStudentSubmission/CreateStudentSubmissionCommandHandler.cs
+index a11b6c0f..04ef5423 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateStudentSubmission/CreateStudentSubmissionCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/CreateStudentSubmission/CreateStudentSubmissionCommandHandler.cs
+@@ -18,6 +18,7 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentS
+ public sealed class CreateStudentSubmissionCommandHandler(
+     IAssignmentRepository assignmentRepository,
+     ISubmissionRepository submissionRepository,
++    IModuleProgressRepository moduleProgressRepository,
+     ITenantProvider tenantProvider,
+     IScoringEngine scoringEngine,
+     ILogger<CreateStudentSubmissionCommandHandler> logger) : ICommandHandler<CreateStudentSubmissionCommand, SubmissionFeedbackDto?>
+@@ -62,7 +63,32 @@ public sealed class CreateStudentSubmissionCommandHandler(
+                 "A teacher may override the cap for this submission.");
+         }
+ 
+-        // WS-D plug point: module-progress gating lands here (decision (k)).
++        // ── WS-D1 (spec §3.3): module-progress gate ─────────────────────
++        // Additive: an assignment with NO required modules always passes
++        // (existing tests stay green). When the assignment has required
++        // modules, the ward must have completed each one (CompletedAt
++        // stamped) before submitting — otherwise the submit is blocked with
++        // RequiredModuleIncompleteException (route → 409).
++        var requiredModuleIds = assignment.Modules
++            .Where(m => m.IsRequired)
++            .Select(m => m.Id)
++            .ToList();
++        if (requiredModuleIds.Count > 0)
++        {
++            var progressByModule = (await moduleProgressRepository
++                    .ListProgressForAssignmentStudentAsync(command.AssignmentId, command.StudentId, cancellationToken))
++                .ToDictionary(p => p.ContentModuleId);
++            var incomplete = requiredModuleIds
++                .Where(id => progressByModule.TryGetValue(id, out var p)
++                    ? p.CompletedAt is null
++                    : true)
++                .ToList();
++            if (incomplete.Count > 0)
++            {
++                throw new RequiredModuleIncompleteException(
++                    $"Required content modules not completed for assignment {command.AssignmentId} / student {command.StudentId}: {string.Join(", ", incomplete)}.");
++            }
++        }
+ 
+         // ── WS-A3 / spec §3.3: answer validation ─────────────────────────
+         // First violation → 400 via SubmissionAnswerValidationException.
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RecordModuleProgress/RecordModuleProgressCommand.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RecordModuleProgress/RecordModuleProgressCommand.cs
+new file mode 100644
+index 00000000..dbaf851b
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RecordModuleProgress/RecordModuleProgressCommand.cs
+@@ -0,0 +1,18 @@
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RecordModuleProgress;
++
++/// <summary>
++/// WS-D1 (spec §3.3) — a ward reports progress on one content module of an
++/// assignment (video watch % / guide scroll-complete %). Upserts the
++/// monotonic + idempotent <see cref="SchoolCollab.Assignments.Core.Domain.ModuleProgress"/>
++/// row; the handler returns <see langword="false"/> when the module is not on
++/// the assignment (route 404) and throws
++/// <see cref="SchoolCollab.Assignments.Core.Domain.Exceptions.AssignmentNotFoundException"/>
++/// when the assignment is absent.
++/// </summary>
++public sealed record RecordModuleProgressCommand(
++    Guid AssignmentId,
++    Guid StudentId,
++    Guid ContentModuleId,
++    int Percent) : ICommand;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RecordModuleProgress/RecordModuleProgressCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RecordModuleProgress/RecordModuleProgressCommandHandler.cs
+new file mode 100644
+index 00000000..7652c8ce
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/RecordModuleProgress/RecordModuleProgressCommandHandler.cs
+@@ -0,0 +1,58 @@
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RecordModuleProgress;
++
++/// <summary>
++/// WS-D1 upsert handler (spec §3.3, decision (d)). Loads the assignment to
++/// resolve the module's completion threshold (the assignment aggregate owns
++/// the gating defaults), then upserts the ward's progress row — first report
++/// creates it via the domain factory, later reports <see cref="ModuleProgress.Record"/>
++/// monotonically. One <c>SaveChangesAsync</c>; the module threshold is applied
++/// so <see cref="ModuleProgress.CompletedAt"/> stamps on first meet.
++/// </summary>
++public sealed class RecordModuleProgressCommandHandler(
++    IAssignmentRepository assignmentRepository,
++    IModuleProgressRepository moduleProgressRepository,
++    ITenantProvider tenantProvider,
++    ILogger<RecordModuleProgressCommandHandler> logger) : ICommandHandler<RecordModuleProgressCommand, bool>
++{
++    public async Task<bool> HandleAsync(RecordModuleProgressCommand command, CancellationToken cancellationToken = default)
++    {
++        logger.LogDebug("Handling RecordModuleProgress for assignment {AssignmentId} / student {StudentId} / module {ContentModuleId}",
++            command.AssignmentId, command.StudentId, command.ContentModuleId);
++
++        var assignment = await assignmentRepository.GetAsync(command.AssignmentId, cancellationToken)
++            ?? throw new AssignmentNotFoundException(command.AssignmentId);
++
++        var module = assignment.Modules.SingleOrDefault(m => m.Id == command.ContentModuleId);
++        if (module is null)
++        {
++            // Module not on the assignment → the route maps to 404.
++            return false;
++        }
++
++        var tenantId = tenantProvider.GetTenantContext().TenantId;
++        var progress = await moduleProgressRepository.GetAsync(
++            command.AssignmentId, command.StudentId, command.ContentModuleId, cancellationToken);
++
++        if (progress is null)
++        {
++            progress = ModuleProgress.Create(
++                tenantId, command.AssignmentId, command.StudentId,
++                command.ContentModuleId, command.Percent, module.MinCompletionThresholdPercent);
++            moduleProgressRepository.Add(progress);
++        }
++        else
++        {
++            progress.Record(command.Percent, module.MinCompletionThresholdPercent);
++        }
++
++        await moduleProgressRepository.SaveChangesAsync(cancellationToken);
++        return true;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/GetWardAssignmentViewQuery.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/GetWardAssignmentViewQuery.cs
+new file mode 100644
+index 00000000..faf0cd33
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/GetWardAssignmentViewQuery.cs
+@@ -0,0 +1,13 @@
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
++
++/// <summary>
++/// WS-D1/WS-A5 — the ward-facing view of a single published assignment:
++/// its modules in display order, each merged with the ward's progress
++/// (<see cref="ModuleProgress"/>), plus the questions-unlocked gate flag
++/// (all required modules have a <c>CompletedAt</c>). Returns null when the
++/// assignment does not exist (route 404).
++/// </summary>
++public sealed record GetWardAssignmentView(Guid AssignmentId, Guid StudentId) : IQuery<WardAssignmentViewDto?>;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/GetWardAssignmentViewQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/GetWardAssignmentViewQueryHandler.cs
+new file mode 100644
+index 00000000..291beb89
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/GetWardAssignmentViewQueryHandler.cs
+@@ -0,0 +1,71 @@
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
++
++/// <summary>
++/// WS-D1/WS-A5 (spec §3.3) — one ward's view of a single assignment: the
++/// content modules with the ward's progress merged in, and the
++/// questions-unlocked flag (all required modules completed). The 2b ward
++/// player binds to <see cref="WardModuleViewDto.PercentComplete"/> /
++/// <see cref="WardModuleViewDto.CompletedAt"/> and gates the question block
++/// on <see cref="WardAssignmentViewDto.QuestionsUnlocked"/>.
++/// </summary>
++public sealed class GetWardAssignmentViewHandler(
++    IAssignmentRepository assignmentRepository,
++    IModuleProgressRepository moduleProgressRepository,
++    ILogger<GetWardAssignmentViewHandler> logger) : IQueryHandler<GetWardAssignmentView, WardAssignmentViewDto?>
++{
++    public async Task<WardAssignmentViewDto?> HandleAsync(GetWardAssignmentView query, CancellationToken cancellationToken = default)
++    {
++        logger.LogDebug("Handling GetWardAssignmentView for assignment {AssignmentId} / student {StudentId}",
++            query.AssignmentId, query.StudentId);
++
++        var assignment = await assignmentRepository.GetAsync(query.AssignmentId, cancellationToken);
++        if (assignment is null)
++        {
++            return null;
++        }
++
++        var progressByModule = (await moduleProgressRepository.ListProgressForAssignmentStudentAsync(
++            query.AssignmentId, query.StudentId, cancellationToken))
++            .ToDictionary(p => p.ContentModuleId);
++
++        var modules = assignment.Modules
++            .OrderBy(m => m.DisplayOrder)
++            .Select(m =>
++            {
++                progressByModule.TryGetValue(m.Id, out var progress);
++                return new WardModuleViewDto(
++                    m.Id,
++                    ToDto(m.ModuleType),
++                    m.Title,
++                    m.Url,
++                    m.DisplayOrder,
++                    m.MinCompletionThresholdPercent,
++                    m.IsRequired,
++                    progress?.PercentComplete ?? 0,
++                    progress?.CompletedAt);
++            })
++            .ToList();
++
++        var questionsUnlocked = assignment.Modules
++            .Where(m => m.IsRequired)
++            .All(m => progressByModule.TryGetValue(m.Id, out var p) && p.CompletedAt is not null);
++
++        return new WardAssignmentViewDto(
++            query.AssignmentId, assignment.Title, assignment.DueDate, questionsUnlocked, modules);
++    }
++
++    /// <summary>Domain <see cref="ModuleType"/> → contract <see cref="ModuleTypeDto"/>
++    /// (both enums are value-aligned Video=0/Guide=1; maps explicitly so a future
++    /// renumber on either side cannot silently misalign the wire contract).</summary>
++    private static ModuleTypeDto ToDto(ModuleType moduleType) => moduleType switch
++    {
++        ModuleType.Video => ModuleTypeDto.Video,
++        _ => ModuleTypeDto.Guide
++    };
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQuery.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQuery.cs
+new file mode 100644
+index 00000000..86fdb3f0
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQuery.cs
+@@ -0,0 +1,14 @@
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
++
++/// <summary>
++/// WS-A5 — the list of assignments a ward can see and act on: Published (and
++/// Scheduled-active per the existing visibility rule) assignments the student
++/// is already a linked recipient of (recipient-link targeting — full
++/// grade/group targeting resolution is cross-context and lands in slice 2b).
++/// Each row carries due date, submission state, and whether required content
++/// modules remain locked.
++/// </summary>
++public sealed record ListWardAssignments(Guid StudentId) : IQuery<WardAssignmentListItemDto[]>;
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQueryHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQueryHandler.cs
+new file mode 100644
+index 00000000..8631772f
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Queries/Ward/ListWardAssignmentsQueryHandler.cs
+@@ -0,0 +1,60 @@
++using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++
++namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
++
++/// <summary>
++/// WS-A5 — projects the ward assignment list. The candidate set (visible
++/// status + recipient-link targeting) comes from
++/// <see cref="IAssignmentRepository.ListWardAssignmentsAsync"/>; each row is
++/// enriched with its required-module lock state (per-module progress) and
++/// submission state (None → InProgress → Completed via FinalizedAt), the
++/// ar-9 per-ward projection precedent. N+1 over the candidate set is accepted
++/// for v1 (the 2b list UI is low-volume per ward) — recorded in the round doc.
++/// </summary>
++public sealed class ListWardAssignmentsHandler(
++    IAssignmentRepository assignmentRepository,
++    ISubmissionRepository submissionRepository,
++    IModuleProgressRepository moduleProgressRepository,
++    ILogger<ListWardAssignmentsHandler> logger) : IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]>
++{
++    public async Task<WardAssignmentListItemDto[]> HandleAsync(ListWardAssignments query, CancellationToken cancellationToken = default)
++    {
++        logger.LogDebug("Handling ListWardAssignments for student {StudentId}", query.StudentId);
++
++        var summaries = await moduleProgressRepository.ListWardAssignmentsAsync(query.StudentId, DateTimeOffset.UtcNow, cancellationToken);
++
++        var result = new List<WardAssignmentListItemDto>(summaries.Count);
++        foreach (var summary in summaries)
++        {
++            var assignment = await assignmentRepository.GetAsync(summary.Id, cancellationToken);
++            if (assignment is null)
++            {
++                continue;
++            }
++
++            var progressByModule = (await moduleProgressRepository.ListProgressForAssignmentStudentAsync(
++                summary.Id, query.StudentId, cancellationToken))
++                .ToDictionary(p => p.ContentModuleId);
++
++            var hasLockedModules = assignment.Modules
++                .Where(m => m.IsRequired)
++                .Any(m => !progressByModule.TryGetValue(m.Id, out var p) || p.CompletedAt is null);
++
++            var submission = await submissionRepository.GetSubmissionByAssignmentStudentAsync(
++                summary.Id, query.StudentId, cancellationToken);
++            var state = submission is null
++                ? WardSubmissionStateDto.NotStarted
++                : submission.FinalizedAt is not null
++                    ? WardSubmissionStateDto.Completed
++                    : WardSubmissionStateDto.InProgress;
++
++            result.Add(new WardAssignmentListItemDto(
++                summary.Id, summary.Title, summary.DueDate, state, hasLockedModules));
++        }
++
++        return result.ToArray();
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs
+index 552879e6..637b0d3e 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/AssignmentsDbContext.cs
+@@ -29,6 +29,10 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext>
+     // WS-C1 (spec §5 line 96): append-only guardian signature audit rows
+     // (immutable — see SignatureEvent). Standalone tenant entity.
+     public DbSet<SignatureEvent> SignatureEvents => Set<SignatureEvent>();
++    // WS-D1 (spec §3.3): per-ward content-module progress (video watch % /
++    // guide scroll-complete) — the gating seam for required modules. Standalone
++    // tenant entity (ar-4 pattern); FK declared from ContentModuleConfiguration side.
++    public DbSet<ModuleProgress> ModuleProgress => Set<ModuleProgress>();
+     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
+ 
+     /// <summary>
+@@ -62,6 +66,8 @@ public sealed class AssignmentsDbContext(DbContextOptions<AssignmentsDbContext>
+         modelBuilder.ApplyConfiguration(new SubmissionAnswerConfiguration(() => CurrentTenantId));
+         // WS-C1: guardian signature audit rows (immutable, standalone).
+         modelBuilder.ApplyConfiguration(new SignatureEventConfiguration(() => CurrentTenantId));
++        // WS-D1: per-ward module progress. Same explicit configuration pattern.
++        modelBuilder.ApplyConfiguration(new ModuleProgressConfiguration(() => CurrentTenantId));
+         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<AssignmentsDbContext>()));
+ 
+         // FR-14 / AC-17: fail fast at model build if any non-owned, non-allow-listed
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/ContentModuleConfiguration.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/ContentModuleConfiguration.cs
+index 11bc1ee8..172bc521 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/ContentModuleConfiguration.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/ContentModuleConfiguration.cs
+@@ -36,5 +36,13 @@ internal sealed class ContentModuleConfiguration : TenantEntityTypeConfiguration
+ 
+         builder.HasIndex(x => new { x.TenantId, x.AssignmentId })
+             .HasDatabaseName("ix_assignment_content_modules_tenant_assignment");
++
++        // WS-D1 (decision (a)): per-ward progress rows are keyed by module. FK
++        // declared once from the parent side — cascade removes a module's
++        // progress rows (module removal only happens during draft edit, before
++        // distribution) — no navigation on either side.
++        builder.HasMany<ModuleProgress>().WithOne()
++            .HasForeignKey(p => p.ContentModuleId)
++            .OnDelete(DeleteBehavior.Cascade);
+     }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/ModuleProgressConfiguration.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/ModuleProgressConfiguration.cs
+new file mode 100644
+index 00000000..c64a213c
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Configurations/ModuleProgressConfiguration.cs
+@@ -0,0 +1,42 @@
++using System.Linq.Expressions;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Metadata.Builders;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Core.Data;
++
++namespace SchoolCollab.Assignments.Core.Data.Configurations;
++
++/// <summary>
++/// WS-D1 (spec §3.3): strict tenant entity for per-ward module progress.
++/// The <c>ContentModuleId</c> FK is declared from the
++/// <c>ContentModuleConfiguration</c> side (cascade — removing a module
++/// removes its progress rows); no navigation on either side
++/// (single-source-of-truth declaration, the standalone-entity pattern).
++/// <see cref="ModuleProgress.AssignmentId"/> is denormalized (no FK to
++/// <see cref="Assignment"/>) so per-(assignment, student) lookups and the
++/// unique row are tenant-scoped without crossing aggregates.
++/// </summary>
++internal sealed class ModuleProgressConfiguration : TenantEntityTypeConfigurationBase<ModuleProgress>
++{
++    public ModuleProgressConfiguration(Expression<Func<Guid>> tenantIdAccessor) : base(tenantIdAccessor) { }
++
++    protected override void ConfigureTenantEntity(EntityTypeBuilder<ModuleProgress> builder)
++    {
++        builder.ToTable("assignment_module_progress");
++
++        builder.ConfigureAuditProperties();
++        builder.ConfigurePostgresRowVersion();
++
++        builder.Property(x => x.AssignmentId).IsRequired();
++        builder.Property(x => x.StudentId).IsRequired();
++        builder.Property(x => x.ContentModuleId).IsRequired();
++        builder.Property(x => x.PercentComplete).IsRequired().HasDefaultValue(0);
++        builder.Property(x => x.CompletedAt);
++
++        // Per-(assignment, student, module) monotonic heartbeat row — the
++        // upsert path (RecordModuleProgress) keys on this uniqueness.
++        builder.HasIndex(x => new { x.TenantId, x.AssignmentId, x.StudentId, x.ContentModuleId })
++            .IsUnique()
++            .HasDatabaseName("uq_assignment_module_progress_tenant_assignment_student_module");
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IModuleProgressRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IModuleProgressRepository.cs
+new file mode 100644
+index 00000000..dcf5f8b3
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/IModuleProgressRepository.cs
+@@ -0,0 +1,36 @@
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Core.Data.Repositories;
++
++/// <summary>
++/// Persistence for per-ward content-module progress (WS-D1 / spec §3.3):
++/// <see cref="ModuleProgress"/> rows keyed by (assignment, student,
++/// module). Entity reads are tracked (the upsert path mutates + saves);
++/// progress is queried per assignment+student by the submission gate and
++/// the ward-view query handler. Also surfaces the WS-A5 ward assignment
++/// candidate set (the ward-facing read aggregation).
++/// </summary>
++public interface IModuleProgressRepository
++{
++    /// <summary>The single progress row for a (assignment, student, module)
++    /// key — null when the ward has not reported any progress yet. Tracked,
++    /// so <see cref="RecordModuleProgress"/> may mutate and save it.</summary>
++    Task<ModuleProgress?> GetAsync(Guid assignmentId, Guid studentId, Guid contentModuleId, CancellationToken ct = default);
++
++    /// <summary>All progress rows for a (assignment, student) — the submission
++    /// gate and the ward view project against these.</summary>
++    Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default);
++
++    /// <summary>WS-A5 — the ward's visible assignment candidate set: Published
++    /// (or Scheduled-active per the existing visibility rule) assignments the
++    /// student is already a linked recipient of (recipient-link targeting;
++    /// grade/group targeting resolution is cross-context and lands in slice
++    /// 2b). Returns <see cref="AssignmentSummary"/> rows the ward-list handler
++    /// enriches with module-lock + submission state.</summary>
++    Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default);
++
++    void Add(ModuleProgress progress);
++
++    Task<int> SaveChangesAsync(CancellationToken ct = default);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ModuleProgressRepository.cs b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ModuleProgressRepository.cs
+new file mode 100644
+index 00000000..ed86a026
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Data/Repositories/ModuleProgressRepository.cs
+@@ -0,0 +1,44 @@
++using Microsoft.EntityFrameworkCore;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.DTOs;
++
++namespace SchoolCollab.Assignments.Core.Data.Repositories;
++
++internal sealed class ModuleProgressRepository(AssignmentsDbContext db) : IModuleProgressRepository
++{
++    public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
++    {
++        return db.Assignments.AsNoTracking()
++            .Where(a =>
++                (a.Status == AssignmentStatus.Published
++                 || (a.Status == AssignmentStatus.Scheduled && a.AvailableFromUtc != null && a.AvailableFromUtc <= nowUtc))
++                && db.AssignmentRecipients.Any(r => r.WardStudentId == studentId && r.AssignmentId == a.Id))
++            .OrderByDescending(a => a.DueDate ?? DateTimeOffset.MaxValue)
++            .Select(a => new AssignmentSummary(
++                a.Id, a.Title, a.Description, a.AssignmentType, a.GradingFormat, a.TargetAudienceType,
++                a.TopicId, a.GradeLevelId, a.Status, a.DueDate, a.MaxScore, a.MandatoryReview,
++                a.CreatedByTeacherId, a.CreatedAt, a.UpdatedAt,
++                a.AvailableFromUtc, a.ArchiveGraceDays, a.ApprovalStatus, a.ApprovedBy, a.ApprovedAt,
++                a.PassScore, a.MaxAttempts,
++                a.RequiresSignature,
++                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
++            .ToListAsync(ct);
++    }
++
++    public Task<ModuleProgress?> GetAsync(Guid assignmentId, Guid studentId, Guid contentModuleId, CancellationToken ct = default) =>
++        db.ModuleProgress.FirstOrDefaultAsync(
++            p => p.AssignmentId == assignmentId
++                && p.StudentId == studentId
++                && p.ContentModuleId == contentModuleId, ct);
++
++    public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(
++        Guid assignmentId, Guid studentId, CancellationToken ct = default) =>
++        db.ModuleProgress
++            .AsNoTracking()
++            .Where(p => p.AssignmentId == assignmentId && p.StudentId == studentId)
++            .ToListAsync(ct);
++
++    public void Add(ModuleProgress progress) => db.ModuleProgress.Add(progress);
++
++    public Task<int> SaveChangesAsync(CancellationToken ct = default) => db.SaveChangesAsync(ct);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/RequiredModuleIncompleteException.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/RequiredModuleIncompleteException.cs
+new file mode 100644
+index 00000000..d8d12f27
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/RequiredModuleIncompleteException.cs
+@@ -0,0 +1,13 @@
++namespace SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++/// <summary>
++/// WS-D1 / spec §3.3 — a ward attempted to submit an assignment that has
++/// required content modules whose completion threshold has not been met.
++/// Routes map this to <c>409 Conflict</c> via <c>Results.Problem</c> (the
++/// <see cref="SubmissionAttemptsExhaustedException"/> posture). The gate is
++/// additive: assignments with no required modules never throw it.
++/// </summary>
++public sealed class RequiredModuleIncompleteException : Exception
++{
++    public RequiredModuleIncompleteException(string message) : base(message) { }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/ModuleProgress.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/ModuleProgress.cs
+new file mode 100644
+index 00000000..4efb45df
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/ModuleProgress.cs
+@@ -0,0 +1,91 @@
++using SchoolCollab.Core.Data;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Core.Domain;
++
++/// <summary>
++/// WS-D1 (spec §3.3) — one ward's progress on one content module of an
++/// assignment. Standalone tenant entity (the ar-4 standalone-entity
++/// pattern): the <c>ContentModuleId</c> FK is declared once in
++/// <c>ContentModuleConfiguration</c> (cascade on module delete) with no
++/// navigation on either side. A single numeric <see cref="PercentComplete"/>
++/// serves both module types (video = watch %, guide = scroll-complete
++/// reported as percent). Recording is monotonic + idempotent
++/// (decision (b)): replays and out-of-order heartbeat posts never
++/// regress progress, and <see cref="CompletedAt"/> is stamped once the
++/// percent first meets the module's completion threshold.
++/// </summary>
++public sealed class ModuleProgress : ITenantEntity, IEntity, IAuditableEntity, IHasRowVersion
++{
++    private ModuleProgress() { }
++
++    public Guid Id { get; private set; }
++    public Guid TenantId { get; private set; }
++    Guid ITenantEntity.TenantId { get => TenantId; set => TenantId = value; }
++
++    public Guid AssignmentId { get; private set; }
++    public Guid StudentId { get; private set; }
++    public Guid ContentModuleId { get; private set; }
++    /// <summary>Clamped 0–100 (video watch % / guide scroll-complete %).</summary>
++    public int PercentComplete { get; private set; }
++    /// <summary>Stamped the first time a report meets the module threshold; never un-stamped.</summary>
++    public DateTimeOffset? CompletedAt { get; private set; }
++    public uint RowVersion { get; private set; }
++    public DateTimeOffset CreatedAt { get; private set; }
++    public DateTimeOffset UpdatedAt { get; private set; }
++
++    /// <summary>Factory — creates the first progress row. Applies the same
++    /// clamping + threshold logic as <see cref="Record"/> so the initial
++    /// report can already be complete.</summary>
++    public static ModuleProgress Create(
++        Guid tenantId,
++        Guid assignmentId,
++        Guid studentId,
++        Guid contentModuleId,
++        int percent,
++        int minCompletionThresholdPercent)
++    {
++        if (tenantId == Guid.Empty)
++            throw new ArgumentException("Tenant id is required.", nameof(tenantId));
++        if (assignmentId == Guid.Empty)
++            throw new ArgumentException("Assignment id is required.", nameof(assignmentId));
++        if (studentId == Guid.Empty)
++            throw new ArgumentException("Student id is required.", nameof(studentId));
++        if (contentModuleId == Guid.Empty)
++            throw new ArgumentException("Content module id is required.", nameof(contentModuleId));
++
++        var now = DateTimeOffset.UtcNow;
++        var clamped = Math.Clamp(percent, 0, 100);
++        return new ModuleProgress
++        {
++            Id = Guid.NewGuid(),
++            TenantId = tenantId,
++            AssignmentId = assignmentId,
++            StudentId = studentId,
++            ContentModuleId = contentModuleId,
++            PercentComplete = clamped,
++            CompletedAt = clamped >= minCompletionThresholdPercent ? now : null,
++            CreatedAt = now,
++            UpdatedAt = now
++        };
++    }
++
++    /// <summary>WS-D1 (decision (b)) — monotonic, idempotent recording of
++    /// the ward's progress. A report at or below the current percent is a
++    /// no-op (replays / out-of-order heartbeats are safe); a higher report
++    /// raises the percent and stamps <see cref="CompletedAt"/> the first
++    /// time the threshold is met. Completion is never revoked.</summary>
++    public void Record(int percent, int minCompletionThresholdPercent)
++    {
++        var clamped = Math.Clamp(percent, 0, 100);
++        if (clamped <= PercentComplete)
++            return;
++
++        PercentComplete = clamped;
++        if (CompletedAt is null && PercentComplete >= minCompletionThresholdPercent)
++        {
++            CompletedAt = DateTimeOffset.UtcNow;
++        }
++        UpdatedAt = DateTimeOffset.UtcNow;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+index ea1caa65..91b2eb84 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Extensions.cs
+@@ -45,6 +45,7 @@ public static class Extensions
+ 
+         services.AddScoped<IAssignmentRepository, AssignmentRepository>();
+         services.AddScoped<ISubmissionRepository, SubmissionRepository>();
++        services.AddScoped<IModuleProgressRepository, ModuleProgressRepository>();
+         services.AddScoped<IAssignmentActivityGroupRepository, AssignmentActivityGroupRepository>();
+         services.AddScoped<SchoolCollab.Assignments.Core.Services.IAssignmentNotificationBroadcaster, SchoolCollab.Assignments.Core.Services.AssignmentNotificationBroadcaster>();
+         // WS-A3 (spec §3.3): pure scoring engine for AutoGraded /
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260915123726_AddModuleProgress.Designer.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260915123726_AddModuleProgress.Designer.cs
+new file mode 100644
+index 00000000..fa886d88
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260915123726_AddModuleProgress.Designer.cs
+@@ -0,0 +1,1244 @@
++﻿// <auto-generated />
++using System;
++using Microsoft.EntityFrameworkCore;
++using Microsoft.EntityFrameworkCore.Infrastructure;
++using Microsoft.EntityFrameworkCore.Migrations;
++using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
++using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
++using SchoolCollab.Assignments.Core.Data;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    [DbContext(typeof(AssignmentsDbContext))]
++    [Migration("20260915123726_AddModuleProgress")]
++    partial class AddModuleProgress
++    {
++        /// <inheritdoc />
++        protected override void BuildTargetModel(ModelBuilder modelBuilder)
++        {
++#pragma warning disable 612, 618
++            modelBuilder
++                .HasAnnotation("ProductVersion", "10.0.8")
++                .HasAnnotation("Relational:MaxIdentifierLength", 63);
++
++            NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<string>("AiPromptOverride")
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("ai_prompt_override");
++
++                    b.Property<int?>("ApprovalStatus")
++                        .HasColumnType("integer")
++                        .HasColumnName("approval_status");
++
++                    b.Property<DateTimeOffset?>("ApprovedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("approved_at");
++
++                    b.Property<Guid?>("ApprovedBy")
++                        .HasColumnType("uuid")
++                        .HasColumnName("approved_by");
++
++                    b.Property<int>("ArchiveGraceDays")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(30)
++                        .HasColumnName("archive_grace_days");
++
++                    b.Property<string>("AssignmentNumber")
++                        .HasMaxLength(50)
++                        .HasColumnType("character varying(50)")
++                        .HasColumnName("assignment_number");
++
++                    b.Property<int>("AssignmentType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("assignment_type");
++
++                    b.Property<DateTimeOffset?>("AvailableFromUtc")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("available_from_utc");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("CreatedByTeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("created_by_teacher_id");
++
++                    b.Property<string>("Description")
++                        .HasMaxLength(5000)
++                        .HasColumnType("character varying(5000)")
++                        .HasColumnName("description");
++
++                    b.Property<int?>("DifficultyEasyCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_easy_count");
++
++                    b.Property<int?>("DifficultyHardCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_hard_count");
++
++                    b.Property<int?>("DifficultyMediumCount")
++                        .HasColumnType("integer")
++                        .HasColumnName("difficulty_medium_count");
++
++                    b.Property<DateTimeOffset?>("DueDate")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("due_date");
++
++                    b.Property<Guid?>("GradeLevelId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("grade_level_id");
++
++                    b.Property<int>("GradingFormat")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("grading_format");
++
++                    b.Property<bool>("MandatoryReview")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("mandatory_review");
++
++                    b.Property<int?>("MaxAttempts")
++                        .HasColumnType("integer")
++                        .HasColumnName("max_attempts");
++
++                    b.Property<decimal?>("MaxScore")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("max_score");
++
++                    b.Property<decimal?>("PassScore")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("pass_score");
++
++                    b.Property<DateTimeOffset?>("PublishedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("published_at");
++
++                    b.Property<string>("QuestionsDraftJson")
++                        .HasColumnType("text")
++                        .HasColumnName("questions_draft_json");
++
++                    b.Property<bool>("RequiresSignature")
++                        .HasColumnType("boolean")
++                        .HasColumnName("requires_signature");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("Status")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("status");
++
++                    b.Property<int>("TargetAudienceType")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("target_audience_type");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Title")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("title");
++
++                    b.Property<Guid>("TopicId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("topic_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignments");
++
++                    b.HasIndex("CreatedByTeacherId")
++                        .HasDatabaseName("ix_assignments_teacher_id");
++
++                    b.HasIndex("GradeLevelId")
++                        .HasDatabaseName("ix_assignments_grade_level_id");
++
++                    b.HasIndex("Status")
++                        .HasDatabaseName("ix_assignments_status");
++
++                    b.HasIndex("TopicId")
++                        .HasDatabaseName("ix_assignments_topic_id");
++
++                    b.ToTable("assignments", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("ActivityGroupId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("activity_group_id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_activity_groups");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_activity_groups_assignment_id");
++
++                    b.HasIndex("TenantId", "ActivityGroupId")
++                        .HasDatabaseName("ix_assignment_activity_groups_tenant_group");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ActivityGroupId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_activity_groups_tenant_assignment_group");
++
++                    b.ToTable("assignment_activity_groups", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentRecipient", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<int>("Channel")
++                        .HasColumnType("integer")
++                        .HasColumnName("channel");
++
++                    b.Property<Guid>("ContactId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("contact_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<DateTimeOffset?>("DeliveredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("delivered_at");
++
++                    b.Property<bool>("NotifyOnBroadcast")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("notify_on_broadcast");
++
++                    b.Property<DateTimeOffset?>("OpenedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("opened_at");
++
++                    b.Property<Guid>("OwnerId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("owner_id");
++
++                    b.Property<int>("OwnerType")
++                        .HasColumnType("integer")
++                        .HasColumnName("owner_type");
++
++                    b.Property<int?>("Role")
++                        .HasColumnType("integer")
++                        .HasColumnName("role");
++
++                    b.Property<bool>("SubscriptionActive")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("subscription_active");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<Guid?>("WardStudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("ward_student_id");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_recipients");
++
++                    b.HasIndex("AssignmentId", "OwnerId")
++                        .HasDatabaseName("ix_assignment_recipients_assignment_owner");
++
++                    b.HasIndex("TenantId", "AssignmentId", "ContactId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_recipients_tenant_assignment_contact");
++
++                    b.ToTable("assignment_recipients", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentResource", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("DisplayName")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("display_name");
++
++                    b.Property<bool>("IncludedInGeneration")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(true)
++                        .HasColumnName("included_in_generation");
++
++                    b.Property<int>("ResourceKind")
++                        .HasColumnType("integer")
++                        .HasColumnName("resource_kind");
++
++                    b.Property<string>("StoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("storage_path");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("Url")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("url");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_resources");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_resources_assignment_id");
++
++                    b.HasIndex("TenantId", "AssignmentId")
++                        .HasDatabaseName("ix_assignment_resources_tenant_assignment");
++
++                    b.ToTable("assignment_resources", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmission", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset?>("AttemptLimitOverriddenAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("attempt_limit_overridden_at");
++
++                    b.Property<Guid?>("AttemptLimitOverriddenBy")
++                        .HasColumnType("uuid")
++                        .HasColumnName("attempt_limit_overridden_by");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("CurrentSource")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_source");
++
++                    b.Property<int>("CurrentVersionNumber")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("current_version_number");
++
++                    b.Property<Guid?>("ExpectedSignerGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("expected_signer_guardian_id");
++
++                    b.Property<DateTimeOffset?>("FinalizedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("finalized_at");
++
++                    b.Property<DateTimeOffset>("LastSubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("last_submitted_at");
++
++                    b.Property<int>("ReviewState")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("review_state");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<int>("SignOffState")
++                        .HasColumnType("integer")
++                        .HasColumnName("sign_off_state");
++
++                    b.Property<DateTimeOffset?>("SignedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("signed_at");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid?>("SubmissionGateId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_gate_id");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submissions");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submissions_tenant_assignment_student");
++
++                    b.ToTable("assignment_submissions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Content")
++                        .HasMaxLength(20000)
++                        .HasColumnType("character varying(20000)")
++                        .HasColumnName("content");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<bool?>("Passed")
++                        .HasColumnType("boolean")
++                        .HasColumnName("passed");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<decimal?>("Score")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("score");
++
++                    b.Property<int>("Source")
++                        .HasColumnType("integer")
++                        .HasColumnName("source");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<DateTimeOffset>("SubmittedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<int>("VersionNumber")
++                        .HasColumnType("integer")
++                        .HasColumnName("version_number");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submission_versions");
++
++                    b.HasIndex("TenantId", "SubmissionId", "VersionNumber")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_submission_versions_tenant_submission_version");
++
++                    b.ToTable("assignment_submission_versions", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ContentModule", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("DisplayOrder")
++                        .HasColumnType("integer")
++                        .HasColumnName("display_order");
++
++                    b.Property<bool>("IsRequired")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("is_required");
++
++                    b.Property<int>("MinCompletionThresholdPercent")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(100)
++                        .HasColumnName("min_completion_threshold_percent");
++
++                    b.Property<int>("ModuleType")
++                        .HasColumnType("integer")
++                        .HasColumnName("module_type");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<string>("StoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("storage_path");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Title")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("title");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("Url")
++                        .IsRequired()
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("url");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_content_modules");
++
++                    b.HasIndex("AssignmentId")
++                        .HasDatabaseName("ix_assignment_content_modules_assignment_id");
++
++                    b.HasIndex("TenantId", "AssignmentId")
++                        .HasDatabaseName("ix_assignment_content_modules_tenant_assignment");
++
++                    b.ToTable("assignment_content_modules", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.GuardianSubmissionGate", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("ReviewComment")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("review_comment");
++
++                    b.Property<DateTimeOffset?>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<Guid?>("ReviewedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("reviewed_by_guardian_id");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<bool>("SubmissionEnabledForStudent")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("boolean")
++                        .HasDefaultValue(false)
++                        .HasColumnName("submission_enabled_for_student");
++
++                    b.Property<DateTimeOffset?>("SubmittedByGuardianAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("submitted_by_guardian_at");
++
++                    b.Property<Guid?>("SubmittedByGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submitted_by_guardian_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_guardian_submission_gates");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_guardian_submission_gates_tenant_assignment_student");
++
++                    b.ToTable("guardian_submission_gates", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset?>("CompletedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("completed_at");
++
++                    b.Property<Guid>("ContentModuleId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("content_module_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("PercentComplete")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("percent_complete");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_module_progress");
++
++                    b.HasIndex("ContentModuleId")
++                        .HasDatabaseName("ix_assignment_module_progress_content_module_id");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId", "ContentModuleId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_module_progress_tenant_assignment_student_module");
++
++                    b.ToTable("assignment_module_progress", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SignatureEvent", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("CertificateStoragePath")
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("certificate_storage_path");
++
++                    b.Property<string>("ConsentTextShown")
++                        .IsRequired()
++                        .HasMaxLength(4000)
++                        .HasColumnType("character varying(4000)")
++                        .HasColumnName("consent_text_shown");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("IpAddress")
++                        .IsRequired()
++                        .HasMaxLength(100)
++                        .HasColumnType("character varying(100)")
++                        .HasColumnName("ip_address");
++
++                    b.Property<int>("SignatureType")
++                        .HasColumnType("integer")
++                        .HasColumnName("signature_type");
++
++                    b.Property<DateTimeOffset>("SignedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("signed_at");
++
++                    b.Property<Guid>("SignerGuardianId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("signer_guardian_id");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("TypedSignature")
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("typed_signature");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.Property<string>("UserAgent")
++                        .IsRequired()
++                        .HasMaxLength(500)
++                        .HasColumnType("character varying(500)")
++                        .HasColumnName("user_agent");
++
++                    b.HasKey("Id")
++                        .HasName("pk_signature_events");
++
++                    b.HasIndex("AssignmentId", "StudentId")
++                        .IsUnique()
++                        .HasDatabaseName("ix_signature_events_assignment_student");
++
++                    b.ToTable("signature_events", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<Guid>("QuestionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("question_id");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid?>("SelectedOptionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("selected_option_id");
++
++                    b.Property<Guid>("SubmissionVersionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_version_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("TextAnswer")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("text_answer");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_submission_answers");
++
++                    b.HasIndex("SubmissionVersionId")
++                        .HasDatabaseName("ix_assignment_submission_answers_submission_version_id");
++
++                    b.HasIndex("TenantId", "SubmissionVersionId")
++                        .HasDatabaseName("ix_assignment_submission_answers_tenant_version");
++
++                    b.ToTable("assignment_submission_answers", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionReview", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<string>("Comments")
++                        .HasMaxLength(2000)
++                        .HasColumnType("character varying(2000)")
++                        .HasColumnName("comments");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<string>("Grade")
++                        .HasMaxLength(20)
++                        .HasColumnType("character varying(20)")
++                        .HasColumnName("grade");
++
++                    b.Property<DateTimeOffset>("ReviewedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("reviewed_at");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<decimal?>("Score")
++                        .HasPrecision(5, 2)
++                        .HasColumnType("numeric(5,2)")
++                        .HasColumnName("score");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("SubmissionId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("submission_id");
++
++                    b.Property<Guid>("TeacherId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("teacher_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_submission_reviews");
++
++                    b.HasIndex("TenantId", "SubmissionId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_submission_reviews_tenant_submission");
++
++                    b.ToTable("submission_reviews", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Core.Messaging.OutboxMessage", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<int>("Attempts")
++                        .HasColumnType("integer")
++                        .HasColumnName("attempts");
++
++                    b.Property<DateTimeOffset?>("DispatchedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("dispatched_at");
++
++                    b.Property<string>("LastError")
++                        .HasColumnType("text")
++                        .HasColumnName("last_error");
++
++                    b.Property<DateTimeOffset>("OccurredAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("occurred_at");
++
++                    b.Property<string>("Payload")
++                        .IsRequired()
++                        .HasColumnType("text")
++                        .HasColumnName("payload");
++
++                    b.Property<Guid?>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<string>("Type")
++                        .IsRequired()
++                        .HasMaxLength(200)
++                        .HasColumnType("character varying(200)")
++                        .HasColumnName("type");
++
++                    b.HasKey("Id")
++                        .HasName("pk_outbox_messages");
++
++                    b.HasIndex("OccurredAt")
++                        .HasDatabaseName("ix_outbox_messages_pending")
++                        .HasFilter("dispatched_at IS NULL");
++
++                    b.HasIndex("TenantId")
++                        .HasDatabaseName("ix_outbox_messages_tenant_id");
++
++                    b.ToTable("outbox_messages", (string)null);
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentAttachment", "Attachments", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("ContentType")
++                                .IsRequired()
++                                .HasMaxLength(100)
++                                .HasColumnType("character varying(100)")
++                                .HasColumnName("content_type");
++
++                            b1.Property<string>("FileName")
++                                .IsRequired()
++                                .HasMaxLength(255)
++                                .HasColumnType("character varying(255)")
++                                .HasColumnName("file_name");
++
++                            b1.Property<long>("FileSize")
++                                .HasColumnType("bigint")
++                                .HasColumnName("file_size");
++
++                            b1.Property<string>("StoragePath")
++                                .IsRequired()
++                                .HasMaxLength(500)
++                                .HasColumnType("character varying(500)")
++                                .HasColumnName("storage_path");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_attachments");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_attachments_assignment_id");
++
++                            b1.ToTable("assignment_attachments", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_attachments_assignments_assignment_id");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentQuestion", "Questions", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<Guid?>("CorrectOptionId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("correct_option_id");
++
++                            b1.Property<int>("DisplayOrder")
++                                .HasColumnType("integer")
++                                .HasColumnName("display_order");
++
++                            b1.Property<string>("ModelAnswer")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("model_answer");
++
++                            b1.Property<string>("QuestionText")
++                                .IsRequired()
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("question_text");
++
++                            b1.Property<int>("QuestionType")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("integer")
++                                .HasDefaultValue(0)
++                                .HasColumnName("question_type");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_questions");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_questions_assignment_id");
++
++                            b1.ToTable("assignment_questions", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_questions_assignments_assignment_id");
++
++                            b1.OwnsMany("SchoolCollab.Assignments.Core.Domain.QuestionOption", "Options", b2 =>
++                                {
++                                    b2.Property<Guid>("Id")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("id");
++
++                                    b2.Property<bool>("IsCorrect")
++                                        .ValueGeneratedOnAdd()
++                                        .HasColumnType("boolean")
++                                        .HasDefaultValue(false)
++                                        .HasColumnName("is_correct");
++
++                                    b2.Property<string>("OptionText")
++                                        .IsRequired()
++                                        .HasMaxLength(500)
++                                        .HasColumnType("character varying(500)")
++                                        .HasColumnName("option_text");
++
++                                    b2.Property<Guid>("QuestionId")
++                                        .HasColumnType("uuid")
++                                        .HasColumnName("question_id");
++
++                                    b2.HasKey("Id")
++                                        .HasName("pk_question_options");
++
++                                    b2.HasIndex("QuestionId")
++                                        .HasDatabaseName("ix_question_options_question_id");
++
++                                    b2.ToTable("question_options", (string)null);
++
++                                    b2.WithOwner()
++                                        .HasForeignKey("QuestionId")
++                                        .HasConstraintName("fk_question_options_assignment_questions_question_id");
++                                });
++
++                            b1.Navigation("Options");
++                        });
++
++                    b.OwnsMany("SchoolCollab.Assignments.Core.Domain.AssignmentReview", "Reviews", b1 =>
++                        {
++                            b1.Property<Guid>("Id")
++                                .ValueGeneratedOnAdd()
++                                .HasColumnType("uuid")
++                                .HasColumnName("id");
++
++                            b1.Property<Guid>("AssignmentId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("assignment_id");
++
++                            b1.Property<string>("Comments")
++                                .HasMaxLength(2000)
++                                .HasColumnType("character varying(2000)")
++                                .HasColumnName("comments");
++
++                            b1.Property<DateTimeOffset>("ReviewDate")
++                                .HasColumnType("timestamp with time zone")
++                                .HasColumnName("review_date");
++
++                            b1.Property<decimal?>("Score")
++                                .HasPrecision(5, 2)
++                                .HasColumnType("numeric(5,2)")
++                                .HasColumnName("score");
++
++                            b1.Property<Guid>("TeacherId")
++                                .HasColumnType("uuid")
++                                .HasColumnName("teacher_id");
++
++                            b1.HasKey("Id")
++                                .HasName("pk_assignment_reviews");
++
++                            b1.HasIndex("AssignmentId")
++                                .HasDatabaseName("ix_assignment_reviews_assignment_id");
++
++                            b1.ToTable("assignment_reviews", (string)null);
++
++                            b1.WithOwner()
++                                .HasForeignKey("AssignmentId")
++                                .HasConstraintName("fk_assignment_reviews_assignments_assignment_id");
++                        });
++
++                    b.Navigation("Attachments");
++
++                    b.Navigation("Questions");
++
++                    b.Navigation("Reviews");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentActivityGroup", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany()
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_activity_groups_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.AssignmentResource", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany("Resources")
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_resources_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ContentModule", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.Assignment", null)
++                        .WithMany("Modules")
++                        .HasForeignKey("AssignmentId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_content_modules_assignments_assignment_id");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.ContentModule", null)
++                        .WithMany()
++                        .HasForeignKey("ContentModuleId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_module_progress_assignment_content_modules_conte");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", null)
++                        .WithMany()
++                        .HasForeignKey("SubmissionVersionId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_submission_answers_assignment_submission_version");
++                });
++
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.Assignment", b =>
++                {
++                    b.Navigation("Modules");
++
++                    b.Navigation("Resources");
++                });
++#pragma warning restore 612, 618
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260915123726_AddModuleProgress.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260915123726_AddModuleProgress.cs
+new file mode 100644
+index 00000000..0023ffe6
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/20260915123726_AddModuleProgress.cs
+@@ -0,0 +1,59 @@
++﻿using System;
++using Microsoft.EntityFrameworkCore.Migrations;
++
++#nullable disable
++
++namespace SchoolCollab.Assignments.Core.Migrations
++{
++    /// <inheritdoc />
++    public partial class AddModuleProgress : Migration
++    {
++        /// <inheritdoc />
++        protected override void Up(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.CreateTable(
++                name: "assignment_module_progress",
++                columns: table => new
++                {
++                    id = table.Column<Guid>(type: "uuid", nullable: false),
++                    tenant_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    assignment_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    student_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    content_module_id = table.Column<Guid>(type: "uuid", nullable: false),
++                    percent_complete = table.Column<int>(type: "integer", nullable: false, defaultValue: 0),
++                    completed_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: true),
++                    xmin = table.Column<uint>(type: "xid", rowVersion: true, nullable: false),
++                    created_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false),
++                    updated_at = table.Column<DateTimeOffset>(type: "timestamp with time zone", nullable: false)
++                },
++                constraints: table =>
++                {
++                    table.PrimaryKey("pk_assignment_module_progress", x => x.id);
++                    table.ForeignKey(
++                        name: "fk_assignment_module_progress_assignment_content_modules_conte",
++                        column: x => x.content_module_id,
++                        principalTable: "assignment_content_modules",
++                        principalColumn: "id",
++                        onDelete: ReferentialAction.Cascade);
++                });
++
++            migrationBuilder.CreateIndex(
++                name: "ix_assignment_module_progress_content_module_id",
++                table: "assignment_module_progress",
++                column: "content_module_id");
++
++            migrationBuilder.CreateIndex(
++                name: "uq_assignment_module_progress_tenant_assignment_student_module",
++                table: "assignment_module_progress",
++                columns: new[] { "tenant_id", "assignment_id", "student_id", "content_module_id" },
++                unique: true);
++        }
++
++        /// <inheritdoc />
++        protected override void Down(MigrationBuilder migrationBuilder)
++        {
++            migrationBuilder.DropTable(
++                name: "assignment_module_progress");
++        }
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+index 1d7371dd..7d429f6c 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Migrations/AssignmentsDbContextModelSnapshot.cs
+@@ -688,6 +688,65 @@ namespace SchoolCollab.Assignments.Core.Migrations
+                     b.ToTable("guardian_submission_gates", (string)null);
+                 });
+ 
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.Property<Guid>("Id")
++                        .HasColumnType("uuid")
++                        .HasColumnName("id");
++
++                    b.Property<Guid>("AssignmentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("assignment_id");
++
++                    b.Property<DateTimeOffset?>("CompletedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("completed_at");
++
++                    b.Property<Guid>("ContentModuleId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("content_module_id");
++
++                    b.Property<DateTimeOffset>("CreatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("created_at");
++
++                    b.Property<int>("PercentComplete")
++                        .ValueGeneratedOnAdd()
++                        .HasColumnType("integer")
++                        .HasDefaultValue(0)
++                        .HasColumnName("percent_complete");
++
++                    b.Property<uint>("RowVersion")
++                        .IsConcurrencyToken()
++                        .ValueGeneratedOnAddOrUpdate()
++                        .HasColumnType("xid")
++                        .HasColumnName("xmin");
++
++                    b.Property<Guid>("StudentId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("student_id");
++
++                    b.Property<Guid>("TenantId")
++                        .HasColumnType("uuid")
++                        .HasColumnName("tenant_id");
++
++                    b.Property<DateTimeOffset>("UpdatedAt")
++                        .HasColumnType("timestamp with time zone")
++                        .HasColumnName("updated_at");
++
++                    b.HasKey("Id")
++                        .HasName("pk_assignment_module_progress");
++
++                    b.HasIndex("ContentModuleId")
++                        .HasDatabaseName("ix_assignment_module_progress_content_module_id");
++
++                    b.HasIndex("TenantId", "AssignmentId", "StudentId", "ContentModuleId")
++                        .IsUnique()
++                        .HasDatabaseName("uq_assignment_module_progress_tenant_assignment_student_module");
++
++                    b.ToTable("assignment_module_progress", (string)null);
++                });
++
+             modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SignatureEvent", b =>
+                 {
+                     b.Property<Guid>("Id")
+@@ -1150,6 +1209,16 @@ namespace SchoolCollab.Assignments.Core.Migrations
+                         .HasConstraintName("fk_assignment_content_modules_assignments_assignment_id");
+                 });
+ 
++            modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.ModuleProgress", b =>
++                {
++                    b.HasOne("SchoolCollab.Assignments.Core.Domain.ContentModule", null)
++                        .WithMany()
++                        .HasForeignKey("ContentModuleId")
++                        .OnDelete(DeleteBehavior.Cascade)
++                        .IsRequired()
++                        .HasConstraintName("fk_assignment_module_progress_assignment_content_modules_conte");
++                });
++
+             modelBuilder.Entity("SchoolCollab.Assignments.Core.Domain.SubmissionAnswer", b =>
+                 {
+                     b.HasOne("SchoolCollab.Assignments.Core.Domain.AssignmentSubmissionVersion", null)
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/WardRoutesTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/WardRoutesTests.cs
+new file mode 100644
+index 00000000..feaf80d5
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/WardRoutesTests.cs
+@@ -0,0 +1,187 @@
++using System.Net;
++using System.Net.Http.Json;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using FluentAssertions;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Moq;
++using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentSubmission;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RecordModuleProgress;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.Features;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// WS-D1/WS-A5 route wiring (round-doc binding list) — exercised against the
++/// same minimal TestServer harness as <see cref="SignOffRoutesTests"/> with
++/// mocked handlers (Program never starts). Covers the progress upsert (204/404),
++/// the ward assignment view (200/404 with per-module progress + the
++/// questions-unlocked flag), the ward list (published, HasLockedModules), and
++/// the module-gate 409 on submission.
++/// </summary>
++[TestClass]
++public class WardRoutesTests
++{
++    private static readonly Guid AssignmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid StudentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid ModuleId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++
++    private static readonly JsonSerializerOptions ReadOptions = new(JsonSerializerDefaults.Web)
++    {
++        Converters =
++        {
++            new JsonStringEnumConverter<ModuleTypeDto>(),
++            new JsonStringEnumConverter<WardSubmissionStateDto>(),
++        }
++    };
++
++    private static string ProgressUrl => $"/assignments/{AssignmentId}/students/{StudentId}/modules/{ModuleId}/progress";
++    private static string WardViewUrl => $"/assignments/{AssignmentId}/students/{StudentId}/modules";
++    private static string WardListUrl => $"/students/{StudentId}/assignments";
++    private static string SubmissionUrl => $"/assignments/{AssignmentId}/students/{StudentId}/submission";
++
++    private sealed class StubFeatureFlags : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => featureKey == FeatureFlagKeys.DisableOIDCAuth;
++        public IDictionary<string, bool> GetAllFlags() =>
++            new Dictionary<string, bool> { [FeatureFlagKeys.DisableOIDCAuth] = true };
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken cancellationToken = default) =>
++            Task.FromResult(IsEnabled(featureKey));
++    }
++
++    private static async Task<WebApplication> StartHostAsync(Action<IServiceCollection>? configure = null)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
++        builder.Services.ConfigureHttpJsonOptions(options =>
++        {
++            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ModuleTypeDto>());
++            options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<WardSubmissionStateDto>());
++        });
++        configure?.Invoke(builder.Services);
++
++        var app = builder.Build();
++        app.MapAssignmentEndpoints(app.Services.GetRequiredService<IFeatureFlagService>());
++        await app.StartAsync();
++        return app;
++    }
++
++    private static HttpClient CreateClient(WebApplication app)
++        => ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++
++    private static WardAssignmentViewDto SampleView(bool unlocked = true)
++    {
++        var module = new WardModuleViewDto(ModuleId, ModuleTypeDto.Video, "Watch me", "https://v",
++            0, 80, true, unlocked ? 100 : 40, unlocked ? DateTimeOffset.UtcNow : null);
++        return new WardAssignmentViewDto(AssignmentId, "Gated", DateTimeOffset.UtcNow, unlocked, [module]);
++    }
++
++    [TestMethod]
++    public async Task ProgressPost_Returns204_WhenRecorded()
++    {
++        var handler = new Mock<ICommandHandler<RecordModuleProgressCommand, bool>>();
++        handler.Setup(h => h.HandleAsync(It.IsAny<RecordModuleProgressCommand>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++
++        await using var app = await StartHostAsync(s => s.AddSingleton<
++            ICommandHandler<RecordModuleProgressCommand, bool>>(handler.Object));
++        var client = CreateClient(app);
++
++        var response = await client.PostAsJsonAsync(ProgressUrl, new RecordModuleProgressRequest(50));
++        response.StatusCode.Should().Be(HttpStatusCode.NoContent);
++    }
++
++    [TestMethod]
++    public async Task ProgressPost_Returns404_WhenModuleMissing()
++    {
++        var handler = new Mock<ICommandHandler<RecordModuleProgressCommand, bool>>();
++        handler.Setup(h => h.HandleAsync(It.IsAny<RecordModuleProgressCommand>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(false);
++
++        await using var app = await StartHostAsync(s => s.AddSingleton<
++            ICommandHandler<RecordModuleProgressCommand, bool>>(handler.Object));
++        var client = CreateClient(app);
++
++        var response = await client.PostAsJsonAsync(ProgressUrl, new RecordModuleProgressRequest(50));
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    [TestMethod]
++    public async Task WardView_Returns200_WithPerModuleProgressAndUnlockFlag()
++    {
++        var handler = new Mock<IQueryHandler<GetWardAssignmentView, WardAssignmentViewDto?>>();
++        handler.Setup(h => h.HandleAsync(It.IsAny<GetWardAssignmentView>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(SampleView(unlocked: true));
++
++        await using var app = await StartHostAsync(s => s.AddSingleton<
++            IQueryHandler<GetWardAssignmentView, WardAssignmentViewDto?>>(handler.Object));
++        var client = CreateClient(app);
++
++        var view = await client.GetFromJsonAsync<WardAssignmentViewDto>(WardViewUrl, ReadOptions);
++        view.Should().NotBeNull();
++        view!.QuestionsUnlocked.Should().BeTrue();
++        view.Modules.Should().ContainSingle();
++        view.Modules[0].PercentComplete.Should().Be(100);
++        view.Modules[0].CompletedAt.Should().NotBeNull();
++    }
++
++    [TestMethod]
++    public async Task WardView_Returns404_WhenAssignmentMissing()
++    {
++        var handler = new Mock<IQueryHandler<GetWardAssignmentView, WardAssignmentViewDto?>>();
++        handler.Setup(h => h.HandleAsync(It.IsAny<GetWardAssignmentView>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync((WardAssignmentViewDto?)null);
++
++        await using var app = await StartHostAsync(s => s.AddSingleton<
++            IQueryHandler<GetWardAssignmentView, WardAssignmentViewDto?>>(handler.Object));
++        var client = CreateClient(app);
++
++        var response = await client.GetAsync(WardViewUrl);
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    [TestMethod]
++    public async Task WardList_Returns200_WithHasLockedModules()
++    {
++        var handler = new Mock<IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]>>();
++        handler.Setup(h => h.HandleAsync(It.IsAny<ListWardAssignments>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync([new WardAssignmentListItemDto(AssignmentId, "Gated", DateTimeOffset.UtcNow,
++                WardSubmissionStateDto.InProgress, HasLockedModules: true)]);
++
++        await using var app = await StartHostAsync(s => s.AddSingleton<
++            IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]>>(handler.Object));
++        var client = CreateClient(app);
++
++        var items = await client.GetFromJsonAsync<WardAssignmentListItemDto[]>(WardListUrl, ReadOptions);
++        items.Should().ContainSingle();
++        items[0].HasLockedModules.Should().BeTrue();
++        items[0].State.Should().Be(WardSubmissionStateDto.InProgress);
++    }
++
++    [TestMethod]
++    public async Task Submission_Returns409_WhenRequiredModuleIncomplete()
++    {
++        var handler = new Mock<ICommandHandler<CreateStudentSubmissionCommand, SubmissionFeedbackDto?>>();
++        handler.Setup(h => h.HandleAsync(It.IsAny<CreateStudentSubmissionCommand>(), It.IsAny<CancellationToken>()))
++            .ThrowsAsync(new RequiredModuleIncompleteException("required module x not completed"));
++
++        await using var app = await StartHostAsync(s => s.AddSingleton<
++            ICommandHandler<CreateStudentSubmissionCommand, SubmissionFeedbackDto?>>(handler.Object));
++        var client = CreateClient(app);
++
++        var response = await client.PostAsJsonAsync(SubmissionUrl, new { Content = "work", Answers = Array.Empty<SubmissionAnswerDto>() });
++        response.StatusCode.Should().Be(HttpStatusCode.Conflict);
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs
+index b2afc1d4..6ac08af4 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/CreateStudentSubmissionScoringHandlerTests.cs
+@@ -33,6 +33,8 @@ public class CreateStudentSubmissionScoringHandlerTests
+ 
+     private static readonly Guid Q1 = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+     private static readonly Guid Q2 = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
++    private static readonly Guid RequiredModuleId = Guid.Parse("c1111111-1111-1111-1111-111111111111");
++    private static readonly Guid OptionalModuleId = Guid.Parse("c2222222-2222-2222-2222-222222222222");
+     private static readonly Guid OptA = Guid.Parse("a1111111-1111-1111-1111-111111111111");
+     private static readonly Guid OptB = Guid.Parse("b1111111-1111-1111-1111-111111111111");
+ 
+@@ -101,6 +103,19 @@ public class CreateStudentSubmissionScoringHandlerTests
+         public Task<GuardianGateDto?> GetGuardianGateAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<GuardianGateDto?>(null);
+     }
+ 
++    private sealed class FakeModuleProgressRepository : IModuleProgressRepository
++    {
++        public List<ModuleProgress> Rows { get; } = new();
++        public Task<ModuleProgress?> GetAsync(Guid a, Guid s, Guid m, CancellationToken ct = default)
++            => Task.FromResult(Rows.FirstOrDefault(p => p.AssignmentId == a && p.StudentId == s && p.ContentModuleId == m));
++        public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
++            => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
++        public void Add(ModuleProgress p) => Rows.Add(p);
++        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
++            => Task.FromResult(new List<AssignmentSummary>());
++        public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
++    }
++
+     private sealed class RecordingScoringEngine : IScoringEngine
+     {
+         public int CallCount;
+@@ -182,14 +197,88 @@ public class CreateStudentSubmissionScoringHandlerTests
+     private static CreateStudentSubmissionCommandHandler NewHandler(
+         Assignment assignment,
+         FakeSubmissionRepository subRepo,
+-        IScoringEngine scoring)
++        IScoringEngine scoring,
++        FakeModuleProgressRepository? moduleRepo = null)
+     {
+         var assignmentRepo = new FakeAssignmentRepository { Assignment = assignment };
+         return new CreateStudentSubmissionCommandHandler(
+-            assignmentRepo, subRepo, new FakeTenantProvider(TenantId),
++            assignmentRepo, subRepo, moduleRepo ?? new FakeModuleProgressRepository(), new FakeTenantProvider(TenantId),
+             scoring, NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+     }
+ 
++    // WS-D1 (spec §3.3): a TeacherGraded, no-mandatory-review assignment carrying
++    // one required (video, 80% threshold) + one optional (guide) module.
++    private static Assignment NewModuleGatedAssignment()
++    {
++        var a = Assignment.Create("Gated", null, AssignmentType.Digital,
++            GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
++            TopicId, null, null, null, TeacherId, mandatoryReview: false)
++            .WithTenant(new FakeTenantProvider(TenantId));
++        var req = a.AddModule(ModuleType.Video, "https://video", title: "Req", minCompletionThresholdPercent: 80, isRequired: true);
++        var opt = a.AddModule(ModuleType.Guide, "https://guide", title: "Opt", minCompletionThresholdPercent: 100, isRequired: false);
++        SetId(req, RequiredModuleId);
++        SetId(opt, OptionalModuleId);
++        return a;
++    }
++
++    // ── WS-D1 (spec §3.3): server-side module gate ───────────────────────
++
++    [TestMethod]
++    public async Task NoModules_Passes()
++    {
++        var assignment = NewTeacherGradedAssignment();
++        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine());
++        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
++        await act.Should().NotThrowAsync();
++    }
++
++    [TestMethod]
++    public async Task RequiredIncomplete_Blocks()
++    {
++        var assignment = NewModuleGatedAssignment();
++        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine());
++        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
++        await act.Should().ThrowAsync<RequiredModuleIncompleteException>();
++    }
++
++    [TestMethod]
++    public async Task RequiredComplete_Passes()
++    {
++        var assignment = NewModuleGatedAssignment();
++        var moduleRepo = new FakeModuleProgressRepository();
++        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, RequiredModuleId, 100, 80));
++        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine(), moduleRepo);
++        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
++        await act.Should().NotThrowAsync();
++    }
++
++    [TestMethod]
++    public async Task OptionalIncomplete_Passes()
++    {
++        var assignment = NewModuleGatedAssignment();
++        var moduleRepo = new FakeModuleProgressRepository();
++        // Required module complete; only the OPTIONAL module is below its threshold
++        // — an incomplete optional module does not block submission.
++        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, RequiredModuleId, 100, 80));
++        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, OptionalModuleId, 50, 100));
++        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine(), moduleRepo);
++
++        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
++        await act.Should().NotThrowAsync();
++    }
++
++    [TestMethod]
++    public async Task ThresholdExactly_Meets_Passes()
++    {
++        var assignment = NewModuleGatedAssignment();
++        var moduleRepo = new FakeModuleProgressRepository();
++        // 80% == the 80 threshold → CompletedAt stamped on create → passes.
++        moduleRepo.Rows.Add(ModuleProgress.Create(TenantId, AssignmentId, StudentId, RequiredModuleId, 80, 80));
++        var handler = NewHandler(assignment, new FakeSubmissionRepository(), new RecordingScoringEngine(), moduleRepo);
++        Func<Task> act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "work"));
++        await act.Should().NotThrowAsync();
++    }
++
+     private static IReadOnlyList<SubmissionAnswerDto> SampleAnswers() =>
+     [
+         new(Q1, OptA, null),
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/ModuleProgressTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/ModuleProgressTests.cs
+new file mode 100644
+index 00000000..0c5ff0a5
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/ModuleProgressTests.cs
+@@ -0,0 +1,86 @@
++using FluentAssertions;
++using SchoolCollab.Assignments.Core.Domain;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-D1 / decision (b) — <see cref="ModuleProgress"/> is the per-ward
++/// content-module progress row. Recording is monotonic + idempotent
++/// (replays / out-of-order heartbeat posts never regress) and
++/// <see cref="ModuleProgress.CompletedAt"/> is stamped once the reported
++/// percent first meets the module threshold, never un-stamped.
++/// </summary>
++[TestClass]
++public class ModuleProgressTests
++{
++    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid AssignmentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid StudentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++    private static readonly Guid ModuleId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++
++    private static ModuleProgress NewProgress(int percent, int threshold = 100)
++        => ModuleProgress.Create(TenantId, AssignmentId, StudentId, ModuleId, percent, threshold);
++
++    [TestMethod]
++    public void Record_ClampsPercent_To0And100()
++    {
++        NewProgress(-25).PercentComplete.Should().Be(0);
++        NewProgress(125).PercentComplete.Should().Be(100);
++
++        var progress = NewProgress(50);
++        progress.Record(200, 100);
++        progress.PercentComplete.Should().Be(100);
++        progress.Record(-5, 100);
++        progress.PercentComplete.Should().Be(100, "record never regresses progress");
++    }
++
++    [TestMethod]
++    public void Record_Monotonic_LowerReportIsNoOp()
++    {
++        var progress = NewProgress(50);
++        var before = progress.UpdatedAt;
++        progress.Record(30, 100);
++        progress.Record(50, 100);
++        progress.PercentComplete.Should().Be(50, "at-or-below reports are no-ops");
++        progress.CompletedAt.Should().BeNull();
++        progress.UpdatedAt.Should().Be(before, "a no-op report does not mutate or re-stamp UpdatedAt");
++    }
++
++    [TestMethod]
++    public void CompletedAt_StampsOnce_AtThreshold()
++    {
++        var progress = NewProgress(70, threshold: 80);
++        progress.CompletedAt.Should().BeNull();
++        progress.Record(80, 80);
++        progress.CompletedAt.Should().NotBeNull();
++
++        var stamped = progress.CompletedAt;
++        progress.Record(95, 80);
++        progress.CompletedAt.Should().Be(stamped, "completion is never re-stamped");
++        progress.PercentComplete.Should().Be(95);
++    }
++
++    [TestMethod]
++    public void CompletedAt_NotStamped_BelowThreshold()
++    {
++        var progress = NewProgress(10, threshold: 80);
++        progress.Record(79, 80);
++        progress.CompletedAt.Should().BeNull();
++        progress.Record(80, 80);
++        progress.CompletedAt.Should().NotBeNull();
++    }
++
++    [TestMethod]
++    public void Record_Idempotent_Replay()
++    {
++        var progress = NewProgress(100, threshold: 50);
++        progress.CompletedAt.Should().NotBeNull();
++        var stamped = progress.CompletedAt;
++        var updated = progress.UpdatedAt;
++
++        progress.Record(100, 50);
++        progress.PercentComplete.Should().Be(100);
++        progress.CompletedAt.Should().Be(stamped);
++        progress.UpdatedAt.Should().Be(updated, "an equal report is a full no-op");
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/RecordModuleProgressCommandHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/RecordModuleProgressCommandHandlerTests.cs
+new file mode 100644
+index 00000000..3fb1db54
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/RecordModuleProgressCommandHandlerTests.cs
+@@ -0,0 +1,155 @@
++using FluentAssertions;
++using Microsoft.Extensions.Logging.Abstractions;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RecordModuleProgress;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Assignments.Core.DTOs;
++using SchoolCollab.Core.Tenancy;
++
++namespace SchoolCollab.Assignments.Tests.Unit;
++
++/// <summary>
++/// WS-D1 / decision (d) — <see cref="RecordModuleProgressCommandHandler"/>
++/// upserts the per-ward progress row keyed by (assignment, student, module):
++/// first report creates it, later reports reconcile monotonically (no second
++/// row, no regression), an unknown module returns false (route 404) and a
++/// missing assignment throws. The row is stamped with the tenant context.
++/// </summary>
++[TestClass]
++public class RecordModuleProgressCommandHandlerTests
++{
++    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-000000000010");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-000000000001");
++    private static readonly Guid AssignmentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid StudentId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++    private static readonly Guid ModuleId = Guid.Parse("44444444-4444-4444-4444-444444444444");
++
++    private sealed class FakeTenantProvider : ITenantProvider
++    {
++        private readonly TenantContext _ctx;
++        public FakeTenantProvider(Guid tenantId) => _ctx = new TenantContext(tenantId, tenantId.ToString(), TenantType.School);
++        public TenantContext GetTenantContext() => _ctx;
++    }
++
++    private sealed class FakeAssignmentRepository(Assignment? assignment) : IAssignmentRepository
++    {
++        public Task<Assignment?> GetAsync(Guid id, CancellationToken ct = default) => Task.FromResult(assignment);
++        public Task AddAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task UpdateAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task DeleteAsync(Assignment a, CancellationToken ct = default) => Task.CompletedTask;
++        public Task<List<AssignmentSummary>> ListAsync(AssignmentStatus? s, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSummary>());
++        public void DetectChanges() { }
++        public Task<List<AssignmentSweepCandidate>> ListScheduledForAutoPublishAsync(DateTimeOffset n, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++        public Task<List<AssignmentSweepCandidate>> ListDueForArchiveAsync(DateTimeOffset n, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSweepCandidate>());
++    }
++
++    private sealed class FakeModuleProgressRepository : IModuleProgressRepository
++    {
++        public List<ModuleProgress> Rows { get; } = new();
++        public int SaveCalls;
++        public Task<ModuleProgress?> GetAsync(Guid a, Guid s, Guid m, CancellationToken ct = default)
++            => Task.FromResult(Rows.FirstOrDefault(p => p.AssignmentId == a && p.StudentId == s && p.ContentModuleId == m));
++        public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
++            => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
++        public void Add(ModuleProgress p) => Rows.Add(p);
++        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSummary>());
++        public Task<int> SaveChangesAsync(CancellationToken ct = default) { SaveCalls++; return Task.FromResult(1); }
++    }
++
++    private static Assignment NewAssignmentWithModule(int threshold = 80)
++    {
++        var a = Assignment.Create("Gated", null, AssignmentType.Digital,
++            GradingFormat.TeacherGraded, TargetAudienceType.AllStudents,
++            TopicId, null, null, null, TeacherId, mandatoryReview: false)
++            .WithTenant(new FakeTenantProvider(TenantId));
++        SetId(a, AssignmentId);
++        var module = a.AddModule(ModuleType.Video, "https://video", title: "Req", minCompletionThresholdPercent: threshold, isRequired: true);
++        SetId(module, ModuleId);
++        return a;
++    }
++
++    private static void SetId(object entity, Guid id) =>
++        entity.GetType().GetProperty("Id")!.SetValue(entity, id);
++
++    private static RecordModuleProgressCommandHandler NewHandler(Assignment? assignment, FakeModuleProgressRepository moduleRepo)
++        => new(
++            new FakeAssignmentRepository(assignment),
++            moduleRepo,
++            new FakeTenantProvider(TenantId),
++            NullLogger<RecordModuleProgressCommandHandler>.Instance);
++
++    [TestMethod]
++    public async Task FirstReport_UpsertsRow()
++    {
++        var moduleRepo = new FakeModuleProgressRepository();
++        var handler = NewHandler(NewAssignmentWithModule(), moduleRepo);
++
++        var ok = await handler.HandleAsync(new RecordModuleProgressCommand(AssignmentId, StudentId, ModuleId, 50));
++
++        ok.Should().BeTrue();
++        moduleRepo.Rows.Should().ContainSingle();
++        var row = moduleRepo.Rows.Single();
++        row.TenantId.Should().Be(TenantId, "the row is stamped with the tenant context");
++        row.PercentComplete.Should().Be(50);
++        row.CompletedAt.Should().BeNull();
++        moduleRepo.SaveCalls.Should().Be(1);
++    }
++
++    [TestMethod]
++    public async Task Replay_LowerOrEqual_IsNoOp_NoSecondRow()
++    {
++        var moduleRepo = new FakeModuleProgressRepository();
++        var handler = NewHandler(NewAssignmentWithModule(), moduleRepo);
++
++        await handler.HandleAsync(new RecordModuleProgressCommand(AssignmentId, StudentId, ModuleId, 40));
++        var first = moduleRepo.Rows.Single();
++        await handler.HandleAsync(new RecordModuleProgressCommand(AssignmentId, StudentId, ModuleId, 30));
++
++        moduleRepo.Rows.Should().ContainSingle("an equal/lower replay never adds a row");
++        moduleRepo.Rows.Single().Should().BeSameAs(first, "upsert mutates the existing row, it is not replaced");
++        moduleRepo.Rows.Single().PercentComplete.Should().Be(40, "progress never regresses");
++    }
++
++    [TestMethod]
++    public async Task HigherReport_RaisesAndStampsCompletion()
++    {
++        var moduleRepo = new FakeModuleProgressRepository();
++        var handler = NewHandler(NewAssignmentWithModule(threshold: 80), moduleRepo);
++
++        await handler.HandleAsync(new RecordModuleProgressCommand(AssignmentId, StudentId, ModuleId, 70));
++        await handler.HandleAsync(new RecordModuleProgressCommand(AssignmentId, StudentId, ModuleId, 90));
++
++        var row = moduleRepo.Rows.Single();
++        row.PercentComplete.Should().Be(90);
++        row.CompletedAt.Should().NotBeNull("90 >= the 80 threshold stamps completion");
++    }
++
++    [TestMethod]
++    public async Task ModuleNotOnAssignment_ReturnsFalse()
++    {
++        var moduleRepo = new FakeModuleProgressRepository();
++        var assignment = NewAssignmentWithModule();
++        SetId(assignment, AssignmentId);
++        // A real (guid) module id that is NOT the assignment's module.
++        var handler = NewHandler(assignment, moduleRepo);
++
++        var ok = await handler.HandleAsync(
++            new RecordModuleProgressCommand(AssignmentId, StudentId, Guid.NewGuid(), 50));
++
++        ok.Should().BeFalse();
++        moduleRepo.Rows.Should().BeEmpty();
++    }
++
++    [TestMethod]
++    public async Task AssignmentMissing_Throws()
++    {
++        var moduleRepo = new FakeModuleProgressRepository();
++        var handler = NewHandler(assignment: null, moduleRepo);
++
++        var act = () => handler.HandleAsync(new RecordModuleProgressCommand(AssignmentId, StudentId, ModuleId, 50));
++        await act.Should().ThrowAsync<AssignmentNotFoundException>();
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+index d14ff58e..de90b850 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SubmissionEngineTests.cs
+@@ -45,6 +45,25 @@ public class SubmissionEngineTests
+     private static FakeAssignmentRepository AssignmentRepo(Assignment assignment) => new() { Assignment = assignment };
+     private static IScoringEngine Scoring() => new ScoringEngine();
+ 
++    // WS-D1 (spec §3.3): empty module-progress repo for submission tests whose
++    // assignments carry no required modules (the gate is additive — a no-module
++    // assignment always passes). Gate-specific seeding lives in
++    // CreateStudentSubmissionScoringHandlerTests.
++    private static FakeModuleProgressRepository ModuleProgressRepo() => new();
++
++    private sealed class FakeModuleProgressRepository : IModuleProgressRepository
++    {
++        public List<ModuleProgress> Rows { get; } = new();
++        public Task<ModuleProgress?> GetAsync(Guid a, Guid s, Guid m, CancellationToken ct = default)
++            => Task.FromResult(Rows.FirstOrDefault(p => p.AssignmentId == a && p.StudentId == s && p.ContentModuleId == m));
++        public Task<List<ModuleProgress>> ListProgressForAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default)
++            => Task.FromResult(Rows.Where(p => p.AssignmentId == a && p.StudentId == s).ToList());
++        public void Add(ModuleProgress p) => Rows.Add(p);
++        public Task<List<AssignmentSummary>> ListWardAssignmentsAsync(Guid studentId, DateTimeOffset nowUtc, CancellationToken ct = default)
++            => Task.FromResult(new List<AssignmentSummary>());
++        public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
++    }
++
+     private static Assignment NewAssignment(bool mandatoryReview = true)
+     {
+         var a = Assignment.Create("Math", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
+@@ -343,7 +362,7 @@ public class SubmissionEngineTests
+         var assignmentRepo = AssignmentRepo(assignment);
+         var submissionRepo = new FakeSubmissionRepository();
+         var handler = new CreateStudentSubmissionCommandHandler(
+-            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
++            assignmentRepo, submissionRepo, ModuleProgressRepo(), TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "my work"));
+ 
+@@ -361,7 +380,7 @@ public class SubmissionEngineTests
+         var gate = GuardianSubmissionGate.Create(TenantId, AssignmentId, StudentId); // not reviewed → disabled
+         var submissionRepo = new FakeSubmissionRepository { GateToReturn = gate };
+         var handler = new CreateStudentSubmissionCommandHandler(
+-            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
++            assignmentRepo, submissionRepo, ModuleProgressRepo(), TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+ 
+         var act = async () => await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "x"));
+         await act.Should().ThrowAsync<UnauthorizedAccessException>();
+@@ -376,7 +395,7 @@ public class SubmissionEngineTests
+         gate.Review(GuardianId, approve: true, null); // enabled
+         var submissionRepo = new FakeSubmissionRepository { GateToReturn = gate };
+         var handler = new CreateStudentSubmissionCommandHandler(
+-            assignmentRepo, submissionRepo, TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
++            assignmentRepo, submissionRepo, ModuleProgressRepo(), TenantProvider(), Scoring(), NullLogger<CreateStudentSubmissionCommandHandler>.Instance);
+ 
+         await handler.HandleAsync(new CreateStudentSubmissionCommand(AssignmentId, StudentId, "my work"));
+ 

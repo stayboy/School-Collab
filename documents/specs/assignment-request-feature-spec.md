@@ -93,7 +93,7 @@ The core object is the **Assignment Request (AR)** — it moves through a lifecy
 - `ContentModule` (id, ar_id, type: video|guide, url/file, min_completion_threshold, order)
 - `Recipient` (id, ar_id, ward_id, guardian_id[], notification_status, completion_status, signature_status)
 - `SubmissionAttempt` (id, recipient_id, answers[], score, passed, timestamp)
-- `SignatureEvent` (id, recipient_id, signer_id, signed_at, ip, device, consent_text_shown, certificate_url)
+- `SignatureEvent` (id, recipient_id, signer_id, signed_at, ip, device, consent_text_shown, certificate_storage_path) — v1 (ar-11) stores a local-FS `IFileStore` path populated transactionally at finalize; URL-form export is Phase-5 WS-G retention
 - `NotificationLog` (id, ar_id, recipient_id, channel, sent_at, delivery_status)
 
 ---

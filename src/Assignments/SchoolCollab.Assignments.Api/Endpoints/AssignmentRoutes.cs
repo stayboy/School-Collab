@@ -32,6 +32,8 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.EnableStudentSubmi
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.OverrideStudentSubmissionAttempts;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.RecordModuleProgress;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
@@ -666,6 +668,12 @@ public static class AssignmentRoutes
             {
                 return Results.Problem(ex.Message, statusCode: 409);
             }
+            // WS-D1 / spec §3.3: required content modules not completed → 409
+            // (the module-progress gate on submission).
+            catch (RequiredModuleIncompleteException ex)
+            {
+                return Results.Problem(ex.Message, statusCode: 409);
+            }
             // WS-A3 / spec §3.3: answer validation → 400 (matches the
             // group's catch pattern).
             catch (SubmissionAnswerValidationException ex)
@@ -974,6 +982,58 @@ public static class AssignmentRoutes
                 return Results.BadRequest(new { ex.Message });
             }
         }).DisableAntiforgery();
+
+        // ── WS-D1 (spec §3.3): per-ward module-progress heartbeats ─────
+        // 204 on a recorded/upserted report; 404 when the assignment or the
+        // module is missing. Same auth posture as the other student-scoped
+        // routes (token-auth re-scoping is F1 / slice 2b — recorded OUT).
+        group.MapPost("/{id:guid}/students/{studentId:guid}/modules/{moduleId:guid}/progress", async (
+            Guid id,
+            Guid studentId,
+            Guid moduleId,
+            [FromBody] RecordModuleProgressRequest req,
+            [FromServices] ICommandHandler<RecordModuleProgressCommand, bool> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var ok = await handler.HandleAsync(new RecordModuleProgressCommand(id, studentId, moduleId, req.Percent), ct);
+                return ok ? Results.NoContent() : Results.NotFound();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+        });
+
+        // WS-D1/WS-A5: the ward-facing assignment view — modules with per-ward
+        // progress + the questions-unlocked gate flag (the 2b player binds to this).
+        group.MapGet("/{id:guid}/students/{studentId:guid}/modules", async (
+            Guid id,
+            Guid studentId,
+            [FromServices] IQueryHandler<GetWardAssignmentView, WardAssignmentViewDto?> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(new GetWardAssignmentView(id, studentId), ct);
+            return result is null ? Results.NotFound() : Results.Ok(result);
+        });
+
+        return group;
+    }
+
+    /// <summary>WS-A5 — the ward assignment list, mounted under a sibling
+    /// <c>/students</c> group (not under <c>/assignments</c>) so the resource
+    /// path is <c>GET /students/{studentId}/assignments</c> exactly.</summary>
+    public static RouteGroupBuilder MapWardAssignmentRoutes(this RouteGroupBuilder group)
+    {
+        group.MapGet("/{studentId:guid}/assignments", async (
+            Guid studentId,
+            [FromServices] IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]> handler,
+            CancellationToken ct) =>
+        {
+            var result = await handler.HandleAsync(new ListWardAssignments(studentId), ct);
+            return Results.Ok(result);
+        });
 
         return group;
     }

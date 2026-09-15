@@ -842,3 +842,25 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   container-controlled Linux runs).
   **Next:** Phase 2 ward experience is the largest remaining gap after C3 (spec §3.2 D1); then Phase 4 WS-E;
   D-6 identity before Phase 5. #232 (ar-10) still open/unmerged — merge order: #232 then stack/11 PR.
+- `ar-12-ward-gating-core` — **CLOSED 2026-09-15, LIGHT round (Tiers 1–2)**; Phase 2 slice **2a**
+  (`rounds/round-ar-12-ward-gating-core.md` + `diffs-ar-12-ward-gating-core.patch`; branch
+  `stack/12-ar-12-ward-gating-core` cut from `main` @ `d2169aef`; commit pending owner authorization).
+  Delivered (WS-D1 core + WS-A5, **no UI**): `ModuleProgress` entity (per ward × module, `PercentComplete`
+  0–100, `CompletedAt` stamped once at the module's `MinCompletionThresholdPercent`) + ONE additive migration;
+  idempotent **monotonic** `Record` (replays/out-of-order heartbeats safe, never regresses or re-stamps);
+  `RecordModuleProgressCommand` + `POST /{id}/students/{sid}/modules/{moduleId}/progress` (204/404);
+  **server-side module gate** on `CreateStudentSubmission` — any required module incomplete throws the new typed
+  `RequiredModuleIncompleteException` → **409** (additive: assignments with no required modules pass; the
+  pre-submission `GuardianSubmissionGate` is untouched, per the breakdown's gate-vs-sign-off risk note);
+  ward queries: `GetWardAssignmentView` (`GET /{id}/students/{sid}/modules` → per-module progress +
+  `QuestionsUnlocked`) and `ListWardAssignments` (`GET /students/{sid}/assignments` → published/active,
+  submission state, `HasLockedModules`) with contract DTOs. 26 files (16 created / 10 modified), 2,818-line
+  patch. Pipeline: worker pass 1 (`deepseek-v4-flash`; 5 deviations adjudicated A-1…A-5) → static reviewer
+  (`kimi-k2.7-code`) **P2-only, no P1** → 2 real P2s fixed parent-side (vacuous `UpdatedAt` self-comparison;
+  missing `AsNoTracking`) with the remaining P2 (repository cohesion) deferred to 2b. Authoritative: build 0
+  errors; **1,691/0** across the 8 projects (Assignments 591/0, Assignments.Api 58/0, Architecture 20/0).
+  **Residuals:** ward-list N+1 (v1); recipient-link-only targeting (grade/group → 2b); read-then-write race on
+  concurrent identical first reports (rare; unique index protects integrity); ward routes keep the teacher/admin
+  OIDC posture until F1.
+  **Next:** slice **2b** — F1 host/auth decision + D2 ward player UI (binds `QuestionsUnlocked`/`PercentComplete`)
+  + the ar-12 carried P2s; then 2c (F2 ward experience), Phase 4 WS-E, D-6, Phase 5 WS-G.

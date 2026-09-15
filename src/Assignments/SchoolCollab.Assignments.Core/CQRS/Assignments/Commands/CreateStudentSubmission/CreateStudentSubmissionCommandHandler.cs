@@ -18,6 +18,7 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.CreateStudentS
 public sealed class CreateStudentSubmissionCommandHandler(
     IAssignmentRepository assignmentRepository,
     ISubmissionRepository submissionRepository,
+    IModuleProgressRepository moduleProgressRepository,
     ITenantProvider tenantProvider,
     IScoringEngine scoringEngine,
     ILogger<CreateStudentSubmissionCommandHandler> logger) : ICommandHandler<CreateStudentSubmissionCommand, SubmissionFeedbackDto?>
@@ -62,7 +63,32 @@ public sealed class CreateStudentSubmissionCommandHandler(
                 "A teacher may override the cap for this submission.");
         }
 
-        // WS-D plug point: module-progress gating lands here (decision (k)).
+        // ── WS-D1 (spec §3.3): module-progress gate ─────────────────────
+        // Additive: an assignment with NO required modules always passes
+        // (existing tests stay green). When the assignment has required
+        // modules, the ward must have completed each one (CompletedAt
+        // stamped) before submitting — otherwise the submit is blocked with
+        // RequiredModuleIncompleteException (route → 409).
+        var requiredModuleIds = assignment.Modules
+            .Where(m => m.IsRequired)
+            .Select(m => m.Id)
+            .ToList();
+        if (requiredModuleIds.Count > 0)
+        {
+            var progressByModule = (await moduleProgressRepository
+                    .ListProgressForAssignmentStudentAsync(command.AssignmentId, command.StudentId, cancellationToken))
+                .ToDictionary(p => p.ContentModuleId);
+            var incomplete = requiredModuleIds
+                .Where(id => progressByModule.TryGetValue(id, out var p)
+                    ? p.CompletedAt is null
+                    : true)
+                .ToList();
+            if (incomplete.Count > 0)
+            {
+                throw new RequiredModuleIncompleteException(
+                    $"Required content modules not completed for assignment {command.AssignmentId} / student {command.StudentId}: {string.Join(", ", incomplete)}.");
+            }
+        }
 
         // ── WS-A3 / spec §3.3: answer validation ─────────────────────────
         // First violation → 400 via SubmissionAnswerValidationException.
