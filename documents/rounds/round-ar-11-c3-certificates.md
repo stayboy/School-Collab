@@ -176,6 +176,27 @@ Residuals / notes:
 - Names degrade to raw ids on directory miss (GetSignOffContext precedent) — recorded, accepted.
 - QuestPDF pinned 2026.8.0; do not bump past it without owner instruction (2026.9.0 font breaking-changes).
 
+## Post-acceptance CI fix (2026-09-15 — same branch, follow-up commit)
+
+`#233`'s first CI run failed on `AssignmentCreateBunitTests.Create_AuthorOverrides_OverridesPrefillAndSubmitsValue`
+— the **same CI-only flake** first seen on #232's CI. The diagnostic wrapper added to that test (which rode
+this branch's commit) made the root cause visible: `Page _error: Please select a subject.` — i.e. the test's
+reflection-primed `_selectedSubject` was **null at submit**.
+
+**Root cause (test-side, product correct):** `Create.razor` has two `@bind-*:after` handlers that clear
+`_selectedSubject` for the FR-58 re-filter — line 234 `@bind-SelectedValues:after="OnSelectedGroupsChangedAsync"`
+(unconditional clear) and line 279 `@bind-Value:after="OnDueDateChangedAsync"`. FluentUI raises those callbacks
+**one render pass late**; on loaded CI runners the pass lands after the test's reflection write, so `SubmitAsync`
+reads null and bails at the subject guard. Locally the queue drained first (~55 clean runs; CI hit it twice in
+~3 runs).
+
+**Fix (test-only, one hunk):** the priming write now happens **inside the same `cut.InvokeAsync` delegate as the
+`SubmitAsync` invocation**, so no queued binding cascade can interleave write and read. The diagnostic wrapper is
+retained (it is what made this diagnosable).
+
+**Verification:** local 576/0; Linux Release + CI env in the container **0/12 failed**; interleaving window
+eliminated by construction. Captured as project skill `fix-flaky-bunit-fluentui-after-cascade`.
+
 ## Execution provenance
 
 | Role | Model | Run | Outcome |
