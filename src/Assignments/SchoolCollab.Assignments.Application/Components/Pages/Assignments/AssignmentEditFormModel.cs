@@ -34,6 +34,12 @@ public sealed class AssignmentEditFormModel
     /// (decision (a)).</summary>
     public List<AttachmentEditorRow> Attachments { get; } = [];
 
+    /// <summary>WS-B2 (spec §3.4 / decision g): the URL rows the author added
+    /// as AI reference material. Mapped into the create request's
+    /// <c>Resources</c> as <see cref="ResourceKindDto.Url"/> rows and fed to the
+    /// question generator as <see cref="Resources"/> texts (≤3).</summary>
+    public List<ResourceUrlRow> ResourceUrls { get; } = [];
+
     /// <summary>Optional free-text prompt override (FR-230 / decision 8).
     /// When blank, the AI host loads the embedded system prompt. When
     /// set, the override is sent as a user-role framing message.</summary>
@@ -63,6 +69,17 @@ public sealed class AssignmentEditFormModel
     /// required after completion. Round-trips through create/update so
     /// the edit page never silently resets the flag.</summary>
     public bool RequiresSignature { get; set; }
+
+    /// <summary>WS-B2 (spec §3.4 line 70): requested per-difficulty counts.
+    /// Round-trip through create/update so the edit page never silently resets
+    /// the AI difficulty mix.</summary>
+    public int? DifficultyEasyCount { get; set; }
+
+    /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
+    public int? DifficultyMediumCount { get; set; }
+
+    /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
+    public int? DifficultyHardCount { get; set; }
 
     /// <summary>Fixed question page size for the editor + review paginator
     /// (spec §0 decision 9 / FR-240).</summary>
@@ -99,6 +116,10 @@ public sealed class AssignmentEditFormModel
         MaxAttempts = assignment.MaxAttempts;
         // WS-C1 (spec §7 Q1): guardian-signature snapshot round-trip.
         RequiresSignature = assignment.RequiresSignature;
+        // WS-B2 (spec §3.4 line 70): difficulty mix round-trip.
+        DifficultyEasyCount = assignment.DifficultyEasyCount;
+        DifficultyMediumCount = assignment.DifficultyMediumCount;
+        DifficultyHardCount = assignment.DifficultyHardCount;
     }
 
     /// <summary>
@@ -160,6 +181,19 @@ public sealed class AssignmentEditFormModel
                 .ToList();
         }
 
+        IReadOnlyList<NewResourceDto>? resources = null;
+        if (ResourceUrls.Count > 0)
+        {
+            resources = ResourceUrls
+                .Select(r => new NewResourceDto(
+                    ResourceKind: ResourceKindDto.Url,
+                    Url: r.Url,
+                    StoragePath: null,
+                    DisplayName: r.DisplayName,
+                    IncludedInGeneration: true))
+                .ToList();
+        }
+
         return new CreateAssignmentRequest(
             Title: Title ?? string.Empty,
             Description: Description,
@@ -174,12 +208,17 @@ public sealed class AssignmentEditFormModel
             AiPromptOverride: AiPromptOverride,
             Questions: questions,
             Attachments: attachments,
+            Resources: resources,
             // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt
             // cap threaded to the wire surface.
             PassScore: PassScore,
             MaxAttempts: MaxAttempts,
             // WS-C1 (spec §7 Q1): guardian-signature snapshot.
-            RequiresSignature: requiresSignature);
+            RequiresSignature: requiresSignature,
+            // WS-B2 (spec §3.4 line 70): difficulty mix threaded to create.
+            DifficultyEasyCount: DifficultyEasyCount,
+            DifficultyMediumCount: DifficultyMediumCount,
+            DifficultyHardCount: DifficultyHardCount);
     }
 
     /// <summary>
@@ -377,6 +416,36 @@ public sealed class AssignmentEditFormModel
             return;
         }
         Attachments.RemoveAt(index);
+    }
+
+    /// <summary>WS-B2 (spec §3.4 / decision g) — adds a reference URL row.
+    /// Trims the input; an empty/blank URL throws <see cref="ArgumentException"/>
+    /// (mirrors the server-side guard), and an exact duplicate returns
+    /// <see langword="false"/> without adding while a new row returns
+    /// <see langword="true"/>.</summary>
+    public bool AddResourceUrl(string url)
+    {
+        var trimmed = url.Trim();
+        if (trimmed.Length == 0)
+        {
+            throw new ArgumentException("A URL is required.", nameof(url));
+        }
+        if (ResourceUrls.Any(r => string.Equals(r.Url, trimmed, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+        ResourceUrls.Add(new ResourceUrlRow(trimmed, null));
+        return true;
+    }
+
+    /// <summary>WS-B2 — removes the reference-URL row at <paramref name="index"/>.</summary>
+    public void RemoveResourceUrlAt(int index)
+    {
+        if (index < 0 || index >= ResourceUrls.Count)
+        {
+            return;
+        }
+        ResourceUrls.RemoveAt(index);
     }
 
     /// <summary>WS-A3 (spec §3.3 + §7 Q4) — client-side submit gate

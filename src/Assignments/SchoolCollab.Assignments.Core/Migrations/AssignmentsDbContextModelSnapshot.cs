@@ -79,6 +79,18 @@ namespace SchoolCollab.Assignments.Core.Migrations
                         .HasColumnType("character varying(5000)")
                         .HasColumnName("description");
 
+                    b.Property<int?>("DifficultyEasyCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("difficulty_easy_count");
+
+                    b.Property<int?>("DifficultyHardCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("difficulty_hard_count");
+
+                    b.Property<int?>("DifficultyMediumCount")
+                        .HasColumnType("integer")
+                        .HasColumnName("difficulty_medium_count");
+
                     b.Property<DateTimeOffset?>("DueDate")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("due_date");
@@ -116,6 +128,10 @@ namespace SchoolCollab.Assignments.Core.Migrations
                     b.Property<DateTimeOffset?>("PublishedAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("published_at");
+
+                    b.Property<string>("QuestionsDraftJson")
+                        .HasColumnType("text")
+                        .HasColumnName("questions_draft_json");
 
                     b.Property<bool>("RequiresSignature")
                         .HasColumnType("boolean")

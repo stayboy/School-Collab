@@ -998,4 +998,119 @@ public class AssignmentFormModelMappingsTests
 
         req.RequiresSignature.Should().BeTrue("ToCreateRequest must thread the author-overridden signature flag (WS-C1)");
     }
+
+    // ── WS-B2 (spec §3.4 line 70): difficulty + resource-URL threading ──
+
+    [TestMethod]
+    public void LoadFrom_CarriesDifficultyCounts()
+    {
+        var dto = MakeAssignment() with { DifficultyEasyCount = 2, DifficultyMediumCount = 3, DifficultyHardCount = 1 };
+        var model = new AssignmentEditFormModel();
+
+        model.LoadFrom(dto);
+
+        model.DifficultyEasyCount.Should().Be(2,
+            "LoadFrom must project the easy count so the edit page never resets the mix (decision (c))");
+        model.DifficultyMediumCount.Should().Be(3);
+        model.DifficultyHardCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public void ToCreateRequest_ThreadsDifficultyCounts()
+    {
+        var model = new AssignmentEditFormModel
+        {
+            Title = "T",
+            DifficultyEasyCount = 2,
+            DifficultyMediumCount = 4,
+            DifficultyHardCount = 1,
+        };
+
+        var req = model.ToCreateRequest(
+            AssignmentTypeDto.Digital,
+            GradingFormatDto.AutoGraded,
+            TargetAudienceTypeDto.AllStudents,
+            TopicId,
+            null,
+            true);
+
+        req.DifficultyEasyCount.Should().Be(2);
+        req.DifficultyMediumCount.Should().Be(4);
+        req.DifficultyHardCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public void ToCreateRequest_ResourceUrls_MapToUrlResourceRows()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddResourceUrl("https://example.com/a");
+        model.AddResourceUrl("https://example.com/b");
+
+        var req = model.ToCreateRequest(
+            AssignmentTypeDto.Digital,
+            GradingFormatDto.AutoGraded,
+            TargetAudienceTypeDto.AllStudents,
+            TopicId,
+            null,
+            true);
+
+        req.Resources.Should().NotBeNull();
+        req.Resources!.Should().HaveCount(2);
+        req.Resources[0].ResourceKind.Should().Be(ResourceKindDto.Url);
+        req.Resources[0].Url.Should().Be("https://example.com/a");
+        req.Resources[0].IncludedInGeneration.Should().BeTrue(
+            "reference-URL rows map as included-in-generation resources (decision g)");
+        req.Resources[1].Url.Should().Be("https://example.com/b");
+    }
+
+    [TestMethod]
+    public void ToCreateRequest_NoResourceUrls_NullResources()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+
+        var req = model.ToCreateRequest(
+            AssignmentTypeDto.Digital,
+            GradingFormatDto.AutoGraded,
+            TargetAudienceTypeDto.AllStudents,
+            TopicId,
+            null,
+            true);
+
+        req.Resources.Should().BeNull("an empty URL list projects to the wire default (null)");
+    }
+
+    [TestMethod]
+    public void AddResourceUrl_TrimsAndAdds_RejectsDuplicateAndBlank()
+    {
+        var model = new AssignmentEditFormModel();
+
+        model.AddResourceUrl("  https://example.com/a  ").Should().BeTrue(
+            "a valid URL trims and adds");
+        model.ResourceUrls.Should().ContainSingle();
+        model.ResourceUrls[0].Url.Should().Be("https://example.com/a", "the URL is trimmed before storing");
+
+        model.AddResourceUrl("https://example.com/a").Should().BeFalse(
+            "an exact duplicate is rejected (no double row)");
+        model.ResourceUrls.Should().HaveCount(1);
+
+        var act = () => model.AddResourceUrl("   ");
+        act.Should().Throw<ArgumentException>("a blank URL throws (mirrors the server guard)");
+        model.ResourceUrls.Should().HaveCount(1);
+    }
+
+    [TestMethod]
+    public void RemoveResourceUrlAt_InRange_Removes_OutOfRange_NoOp()
+    {
+        var model = new AssignmentEditFormModel();
+        model.AddResourceUrl("https://example.com/a");
+        model.AddResourceUrl("https://example.com/b");
+
+        model.RemoveResourceUrlAt(0);
+        model.ResourceUrls.Should().HaveCount(1);
+        model.ResourceUrls[0].Url.Should().Be("https://example.com/b");
+
+        model.RemoveResourceUrlAt(99);
+        model.RemoveResourceUrlAt(-1);
+        model.ResourceUrls.Should().HaveCount(1, "out-of-range indices are silently ignored");
+    }
 }

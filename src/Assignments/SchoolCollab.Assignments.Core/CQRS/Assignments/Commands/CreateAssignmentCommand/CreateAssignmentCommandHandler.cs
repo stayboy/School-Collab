@@ -63,7 +63,11 @@ public sealed class CreateAssignmentCommandHandler(
             passScore: command.PassScore,
             maxAttempts: command.MaxAttempts,
             // WS-C1 (spec §7 Q1): guardian-signature snapshot, thread-through.
-            requiresSignature: command.RequiresSignature)
+            requiresSignature: command.RequiresSignature,
+            // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
+            difficultyEasy: command.DifficultyEasyCount,
+            difficultyMedium: command.DifficultyMediumCount,
+            difficultyHard: command.DifficultyHardCount)
             .WithTenant(tenantProvider);
 
         if (command.Questions is { Count: > 0 })

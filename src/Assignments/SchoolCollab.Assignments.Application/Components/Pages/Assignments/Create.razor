@@ -311,6 +311,7 @@
                                                       TopicId="@(_selectedSubject is null ? null : Guid.Parse(_selectedSubject.Value))"
                                                       TopicName="@_selectedSubject?.Label"
                                                       GradeLevelId="@(_selectedGradeLevel is null ? null : Guid.Parse(_selectedGradeLevel.Value))"
+                                                      PromptLocked="_aiPromptLocked"
                                                       OnQuestionsChanged="OnWizardQuestionsChanged" />
                         </section>
                     }
@@ -482,6 +483,9 @@
     // resolved grade/tenant default (best-effort, fail-open); the author may
     // override; the final value is submitted with create.
     private bool _requiresSignature;
+    // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock — disables the
+    // wizard's guidance textarea when the tenant locked the prompt.
+    private bool _aiPromptLocked;
 
     // Grade Level dropdown state
     private GradeLevelDto[]? _gradeLevels;
@@ -598,6 +602,32 @@
         // a resolver/endpoint failure leaves the checkbox at its current value
         // and the author sets it manually (no error bar).
         await ResolveSignatureDefaultAsync(null);
+
+        // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock — the wizard's
+        // guidance textarea is disabled when the tenant locked the prompt.
+        // Best-effort + fail-open (the /signature-default precedent).
+        await LoadAiPromptPolicyAsync();
+    }
+
+    /// <summary>
+    /// WS-B2 (spec §3.4 line 70): loads the org-level AI-prompt lock, disabling
+    /// the wizard's prompt guidance when locked. Fail-open: any failure is a
+    /// warning log and the textarea stays enabled (the /signature-default
+    /// pre-fill precedent — no error bar).
+    /// </summary>
+    private async Task LoadAiPromptPolicyAsync()
+    {
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _aiPromptLocked = await Api.GetAiPromptPolicyAsync(ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "AI-prompt lock resolution failed");
+        }
     }
 
     private async Task OnGradeLevelChangedAsync(GradeLevelOption? option)

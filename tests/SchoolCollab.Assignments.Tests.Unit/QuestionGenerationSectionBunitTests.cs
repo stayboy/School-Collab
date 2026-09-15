@@ -50,17 +50,24 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         AssignmentEditFormModel model,
         FakeQuestionGenerator fake,
         bool gateEnabled = true,
+        bool promptLocked = false,
         Guid? topicId = null,
         string? topicName = null,
         Guid? gradeLevelId = null,
-        EventCallback? onQuestionsChanged = null)
+        EventCallback? onQuestionsChanged = null,
+        IUrlTextExtractor? urlExtractor = null)
     {
         Services.AddSingleton<IAssignmentQuestionGenerator>(fake);
+        // WS-B2 (step 6): the section depends on the reference-URL extraction
+        // seam. A benign fake (always succeeds) by default; a caller may
+        // supply its own to exercise the 4-URL cap / per-URL failure paths.
+        Services.AddSingleton<IUrlTextExtractor>(urlExtractor ?? DefaultUrlExtractor());
 
         return Render<QuestionGenerationSection>(parameters =>
         {
             parameters.Add(p => p.Model, model);
             parameters.Add(p => p.GateEnabled, gateEnabled);
+            parameters.Add(p => p.PromptLocked, promptLocked);
             parameters.Add(p => p.TopicId, topicId);
             parameters.Add(p => p.TopicName, topicName);
             parameters.Add(p => p.GradeLevelId, gradeLevelId);
@@ -356,7 +363,137 @@ public class QuestionGenerationSectionBunitTests : BunitContext
         });
     }
 
+    // ── WS-B2 (round-10 binding list): difficulty, lock, URL cases ────────
+
+    [TestMethod]
+    public void Difficulty_Fields_ThreadIntoRequest()
+    {
+        var model = new AssignmentEditFormModel
+        {
+            DifficultyEasyCount = 2,
+            DifficultyMediumCount = 4,
+            DifficultyHardCount = 1,
+        };
+        var fake = new FakeQuestionGenerator();
+        var topicId = Guid.NewGuid();
+
+        var cut = RenderSection(model, fake, topicId: topicId, topicName: "Topic");
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.TopicId.Should().Be(topicId);
+        fake.LastRequest.DifficultyEasyCount.Should().Be(2,
+            "R7: the request reads the difficulty counts from the form model");
+        fake.LastRequest.DifficultyMediumCount.Should().Be(4);
+        fake.LastRequest.DifficultyHardCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public void PromptLocked_DisablesTextArea()
+    {
+        var model = new AssignmentEditFormModel();
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(model, fake, promptLocked: true, topicId: Guid.NewGuid(), topicName: "Topic");
+
+        var area = cut.FindComponent<FluentTextArea>();
+        area.Instance.Disabled.Should().BeTrue(
+            "when the tenant locks the org prompt, the guidance textarea is disabled");
+        cut.Markup.Should().Contain("Your organization has locked the AI prompt.",
+            "the locked tooltip explains why the guidance is disabled");
+    }
+
+    [TestMethod]
+    public void ResourceUrls_PassExtractedTexts()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddResourceUrl("https://example.com/a");
+        model.AddResourceUrl("https://example.com/b");
+        var fake = new FakeQuestionGenerator();
+        var extractor = Mock.Of<IUrlTextExtractor>(x =>
+            x.ExtractAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())
+                == Task.FromResult(new UrlTextExtractionResult(true, "content", null)));
+
+        var cut = RenderSection(
+            model, fake, topicId: Guid.NewGuid(), topicName: "Topic",
+            urlExtractor: extractor);
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().NotBeNull(
+            "reference-URL texts are passed to the generator (decision g)");
+        fake.LastRequest.ResourceTexts!.Should().HaveCount(2, "one extracted text per included URL");
+    }
+
+    [TestMethod]
+    public void ResourceUrl_Failure_FailsOpenWithWarning()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+        model.AddResourceUrl("https://example.com/broken");
+        var fake = new FakeQuestionGenerator();
+        // Per-URL failure is fail-open: no extracted text, but generation proceeds.
+        var extractor = Mock.Of<IUrlTextExtractor>(x =>
+            x.ExtractAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())
+                == Task.FromResult(new UrlTextExtractionResult(false, null, "blocked")));
+
+        var cut = RenderSection(
+            model, fake, topicId: Guid.NewGuid(), topicName: "Topic",
+            urlExtractor: extractor);
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().BeNull(
+            "a failed URL extraction contributes no text but does not block generation");
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("https://example.com/broken",
+                "the per-URL failure surfaces a warning naming the failed link");
+            cut.Markup.Should().Contain("Couldn't read content",
+                "the warning text says generation proceeds without the failed link");
+        });
+        model.Questions.Should().HaveCount(3, "the generator still appends rows after a per-URL failure");
+    }
+
+    [TestMethod]
+    public void MoreThanThreeUrls_WarnsAndCaps()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+        for (var i = 0; i < 4; i++)
+        {
+            model.AddResourceUrl($"https://example.com/{i}");
+        }
+        var fake = new FakeQuestionGenerator();
+
+        var cut = RenderSection(model, fake, topicId: Guid.NewGuid(), topicName: "Topic");
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim().StartsWith("Generate", StringComparison.Ordinal))
+            .Click();
+
+        cut.WaitForAssertion(() => fake.LastRequest.Should().NotBeNull());
+        fake.LastRequest!.ResourceTexts.Should().HaveCount(3,
+            "only the first 3 included URLs are fetched (decision g cap)");
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("Only the first 3 included links are fetched",
+                "the over-cap warning is surfaced to the teacher");
+            cut.Markup.Should().Contain("1 link(s) skipped",
+                "the warning reports how many links were skipped");
+        });
+    }
+
     // ── Fake IAssignmentQuestionGenerator ──────────────────────────────
+
+    /// <summary>Default URL extractor: always succeeds with a fixed text.</summary>
+    private static IUrlTextExtractor DefaultUrlExtractor() => Mock.Of<IUrlTextExtractor>(x =>
+        x.ExtractAsync(It.IsAny<string>(), It.IsAny<CancellationToken>())
+            == Task.FromResult(new UrlTextExtractionResult(true, "extracted", null)));
+
 
     /// <summary>Hand-rolled fake (per the plan: fakes for non-HTTP
     /// interfaces; Moq only for ILogger-style seams). Stands in for
@@ -378,6 +515,10 @@ public class QuestionGenerationSectionBunitTests : BunitContext
 
         public int GenerateCalls { get; private set; }
 
+        /// <summary>R7: the last <see cref="QuestionGenerationRequest"/> the
+        /// generator saw, for the difficulty/URL threading assertions.</summary>
+        public QuestionGenerationRequest? LastRequest { get; private set; }
+
         public TimeSpan Delay { get; set; } = TimeSpan.Zero;
 
         public Exception? NextException { get; set; }
@@ -389,6 +530,7 @@ public class QuestionGenerationSectionBunitTests : BunitContext
             CancellationToken ct = default)
         {
             GenerateCalls++;
+            LastRequest = request;
             if (Delay > TimeSpan.Zero)
             {
                 await Task.Delay(Delay, ct);

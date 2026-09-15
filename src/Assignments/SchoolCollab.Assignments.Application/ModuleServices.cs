@@ -32,14 +32,22 @@ public static class ModuleServices
         // (dev-selected tenant) plus the retry handler + long handler lifetime.
         services.AddCrossModuleHttpClient<AssignmentsApiClient>("https+http://assignments-api", propagateTenant: true);
 
-        // AI question-generation seam (spec §3.4 / round ar-2 decision (a)/(d)).
-        // The endpoint is anonymous on the AI host (matches /api/ai/chat posture)
-        // and reads no tenant data, so we propagateTenant:false (decision (d)
-        // corollary) and expose the typed client through
+        // AI question-generation seam (spec §3.4 / round ar-2 decision (a)/(d);
+        // WS-B2 / ar-10). The endpoint is anonymous on the AI host (matches
+        // /api/ai/chat posture) but the AI host now resolves the caller's tenant
+        // organization prompt (WS-B2) via the propagated tenant header, so the
+        // client propagates the tenant (the ar-2 "flip when WS-B2 org-level
+        // prompts land" note). The typed client is exposed through
         // IAssignmentQuestionGenerator so the wizard depends on the abstraction.
-        services.AddCrossModuleHttpClient<AssignmentQuestionGenerator>("https+http://settings-ai", propagateTenant: false);
+        services.AddCrossModuleHttpClient<AssignmentQuestionGenerator>("https+http://settings-ai", propagateTenant: true);
         services.AddTransient<IAssignmentQuestionGenerator>(sp =>
             sp.GetRequiredService<AssignmentQuestionGenerator>());
+
+        // URL text extraction for AI question generation (WS-B2 / spec §3.4
+        // decision g). The named client carries ONLY the 5s timeout — NO tenant
+        // propagation handler (external hosts must not learn internal tenancy).
+        services.AddHttpClient("url-fetcher", client => client.Timeout = TimeSpan.FromSeconds(5));
+        services.AddTransient<IUrlTextExtractor, UrlTextExtractor>();
 
         return services;
     }

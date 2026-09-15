@@ -5,6 +5,7 @@
 @implements IDisposable
 @inject IAssignmentQuestionGenerator QuestionGenerator
 @inject ILogger<QuestionGenerationSection> Logger
+@inject IUrlTextExtractor UrlTextExtractor
 
 <section class="question-generation-section">
     <div class="question-generation-controls">
@@ -12,6 +13,8 @@
                         Label="Additional guidance for the AI (optional)"
                         MaxLength="4000"
                         Rows="3"
+                        Disabled="@PromptLocked"
+                        Tooltip="@(PromptLocked ? "Your organization has locked the AI prompt." : null)"
                         class="full-width" />
 
         <div class="question-generation-row">
@@ -20,6 +23,22 @@
                                Min="1"
                                Max="30"
                                Class="w-3" />
+
+            <FluentNumberField @bind-Value="Model.DifficultyEasyCount"
+                               Label="Easy questions"
+                               Min="0"
+                               Max="30"
+                               Class="w-2" />
+            <FluentNumberField @bind-Value="Model.DifficultyMediumCount"
+                               Label="Medium questions"
+                               Min="0"
+                               Max="30"
+                               Class="w-2" />
+            <FluentNumberField @bind-Value="Model.DifficultyHardCount"
+                               Label="Hard questions"
+                               Min="0"
+                               Max="30"
+                               Class="w-2" />
 
             <div class="question-generation-types" role="group" aria-label="Question types">
                 <FluentCheckbox @bind-Value="_includeMultipleChoice" Label="@EnumHelper.GetDescription(QuestionTypeDto.MultipleChoice)" />
@@ -50,6 +69,11 @@
         {
             <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_generationError</FluentMessageBar>
         }
+
+        @if (!string.IsNullOrEmpty(_urlWarning))
+        {
+            <FluentMessageBar Intent="MessageIntent.Warning" class="mt-2">@_urlWarning</FluentMessageBar>
+        }
     </div>
 </section>
 
@@ -61,6 +85,10 @@
     /// <summary>True when the type + grading format combination supports
     /// AI question generation (FR-220 / EC-3).</summary>
     [Parameter] public bool GateEnabled { get; set; }
+
+    /// <summary>True when the tenant LOCKED the org-level AI prompt (WS-B2
+    /// spec §3.4 line 70) — disables the prompt-guidance textarea.</summary>
+    [Parameter] public bool PromptLocked { get; set; }
 
     /// <summary>The selected subject's id, passed into the generation
     /// request's <see cref="QuestionGenerationRequest.TopicId"/>. Null
@@ -87,6 +115,7 @@
     private bool _includeShortAnswer = true;
     private bool _generating;
     private string? _generationError;
+    private string? _urlWarning;
     private CancellationTokenSource? _generateCts;
 
     private async Task OnGenerateAsync()
@@ -123,6 +152,28 @@
         if (_includeShortAnswer) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.ShortAnswer));
         if (picked.Count > 0) types = picked;
 
+        // WS-B2 + URL ingestion (decision g): fetch up to 3 included URLs as
+        // reference material; per-URL failure is fail-open with a warning.
+        var allUrls = Model.ResourceUrls.Select(r => r.Url).ToList();
+        var urls = allUrls.Take(3).ToList();
+        var overCapSkipped = allUrls.Count - urls.Count;
+        var failedUrls = new List<string>();
+        IReadOnlyList<string>? resourceTexts = null;
+        if (urls.Count > 0)
+        {
+            var texts = new List<string>(urls.Count);
+            foreach (var url in urls)
+            {
+                var result = await UrlTextExtractor.ExtractAsync(url, ct);
+                if (result.Success && result.Text is not null)
+                    texts.Add(result.Text);
+                else
+                    failedUrls.Add(url);
+            }
+            if (texts.Count > 0) resourceTexts = texts;
+        }
+        _urlWarning = BuildUrlWarning(overCapSkipped, failedUrls);
+
         var request = new QuestionGenerationRequest(
             TopicId: TopicId.Value,
             TopicName: TopicName ?? string.Empty,
@@ -130,7 +181,15 @@
             ContextStrands: null,
             QuestionCount: _questionCount,
             Types: types,
-            PromptOverride: Model.AiPromptOverride);
+            PromptOverride: Model.AiPromptOverride,
+            DifficultyEasyCount: Model.DifficultyEasyCount,
+            DifficultyMediumCount: Model.DifficultyMediumCount,
+            DifficultyHardCount: Model.DifficultyHardCount,
+            ResourceTexts: resourceTexts);
+
+        // WS-B2: the difficulty fields bind directly to the form model, so
+        // the values are already on Model before Generate runs and survive a
+        // Save-without-Generate (decision (c) — never reset the mix).
 
         Logger.LogInformation(
             "Requesting {Count} questions for topic {TopicName}",
@@ -176,6 +235,20 @@
     private void OnCancelAsync()
     {
         _generateCts?.Cancel();
+    }
+
+    private static string? BuildUrlWarning(int overCapSkipped, IReadOnlyList<string> failedUrls)
+    {
+        var parts = new List<string>(2);
+        if (overCapSkipped > 0)
+        {
+            parts.Add($"Only the first 3 included links are fetched; {overCapSkipped} link(s) skipped.");
+        }
+        if (failedUrls.Count > 0)
+        {
+            parts.Add($"Couldn't read content from: {string.Join(", ", failedUrls)} — generating without it.");
+        }
+        return parts.Count > 0 ? string.Join(" ", parts) : null;
     }
 
     public void Dispose()

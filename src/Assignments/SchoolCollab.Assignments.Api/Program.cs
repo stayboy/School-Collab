@@ -72,6 +72,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ISignatureDefa
 // default. Same settings-api named client as the resolvers above.
 builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ISignatureConsentTextResolver,
     SchoolCollab.Assignments.Api.Services.SignatureConsentTextResolver>();
+// Org-level AI-prompt lock resolver (WS-B2 / spec §3.4 line 70): whether the
+// tenant LOCKED the org-level AI prompt, so the wizard's prompt override is
+// disabled. Same settings-api named client; fail-open to false.
+builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.IAiPromptPolicyResolver,
+    SchoolCollab.Assignments.Api.Services.AiPromptPolicyResolver>();
 
 // Student directory port for the sign-off surfaces (WS-C1 / spec §5 + §7 Q5):
 // ward names + guardian links from the Students API.

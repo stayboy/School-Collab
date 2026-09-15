@@ -1,6 +1,7 @@
 @page "/assignments/{Id:guid}/edit"
 @using SchoolCollab.Assignments.Contracts
 @using Microsoft.FluentUI.AspNetCore.Components
+@using SchoolCollab.Assignments.Application.Helpers
 @inject AssignmentsApiClient Api
 @inject NavigationManager Nav
 @inject ILogger<Edit> Logger
@@ -88,6 +89,20 @@
                     <FluentCheckbox Id="assignmentEditRequiresSignature" @bind-Value="_requiresSignature" Label="Require guardian signature after completion" />
                 </FormRow>
 
+                @* WS-B2 (spec §3.4 line 73): versioned questions-draft regeneration.
+                   Draft-only surface; the section owns its local generation state.
+                   PromptLocked comes from the tenant org AI-prompt lock. *@
+                @if (_item.Status == AssignmentStatusDto.Draft)
+                {
+                    <QuestionsDraftSection AssignmentId="_item.Id"
+                                           GateEnabled="QuestionGenerationGate.IsEnabled(_item.AssignmentType, _item.GradingFormat)"
+                                           PromptLocked="_aiPromptLocked"
+                                           TopicId="_item.TopicId"
+                                           TopicName="_item.TopicName"
+                                           GradeLevelId="_item.GradeLevelId"
+                                           OnConfirmed="OnDraftConfirmedAsync" />
+                }
+
                 @if (!string.IsNullOrEmpty(_error))
                 {
                     <FluentMessageBar Intent="MessageIntent.Error" class="mb-3">@_error</FluentMessageBar>
@@ -116,6 +131,15 @@
     private string? _error;
     private bool _mandatoryReview = true;
     private bool _requiresSignature;
+    // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock — drives the draft
+    // regeneration section's guidance textarea (disabled when the tenant locked it).
+    private bool _aiPromptLocked;
+    // WS-B2 (spec §3.4 line 70): difficulty mix round-trip — the wizard owns
+    // the difficulty UI; an edit just carries the loaded counts through so it
+    // never silently resets them (decision (c)).
+    private int? _difficultyEasyCount;
+    private int? _difficultyMediumCount;
+    private int? _difficultyHardCount;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
 
@@ -179,6 +203,10 @@
                 _model.LoadFrom(_item);
                 _mandatoryReview = _item.MandatoryReview;
                 _requiresSignature = _item.RequiresSignature;
+                // WS-B2 (spec §3.4 line 70): difficulty mix carried forward.
+                _difficultyEasyCount = _item.DifficultyEasyCount;
+                _difficultyMediumCount = _item.DifficultyMediumCount;
+                _difficultyHardCount = _item.DifficultyHardCount;
                 _selectedType = _typeOptions.FirstOrDefault(o => o.Value == ((int)_item.AssignmentType).ToString());
                 _selectedGradingFormat = _gradingFormatOptions.FirstOrDefault(o => o.Value == ((int)_item.GradingFormat).ToString());
                 _selectedTargetAudience = _targetAudienceOptions.FirstOrDefault(o => o.Value == ((int)_item.TargetAudienceType).ToString());
@@ -196,6 +224,45 @@
         finally
         {
             if (!_disposed) _loading = false;
+        }
+
+        // WS-B2 (spec §3.4 line 70): org-level AI-prompt lock for the draft
+        // regeneration section. Best-effort + fail-open (no error bar).
+        await LoadAiPromptPolicyAsync();
+    }
+
+    /// <summary>WS-B2 — loads the org-level AI-prompt lock, disabling the draft
+    /// section's guidance textarea when locked. Fail-open: any failure is a
+    /// warning log and the textarea stays enabled (no error bar).</summary>
+    private async Task LoadAiPromptPolicyAsync()
+    {
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _aiPromptLocked = await Api.GetAiPromptPolicyAsync(ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "AI-prompt lock resolution failed while editing assignment {AssignmentId}", Id);
+        }
+    }
+
+    /// <summary>WS-B2 — after Confirm replaces the questions, reload the summary
+    /// so the page reflects the new question count / review area.</summary>
+    private async Task OnDraftConfirmedAsync()
+    {
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            _item = await Api.GetByIdAsync(Id, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogWarning(ex, "Failed to reload assignment {AssignmentId} after draft confirm", Id);
         }
     }
 
@@ -261,7 +328,12 @@
                 MaxAttempts: _model.MaxAttempts,
                 // WS-C1 (spec §7 Q1): guardian-signature round-trip — an edit
                 // without this would silently reset the flag to false.
-                RequiresSignature: _requiresSignature);
+                RequiresSignature: _requiresSignature,
+                // WS-B2 (spec §3.4 line 70): difficulty mix round-trip — carries
+                // the loaded counts forward so a plain edit never drops them.
+                DifficultyEasyCount: _difficultyEasyCount,
+                DifficultyMediumCount: _difficultyMediumCount,
+                DifficultyHardCount: _difficultyHardCount);
 
             await Api.UpdateAsync(Id, req, ct);
             Nav.NavigateTo("/assignments");

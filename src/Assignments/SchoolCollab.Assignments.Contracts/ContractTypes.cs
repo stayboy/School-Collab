@@ -127,7 +127,13 @@ public record AssignmentSummaryDto(
     /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
     /// after completion. Snapshotted at create from the resolved grade/tenant
     /// default; the author may override. Defaults to false in pre-WS-C1 data.</summary>
-    bool RequiresSignature = false);
+    bool RequiresSignature = false,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested easy-question count. Null = let the model decide.</summary>
+    int? DifficultyEasyCount = null,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
+    int? DifficultyMediumCount = null,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
+    int? DifficultyHardCount = null);
 
 public record CreateAssignmentRequest(
     string Title,
@@ -157,7 +163,13 @@ public record CreateAssignmentRequest(
     int? MaxAttempts = null,
     /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
     /// after completion. Threaded to <c>Assignment.Create</c>.</summary>
-    bool RequiresSignature = false);
+    bool RequiresSignature = false,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested easy-question count. Null = let the model decide.</summary>
+    int? DifficultyEasyCount = null,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
+    int? DifficultyMediumCount = null,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
+    int? DifficultyHardCount = null);
 
 public record UpdateAssignmentRequest(
     string Title,
@@ -187,7 +199,13 @@ public record UpdateAssignmentRequest(
     int? MaxAttempts = null,
     /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is required
     /// after completion. Threaded to <c>Assignment.Update</c>.</summary>
-    bool RequiresSignature = false);
+    bool RequiresSignature = false,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested easy-question count. Null = let the model decide.</summary>
+    int? DifficultyEasyCount = null,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested medium-question count.</summary>
+    int? DifficultyMediumCount = null,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested hard-question count.</summary>
+    int? DifficultyHardCount = null);
 
 /// <summary>Schedule an assignment to auto-publish at a future
 /// moment (spec §3.5 step 2). The sweep dispatches the existing

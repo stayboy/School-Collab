@@ -39,4 +39,9 @@ public sealed record CreateAssignmentCommand(
     /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
     /// required after completion. Threaded to
     /// <c>Assignment.Create(...)</c>.</summary>
-    bool RequiresSignature = false) : ICommand;
+    bool RequiresSignature = false,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested per-difficulty counts.
+    /// Threaded to <c>Assignment.Create(...)</c>.</summary>
+    int? DifficultyEasyCount = null,
+    int? DifficultyMediumCount = null,
+    int? DifficultyHardCount = null) : ICommand;

@@ -28,18 +28,27 @@ public sealed class AssignmentQuestionGenerationService
     /// </summary>
     public const int MaxPromptOverrideLength = 4000;
 
+    /// <summary>WS-B2: maximum number of <see cref="QuestionGenerationRequest.ResourceTexts"/> entries.</summary>
+    public const int MaxResourceTexts = 5;
+
+    /// <summary>WS-B2: maximum character length of one resource reference text.</summary>
+    public const int MaxResourceTextLength = 20000;
+
     private readonly AssignmentQuestionGenerationSystemPromptProvider _promptProvider;
+    private readonly TenantAssignmentAiPromptProvider _tenantPromptProvider;
     private readonly IChatClientFactory _chatClientFactory;
     private readonly IConfiguration _config;
     private readonly ILogger<AssignmentQuestionGenerationService> _logger;
 
     public AssignmentQuestionGenerationService(
         AssignmentQuestionGenerationSystemPromptProvider promptProvider,
+        TenantAssignmentAiPromptProvider tenantPromptProvider,
         IChatClientFactory chatClientFactory,
         IConfiguration config,
         ILogger<AssignmentQuestionGenerationService> logger)
     {
         _promptProvider = promptProvider;
+        _tenantPromptProvider = tenantPromptProvider;
         _chatClientFactory = chatClientFactory;
         _config = config;
         _logger = logger;
@@ -64,7 +73,15 @@ public sealed class AssignmentQuestionGenerationService
             request.QuestionCount, request.TopicName, model);
 
         var chatOptions = new ChatOptions { ModelId = model };
-        var messages = _promptProvider.BuildMessages(request);
+
+        // WS-B2 / spec §3.4 line 91: resolve the tenant's organization prompt
+        // (fail-open to the embedded default) and, when the tenant has locked the
+        // prompt, ignore the teacher's override entirely (defence-in-depth under
+        // the wizard's disabled textarea).
+        var org = await _tenantPromptProvider.FetchAsync(ct);
+        var effectiveRequest = org is { IsLocked: true } ? request with { PromptOverride = null } : request;
+
+        var messages = _promptProvider.BuildMessages(effectiveRequest, org?.SystemPrompt);
 
         string modelText;
         try
@@ -114,6 +131,26 @@ public sealed class AssignmentQuestionGenerationService
         {
             throw new AssignmentQuestionGenerationException(
                 $"Prompt override must be {MaxPromptOverrideLength} characters or fewer.", 400);
+        }
+
+        // WS-B2 / spec §3.4: difficulty counts must be non-negative when supplied.
+        if (request.DifficultyEasyCount < 0 || request.DifficultyMediumCount < 0 || request.DifficultyHardCount < 0)
+        {
+            throw new AssignmentQuestionGenerationException(
+                "Difficulty counts must be zero or greater.", 400);
+        }
+
+        // WS-B2 / spec §3.4: bounded reference-material input.
+        if (request.ResourceTexts is { Count: > MaxResourceTexts })
+        {
+            throw new AssignmentQuestionGenerationException(
+                $"At most {MaxResourceTexts} reference texts are supported.", 400);
+        }
+
+        if (request.ResourceTexts?.Any(t => t.Length > MaxResourceTextLength) == true)
+        {
+            throw new AssignmentQuestionGenerationException(
+                $"Reference texts must be {MaxResourceTextLength} characters or fewer.", 400);
         }
     }
 }

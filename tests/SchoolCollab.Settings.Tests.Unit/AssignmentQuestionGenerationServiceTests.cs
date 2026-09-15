@@ -1,5 +1,8 @@
 using System.ClientModel;
 using System.Net;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
@@ -53,6 +56,7 @@ public class AssignmentQuestionGenerationServiceTests
         var promptProvider = BuildPromptProvider("Production");
         var service = new AssignmentQuestionGenerationService(
             promptProvider,
+            BuildTenantPromptProvider(),
             factory.Object,
             config,
             new TestLogger<AssignmentQuestionGenerationService>());
@@ -98,6 +102,7 @@ public class AssignmentQuestionGenerationServiceTests
 
         var service = new AssignmentQuestionGenerationService(
             BuildPromptProvider("Production"),
+            BuildTenantPromptProvider(),
             factory.Object,
             config,
             new TestLogger<AssignmentQuestionGenerationService>());
@@ -309,12 +314,139 @@ public class AssignmentQuestionGenerationServiceTests
         await act.Should().ThrowAsync<OperationCanceledException>();
     }
 
+    [TestMethod]
+    public async Task GenerateAsync_RejectsNegativeDifficulty()
+    {
+        var service = BuildService(Mock.Of<IChatClientFactory>());
+        var request = NewValidRequest() with { DifficultyEasyCount = -1 };
+
+        var act = () => service.GenerateAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<AssignmentQuestionGenerationException>().Where(e => e.StatusCode == 400);
+    }
+
+    [TestMethod]
+    public async Task GenerateAsync_RejectsMoreThan5ResourceTexts()
+    {
+        var service = BuildService(Mock.Of<IChatClientFactory>());
+        var request = NewValidRequest() with
+        {
+            ResourceTexts = Enumerable.Range(0, 6).Select(i => $"reference-{i}").ToArray()
+        };
+
+        var act = () => service.GenerateAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<AssignmentQuestionGenerationException>().Where(e => e.StatusCode == 400);
+    }
+
+    [TestMethod]
+    public async Task GenerateAsync_RejectsOversizeResourceText()
+    {
+        var service = BuildService(Mock.Of<IChatClientFactory>());
+        var request = NewValidRequest() with { ResourceTexts = new[] { new string('x', 20001) } };
+
+        var act = () => service.GenerateAsync(request, CancellationToken.None);
+
+        await act.Should().ThrowAsync<AssignmentQuestionGenerationException>().Where(e => e.StatusCode == 400);
+    }
+
+    [TestMethod]
+    public async Task GenerateAsync_OrgPromptWinsOverEmbedded()
+    {
+        var captured = new List<ChatMessage>();
+        var service = new AssignmentQuestionGenerationService(
+            BuildPromptProvider("Production"),
+            BuildTenantPromptProvider(systemPrompt: "Tenant organization prompt.", isLocked: false),
+            CapturingFactory(captured).Object,
+            BuildConfiguration(("codedvalue-ai-provider", "ollama"), ("Ollama:DefaultModel", "m")),
+            new TestLogger<AssignmentQuestionGenerationService>());
+
+        await service.GenerateAsync(NewValidRequest(), CancellationToken.None);
+
+        captured[0].Role.Should().Be(ChatRole.System);
+        captured[0].Text.Should().Be("Tenant organization prompt.",
+            "the tenant org prompt replaces the embedded system prompt (WS-B2)");
+    }
+
+    [TestMethod]
+    public async Task GenerateAsync_LocksPromptOverrideWhenTenantLocked()
+    {
+        var captured = new List<ChatMessage>();
+        var service = new AssignmentQuestionGenerationService(
+            BuildPromptProvider("Production"),
+            BuildTenantPromptProvider(systemPrompt: "Tenant organization prompt.", isLocked: true),
+            CapturingFactory(captured).Object,
+            BuildConfiguration(("codedvalue-ai-provider", "ollama"), ("Ollama:DefaultModel", "m")),
+            new TestLogger<AssignmentQuestionGenerationService>());
+
+        await service.GenerateAsync(NewValidRequest() with { PromptOverride = "teacher guidance" }, CancellationToken.None);
+
+        captured.Should().HaveCount(2, "a locked org prompt suppresses the override's framing message (WS-B2)");
+        captured[0].Text.Should().Be("Tenant organization prompt.");
+        captured[1].Text.Should().NotContain("teacher guidance");
+    }
+
+    [TestMethod]
+    public async Task GenerateAsync_Locked_IgnoresPromptOverride()
+    {
+        var captured = new List<ChatMessage>();
+        var service = new AssignmentQuestionGenerationService(
+            BuildPromptProvider("Production"),
+            BuildTenantPromptProvider(systemPrompt: null, isLocked: true),
+            CapturingFactory(captured).Object,
+            BuildConfiguration(("codedvalue-ai-provider", "ollama"), ("Ollama:DefaultModel", "m")),
+            new TestLogger<AssignmentQuestionGenerationService>());
+
+        await service.GenerateAsync(NewValidRequest() with { PromptOverride = "should be ignored" }, CancellationToken.None);
+
+        captured.Should().HaveCount(2, "the tenant lock causes the override to be dropped server-side (defence-in-depth)");
+        captured[1].Text.Should().NotContain("should be ignored");
+    }
+
+    private static TenantAssignmentAiPromptProvider BuildTenantPromptProvider(string? systemPrompt = null, bool isLocked = false)
+    {
+        var http = new HttpClient(new ScriptedAiPromptHandler(systemPrompt, isLocked))
+        {
+            BaseAddress = new Uri("http://settings")
+        };
+        return new TenantAssignmentAiPromptProvider(http, new TestLogger<TenantAssignmentAiPromptProvider>());
+    }
+
+    private sealed class ScriptedAiPromptHandler(string? systemPrompt, bool isLocked) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (systemPrompt is null && !isLocked)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+            var json = JsonSerializer.Serialize(new { systemPrompt, isLocked });
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            });
+        }
+    }
+
+    private static Mock<IChatClientFactory> CapturingFactory(
+        List<ChatMessage> captured,
+        string payload = """{"questions":[{"text":"Q?","type":"shortAnswer","options":null,"modelAnswer":"A"}]}""")
+    {
+        var chatClient = new DelegateChatClient((messages, _, _) =>
+        {
+            captured.AddRange(messages);
+            return new ChatResponse(new ChatMessage(ChatRole.Assistant, payload));
+        });
+        var factory = new Mock<IChatClientFactory>();
+        factory.Setup(f => f.GetClient()).Returns(chatClient);
+        return factory;
+    }
+
     private static AssignmentQuestionGenerationService BuildService(IChatClientFactory factory)
     {
         var config = BuildConfiguration(("codedvalue-ai-provider", "ollama"),
             ("Ollama:DefaultModel", "test-model"));
         return new AssignmentQuestionGenerationService(
             BuildPromptProvider("Production"),
+            BuildTenantPromptProvider(),
             factory,
             config,
             new TestLogger<AssignmentQuestionGenerationService>());

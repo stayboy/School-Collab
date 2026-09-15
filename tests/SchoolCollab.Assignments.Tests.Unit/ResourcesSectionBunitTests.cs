@@ -489,4 +489,92 @@ public class ResourcesSectionBunitTests : BunitContext
             "the refused second file must not be added to the form model");
         _mockHttp.VerifyNoOutstandingExpectation();
     }
+
+    // ── WS-B2 (round-10 binding list): reference-URL add/remove/dedupe ──
+
+    [TestMethod]
+    public async Task AddUrl_AddsRow_AndRemovesAndRejectsDuplicate()
+    {
+        var model = new AssignmentEditFormModel();
+        var cut = RenderSection(model);
+
+        // Type a URL into the bound text field, then click the Add link button.
+        var field = cut.FindComponent<FluentTextField>();
+        await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/notes"));
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim() == "Add link")
+            .Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            model.ResourceUrls.Should().ContainSingle("adding a URL appends one reference row");
+            model.ResourceUrls[0].Url.Should().Be("https://example.com/notes");
+        });
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("1 link(s)", "the toolbar count reflects the added URL");
+        });
+
+        // Same URL again → the model AddResourceUrl dedupes; the section surfaces
+        // the friendly duplicate warning and does NOT add a second row.
+        await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/notes"));
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim() == "Add link")
+            .Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            model.ResourceUrls.Should().HaveCount(1,
+                "an exact duplicate URL must not add a second row (decision g dedupe)");
+        });
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("That link was already added.",
+                "the duplicate surfaces a friendly warning");
+        });
+
+        // Remove via the row's dismiss button (aria-label "Remove <url>").
+        cut.FindAll("fluent-button")
+            .First(b => b.GetAttribute("aria-label") == "Remove https://example.com/notes")
+            .Click();
+
+        cut.WaitForAssertion(() =>
+        {
+            model.ResourceUrls.Should().BeEmpty("removing the URL row clears the reference list");
+        });
+        cut.WaitForAssertion(() =>
+        {
+            cut.Markup.Should().Contain("0 link(s)", "the toolbar count reflects the removal");
+        });
+    }
+
+    [TestMethod]
+    public async Task AddUrl_Then_ToCreateRequest_MapsUrlResourceRows()
+    {
+        var model = new AssignmentEditFormModel { Title = "T" };
+        var cut = RenderSection(model);
+
+        var field = cut.FindComponent<FluentTextField>();
+        await cut.InvokeAsync(() => field.Instance.ValueChanged.InvokeAsync("https://example.com/source"));
+        cut.FindAll("fluent-button")
+            .First(b => b.TextContent.Trim() == "Add link")
+            .Click();
+
+        cut.WaitForAssertion(() => model.ResourceUrls.Should().HaveCount(1));
+
+        var req = model.ToCreateRequest(
+            SchoolCollab.Assignments.Contracts.AssignmentTypeDto.Digital,
+            SchoolCollab.Assignments.Contracts.GradingFormatDto.AutoGraded,
+            SchoolCollab.Assignments.Contracts.TargetAudienceTypeDto.AllStudents,
+            Guid.Parse("00000000-0000-0000-0000-000000000010"),
+            null,
+            true);
+
+        req.Resources.Should().NotBeNull();
+        req.Resources!.Should().ContainSingle();
+        req.Resources[0].ResourceKind.Should().Be(ResourceKindDto.Url);
+        req.Resources[0].Url.Should().Be("https://example.com/source");
+        req.Resources[0].IncludedInGeneration.Should().BeTrue(
+            "reference-URL rows map as included-in-generation resources (decision g)");
+    }
 }

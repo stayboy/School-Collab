@@ -41,4 +41,9 @@ public record AssignmentSummary(
     /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
     /// required after completion. Projected so the summary list
     /// reports the create-time snapshot.</summary>
-    bool RequiresSignature = false);
+    bool RequiresSignature = false,
+    /// <summary>WS-B2 (spec §3.4 line 70): requested per-difficulty counts.
+    /// Projected so summaries never silently reset the AI difficulty mix.</summary>
+    int? DifficultyEasyCount = null,
+    int? DifficultyMediumCount = null,
+    int? DifficultyHardCount = null);
