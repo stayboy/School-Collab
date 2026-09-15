@@ -69,6 +69,10 @@ public class AssignmentDetailBunitTests : BunitContext
         Services.AddSingleton<SchoolCollab.Students.Application.Services.StudentsApiClient>();
         Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Students.Application.Services.StudentsApiClient>>());
+        // C3: Detail renders SignOffSection, which injects CertificateDownloadService
+        // (the JS save path has no DOM in bUnit — these tests assert the action gating).
+        Services.AddSingleton<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>();
+        Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>>());
         // WS-A2: the Detail page injects IFeatureFlagService to gate the
         // approval panel + Draft row's Schedule action.
         SetupFeatureFlag(false);
@@ -791,5 +795,52 @@ public class AssignmentDetailBunitTests : BunitContext
         plain.WaitForAssertion(() => plain.Markup.Should().Contain("Math HW"));
         plain.Markup.Should().NotContain("Guardian Sign-off",
             "the card renders NOTHING when the assignment does not require a signature");
+    }
+
+    // ── C3 certificate download action (decision (f)) ─────────────────────
+
+    private static SignOffStatusDto StatusRow(Guid studentId, DateTimeOffset? finalizedAt) =>
+        new(studentId, "Ward One", null, null, Guid.NewGuid(), "Jane Doe",
+            SignOffStateDto.Signed, DateTimeOffset.UtcNow, finalizedAt, true, true, 2, 88m, true);
+
+    private void SetupSignOffStatuses(Guid assignmentId, params SignOffStatusDto[] rows)
+    {
+        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{assignmentId}/sign-off-statuses")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(rows, _apiJsonOptions));
+    }
+
+    [TestMethod]
+    public void Certificate_Action_Shown_ForFinalizedWard()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
+        var studentId = Guid.NewGuid();
+
+        // Specific backend BEFORE the generic SetupGetAssignment fallback
+        // (MockHttp v6 first-match ordering, the documented pattern).
+        SetupSignOffStatuses(dto.Id, StatusRow(studentId, finalizedAt: DateTimeOffset.UtcNow));
+        SetupGetAssignment(dto);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Certificate",
+            "a finalized ward gains the per-row certificate download action"));
+    }
+
+    [TestMethod]
+    public void Certificate_Action_Hidden_WhenNotFinalized()
+    {
+        var dto = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
+        var studentId = Guid.NewGuid();
+
+        SetupSignOffStatuses(dto.Id, StatusRow(studentId, finalizedAt: null));
+        SetupGetAssignment(dto);
+
+        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
+
+        // Wait for the Signed row to render, then assert no certificate action.
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Signed",
+            "the (still-signed) row renders with a status badge"));
+        cut.Markup.Should().NotContain("Certificate",
+            "a not-yet-finalized ward must not offer the certificate download");
     }
 }

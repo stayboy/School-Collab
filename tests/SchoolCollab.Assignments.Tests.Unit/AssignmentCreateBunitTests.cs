@@ -299,8 +299,30 @@ public class AssignmentCreateBunitTests : BunitContext
         var submit = typeof(CreatePage).GetMethod("SubmitAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
         await cut.InvokeAsync(async () => await ((Task)submit.Invoke(cut.Instance, Array.Empty<object?>())!)!);
 
-        capturedBody.Should().NotBeNull();
-        capturedBody.Should().Contain("\"requiresSignature\":false", "the author's override is submitted in the create request");
+        // Diagnostic wrapping: this test failed once on the GitHub Actions Linux
+        // runner (run 34938835437) with a bare "Expected capturedBody not to be
+        // <null>" and proved unreproducible across ~50 local runs (Linux container,
+        // Release, exact CI command, 2 CPUs, en-US culture). When the submit path
+        // bails silently (guard return or swallowed OperationCanceledException)
+        // the page state at that moment is the only evidence — dump it.
+        try
+        {
+            capturedBody.Should().NotBeNull();
+            capturedBody.Should().Contain("\"requiresSignature\":false", "the author's override is submitted in the create request");
+        }
+        catch (Exception)
+        {
+            var err = typeof(CreatePage).GetField("_error", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(cut.Instance);
+            var subject = typeof(CreatePage).GetField("_selectedSubject", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(cut.Instance);
+            Assert.Fail($"""
+                Create_AuthorOverrides submit did not reach POST /assignments.
+                capturedBody: {capturedBody}
+                Page _error: {err}
+                Page _selectedSubject: {subject}
+                Captured page logs:
+                {string.Join(Environment.NewLine, _createLogs)}
+                """);
+        }
     }
 
     [TestMethod]

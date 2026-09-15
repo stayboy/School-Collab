@@ -784,3 +784,61 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   commit agent per the AGENTS.md execution model (clean: exact staging, amend anomaly handled per authorization,
   scratch untracked, no merges). The checkout-block lesson: session-mandated skill edits must be committed with
   their round or they block the stack branch dance.
+- `ar-7-template` — **CLOSED** (A4 duplicate-as-template: `DuplicateAssignmentCommand` scalar-clone handler +
+  route + Index action + pure handler tests). Landed as **PR #229** (squash `1e4f59c8`).
+- `ar-8-signature-defaults` — **CLOSED** (WS-C1 prerequisite: `TenantAssignmentPolicy` (Settings) +
+  `GradeAssignmentPolicy` (Students) policy pair + effective `ISignatureDefaultResolver` (fail-open) +
+  grade-Detail UI + wizard pre-fill; `RequiresSignature` wired end-to-end). Landed as **PR #230** (squash
+  `8ad19978`).
+- `ar-9-signoff` — **CLOSED 2026-09-14** (WS-C1/C2/C4: `SignOffState`/`SignedAt`/`FinalizedAt`/
+  `ExpectedSignerGuardianId` on `AssignmentSubmission` + append-only `SignatureEvent` audit row + guardian e-sign
+  page (typed/click + tenant consent-text override) + `SubmissionLockedException` first-line submit lock +
+  teacher reassignment/finalize commands + routes). Landed as **PR #231** (squash `d6d544ce`). **Carried:**
+  C3 certificates OUT (`CertificateStoragePath` nullable + unread); WS-F3 page relocation behind real auth +
+  deep links (route + command unchanged); auto-finalize-on-sign + Primary-guardian-priority enforcement recorded
+  backlog.
+- `ar-10-ai-extensions` — **CLOSED 2026-09-15** (`rounds/round-ar-10-ai-extensions.md` +
+  `diffs-ar-10-ai-extensions.patch`; commit `a5f49efd` on `stack/10-ar-10-ai-extensions` → **PR #232**, open
+  awaiting Build & Test CI at log time). Delivered (WS-B2): three nullable difficulty columns threaded
+  create/update/read-back/duplicate (the `AssignmentSummary`/`AssignmentRepository` intermediate projection) +
+  wizard `QuestionGenerationSection` difficulty fields (persist without Generate — the rework R7 fix); org-level
+  `TenantAssignmentAiPrompt` (Settings entity + CQRS + `/assignment-ai-prompt` Admin page +
+  `AssignmentAiPromptApiClient` with tenant propagation); versioned regeneration via the `QuestionsDraftJson`
+  staged blob (`Stage/Confirm/Discard/GetQuestionsDraft` CQRS + 4 routes + always-200 `/ai-prompt-policy` lock
+  route + Draft-only `QuestionsDraftSection` UI with confirm-replaces semantics); URL ingestion (`HtmlAgilityPack`
+  CPM entry + `UrlTextExtractor` http/https-guarded, 512KB/5s caps, ≤3 URLs fail-open per-URL + `ResourcesSection`
+  URL rows); `propagateTenant: true` flip on the generator client — **resolves the ar-2 carried follow-up**. 88
+  implementation files, ~7,096 insertions / 53 deletions. Pipeline: SOLO worker passes 1–8 → dispatched rework
+  worker (R1–R9) → static reviewer ×2 (`kimi-k2.7-code`; P1 → 1 rework iteration → PASS) → UI tester
+  (`minimax-m3`, P2-only; the 3 plan-list false alarms downgraded to amendments A1–A3). Authoritative: build 0
+  errors; **2,119/0** across the 8 projects (Assignments 566/0, Assignments.Api 45/0, Architecture 20/0).
+  **Residuals:** 4 UI P2 nits (`QuestionsDraftSection` difficulty generation-only tooltip + gate-disabled tooltip
+  + busy-Cancel; `ResourcesSection` "0 link(s)" wording); SSRF URL allowlist (v1 scheme-guard only);
+  `AssignmentSummaryDto` omits `AiPromptOverride` → the draft prompt textarea cannot pre-fill (D-6 follow-up);
+  ar-1 EF owned-children verification still open.
+  **Next:** round 11 = `ar-11-c3-certificates` (C3 QuestPDF certificate on finalize + download route — parked
+  plan `rounds/round-ar-11-c3-certificates.md`, authored 2026-09-15; fires after #232 merges).
+- `ar-11-c3-certificates` — **CLOSED 2026-09-15, LIGHT round (Tiers 1–2; UI tester skipped by owner choice)**
+  (`rounds/round-ar-11-c3-certificates.md` + `diffs-ar-11-c3-certificates.patch`; branch `stack/11-ar-11-c3-certificates`
+  cut from stack/10 tip `a5f49efd` — NOT main, #232 left unmerged by owner instruction; commit pending owner
+  authorization). Delivered (C3): QuestPDF **2026.8.0** CPM entry + certificate pipeline — `IAssignmentCertificateGenerator`
+  (Core/Services) + `AssignmentCertificateContent` + `AssignmentCertificateException` (→ 502, ar-2 precedent);
+  renderer in the **API** layer (plan amendment **A-1**: decision (a)'s Application placement could never resolve —
+  the API host references only Core, `AddAssignmentsCore` is its sole wiring, Application is an Admin-only RCL);
+  transactional finalize (`FinalizeSignOffCommandHandler` loads event/assignment/names, single `SaveChangesAsync`,
+  generation failure rolls the finalize back, retryable); the ONE `SignatureEvent.AttachCertificate` mutation
+  (parent-adjudicated exception to ar-9 append-only purity; idempotent, stamps `UpdatedAt`) populates the ar-9
+  nullable column; `GET /{id}/students/{sid}/certificate` (404 when no event / not generated / file missing);
+  `AssignmentsApiClient.GetCertificateAsync` → `byte[]`; the app's **first JS interop** (`wwwroot/js/fileDownload.js`,
+  use-js-interop pattern: dynamic import, cached module, `IAsyncDisposable`, `JSDisconnectedException`-safe) +
+  `CertificateDownloadService`; download actions on both surfaces — `SignOffSection.razor` per-ward Certificate
+  button (Detail's Guardian Sign-off tab; gated `FinalizedAt != null`) + `SignOff.razor` button. 23 files
+  (8 created / 15 modified), 1,436-line patch. Pipeline: worker pass 1 (`deepseek-v4-flash`, 1 supervisor call
+  → A-1) → static reviewer (`kimi-k2.7-code`) **PASS, P1/P2 empty**. Authoritative: build 0 errors; **1,670/0**
+  across the 8 projects (Assignments 576/0, Assignments.Api 52/0, Architecture 20/0). **Residuals:** UI tester
+  pass skipped (parked handover in the round doc); certificates never deleted (IFileStore retention = Phase-5
+  WS-G); names degrade to raw ids on directory miss. ar-10's CI-flake diagnostic on `AssignmentCreateBunitTests`
+  rides this commit set (run 34938835437 rerun green — the flake proved ~1-in-55, unreproducible in ~53
+  container-controlled Linux runs).
+  **Next:** Phase 2 ward experience is the largest remaining gap after C3 (spec §3.2 D1); then Phase 4 WS-E;
+  D-6 identity before Phase 5. #232 (ar-10) still open/unmerged — merge order: #232 then stack/11 PR.

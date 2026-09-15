@@ -35,6 +35,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
 using SchoolCollab.Assignments.Core.Data.Repositories;
 using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
+using SchoolCollab.Assignments.Core.Services;
 
 namespace SchoolCollab.Assignments.Api.Endpoints;
 
@@ -865,6 +866,45 @@ public static class AssignmentRoutes
             {
                 return Results.Problem(ex.Message, statusCode: 409);
             }
+            catch (AssignmentCertificateException ex)
+            {
+                // C3: a certificate generation/store failure fails the finalize
+                // (transactional) and maps to 502 (the ar-2 provider-failure
+                // precedent) so the client can distinguish it from the 500 default.
+                return Results.Problem(ex.Message, statusCode: 502);
+            }
+        });
+
+        // C3 — the finalized certificate PDF (GET /{id}/students/{studentId}/certificate).
+        // 404 when the pair has no signature event or no certificate was generated;
+        // the stored file is streamed as application/pdf with a download name.
+        group.MapGet("/{id:guid}/students/{studentId:guid}/certificate", async (
+            Guid id,
+            Guid studentId,
+            [FromServices] ISubmissionRepository submissionRepository,
+            [FromServices] IFileStore fileStore,
+            CancellationToken ct) =>
+        {
+            var signatureEvent = await submissionRepository.GetSignatureEventByAssignmentStudentAsync(
+                id, studentId, ct);
+            if (signatureEvent is null || string.IsNullOrWhiteSpace(signatureEvent.CertificateStoragePath))
+            {
+                return Results.NotFound();
+            }
+
+            Stream? stream;
+            try
+            {
+                stream = await fileStore.OpenReadAsync(signatureEvent.CertificateStoragePath, ct);
+            }
+            catch (FileNotFoundException)
+            {
+                // Stored reference present but the backing file is gone.
+                return Results.NotFound();
+            }
+
+            return Results.Stream(stream, "application/pdf",
+                fileDownloadName: $"certificate-{id:N}-{studentId:N}.pdf");
         });
 
         // The single aggregate the guardian sign page consumes (one call).

@@ -331,6 +331,23 @@ public sealed class AssignmentsApiClient
             $"/assignments/{assignmentId}/students/{studentId}/sign-off/finalize", null, ct)).EnsureSuccessStatusCode();
     }
 
+    /// <summary>C3 — downloads the finalized sign-off certificate PDF for a
+    /// (assignment, ward) pair. A 404 (no event / no certificate generated /
+    /// backing file missing) surfaces as <see cref="HttpRequestException"/>
+    /// via <see cref="HttpResponseMessage.EnsureSuccessStatusCode"/> for the
+    /// UI to show an error bar rather than crash.</summary>
+    public async Task<byte[]> GetCertificateAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Getting certificate for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
+        var response = await _http.GetAsync(
+            $"/assignments/{assignmentId}/students/{studentId}/certificate", ct);
+        response.EnsureSuccessStatusCode();
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        _logger.LogInformation("Downloaded {Bytes} certificate bytes for assignment {AssignmentId} / student {StudentId}",
+            bytes.Length, assignmentId, studentId);
+        return bytes;
+    }
+
     /// <summary>The AI-prompt lock state for the create/edit wizard (WS-B2
     /// spec §3.4 line 70). Always-200 fail-open resolution from the API.</summary>
     public async Task<bool> GetAiPromptPolicyAsync(CancellationToken ct = default)
