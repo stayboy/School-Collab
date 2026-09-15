@@ -17,5 +17,7 @@
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
     <PackageReference Include="Microsoft.OpenApi" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
+    <!-- C3 certificate PDF rendering (Community license; pin 2026.8.0 in CPM). -->
+    <PackageReference Include="QuestPDF" />
   </ItemGroup>
 </Project>

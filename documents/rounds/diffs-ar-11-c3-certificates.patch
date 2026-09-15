@@ -1,0 +1,1436 @@
+diff --git a/Directory.Packages.props b/Directory.Packages.props
+index fbbfc017..fcf760c6 100644
+--- a/Directory.Packages.props
++++ b/Directory.Packages.props
+@@ -80,6 +80,9 @@
+     <PackageVersion Include="Humanizer" Version="2.14.1" />
+     <PackageVersion Include="Scrutor" Version="7.0.0" />
+     <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.10" />
++    <!-- C3 certificate PDF rendering. PINNED at 2026.8.0: 2026.9.0 (2026-09-14)
++         shipped font-system breaking changes. Community license tier. -->
++    <PackageVersion Include="QuestPDF" Version="2026.8.0" />
+   </ItemGroup>
+   <ItemGroup Label="Transitive Security Overrides">
+     <!-- AngleSharp is pulled in transitively by bunit. The 1.4.0 version has
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+index bec1228b..5e5bd618 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/AssignmentRoutes.cs
+@@ -35,6 +35,7 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Assignments.Core.Services;
+ 
+ namespace SchoolCollab.Assignments.Api.Endpoints;
+ 
+@@ -865,6 +866,45 @@ public static class AssignmentRoutes
+             {
+                 return Results.Problem(ex.Message, statusCode: 409);
+             }
++            catch (AssignmentCertificateException ex)
++            {
++                // C3: a certificate generation/store failure fails the finalize
++                // (transactional) and maps to 502 (the ar-2 provider-failure
++                // precedent) so the client can distinguish it from the 500 default.
++                return Results.Problem(ex.Message, statusCode: 502);
++            }
++        });
++
++        // C3 — the finalized certificate PDF (GET /{id}/students/{studentId}/certificate).
++        // 404 when the pair has no signature event or no certificate was generated;
++        // the stored file is streamed as application/pdf with a download name.
++        group.MapGet("/{id:guid}/students/{studentId:guid}/certificate", async (
++            Guid id,
++            Guid studentId,
++            [FromServices] ISubmissionRepository submissionRepository,
++            [FromServices] IFileStore fileStore,
++            CancellationToken ct) =>
++        {
++            var signatureEvent = await submissionRepository.GetSignatureEventByAssignmentStudentAsync(
++                id, studentId, ct);
++            if (signatureEvent is null || string.IsNullOrWhiteSpace(signatureEvent.CertificateStoragePath))
++            {
++                return Results.NotFound();
++            }
++
++            Stream? stream;
++            try
++            {
++                stream = await fileStore.OpenReadAsync(signatureEvent.CertificateStoragePath, ct);
++            }
++            catch (FileNotFoundException)
++            {
++                // Stored reference present but the backing file is gone.
++                return Results.NotFound();
++            }
++
++            return Results.Stream(stream, "application/pdf",
++                fileDownloadName: $"certificate-{id:N}-{studentId:N}.pdf");
+         });
+ 
+         // The single aggregate the guardian sign page consumes (one call).
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index 1bdc9118..6d3b2a92 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -46,6 +46,11 @@ else
+ }
+ 
+ builder.Services.AddAssignmentsCore(builder.Configuration);
++// C3 certificate rendering — the QuestPDF generator lives in the Api layer
++// (the only runtime that dispatches finalize) and is registered here after
++// AddAssignmentsCore so the Scrutor-scanned Core finalize handler resolves it.
++builder.Services.AddTransient<SchoolCollab.Assignments.Core.Services.IAssignmentCertificateGenerator,
++    SchoolCollab.Assignments.Api.Services.AssignmentCertificateGenerator>();
+ // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
+ // is resolvable by the CreateAssignmentCommandHandler.
+ builder.Services.AddSettingsCore(builder.Configuration);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj b/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj
+index df29e757..6656ce04 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj
++++ b/src/Assignments/SchoolCollab.Assignments.Api/SchoolCollab.Assignments.Api.csproj
+@@ -17,5 +17,7 @@
+     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+     <PackageReference Include="Microsoft.OpenApi" />
+     <PackageReference Include="Microsoft.EntityFrameworkCore.Design" PrivateAssets="all" />
++    <!-- C3 certificate PDF rendering (Community license; pin 2026.8.0 in CPM). -->
++    <PackageReference Include="QuestPDF" />
+   </ItemGroup>
+ </Project>
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Services/AssignmentCertificateGenerator.cs b/src/Assignments/SchoolCollab.Assignments.Api/Services/AssignmentCertificateGenerator.cs
+new file mode 100644
+index 00000000..9058ac35
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Services/AssignmentCertificateGenerator.cs
+@@ -0,0 +1,129 @@
++using Microsoft.Extensions.Logging;
++using QuestPDF.Fluent;
++using QuestPDF.Helpers;
++using QuestPDF.Infrastructure;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Api.Services;
++
++/// <summary>
++/// C3 — QuestPDF (pin 2026.8.0) renderer for the sign-off certificate
++/// (decision (a), amendment A-1). Lives in the Assignments.Api delivery layer
++/// (NOT the domain project, so QuestPDF stays out of Assignments.Core — the
++/// plan's decision-(a) intent) and is the only runtime that dispatches
++/// finalize, so the API host can resolve it while the Blazor Application RCL
++/// cannot be seen by the API. Implements <see cref="IAssignmentCertificateGenerator"/>.
++/// Layout v1: a single English A4 page with a modest title header; a
++/// student/guardian/assignment block; a signature block (type + typed name);
++/// the consent text shown at signing (verbatim audit value) in a footer; and a
++/// generated-at page footer. No logos / images.
++/// </summary>
++public sealed class AssignmentCertificateGenerator(
++    ILogger<AssignmentCertificateGenerator> logger) : IAssignmentCertificateGenerator
++{
++    static AssignmentCertificateGenerator()
++    {
++        // QuestPDF community license (org < $1M annual revenue) — set once via
++        // the static ctor so the renderer is idempotent across instantiations.
++        // The 2026.8.0 pin stays fixed (2026.9.0 introduced font-system
++        // breaking changes); the default Lato font is bundled and fine for the
++        // English v1 layout.
++        QuestPDF.Settings.License = LicenseType.Community;
++    }
++
++    public Task<byte[]> GenerateAsync(AssignmentCertificateContent content, CancellationToken cancellationToken = default)
++    {
++        logger.LogDebug(
++            "Generating certificate for assignment {AssignmentTitle} / student {StudentName}",
++            content.AssignmentTitle, content.StudentName);
++
++        var pdf = Document.Create(container =>
++        {
++            container.Page(page =>
++            {
++                page.Size(PageSizes.A4);
++                page.Margin(40);
++                page.DefaultTextStyle(style => style.FontSize(11));
++
++                page.Header()
++                    .PaddingBottom(16)
++                    .BorderBottom(1)
++                    .BorderColor(Colors.Grey.Lighten2)
++                    .Text("Sign-off Certificate")
++                    .FontSize(20).Bold().FontColor("#1f3a5f");
++
++                page.Content().Column(column =>
++                {
++                    column.Spacing(8);
++
++                    column.Item().Text(text =>
++                    {
++                        text.DefaultTextStyle(style => style.FontSize(11).SemiBold());
++                        text.Span("Student (ward)");
++                    });
++
++                    column.Item().Text(content.StudentName);
++
++                    column.Item().PaddingTop(6).Text(text =>
++                    {
++                        text.Span("Guardian signer: ").SemiBold();
++                        text.Span(content.SignerGuardianName);
++                    });
++                    column.Item().Text(text =>
++                    {
++                        text.Span("Assignment: ").SemiBold();
++                        text.Span(content.AssignmentTitle);
++                    });
++                    column.Item().Text(text =>
++                    {
++                        text.Span("Signed on: ").SemiBold();
++                        text.Span(content.SignedAt.ToLocalTime().ToString("g"));
++                    });
++                    column.Item().Text(text =>
++                    {
++                        text.Span("Finalized on: ").SemiBold();
++                        text.Span(content.FinalizedAt.ToLocalTime().ToString("g"));
++                    });
++
++                    column.Item().PaddingTop(6).Text(text =>
++                    {
++                        text.Span("Signature method: ").SemiBold();
++                        text.Span(content.SignatureType == SignatureType.Typed ? "Typed" : "Click");
++                    });
++                    if (content.SignatureType == SignatureType.Typed)
++                    {
++                        column.Item().Text(text =>
++                        {
++                            text.Span("Typed name: ").SemiBold();
++                            text.Span(content.TypedSignature);
++                        });
++                    }
++
++                    column.Item().PaddingTop(10).Text(text =>
++                    {
++                        text.DefaultTextStyle(style => style.FontSize(9).FontColor(Colors.Grey.Darken1));
++                        text.Span("Consent text shown at signing:");
++                    });
++                    column.Item().Text(text =>
++                    {
++                        text.DefaultTextStyle(style => style.FontSize(9).FontColor(Colors.Grey.Darken1));
++                        text.Span(content.ConsentTextShown);
++                    });
++                });
++
++                page.Footer().AlignCenter().Text(text =>
++                {
++                    text.DefaultTextStyle(style => style.FontSize(9).FontColor(Colors.Grey.Darken1));
++                    text.Span($"Generated on {DateTimeOffset.UtcNow.ToLocalTime():g}");
++                });
++            });
++        }).GeneratePdf();
++
++        logger.LogInformation(
++            "Generated {Bytes} certificate bytes for assignment {AssignmentTitle} / student {StudentName}",
++            pdf.Length, content.AssignmentTitle, content.StudentName);
++
++        return Task.FromResult(pdf);
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor
+index 82e9735e..3c8886bd 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOff.razor
+@@ -9,9 +9,10 @@
+ @using SchoolCollab.Assignments.Contracts
+ @using Microsoft.FluentUI.AspNetCore.Components
+ @inject AssignmentsApiClient Api
++@inject CertificateDownloadService CertificateDownload
+ @inject NavigationManager Nav
+ @inject ILogger<SignOff> Logger
+-@implements IDisposable
++@implements IAsyncDisposable
+ 
+ <PageTitle>Sign off — @_context?.AssignmentTitle</PageTitle>
+ 
+@@ -46,7 +47,15 @@
+                             ? $"and finalized on {_context.FinalizedAt.Value.ToLocalTime():g}."
+                             : $"on {_context.SignedAt?.ToLocalTime():g}.")
+                     </FluentMessageBar>
+-                    <FluentButton Appearance="Appearance.Outline" @onclick="Cancel" class="mt-3">Back to assignments</FluentButton>
++                    <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem" class="mt-3">
++                        @if (_context.FinalizedAt is not null)
++                        {
++                            <FluentButton Appearance="Appearance.Accent"
++                                          OnClick="DownloadCertificateAsync"
++                                          Disabled="@_downloadBusy">Download certificate</FluentButton>
++                        }
++                        <FluentButton Appearance="Appearance.Outline" @onclick="Cancel">Back to assignments</FluentButton>
++                    </FluentStack>
+                 }
+                 else
+                 {
+@@ -138,6 +147,7 @@
+     private SignOffContextDto? _context;
+     private bool _loading = true;
+     private bool _busy;
++    private bool _downloadBusy;
+     private string? _error;
+     private bool _consentChecked;
+     private Guid? _selectedGuardianId;
+@@ -204,14 +214,38 @@
+         }
+     }
+ 
++    private async Task DownloadCertificateAsync()
++    {
++        if (_disposed || _downloadBusy || _context is null) return;
++        _downloadBusy = true;
++        _error = null;
++        var ct = _loadCts?.Token ?? CancellationToken.None;
++        try
++        {
++            await CertificateDownload.DownloadAsync(AssignmentId, StudentId, ct);
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogError(ex, "Failed to download certificate for {AssignmentId}/{StudentId}", AssignmentId, StudentId);
++            _error = ex.Message;
++        }
++        finally
++        {
++            if (!_disposed) { _downloadBusy = false; StateHasChanged(); }
++        }
++    }
++
+     private void Cancel() => Nav.NavigateTo("/assignments");
+ 
+-    public void Dispose()
++    public async ValueTask DisposeAsync()
+     {
+         _disposed = true;
+         _loadCts?.Cancel();
+         _loadCts?.Dispose();
+         _loadCts = null;
++        await CertificateDownload.DisposeAsync();
+     }
+ 
+     // FluentUI 4.14.2 FluentBadge render-safe triad only (the Detail.razor WS-A2
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor
+index e511015d..07b6634a 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Components/Pages/Assignments/SignOffSection.razor
+@@ -2,9 +2,10 @@
+ @using SchoolCollab.Admin.Shared.Components.Dialogs
+ @using Microsoft.FluentUI.AspNetCore.Components
+ @inject AssignmentsApiClient Api
++@inject CertificateDownloadService CertificateDownload
+ @inject IDialogService DialogService
+ @inject ILogger<SignOffSection> Logger
+-@implements IDisposable
++@implements IAsyncDisposable
+ 
+ @* WS-C1 teacher surface (spec §3.2 line 51): the per-ward guardian sign-off
+    card on the Assignments Detail page. Renders nothing when the assignment
+@@ -90,6 +91,14 @@
+                                                   class="ms-2"
+                                                   Disabled="@_finalizing">Finalize</FluentButton>
+                                 }
++                                @if (row.FinalizedAt is not null)
++                                {
++                                    <FluentButton Appearance="Appearance.Lightweight"
++                                                  Title="Download the signed certificate PDF"
++                                                  OnClick="@(() => DownloadCertificateAsync(row))"
++                                                  class="ms-2"
++                                                  Disabled="@_downloadBusy">Certificate</FluentButton>
++                                }
+                             </td>
+                         </tr>
+                     }
+@@ -111,6 +120,7 @@
+     private List<SignOffStatusDto>? _rows;
+     private bool _busy = true;
+     private bool _finalizing;
++    private bool _downloadBusy;
+     private string? _error;
+     private CancellationTokenSource? _loadCts;
+     private volatile bool _disposed;
+@@ -204,6 +214,30 @@
+         }
+     }
+ 
++    private async Task DownloadCertificateAsync(SignOffStatusDto row)
++    {
++        if (_disposed || _downloadBusy) return;
++        _downloadBusy = true;
++        _error = null;
++        var ct = _loadCts?.Token ?? CancellationToken.None;
++        try
++        {
++            await CertificateDownload.DownloadAsync(AssignmentId, row.StudentId, ct);
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogError(ex, "Failed to download certificate for assignment {AssignmentId} / student {StudentId}",
++                AssignmentId, row.StudentId);
++            _error = ex.Message;
++        }
++        finally
++        {
++            if (!_disposed) { _downloadBusy = false; StateHasChanged(); }
++        }
++    }
++
+     private static string StatusLabel(SignOffStatusDto row) => row.SignOffState switch
+     {
+         SignOffStateDto.AwaitingSignature => "Awaiting signature",
+@@ -225,11 +259,12 @@
+         _ => Appearance.Neutral
+     };
+ 
+-    public void Dispose()
++    public async ValueTask DisposeAsync()
+     {
+         _disposed = true;
+         _loadCts?.Cancel();
+         _loadCts?.Dispose();
+         _loadCts = null;
++        await CertificateDownload.DisposeAsync();
+     }
+ }
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/ModuleServices.cs b/src/Assignments/SchoolCollab.Assignments.Application/ModuleServices.cs
+index 79f49715..47064e92 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/ModuleServices.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/ModuleServices.cs
+@@ -49,6 +49,11 @@ public static class ModuleServices
+         services.AddHttpClient("url-fetcher", client => client.Timeout = TimeSpan.FromSeconds(5));
+         services.AddTransient<IUrlTextExtractor, UrlTextExtractor>();
+ 
++        // C3 certificate download (decision (f)): wraps the ApiClient PDF fetch + the
++        // fileDownload.js save. Owns the lazily-loaded JS module ref, disposed by the
++        // consuming component.
++        services.AddTransient<CertificateDownloadService>();
++
+         return services;
+     }
+ }
+\ No newline at end of file
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+index 1254a066..95ffa70d 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Services/AssignmentsApiClient.cs
+@@ -331,6 +331,23 @@ public sealed class AssignmentsApiClient
+             $"/assignments/{assignmentId}/students/{studentId}/sign-off/finalize", null, ct)).EnsureSuccessStatusCode();
+     }
+ 
++    /// <summary>C3 — downloads the finalized sign-off certificate PDF for a
++    /// (assignment, ward) pair. A 404 (no event / no certificate generated /
++    /// backing file missing) surfaces as <see cref="HttpRequestException"/>
++    /// via <see cref="HttpResponseMessage.EnsureSuccessStatusCode"/> for the
++    /// UI to show an error bar rather than crash.</summary>
++    public async Task<byte[]> GetCertificateAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
++    {
++        _logger.LogDebug("Getting certificate for assignment {AssignmentId} / student {StudentId}", assignmentId, studentId);
++        var response = await _http.GetAsync(
++            $"/assignments/{assignmentId}/students/{studentId}/certificate", ct);
++        response.EnsureSuccessStatusCode();
++        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
++        _logger.LogInformation("Downloaded {Bytes} certificate bytes for assignment {AssignmentId} / student {StudentId}",
++            bytes.Length, assignmentId, studentId);
++        return bytes;
++    }
++
+     /// <summary>The AI-prompt lock state for the create/edit wizard (WS-B2
+     /// spec §3.4 line 70). Always-200 fail-open resolution from the API.</summary>
+     public async Task<bool> GetAiPromptPolicyAsync(CancellationToken ct = default)
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/Services/CertificateDownloadService.cs b/src/Assignments/SchoolCollab.Assignments.Application/Services/CertificateDownloadService.cs
+new file mode 100644
+index 00000000..404e3bd4
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/Services/CertificateDownloadService.cs
+@@ -0,0 +1,62 @@
++using Microsoft.AspNetCore.Components;
++using Microsoft.Extensions.Logging;
++using Microsoft.JSInterop;
++
++namespace SchoolCollab.Assignments.Application.Services;
++
++/// <summary>
++/// C3 — thin browser-side orchestration for the certificate download
++/// (decision (f)): fetches the PDF byte array via
++/// <see cref="AssignmentsApiClient.GetCertificateAsync"/> then hands it to the
++/// <c>fileDownload.js</c> module (a Blob + anchor-click save). The JS module is
++/// loaded lazily via dynamic <c>import()</c>, cached on this instance, and
++/// disposed here (the calling component disposes this service) — the
++/// use-js-interop pattern (module ref owned by the consumer, disposed in a
++/// <see cref="IAsyncDisposable"/> path, <see cref="JSDisconnectedException"/>-safe).
++/// A 404 (no certificate) surfaces as <see cref="HttpRequestException"/> for
++/// the UI to render an error bar rather than crash.
++/// </summary>
++public sealed class CertificateDownloadService(
++    AssignmentsApiClient api,
++    IJSRuntime js,
++    ILogger<CertificateDownloadService> logger) : IAsyncDisposable
++{
++    private IJSObjectReference? _fileDownloadModule;
++
++    /// <summary>Downloads the finalized certificate for a (assignment, ward)
++    /// pair to the browser. Idempotent module load; <c>JSDisconnectedException</c>
++    /// (the circuit closed mid-save) is swallowed harmlessly.</summary>
++    public async Task DownloadAsync(Guid assignmentId, Guid studentId, CancellationToken ct = default)
++    {
++        var pdf = await api.GetCertificateAsync(assignmentId, studentId, ct);
++
++        try
++        {
++            _fileDownloadModule ??= await js.InvokeAsync<IJSObjectReference>(
++                "import", "./_content/SchoolCollab.Assignments.Application/js/fileDownload.js");
++            await _fileDownloadModule.InvokeVoidAsync("saveByteArray",
++                $"certificate-{assignmentId:N}-{studentId:N}.pdf", pdf);
++        }
++        catch (JSDisconnectedException)
++        {
++            // The circuit closed before the save completed — nothing to surface.
++        }
++
++        logger.LogInformation(
++            "Certificate downloaded for assignment {AssignmentId} / student {StudentId}",
++            assignmentId, studentId);
++    }
++
++    public async ValueTask DisposeAsync()
++    {
++        if (_fileDownloadModule is null) return;
++        try
++        {
++            await _fileDownloadModule.DisposeAsync();
++        }
++        catch (JSDisconnectedException)
++        {
++        }
++        _fileDownloadModule = null;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Application/wwwroot/js/fileDownload.js b/src/Assignments/SchoolCollab.Assignments.Application/wwwroot/js/fileDownload.js
+new file mode 100644
+index 00000000..28442076
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Application/wwwroot/js/fileDownload.js
+@@ -0,0 +1,23 @@
++// C3 certificate download (the app's first JS interop — decision (f)).
++// Loaded dynamically via IJSRuntime import() and cached on the calling
++// component (ModuleServices registers CertificateDownloadService, which owns
++// this module). Saves a PDF byte array as a browser download.
++//
++// bUnit has no DOM download path, so this module is exercised manually / by
++// the UI tester; the bUnit tests assert the action gating + the ApiClient call
++// instead. .NET Blazor Server round-trips a byte[] as a flat number array, so
++// the bytes are wrapped in a Uint8Array before being fed to the Blob.
++export function saveByteArray(fileName, bytes) {
++    const byteArray = new Uint8Array(bytes);
++    const blob = new Blob([byteArray], { type: 'application/pdf' });
++    const url = URL.createObjectURL(blob);
++
++    const anchor = document.createElement('a');
++    anchor.href = url;
++    anchor.download = fileName;
++    document.body.appendChild(anchor);
++    anchor.click();
++    document.body.removeChild(anchor);
++
++    URL.revokeObjectURL(url);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/SignOff/FinalizeSignOffCommandHandler.cs b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/SignOff/FinalizeSignOffCommandHandler.cs
+index 2ac23827..7d3ac2ec 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/SignOff/FinalizeSignOffCommandHandler.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/CQRS/Assignments/Commands/SignOff/FinalizeSignOffCommandHandler.cs
+@@ -2,17 +2,34 @@ using Microsoft.Extensions.Logging;
+ using SchoolCollab.Core.CQRS;
+ using SchoolCollab.Assignments.Core.Data.Repositories;
+ using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Assignments.Core.Services;
+ 
+ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
+ 
+ /// <summary>
+-/// WS-C1/C4 — finalizes a signed sign-off (teacher action; spec §3.2 line 51).
+-/// The domain method enforces the Signed-only guard and stamps
++/// WS-C1/C4 + C3 — finalizes a signed sign-off (teacher action; spec §3.2
++/// line 51). The domain method enforces the Signed-only guard and stamps
+ /// <c>FinalizedAt</c> (terminal locked marker — further submissions stay
+-/// blocked).
++/// blocked). C3 extends the flow: after finalize stamps, the handler builds the
++/// certificate content (assignment title + signer/student names + audit fields
++/// from the signature event), generates the PDF via
++/// <see cref="IAssignmentCertificateGenerator"/>, stores it via
++/// <see cref="IFileStore"/> and attaches the opaque storage path on the event
++/// via <see cref="SignatureEvent.AttachCertificate"/>.
++///
++/// <para>Transactional: a single <see cref="ISubmissionRepository.SaveChangesAsync"/>
++/// runs LAST, so a generation/store failure (typed
++/// <see cref="AssignmentCertificateException"/>) throws before any persistence and the
++/// finalize is cleanly retryable by finalizing again — the in-memory mutation is never
++/// committed.</para>
+ /// </summary>
+ public sealed class FinalizeSignOffCommandHandler(
+     ISubmissionRepository submissionRepository,
++    IAssignmentRepository assignmentRepository,
++    IStudentDirectory studentDirectory,
++    ISignatureConsentTextResolver consentResolver,
++    IAssignmentCertificateGenerator certificateGenerator,
++    IFileStore fileStore,
+     ILogger<FinalizeSignOffCommandHandler> logger) : ICommandHandler<FinalizeSignOffCommand>
+ {
+     public async Task HandleAsync(FinalizeSignOffCommand command, CancellationToken cancellationToken = default)
+@@ -24,11 +41,85 @@ public sealed class FinalizeSignOffCommandHandler(
+             command.AssignmentId, command.StudentId, cancellationToken)
+             ?? throw new SubmissionNotFoundException(command.StudentId);
+ 
++        // Finalize requires a prior sign — the audit event is the source of the
++        // signer/typed-name/consent fields below.
++        var signatureEvent = await submissionRepository.GetSignatureEventByAssignmentStudentAsync(
++            command.AssignmentId, command.StudentId, cancellationToken)
++            ?? throw new SubmissionSignOffStateException(
++                "A sign-off can only be finalized after the guardian has signed.");
++
++        var assignment = await assignmentRepository.GetAsync(command.AssignmentId, cancellationToken)
++            ?? throw new AssignmentNotFoundException(command.AssignmentId);
++
+         submission.FinalizeSignOff();
++
++        // Names degrade to the raw id on a directory miss (the
++        // GetSignOffContextQueryHandler precedent).
++        var studentName = (await studentDirectory.GetStudentNameAsync(command.StudentId, cancellationToken))
++            ?.DisplayName ?? command.StudentId.ToString();
++
++        var signerName = signatureEvent.SignerGuardianId.ToString();
++        var guardians = await studentDirectory.GetGuardiansAsync(command.StudentId, cancellationToken);
++        var signer = guardians.FirstOrDefault(g => g.GuardianId == signatureEvent.SignerGuardianId);
++        if (signer is not null)
++        {
++            signerName = signer.DisplayName;
++        }
++
++        // The consent shown at signing is captured verbatim on the audit event
++        // (the authoritative source for the certificate); the resolver is the
++        // fail-safe fallback if the event ever lacks a recorded consent.
++        var consentText = string.IsNullOrWhiteSpace(signatureEvent.ConsentTextShown)
++            ? await consentResolver.ResolveConsentTextAsync(cancellationToken)
++            : signatureEvent.ConsentTextShown;
++
++        var content = new AssignmentCertificateContent(
++            assignment.Title,
++            studentName,
++            signerName,
++            signatureEvent.SignatureType,
++            signatureEvent.TypedSignature,
++            signatureEvent.SignedAt,
++            submission.FinalizedAt ?? DateTimeOffset.UtcNow,
++            consentText);
++
++        byte[] pdf;
++        try
++        {
++            pdf = await certificateGenerator.GenerateAsync(content, cancellationToken);
++        }
++        catch (OperationCanceledException)
++        {
++            throw;
++        }
++        catch (Exception ex)
++        {
++            throw new AssignmentCertificateException(
++                $"Failed to generate the certificate for assignment {command.AssignmentId} / student {command.StudentId}.", ex);
++        }
++
++        string storagePath;
++        try
++        {
++            using var stream = new MemoryStream(pdf);
++            storagePath = await fileStore.StoreAsync(stream, "certificate.pdf", "application/pdf", cancellationToken);
++        }
++        catch (OperationCanceledException)
++        {
++            throw;
++        }
++        catch (Exception ex)
++        {
++            throw new AssignmentCertificateException(
++                $"Failed to store the certificate for assignment {command.AssignmentId} / student {command.StudentId}.", ex);
++        }
++
++        signatureEvent.AttachCertificate(storagePath);
++
+         submissionRepository.Update(submission);
+         await submissionRepository.SaveChangesAsync(cancellationToken);
+ 
+-        logger.LogInformation("Finalized sign-off for student {StudentId} / assignment {AssignmentId}",
+-            command.StudentId, command.AssignmentId);
++        logger.LogInformation("Finalized sign-off for student {StudentId} / assignment {AssignmentId} with certificate {StoragePath}",
++            command.StudentId, command.AssignmentId, storagePath);
+     }
+ }
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/AssignmentCertificateException.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/AssignmentCertificateException.cs
+new file mode 100644
+index 00000000..7284a7ac
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/Exceptions/AssignmentCertificateException.cs
+@@ -0,0 +1,18 @@
++namespace SchoolCollab.Assignments.Core.Domain.Exceptions;
++
++/// <summary>
++/// C3 — raised when the sign-off certificate cannot be generated or stored
++/// during finalize (mirrors the <see cref="AssignmentApprovalRequiredException"/>
++/// typed-exception posture). The finalize route maps it to HTTP 502 (the ar-2
++/// provider-failure precedent) so a downstream renderer/IFileStore failure is
++/// distinguishable from the assignment 500 default. Wrapping keeps the failure
++/// typed: callers retry by finalizing again (the finalize is transactional —
++/// a generation failure rolls back the finalize without persisting it).
++/// </summary>
++public sealed class AssignmentCertificateException : Exception
++{
++    public AssignmentCertificateException(string message) : base(message) { }
++
++    public AssignmentCertificateException(string message, Exception innerException)
++        : base(message, innerException) { }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Domain/SignatureEvent.cs b/src/Assignments/SchoolCollab.Assignments.Core/Domain/SignatureEvent.cs
+index 6afaf4ca..3e85fdfc 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Core/Domain/SignatureEvent.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Domain/SignatureEvent.cs
+@@ -53,6 +53,28 @@ public sealed class SignatureEvent : ITenantEntity, IEntity, IAuditableEntity
+     public DateTimeOffset CreatedAt { get; private set; }
+     public DateTimeOffset UpdatedAt { get; private set; }
+ 
++    /// <summary>
++    /// C3 — the single narrow post-sign mutation (parent-adjudicated deviation
++    /// to the ar-9 append-only purity; the column was designed for exactly this
++    /// — see the residual on the ar-9 spec item "the C3 certificate round
++    /// populates it"). Rejects a null/whitespace path with a typed
++    /// <see cref="ArgumentException"/>; idempotent no-op when a path is already
++    /// attached (a re-finalize never overwrites a stored certificate); stamps
++    /// <c>UpdatedAt</c> so the audit shows when the certificate reference was
++    /// attached.
++    /// </summary>
++    public void AttachCertificate(string certificateStoragePath)
++    {
++        if (string.IsNullOrWhiteSpace(certificateStoragePath))
++            throw new ArgumentException("Certificate storage path is required.", nameof(certificateStoragePath));
++
++        if (!string.IsNullOrWhiteSpace(CertificateStoragePath))
++            return;
++
++        CertificateStoragePath = certificateStoragePath.Trim();
++        UpdatedAt = DateTimeOffset.UtcNow;
++    }
++
+     /// <summary>
+     /// Append-only factory — the ONLY way a signature event row is created.
+     /// Rejects empty audit fields (typed <see cref="ArgumentException"/>) and a
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentCertificateContent.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentCertificateContent.cs
+new file mode 100644
+index 00000000..a5cc3c73
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/AssignmentCertificateContent.cs
+@@ -0,0 +1,22 @@
++using SchoolCollab.Assignments.Core.Domain;
++
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// C3 — the immutable inputs the certificate renderer needs. Assembled by the
++/// finalize command handler from the assignment (title), the audit signature
++/// event (signer/type/typed name/signed-at/consent shown verbatim) and the
++/// student directory (student + signer-guardian display names — callers
++/// already degrade to the raw id on a lookup miss, the GetSignOffContext
++/// precedent). Layout is a single A4 page; the record carries no layout or
++/// styling — only the data the renderer projects.
++/// </summary>
++public sealed record AssignmentCertificateContent(
++    string AssignmentTitle,
++    string StudentName,
++    string SignerGuardianName,
++    SignatureType SignatureType,
++    string? TypedSignature,
++    DateTimeOffset SignedAt,
++    DateTimeOffset FinalizedAt,
++    string ConsentTextShown);
+diff --git a/src/Assignments/SchoolCollab.Assignments.Core/Services/IAssignmentCertificateGenerator.cs b/src/Assignments/SchoolCollab.Assignments.Core/Services/IAssignmentCertificateGenerator.cs
+new file mode 100644
+index 00000000..767d7816
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Core/Services/IAssignmentCertificateGenerator.cs
+@@ -0,0 +1,18 @@
++namespace SchoolCollab.Assignments.Core.Services;
++
++/// <summary>
++/// C3 — renders the sign-off certificate PDF for a finalized guardian
++/// sign-off (assignment-request-implementation-details.md §2 WS-C; QuestPDF,
++/// pin 2026.8.0). The interface lives in Core so the finalize handler can
++/// depend on it; the implementation is a delivery-layer concern and lives in
++/// the Assignments.Api project (the API host is the only runtime that
++/// dispatches finalize). Consumers degrade the certificate content from the
++/// data the handler already loads — no cross-bounded-context types here.
++/// </summary>
++public interface IAssignmentCertificateGenerator
++{
++    /// <summary>Generates a one-page A4 PDF byte array for the given finalized
++    /// sign-off content. Community QuestPDF license (org &lt;$1M revenue) is set
++    /// once by the implementation.</summary>
++    Task<byte[]> GenerateAsync(AssignmentCertificateContent content, CancellationToken cancellationToken = default);
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentCertificateGeneratorTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentCertificateGeneratorTests.cs
+new file mode 100644
+index 00000000..467e6d7b
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/AssignmentCertificateGeneratorTests.cs
+@@ -0,0 +1,83 @@
++using FluentAssertions;
++using Microsoft.Extensions.Logging.Abstractions;
++using SchoolCollab.Assignments.Api.Services;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// C3 — the QuestPDF certificate renderer (decision (a), amendment A-1: the
++/// generator lives in the Assignments.Api layer — the only runtime that
++/// dispatches finalize — so these tests live in the Api test project, which is
++/// the one that references the Api assembly). Asserts the exported PDF shape,
++/// that both signature types render, and that long / multi-paragraph consent
++/// text does not blow up the layout.
++/// </summary>
++[TestClass]
++public class AssignmentCertificateGeneratorTests
++{
++    private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-000000000ab1");
++    private static readonly Guid GuardianId = Guid.Parse("00000000-0000-0000-0000-000000000ab2");
++
++    private static AssignmentCertificateGenerator Generator =>
++        new(NullLogger<AssignmentCertificateGenerator>.Instance);
++
++    private static AssignmentCertificateContent Content(
++        SignatureType signatureType = SignatureType.Click,
++        string? typedSignature = null,
++        string consentText = "By signing I consent to the publication of this assignment outcome.")
++    {
++        var signed = new DateTimeOffset(new DateTime(2026, 3, 2, 9, 30, 0, DateTimeKind.Utc));
++        var finalized = signed.AddHours(2);
++        return new AssignmentCertificateContent(
++            "Math HW",
++            "Ward One",
++            "Jane Doe",
++            signatureType,
++            typedSignature,
++            signed,
++            finalized,
++            consentText);
++    }
++
++    [TestMethod]
++    public async Task Generates_NonEmptyPdf_WithPdfHeader()
++    {
++        var bytes = await Generator.GenerateAsync(Content(), CancellationToken.None);
++
++        bytes.Should().NotBeNullOrEmpty();
++        bytes.Should().HaveCountGreaterThan(500, "a one-page A4 certificate is a non-trivial PDF");
++        bytes.Length.Should().BeGreaterThan(500);
++        bytes.AsSpan(0, 4).SequenceEqual("%PDF"u8).Should().BeTrue("the generated bytes carry the PDF header");
++    }
++
++    [TestMethod]
++    public async Task Renders_BothSignatureTypes()
++    {
++        var typed = await Generator.GenerateAsync(
++            Content(SignatureType.Typed, "Jane Doe"), CancellationToken.None);
++        var click = await Generator.GenerateAsync(
++            Content(SignatureType.Click, null), CancellationToken.None);
++
++        typed.Should().NotBeNullOrEmpty();
++        click.Should().NotBeNullOrEmpty();
++        typed.AsSpan(0, 4).SequenceEqual("%PDF"u8).Should().BeTrue();
++        click.AsSpan(0, 4).SequenceEqual("%PDF"u8).Should().BeTrue();
++    }
++
++    [TestMethod]
++    public async Task LongConsentText_DoesNotThrow()
++    {
++        var multiParagraph = string.Join("\n\n",
++            Enumerable.Range(1, 6).Select(i =>
++                $"Consent paragraph {i}: the guardian has reviewed the assignment instructions, " +
++                "the marking rubric and the publication terms before signing."));
++
++        // Awaiting directly is the assertion: a layout error throws and fails the test.
++        var bytes = await Generator.GenerateAsync(Content(consentText: multiParagraph), CancellationToken.None);
++
++        bytes.Should().NotBeNullOrEmpty();
++        bytes.AsSpan(0, 4).SequenceEqual("%PDF"u8).Should().BeTrue();
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/CertificateRoutesTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/CertificateRoutesTests.cs
+new file mode 100644
+index 00000000..9a78e7a5
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/CertificateRoutesTests.cs
+@@ -0,0 +1,154 @@
++using System.Net;
++using System.Text;
++using FluentAssertions;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Moq;
++using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.Features;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// C3 certificate GET route (decision (e)) — exercised against the same minimal
++/// TestServer harness as <see cref="SignOffRoutesTests"/> (Program never
++/// starts — <c>MapAssignmentEndpoints</c> only, with mocked
++/// <see cref="ISubmissionRepository"/> + <see cref="IFileStore"/>). Covers the
++/// streamed 200 and the two 404 paths.
++/// </summary>
++[TestClass]
++public class CertificateRoutesTests
++{
++    private static readonly Guid AssignmentId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid StudentId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid SignerGuardianId = Guid.Parse("33333333-3333-3333-3333-333333333333");
++
++    private static string CertificateUrl => $"/assignments/{AssignmentId}/students/{StudentId}/certificate";
++
++    private static async Task<WebApplication> StartHostAsync(
++        Mock<ISubmissionRepository>? submissionRepo = null,
++        Mock<IFileStore>? fileStore = null)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(new StubFeatureFlags());
++
++        builder.Services.AddSingleton(submissionRepo?.Object ?? new Mock<ISubmissionRepository> { DefaultValue = DefaultValue.Mock }.Object);
++        builder.Services.AddSingleton(fileStore?.Object ?? new Mock<IFileStore>().Object);
++
++        var app = builder.Build();
++        app.MapAssignmentEndpoints(app.Services.GetRequiredService<IFeatureFlagService>());
++        await app.StartAsync();
++        return app;
++    }
++
++    private static HttpClient CreateClient(WebApplication app)
++        => ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++
++    private static SignatureEvent EventWithCertificate(string? path)
++    {
++        var e = SignatureEvent.Create(
++            Guid.Parse("00000000-0000-0000-0000-00000000ca11"),
++            AssignmentId, StudentId, SignerGuardianId,
++            SignatureType.Typed, "Jane Doe", "203.0.113.7", "unit-test", "By signing I consent.");
++        if (path is not null)
++        {
++            e.AttachCertificate(path);
++        }
++        return e;
++    }
++
++    [TestMethod]
++    public async Task GetCertificate_200_StreamsPdf()
++    {
++        var repo = new Mock<ISubmissionRepository>();
++        repo.Setup(r => r.GetSignatureEventByAssignmentStudentAsync(AssignmentId, StudentId, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(EventWithCertificate("uploads/signoff/cert.pdf"));
++        var store = new Mock<IFileStore>();
++        store.Setup(s => s.OpenReadAsync("uploads/signoff/cert.pdf", It.IsAny<CancellationToken>()))
++            .ReturnsAsync(new MemoryStream(Encoding.UTF8.GetBytes("%PDF-1.7 fake certificate content")));
++
++        await using var app = await StartHostAsync(repo, store);
++        var client = CreateClient(app);
++
++        var response = await client.GetAsync(CertificateUrl);
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++        response.Content.Headers.ContentType!.MediaType.Should().Be("application/pdf");
++        response.Content.Headers.ContentDisposition!.FileName.Should().Be(
++            $"certificate-{AssignmentId:N}-{StudentId:N}.pdf");
++        var bytes = await response.Content.ReadAsByteArrayAsync();
++        Encoding.UTF8.GetString(bytes).Should().StartWith("%PDF", "the stored file bytes are streamed");
++    }
++
++    [TestMethod]
++    public async Task GetCertificate_404_WhenNoEvent()
++    {
++        var repo = new Mock<ISubmissionRepository>();
++        repo.Setup(r => r.GetSignatureEventByAssignmentStudentAsync(AssignmentId, StudentId, It.IsAny<CancellationToken>()))
++            .ReturnsAsync((SignatureEvent?)null);
++
++        await using var app = await StartHostAsync(repo);
++        var client = CreateClient(app);
++
++        var response = await client.GetAsync(CertificateUrl);
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++
++    [TestMethod]
++    public async Task GetCertificate_404_WhenCertificateNotGenerated()
++    {
++        var repo = new Mock<ISubmissionRepository>();
++        repo.Setup(r => r.GetSignatureEventByAssignmentStudentAsync(AssignmentId, StudentId, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(EventWithCertificate(path: null));
++
++        await using var app = await StartHostAsync(repo);
++        var client = CreateClient(app);
++
++        var response = await client.GetAsync(CertificateUrl);
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
++            "a signed-but-never-finalized pair has no certificate to download");
++    }
++
++    [TestMethod]
++    public async Task GetCertificate_404_WhenFileMissing()
++    {
++        var repo = new Mock<ISubmissionRepository>();
++        repo.Setup(r => r.GetSignatureEventByAssignmentStudentAsync(AssignmentId, StudentId, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(EventWithCertificate("uploads/signoff/cert.pdf"));
++        var store = new Mock<IFileStore>();
++        store.Setup(s => s.OpenReadAsync("uploads/signoff/cert.pdf", It.IsAny<CancellationToken>()))
++            .ThrowsAsync(new FileNotFoundException());
++
++        await using var app = await StartHostAsync(repo, store);
++        var client = CreateClient(app);
++
++        var response = await client.GetAsync(CertificateUrl);
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
++            "a stored reference whose backing file is gone still 404s");
++    }
++
++    /// <summary>OIDC auth is disabled so the mapped group needs no authorization
++    /// scheme (the SignOffRoutesTests posture).</summary>
++    private sealed class StubFeatureFlags : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => featureKey == FeatureFlagKeys.DisableOIDCAuth;
++
++        public IDictionary<string, bool> GetAllFlags() =>
++            new Dictionary<string, bool> { [FeatureFlagKeys.DisableOIDCAuth] = true };
++
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken cancellationToken = default) =>
++            Task.FromResult(IsEnabled(featureKey));
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
+index 07e6ed61..3c06942c 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/AssignmentDetailBunitTests.cs
+@@ -69,6 +69,10 @@ public class AssignmentDetailBunitTests : BunitContext
+         Services.AddSingleton<SchoolCollab.Students.Application.Services.StudentsApiClient>();
+         Services.AddSingleton<SchoolCollab.Admin.Shared.Services.CodedValuesApiClient>();
+         Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Students.Application.Services.StudentsApiClient>>());
++        // C3: Detail renders SignOffSection, which injects CertificateDownloadService
++        // (the JS save path has no DOM in bUnit — these tests assert the action gating).
++        Services.AddSingleton<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>();
++        Services.AddSingleton(Mock.Of<ILogger<SchoolCollab.Assignments.Application.Services.CertificateDownloadService>>());
+         // WS-A2: the Detail page injects IFeatureFlagService to gate the
+         // approval panel + Draft row's Schedule action.
+         SetupFeatureFlag(false);
+@@ -792,4 +796,51 @@ public class AssignmentDetailBunitTests : BunitContext
+         plain.Markup.Should().NotContain("Guardian Sign-off",
+             "the card renders NOTHING when the assignment does not require a signature");
+     }
++
++    // ── C3 certificate download action (decision (f)) ─────────────────────
++
++    private static SignOffStatusDto StatusRow(Guid studentId, DateTimeOffset? finalizedAt) =>
++        new(studentId, "Ward One", null, null, Guid.NewGuid(), "Jane Doe",
++            SignOffStateDto.Signed, DateTimeOffset.UtcNow, finalizedAt, true, true, 2, 88m, true);
++
++    private void SetupSignOffStatuses(Guid assignmentId, params SignOffStatusDto[] rows)
++    {
++        _mockHttp.When(HttpMethod.Get, $"http://localhost/assignments/{assignmentId}/sign-off-statuses")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(rows, _apiJsonOptions));
++    }
++
++    [TestMethod]
++    public void Certificate_Action_Shown_ForFinalizedWard()
++    {
++        var dto = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
++        var studentId = Guid.NewGuid();
++
++        // Specific backend BEFORE the generic SetupGetAssignment fallback
++        // (MockHttp v6 first-match ordering, the documented pattern).
++        SetupSignOffStatuses(dto.Id, StatusRow(studentId, finalizedAt: DateTimeOffset.UtcNow));
++        SetupGetAssignment(dto);
++
++        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Certificate",
++            "a finalized ward gains the per-row certificate download action"));
++    }
++
++    [TestMethod]
++    public void Certificate_Action_Hidden_WhenNotFinalized()
++    {
++        var dto = MakeDto(AssignmentStatusDto.Published, requiresSignature: true);
++        var studentId = Guid.NewGuid();
++
++        SetupSignOffStatuses(dto.Id, StatusRow(studentId, finalizedAt: null));
++        SetupGetAssignment(dto);
++
++        var cut = Render<DetailPage_Component>(parameters => parameters.Add(p => p.Id, dto.Id));
++
++        // Wait for the Signed row to render, then assert no certificate action.
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Signed",
++            "the (still-signed) row renders with a status badge"));
++        cut.Markup.Should().NotContain("Certificate",
++            "a not-yet-finalized ward must not offer the certificate download");
++    }
+ }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/ReassignFinalizeSignOffCommandHandlerTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/ReassignFinalizeSignOffCommandHandlerTests.cs
+index 6322f1ca..a0592816 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/ReassignFinalizeSignOffCommandHandlerTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/ReassignFinalizeSignOffCommandHandlerTests.cs
+@@ -8,6 +8,8 @@ using SchoolCollab.Assignments.Core.DTOs;
+ using SchoolCollab.Assignments.Core.Services;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Students.Core.Domain;
++using SchoolCollab.Core.Tenancy;
++using Moq;
+ 
+ namespace SchoolCollab.Assignments.Tests.Unit;
+ 
+@@ -117,8 +119,10 @@ public class ReassignSignOffCommandHandlerTests
+ }
+ 
+ /// <summary>
+-/// WS-C1/C4 — <see cref="FinalizeSignOffCommandHandler"/>: stamps FinalizedAt
+-/// on a Signed submission (Signed-only guard; the terminal locked marker).
++/// WS-C1/C4 + C3 — <see cref="FinalizeSignOffCommandHandler"/>: stamps
++/// FinalizedAt on a Signed submission (Signed-only guard; the terminal locked
++/// marker) and, on success, generates + stores the certificate PDF and attaches
++/// the storage path on the audit <see cref="SignatureEvent"/>.
+ /// </summary>
+ [TestClass]
+ public class FinalizeSignOffCommandHandlerTests
+@@ -126,9 +130,13 @@ public class FinalizeSignOffCommandHandlerTests
+     private static readonly Guid TenantId = Guid.Parse("00000000-0000-0000-0000-0000000007d1");
+     private static readonly Guid AssignmentId = Guid.Parse("00000000-0000-0000-0000-0000000007d2");
+     private static readonly Guid StudentId = Guid.Parse("00000000-0000-0000-0000-0000000007d3");
++    private static readonly Guid GuardianId = Guid.Parse("00000000-0000-0000-0000-0000000007d4");
++    private static readonly Guid TopicId = Guid.Parse("00000000-0000-0000-0000-0000000007d5");
++    private static readonly Guid TeacherId = Guid.Parse("00000000-0000-0000-0000-0000000007d6");
+ 
+-    private sealed class FakeSubmissionRepository(AssignmentSubmission? submission) : ISubmissionRepository
++    private sealed class FakeSubmissionRepository(AssignmentSubmission? submission, SignatureEvent? signatureEvent = null) : ISubmissionRepository
+     {
++        public int SaveCalls { get; private set; }
+         public Task<AssignmentRecipient?> GetRecipientAsync(Guid a, Guid c, CancellationToken ct = default) => Task.FromResult<AssignmentRecipient?>(null);
+         public void Add(AssignmentRecipient r) { }
+         public void Update(AssignmentRecipient r) { }
+@@ -146,11 +154,11 @@ public class FinalizeSignOffCommandHandlerTests
+         public void Add(SubmissionReview r) { }
+         public void Add(SubmissionAnswer a) { }
+         public void Add(SignatureEvent e) { }
+-        public Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult<SignatureEvent?>(null);
++        public Task<SignatureEvent?> GetSignatureEventByAssignmentStudentAsync(Guid a, Guid s, CancellationToken ct = default) => Task.FromResult(signatureEvent);
+         public Task<List<AssignmentSubmission>> ListSubmissionEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmission>());
+         public Task<List<AssignmentRecipient>> ListRecipientEntitiesByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(new List<AssignmentRecipient>());
+         public Task<List<AssignmentSubmissionVersion>> ListVersionsForSubmissionIdsAsync(IReadOnlyList<Guid> ids, CancellationToken ct = default) => Task.FromResult(new List<AssignmentSubmissionVersion>());
+-        public Task<int> SaveChangesAsync(CancellationToken ct = default) => Task.FromResult(1);
++        public Task<int> SaveChangesAsync(CancellationToken ct = default) { SaveCalls++; return Task.FromResult(1); }
+         public Task<SubmissionForReviewDto[]> ListSubmissionsForReviewAsync(Guid t, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
+         public Task<SubmissionForReviewDto[]> ListSubmissionsByAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(Array.Empty<SubmissionForReviewDto>());
+         public Task<AssignmentRecipientDto[]> ListRecipientsForAssignmentAsync(Guid a, CancellationToken ct = default) => Task.FromResult(Array.Empty<AssignmentRecipientDto>());
+@@ -166,13 +174,73 @@ public class FinalizeSignOffCommandHandlerTests
+         return s;
+     }
+ 
++    private static Assignment NewAssignment() =>
++        Assignment.Create("Math HW", null, AssignmentType.Digital, GradingFormat.TeacherGraded,
++            TargetAudienceType.AllStudents, TopicId, null, null, null, TeacherId)
++            .WithTenant(TenantId);
++
++    private static SignatureEvent NewSignatureEvent() =>
++        SignatureEvent.Create(TenantId, AssignmentId, StudentId, GuardianId,
++            SignatureType.Typed, "Jane Doe", "192.168.1.10", "Mozilla/5.0 (Test)", "By signing I consent.");
++
++    private static byte[] SamplePdf() => [0x25, 0x50, 0x44, 0x46]; // "%PDF"
++
++    /// <summary>Builds the handler with Moq stubs for the C3 deps; the provided
++    /// fakes are the ones each test asserts on (repo, store, generator). The
++    /// directory resolves the student display name + the signer guardian.</summary>
++    private static FinalizeSignOffCommandHandler BuildHandler(
++        FakeSubmissionRepository repo,
++        Mock<IAssignmentCertificateGenerator>? generator = null,
++        Mock<IFileStore>? store = null,
++        IStudentDirectory? directory = null)
++    {
++        var assignmentRepo = new Mock<IAssignmentRepository>();
++        assignmentRepo.Setup(r => r.GetAsync(AssignmentId, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(NewAssignment());
++
++        directory ??= new Mock<IStudentDirectory>().Object;
++
++        var consent = new Mock<ISignatureConsentTextResolver>();
++        consent.Setup(r => r.ResolveConsentTextAsync(It.IsAny<CancellationToken>()))
++            .ReturnsAsync("By signing I consent.");
++
++        var gen = generator ?? new Mock<IAssignmentCertificateGenerator>();
++        if (generator is null)
++        {
++            gen.Setup(g => g.GenerateAsync(It.IsAny<AssignmentCertificateContent>(), It.IsAny<CancellationToken>()))
++                .ReturnsAsync(SamplePdf());
++        }
++
++        var fs = store ?? new Mock<IFileStore>();
++        if (store is null)
++        {
++            fs.Setup(f => f.StoreAsync(It.IsAny<Stream>(), "certificate.pdf", "application/pdf", It.IsAny<CancellationToken>()))
++                .ReturnsAsync("uploads/signoff/cert.pdf");
++        }
++
++        return new FinalizeSignOffCommandHandler(
++            repo, assignmentRepo.Object, directory,
++            consent.Object, gen.Object, fs.Object,
++            NullLogger<FinalizeSignOffCommandHandler>.Instance);
++    }
++
++    private static Mock<IStudentDirectory> DirectoryWithGuardian()
++    {
++        var directory = new Mock<IStudentDirectory>();
++        directory.Setup(d => d.GetStudentNameAsync(StudentId, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(new StudentNameInfo(StudentId, "Ward One"));
++        directory.Setup(d => d.GetGuardiansAsync(StudentId, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(new List<WardGuardianInfo> { new(GuardianId, "Jane Doe", true) });
++        return directory;
++    }
++
+     [TestMethod]
+     public async Task Finalize_FromSigned_StampFinalizedAt()
+     {
+         var submission = NewSignedSubmission();
+-        var repo = new FakeSubmissionRepository(submission);
++        var repo = new FakeSubmissionRepository(submission, NewSignatureEvent());
+ 
+-        var handler = new FinalizeSignOffCommandHandler(repo, NullLogger<FinalizeSignOffCommandHandler>.Instance);
++        var handler = BuildHandler(repo, directory: DirectoryWithGuardian().Object);
+ 
+         await handler.HandleAsync(new FinalizeSignOffCommand(AssignmentId, StudentId), CancellationToken.None);
+ 
+@@ -183,13 +251,87 @@ public class FinalizeSignOffCommandHandlerTests
+     public async Task Finalize_WrongState_Throws()
+     {
+         var submission = AssignmentSubmission.Create(TenantId, AssignmentId, StudentId, null); // None
+-        var repo = new FakeSubmissionRepository(submission);
++        var repo = new FakeSubmissionRepository(submission, NewSignatureEvent());
++
++        var handler = BuildHandler(repo, directory: DirectoryWithGuardian().Object);
++
++        var act = () => handler.HandleAsync(new FinalizeSignOffCommand(AssignmentId, StudentId), CancellationToken.None);
++
++        await act.Should().ThrowAsync<SubmissionSignOffStateException>();
++        submission.FinalizedAt.Should().BeNull();
++        repo.SaveCalls.Should().Be(0, "a failed finalize must not hit SaveChanges");
++    }
+ 
+-        var handler = new FinalizeSignOffCommandHandler(repo, NullLogger<FinalizeSignOffCommandHandler>.Instance);
++    // ── C3 binding coverage ─────────────────────────────────────────────
++
++    [TestMethod]
++    public async Task Finalize_GeneratesAndAttachesCertificate()
++    {
++        var submission = NewSignedSubmission();
++        var signatureEvent = NewSignatureEvent();
++        var repo = new FakeSubmissionRepository(submission, signatureEvent);
++        var generator = new Mock<IAssignmentCertificateGenerator>();
++        generator.Setup(g => g.GenerateAsync(It.IsAny<AssignmentCertificateContent>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(SamplePdf());
++        var store = new Mock<IFileStore>();
++        store.Setup(f => f.StoreAsync(It.IsAny<Stream>(), "certificate.pdf", "application/pdf", It.IsAny<CancellationToken>()))
++            .ReturnsAsync("uploads/signoff/cert.pdf");
++
++        var handler = BuildHandler(repo, generator, store, DirectoryWithGuardian().Object);
++
++        await handler.HandleAsync(new FinalizeSignOffCommand(AssignmentId, StudentId), CancellationToken.None);
++
++        submission.FinalizedAt.Should().NotBeNull();
++        signatureEvent.CertificateStoragePath.Should().Be("uploads/signoff/cert.pdf",
++            "the stored certificate path is attached on the audit event");
++        generator.Verify(g => g.GenerateAsync(
++                It.Is<AssignmentCertificateContent>(c =>
++                    c.AssignmentTitle == "Math HW" && c.StudentName == "Ward One" &&
++                    c.SignerGuardianName == "Jane Doe" && c.SignatureType == SignatureType.Typed &&
++                    c.TypedSignature == "Jane Doe" && c.ConsentTextShown == "By signing I consent."),
++                It.IsAny<CancellationToken>()),
++            Times.Once);
++        store.Verify(f => f.StoreAsync(It.IsAny<Stream>(), "certificate.pdf", "application/pdf", It.IsAny<CancellationToken>()), Times.Once);
++        repo.SaveCalls.Should().Be(1);
++    }
++
++    [TestMethod]
++    public async Task Finalize_Throws_WhenNoSignatureEvent()
++    {
++        var submission = NewSignedSubmission();
++        var repo = new FakeSubmissionRepository(submission, signatureEvent: null);
++
++        var handler = BuildHandler(repo, directory: DirectoryWithGuardian().Object);
+ 
+         var act = () => handler.HandleAsync(new FinalizeSignOffCommand(AssignmentId, StudentId), CancellationToken.None);
+ 
+         await act.Should().ThrowAsync<SubmissionSignOffStateException>();
+         submission.FinalizedAt.Should().BeNull();
++        repo.SaveCalls.Should().Be(0, "finalize without a prior sign must not persist anything");
++    }
++
++    [TestMethod]
++    public async Task Finalize_RollsBack_WhenGenerationFails()
++    {
++        var submission = NewSignedSubmission();
++        var signatureEvent = NewSignatureEvent();
++        var repo = new FakeSubmissionRepository(submission, signatureEvent);
++        var generator = new Mock<IAssignmentCertificateGenerator>();
++        generator.Setup(g => g.GenerateAsync(It.IsAny<AssignmentCertificateContent>(), It.IsAny<CancellationToken>()))
++            .ThrowsAsync(new InvalidOperationException("renderer down"));
++
++        var handler = BuildHandler(repo, generator, directory: DirectoryWithGuardian().Object);
++
++        var act = () => handler.HandleAsync(new FinalizeSignOffCommand(AssignmentId, StudentId), CancellationToken.None);
++
++        (await act.Should().ThrowAsync<AssignmentCertificateException>())
++            .Which.InnerException.Should().BeOfType<InvalidOperationException>();
++        signatureEvent.CertificateStoragePath.Should().BeNull(
++            "generation failure must not attach a certificate path");
++        // FinalizeSignOff() stamps FinalizedAt in-memory before generation (plan
++        // decision (d) ordering); rollback is at the persistence boundary, so the
++        // observable is that SaveChanges is never reached — the staged finalize
++        // is not committed and a retry re-finalizes from a Signed submission.
++        repo.SaveCalls.Should().Be(0, "a generation failure must not save the finalize");
+     }
+ }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SignOffPageBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SignOffPageBunitTests.cs
+index e2c2fc38..dbc2c469 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SignOffPageBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SignOffPageBunitTests.cs
+@@ -61,6 +61,11 @@ public class SignOffPageBunitTests : BunitContext
+         Services.AddSingleton<AssignmentsApiClient>();
+         Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
+         Services.AddSingleton(Mock.Of<ILogger<SignOffPage>>());
++        // C3: the page injects CertificateDownloadService (wraps the ApiClient fetch
++        // + the fileDownload.js save). The JS save path has no DOM in bUnit, so the
++        // tests assert the button gating; the module is exercised manually.
++        Services.AddSingleton<CertificateDownloadService>();
++        Services.AddSingleton(Mock.Of<ILogger<CertificateDownloadService>>());
+     }
+ 
+     private static string ContextUrl => $"/assignments/{AssignmentId}/students/{StudentId}/sign-off";
+@@ -228,4 +233,37 @@ public class SignOffPageBunitTests : BunitContext
+         cut.WaitForAssertion(() =>
+             cut.Markup.Should().Contain("500", "the failed POST surfaces the error bar"));
+     }
++
++    // ── C3 certificate download gating (decision (f)) ─────────────────────
++
++    private void SetupFinalizedContext()
++    {
++        var context = new SignOffContextDto(
++            AssignmentId, StudentId, "Math HW", "Ward One",
++            SignOffStateDto.Signed, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
++            2, 88m, true, "Consent text shown to the guardian", new List<WardGuardianDto>());
++        _mockHttp.When(HttpMethod.Get, $"http://localhost{ContextUrl}")
++            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(context, _apiJsonOptions));
++    }
++
++    [TestMethod]
++    public void DownloadCertificate_Visible_WhenFinalized()
++    {
++        SetupFinalizedContext();
++
++        var cut = RenderPage();
++
++        cut.Markup.Should().Contain("Download certificate",
++            "a finalized sign-off offers the PDF download action");
++    }
++
++    [TestMethod]
++    public void DownloadCertificate_Hidden_WhenNotFinalized()
++    {
++        SetupDefaultGuardians(); // AwaitingSignature → the signing view, not finalized
++        var cut = RenderPage();
++
++        cut.Markup.Should().NotContain("Download certificate",
++            "the download button is gated on FinalizedAt");
++    }
+ }
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SignOffSectionBunitTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SignOffSectionBunitTests.cs
+index 48b2bcf5..20892006 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SignOffSectionBunitTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SignOffSectionBunitTests.cs
+@@ -65,6 +65,11 @@ public class SignOffSectionBunitTests : BunitContext
+         Services.AddSingleton<AssignmentsApiClient>();
+         Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
+         Services.AddSingleton(Mock.Of<ILogger<SignOffSection>>());
++        // C3: SignOffSection now injects CertificateDownloadService (per-row
++        // certificate action; the JS save path has no DOM in bUnit — the tests
++        // assert the action gating only).
++        Services.AddSingleton<CertificateDownloadService>();
++        Services.AddSingleton(Mock.Of<ILogger<CertificateDownloadService>>());
+     }
+ 
+     private static SignOffStatusDto Row(
+diff --git a/tests/SchoolCollab.Assignments.Tests.Unit/SignatureEventTests.cs b/tests/SchoolCollab.Assignments.Tests.Unit/SignatureEventTests.cs
+index 4ca76ee2..8e72e84d 100644
+--- a/tests/SchoolCollab.Assignments.Tests.Unit/SignatureEventTests.cs
++++ b/tests/SchoolCollab.Assignments.Tests.Unit/SignatureEventTests.cs
+@@ -117,4 +117,40 @@ public class SignatureEventTests
+         act.Should().Throw<ArgumentException>()
+             .WithParameterName("signerGuardianId");
+     }
++
++    // ── C3 certificate attachment (decision (c): the single narrow update) ──
++
++    [TestMethod]
++    public void AttachCertificate_SetsPath()
++    {
++        var e = CreateTypedEvent("Jane Doe");
++
++        e.AttachCertificate("uploads/signoff/cert.pdf");
++
++        e.CertificateStoragePath.Should().Be("uploads/signoff/cert.pdf");
++    }
++
++    [TestMethod]
++    public void AttachCertificate_Idempotent_OnSecondCall()
++    {
++        var e = CreateTypedEvent("Jane Doe");
++
++        e.AttachCertificate("uploads/signoff/first.pdf");
++        e.AttachCertificate("uploads/signoff/second.pdf");
++
++        e.CertificateStoragePath.Should().Be("uploads/signoff/first.pdf",
++            "a re-finalize must never overwrite an already-attached certificate path");
++    }
++
++    [TestMethod]
++    public void AttachCertificate_Throws_OnEmptyPath()
++    {
++        var e = CreateTypedEvent("Jane Doe");
++
++        var act = () => e.AttachCertificate("   ");
++
++        act.Should().Throw<ArgumentException>()
++            .WithParameterName("certificateStoragePath");
++        e.CertificateStoragePath.Should().BeNull();
++    }
+ }
+\ No newline at end of file

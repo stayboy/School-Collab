@@ -283,9 +283,14 @@ public class AssignmentCreateBunitTests : BunitContext
         var checkbox = GetSignatureCheckbox(cut);
         await cut.InvokeAsync(() => checkbox.Instance.ValueChanged.InvokeAsync(false));
 
-        // Prime the subject selection required by SubmitAsync.
+        // Prime the subject selection required by SubmitAsync — INSIDE the same renderer
+        // invocation as the submit. FluentUI's activity-groups multi-select and due-date
+        // picker raise their @bind-*:after handlers (OnSelectedGroupsChangedAsync /
+        // OnDueDateChangedAsync) one render pass late, and both clear _selectedSubject
+        // (FR-58 re-filter). A write made outside this invocation can therefore be
+        // clobbered by the pending cascade before SubmitAsync reads it — the observed
+        // CI-only flake ("Please select a subject.") diagnosed 2026-09-15.
         var selectedSubjectField = typeof(CreatePage).GetField("_selectedSubject", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        selectedSubjectField.SetValue(cut.Instance, CreateOption("SubjectOption", topicId.ToString(), "Mathematics"));
 
         string? capturedBody = null;
         _mockHttp.Expect(HttpMethod.Post, "http://localhost/assignments")
@@ -297,10 +302,36 @@ public class AssignmentCreateBunitTests : BunitContext
             .Respond(HttpStatusCode.OK, "application/json", "\"11111111-1111-1111-1111-111111111111\"");
 
         var submit = typeof(CreatePage).GetMethod("SubmitAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        await cut.InvokeAsync(async () => await ((Task)submit.Invoke(cut.Instance, Array.Empty<object?>())!)!);
+        await cut.InvokeAsync(async () =>
+        {
+            selectedSubjectField.SetValue(cut.Instance, CreateOption("SubjectOption", topicId.ToString(), "Mathematics"));
+            await ((Task)submit.Invoke(cut.Instance, Array.Empty<object?>())!)!;
+        });
 
-        capturedBody.Should().NotBeNull();
-        capturedBody.Should().Contain("\"requiresSignature\":false", "the author's override is submitted in the create request");
+        // Diagnostic wrapping: this test failed once on the GitHub Actions Linux
+        // runner (run 34938835437) with a bare "Expected capturedBody not to be
+        // <null>" and proved unreproducible across ~50 local runs (Linux container,
+        // Release, exact CI command, 2 CPUs, en-US culture). When the submit path
+        // bails silently (guard return or swallowed OperationCanceledException)
+        // the page state at that moment is the only evidence — dump it.
+        try
+        {
+            capturedBody.Should().NotBeNull();
+            capturedBody.Should().Contain("\"requiresSignature\":false", "the author's override is submitted in the create request");
+        }
+        catch (Exception)
+        {
+            var err = typeof(CreatePage).GetField("_error", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(cut.Instance);
+            var subject = typeof(CreatePage).GetField("_selectedSubject", BindingFlags.NonPublic | BindingFlags.Instance)?.GetValue(cut.Instance);
+            Assert.Fail($"""
+                Create_AuthorOverrides submit did not reach POST /assignments.
+                capturedBody: {capturedBody}
+                Page _error: {err}
+                Page _selectedSubject: {subject}
+                Captured page logs:
+                {string.Join(Environment.NewLine, _createLogs)}
+                """);
+        }
     }
 
     [TestMethod]

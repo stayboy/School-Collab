@@ -54,6 +54,28 @@ public sealed class SignatureEvent : ITenantEntity, IEntity, IAuditableEntity
     public DateTimeOffset UpdatedAt { get; private set; }
 
     /// <summary>
+    /// C3 — the single narrow post-sign mutation (parent-adjudicated deviation
+    /// to the ar-9 append-only purity; the column was designed for exactly this
+    /// — see the residual on the ar-9 spec item "the C3 certificate round
+    /// populates it"). Rejects a null/whitespace path with a typed
+    /// <see cref="ArgumentException"/>; idempotent no-op when a path is already
+    /// attached (a re-finalize never overwrites a stored certificate); stamps
+    /// <c>UpdatedAt</c> so the audit shows when the certificate reference was
+    /// attached.
+    /// </summary>
+    public void AttachCertificate(string certificateStoragePath)
+    {
+        if (string.IsNullOrWhiteSpace(certificateStoragePath))
+            throw new ArgumentException("Certificate storage path is required.", nameof(certificateStoragePath));
+
+        if (!string.IsNullOrWhiteSpace(CertificateStoragePath))
+            return;
+
+        CertificateStoragePath = certificateStoragePath.Trim();
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>
     /// Append-only factory — the ONLY way a signature event row is created.
     /// Rejects empty audit fields (typed <see cref="ArgumentException"/>) and a
     /// Typed signature without the signer's full name.

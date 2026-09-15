@@ -26,9 +26,9 @@
 ### Legend
 - ✅ shipped & reusable · 🟡 partially exists (extend) · ❌ net-new
 
-> **Asset inventory refreshed 2026-09-11** after rounds ar-1…ar-9 — state markers updated
+> **Asset inventory refreshed 2026-09-15** after rounds ar-1…ar-10 — state markers updated
 > to match shipped code, with round attributions in the cells. Remaining ❌/🟡 rows are
-> the open lanes (Phase 2 ward experience, C3 certificates, WS-B2/ar-10, Phase 4/5).
+> the open lanes (Phase 2 ward experience, C3 certificates/ar-11, Phase 4/5).
 
 ### §3.1 Google Classroom core
 
@@ -37,7 +37,7 @@
 | Roster/class/group targeting | ✅ | `TargetAudienceType` (AllStudents/SelectedGrades/SelectedGroups) + `AssignmentActivityGroup` links + `GradeLevelId`/`TopicId`. AR spec adds *individual wards* — new audience value or per-ward recipient rows. |
 | Due date / late policy | 🟡 | `DueDate` + `AvailableFromUtc` (Scheduled/auto-publish) shipped (ar-5). Late-submission policy still net-new. |
 | Topics/categories | ✅ | `Topic` entity (Students context), `Assignment.TopicId`. |
-| Materials (files/links/video) | 🟡 | `AssignmentResource` + `AddAttachment`/`RemoveAttachment` aggregate methods (ar-1) + local `IFileStore` staging endpoint (ar-4) shipped. URL/video ingestion net-new (ar-10 WS-B2). |
+| Materials (files/links/video) | 🟡 | `AssignmentResource` + `AddAttachment`/`RemoveAttachment` aggregate methods (ar-1) + local `IFileStore` staging endpoint (ar-4) shipped. URL ingestion + HtmlAgilityPack text extraction shipped (ar-10 WS-B2, ≤3 fail-open); video/transcripts net-new. |
 | Draft → Scheduled → Published | ✅ | Full lifecycle `Draft → Scheduled → Published → Closed → Archived` with auto-publish sweep + `FEATURE:RequireAssignmentApproval` approval gate (ar-5). |
 | Reuse/duplicate as template | ✅ | `DuplicateAssignmentCommand` (ar-7). |
 | Per-ward progress + rubric grading | 🟡 | Structured answers + per-version `Score`/`Passed` shipped (ar-6); `SubmissionReview` retained. Rubric + per-ward progress % still net-new (Phase 2 D1). |
@@ -52,7 +52,7 @@
 | Status chain Sent→Viewed→…→Finalized | 🟡 | Sent/Viewed via `AssignmentRecipient.DeliveredAt`/`OpenedAt`; AwaitingSignature/Signed/Finalized via `SignOffState`/`FinalizedAt` (ar-9, per-ward projection). In-Progress/Completed still need per-ward progress (Phase 2 D1). |
 | Auto-reminders | 🟡 | Policy fields shipped (`MaxReminders`, `ReminderIntervalHours`, `SendoutTimeOfDay`) but stored-only; no worker, no channel. |
 | Audit trail (IP/device/consent) | ✅ | `SignatureEvent` (ar-9): signer guardian, signed-at, IP, user-agent, signature type, typed name, consent text shown — immutable, DB-unique per (assignment, student). |
-| Certificate PDF | ❌ | Still net-new (deliberately OUT of ar-9): `IFileStore` shipped (ar-4) and `SignatureEvent.CertificateStoragePath` ships nullable — QuestPDF generation + download route are the later C3 round. |
+| Certificate PDF | ✅ | Landed (ar-11, light round): QuestPDF 2026.8.0 renderer in the Assignments **API** layer (amendment A-1 — the API host never loads the Application RCL), transactional finalize generation into `IFileStore`, `SignatureEvent.AttachCertificate` (the single ar-9-purity exception), `GET .../certificate` download route + first JS interop (`fileDownload.js`) + per-ward action on the Detail Sign-off tab and the guardian page. Round: `rounds/round-ar-11-c3-certificates.md`. |
 | Guardian delegation | ✅ | Teacher reassignment command records advisory `ExpectedSignerGuardianId` (ar-9); any linked `StudentGuardian` may sign (Primary-priority enforcement recorded backlog). |
 
 ### §3.3 Proofpoint content & assessment
@@ -71,10 +71,10 @@
 |---|---|---|
 | Generation engine + prompt seam | ✅ | `AIChatEngine` (generic streaming + tool-call loop), `ISystemPromptProvider`, `IChatClientFactory` (Ollama/OpenRouter), `ChatModelResolver`. `assignment-creation-with-ai.md` decision 3–4 already define the dedicated endpoint (`POST /api/ai/assignments/questions`), `AssignmentQuestionGenerationSystemPromptProvider`, `IAssignmentQuestionGenerator` seam. |
 | Author prompt override | ✅ (spec'd) | Per-assignment override is spec'd in `assignment-creation-with-ai.md` (decision 8). |
-| Org-level system prompt (admin, locked/editable) | ❌ | AR addition. Precedent: `TenantNotificationPolicy` (Settings, one row per tenant) — store as a tenant-level `Settings` entity, not a coded value. |
-| N questions / type mix / difficulty mix | 🟡 | Prior spec has count + type mix; **difficulty distribution** is an AR addition. |
-| Versioned regeneration | ❌ | AR addition: regenerate creates a draft set without destroying prior edits (confirm-before-replace). |
-| URL/file/video resources as input | 🟡 | File staging shipped (ar-4); URL fetching + transcript extraction net-new (ar-10 WS-B2). |
+| Org-level system prompt (admin, locked/editable) | ✅ | Shipped (ar-10 #232): Settings `TenantAssignmentAiPrompt` tenant row (prompt + locked flag) + Admin `/assignment-ai-prompt` page + `AssignmentAiPromptApiClient`; the AI server provider resolves the tenant header, fails open, and org prompt REPLACES the embedded one when not locked. |
+| N questions / type mix / difficulty mix | ✅ | Count + type mix shipped (ar-3); difficulty distribution shipped (ar-10 #232): three nullable per-difficulty columns threaded through create/update/read-back/duplicate + wizard + draft-regeneration surfaces. |
+| Versioned regeneration | ✅ | Shipped (ar-10 #232): `QuestionsDraftJson` staged blob + `Stage/Confirm/Discard/GetQuestionsDraft` CQRS + 4 routes + Draft-only `QuestionsDraftSection` — regenerate without destroying prior edits, confirm-before-replace (labelled). |
+| URL/file/video resources as input | 🟡 | File staging shipped (ar-4); URL fetching + HtmlAgilityPack text extraction shipped (ar-10 WS-B2: http/https guard, 512KB/5s caps, ≤3 URLs, per-URL fail-open). Video/transcript extraction net-new. |
 
 ### §5 Notifications
 
@@ -219,8 +219,7 @@ within a phase.
       Scheduled/Approval/Archive states, feature-flagged (ar-5); A3 structured
       answers + auto-score + pass/retry (ar-6); A4 duplicate-as-template (ar-7).
       *(WS-B2 extensions — difficulty distribution, org-level prompt, versioned
-      regeneration, URL ingestion — remain open: parked as
-      `rounds/round-ar-10-ai-extensions.md`.)*
+      regeneration, URL ingestion — **shipped as ar-10 / PR #232, 2026-09-15**.)*
 - **Accept:** author builds an AR with modules + AI questions, previews pass threshold,
   duplicates it; lifecycle demo Draft→Scheduled→Published→Closed→Archived with approval
   gate on; `dotnet build`/`dotnet test` green; architecture tests green.
@@ -231,7 +230,7 @@ within a phase.
   order, questions unlock per thresholds, submits answers, gets auto-scored result with
   retry per policy; unit + bUnit coverage for gating engine and player states.
 
-### Phase 3 — Guardian sign-off (WS-C, WS-F3 partial) — **in progress** (ar-8/ar-9 landed; C3 + WS-F3 open)
+### Phase 3 — Guardian sign-off (WS-C, WS-F3 partial) — **nearly complete** (ar-8/ar-9/ar-11 landed; WS-F3 open)
 - [x] **C1 prerequisite:** signature-default policy pair (`TenantAssignmentPolicy`
       Settings + `GradeAssignmentPolicy` Students) + effective resolver +
       grade-Detail UI + wizard pre-fill + tests. — ar-8 (#230)
@@ -239,9 +238,10 @@ within a phase.
       `SignatureEvent` audit); C2 sign-off UI (guardian e-sign page, typed/click,
       tenant consent-text override); C4 locking (`RecordSubmission` guard) +
       teacher reassignment + finalize. — ar-9 (#231)
-- [ ] C3 certificate (D-1 local `IFileStore` + D-3 QuestPDF) — deferred: ar-9
-      recorded it OUT; `SignatureEvent.CertificateStoragePath` ships nullable,
-      nothing reads it, the download route is not built.
+- [x] C3 certificate (D-1 local `IFileStore` + D-3 QuestPDF 2026.8.0) — **landed ar-11 (2026-09-15, light
+      round; plan amendment A-1: renderer in the Api layer)**. Transactional finalize generation +
+      `AttachCertificate` + download route + JS-interop download on both UI surfaces. `rounds/round-ar-11-c3-certificates.md`
+      CLOSED; commit pending owner authorization on `stack/11-ar-11-c3-certificates` (stack/10 #232 unmerged).
 - [ ] WS-F3 partial: relocate the sign page behind real auth + E1 deep links
       (route + command unchanged) — blocked on Phase 2's F1 host + Phase 4's E1.
 - **Accept:** guardian reviews ward's completed work, signs with consent text, submission

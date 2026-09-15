@@ -65,6 +65,11 @@ public class SignOffSectionBunitTests : BunitContext
         Services.AddSingleton<AssignmentsApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
         Services.AddSingleton(Mock.Of<ILogger<SignOffSection>>());
+        // C3: SignOffSection now injects CertificateDownloadService (per-row
+        // certificate action; the JS save path has no DOM in bUnit — the tests
+        // assert the action gating only).
+        Services.AddSingleton<CertificateDownloadService>();
+        Services.AddSingleton(Mock.Of<ILogger<CertificateDownloadService>>());
     }
 
     private static SignOffStatusDto Row(

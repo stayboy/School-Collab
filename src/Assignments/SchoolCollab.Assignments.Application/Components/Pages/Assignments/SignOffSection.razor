@@ -2,9 +2,10 @@
 @using SchoolCollab.Admin.Shared.Components.Dialogs
 @using Microsoft.FluentUI.AspNetCore.Components
 @inject AssignmentsApiClient Api
+@inject CertificateDownloadService CertificateDownload
 @inject IDialogService DialogService
 @inject ILogger<SignOffSection> Logger
-@implements IDisposable
+@implements IAsyncDisposable
 
 @* WS-C1 teacher surface (spec §3.2 line 51): the per-ward guardian sign-off
    card on the Assignments Detail page. Renders nothing when the assignment
@@ -90,6 +91,14 @@
                                                   class="ms-2"
                                                   Disabled="@_finalizing">Finalize</FluentButton>
                                 }
+                                @if (row.FinalizedAt is not null)
+                                {
+                                    <FluentButton Appearance="Appearance.Lightweight"
+                                                  Title="Download the signed certificate PDF"
+                                                  OnClick="@(() => DownloadCertificateAsync(row))"
+                                                  class="ms-2"
+                                                  Disabled="@_downloadBusy">Certificate</FluentButton>
+                                }
                             </td>
                         </tr>
                     }
@@ -111,6 +120,7 @@
     private List<SignOffStatusDto>? _rows;
     private bool _busy = true;
     private bool _finalizing;
+    private bool _downloadBusy;
     private string? _error;
     private CancellationTokenSource? _loadCts;
     private volatile bool _disposed;
@@ -204,6 +214,30 @@
         }
     }
 
+    private async Task DownloadCertificateAsync(SignOffStatusDto row)
+    {
+        if (_disposed || _downloadBusy) return;
+        _downloadBusy = true;
+        _error = null;
+        var ct = _loadCts?.Token ?? CancellationToken.None;
+        try
+        {
+            await CertificateDownload.DownloadAsync(AssignmentId, row.StudentId, ct);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (_disposed) return;
+            Logger.LogError(ex, "Failed to download certificate for assignment {AssignmentId} / student {StudentId}",
+                AssignmentId, row.StudentId);
+            _error = ex.Message;
+        }
+        finally
+        {
+            if (!_disposed) { _downloadBusy = false; StateHasChanged(); }
+        }
+    }
+
     private static string StatusLabel(SignOffStatusDto row) => row.SignOffState switch
     {
         SignOffStateDto.AwaitingSignature => "Awaiting signature",
@@ -225,11 +259,12 @@
         _ => Appearance.Neutral
     };
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         _disposed = true;
         _loadCts?.Cancel();
         _loadCts?.Dispose();
         _loadCts = null;
+        await CertificateDownload.DisposeAsync();
     }
 }

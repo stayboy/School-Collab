@@ -46,6 +46,11 @@ else
 }
 
 builder.Services.AddAssignmentsCore(builder.Configuration);
+// C3 certificate rendering — the QuestPDF generator lives in the Api layer
+// (the only runtime that dispatches finalize) and is registered here after
+// AddAssignmentsCore so the Scrutor-scanned Core finalize handler resolves it.
+builder.Services.AddTransient<SchoolCollab.Assignments.Core.Services.IAssignmentCertificateGenerator,
+    SchoolCollab.Assignments.Api.Services.AssignmentCertificateGenerator>();
 // Phase 2: register Settings.Core so IEntityCodeGenerator (auto-generated entity codes)
 // is resolvable by the CreateAssignmentCommandHandler.
 builder.Services.AddSettingsCore(builder.Configuration);

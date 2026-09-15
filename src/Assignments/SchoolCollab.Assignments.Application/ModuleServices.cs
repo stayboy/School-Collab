@@ -49,6 +49,11 @@ public static class ModuleServices
         services.AddHttpClient("url-fetcher", client => client.Timeout = TimeSpan.FromSeconds(5));
         services.AddTransient<IUrlTextExtractor, UrlTextExtractor>();
 
+        // C3 certificate download (decision (f)): wraps the ApiClient PDF fetch + the
+        // fileDownload.js save. Owns the lazily-loaded JS module ref, disposed by the
+        // consuming component.
+        services.AddTransient<CertificateDownloadService>();
+
         return services;
     }
 }

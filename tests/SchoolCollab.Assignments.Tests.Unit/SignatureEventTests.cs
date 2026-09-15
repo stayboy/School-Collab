@@ -117,4 +117,40 @@ public class SignatureEventTests
         act.Should().Throw<ArgumentException>()
             .WithParameterName("signerGuardianId");
     }
+
+    // ── C3 certificate attachment (decision (c): the single narrow update) ──
+
+    [TestMethod]
+    public void AttachCertificate_SetsPath()
+    {
+        var e = CreateTypedEvent("Jane Doe");
+
+        e.AttachCertificate("uploads/signoff/cert.pdf");
+
+        e.CertificateStoragePath.Should().Be("uploads/signoff/cert.pdf");
+    }
+
+    [TestMethod]
+    public void AttachCertificate_Idempotent_OnSecondCall()
+    {
+        var e = CreateTypedEvent("Jane Doe");
+
+        e.AttachCertificate("uploads/signoff/first.pdf");
+        e.AttachCertificate("uploads/signoff/second.pdf");
+
+        e.CertificateStoragePath.Should().Be("uploads/signoff/first.pdf",
+            "a re-finalize must never overwrite an already-attached certificate path");
+    }
+
+    [TestMethod]
+    public void AttachCertificate_Throws_OnEmptyPath()
+    {
+        var e = CreateTypedEvent("Jane Doe");
+
+        var act = () => e.AttachCertificate("   ");
+
+        act.Should().Throw<ArgumentException>()
+            .WithParameterName("certificateStoragePath");
+        e.CertificateStoragePath.Should().BeNull();
+    }
 }

@@ -61,6 +61,11 @@ public class SignOffPageBunitTests : BunitContext
         Services.AddSingleton<AssignmentsApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<AssignmentsApiClient>>());
         Services.AddSingleton(Mock.Of<ILogger<SignOffPage>>());
+        // C3: the page injects CertificateDownloadService (wraps the ApiClient fetch
+        // + the fileDownload.js save). The JS save path has no DOM in bUnit, so the
+        // tests assert the button gating; the module is exercised manually.
+        Services.AddSingleton<CertificateDownloadService>();
+        Services.AddSingleton(Mock.Of<ILogger<CertificateDownloadService>>());
     }
 
     private static string ContextUrl => $"/assignments/{AssignmentId}/students/{StudentId}/sign-off";
@@ -227,5 +232,38 @@ public class SignOffPageBunitTests : BunitContext
 
         cut.WaitForAssertion(() =>
             cut.Markup.Should().Contain("500", "the failed POST surfaces the error bar"));
+    }
+
+    // ── C3 certificate download gating (decision (f)) ─────────────────────
+
+    private void SetupFinalizedContext()
+    {
+        var context = new SignOffContextDto(
+            AssignmentId, StudentId, "Math HW", "Ward One",
+            SignOffStateDto.Signed, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            2, 88m, true, "Consent text shown to the guardian", new List<WardGuardianDto>());
+        _mockHttp.When(HttpMethod.Get, $"http://localhost{ContextUrl}")
+            .Respond(HttpStatusCode.OK, "application/json", JsonSerializer.Serialize(context, _apiJsonOptions));
+    }
+
+    [TestMethod]
+    public void DownloadCertificate_Visible_WhenFinalized()
+    {
+        SetupFinalizedContext();
+
+        var cut = RenderPage();
+
+        cut.Markup.Should().Contain("Download certificate",
+            "a finalized sign-off offers the PDF download action");
+    }
+
+    [TestMethod]
+    public void DownloadCertificate_Hidden_WhenNotFinalized()
+    {
+        SetupDefaultGuardians(); // AwaitingSignature → the signing view, not finalized
+        var cut = RenderPage();
+
+        cut.Markup.Should().NotContain("Download certificate",
+            "the download button is gated on FinalizedAt");
     }
 }
