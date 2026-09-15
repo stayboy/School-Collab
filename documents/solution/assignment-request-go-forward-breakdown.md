@@ -249,7 +249,7 @@ within a phase.
 - [x] C3 certificate (D-1 local `IFileStore` + D-3 QuestPDF 2026.8.0) — **landed ar-11 (2026-09-15, light
       round; plan amendment A-1: renderer in the Api layer)**. Transactional finalize generation +
       `AttachCertificate` + download route + JS-interop download on both UI surfaces. `rounds/round-ar-11-c3-certificates.md`
-      CLOSED; commit pending owner authorization on `stack/11-ar-11-c3-certificates` (stack/10 #232 unmerged).
+      CLOSED; **merged 2026-09-15 as PR #233** (squash `d2169aef`).
 - [ ] WS-F3 partial: relocate the sign page behind real auth + E1 deep links
       (route + command unchanged) — blocked on Phase 2's F1 host + Phase 4's E1.
 - **Accept:** guardian reviews ward's completed work, signs with consent text, submission
@@ -287,11 +287,10 @@ within a phase.
 ## 6. Immediate next actions
 
 1. ~~Stakeholder pass on decisions~~ — done (Phase 0 complete).
-2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10,
-   light round (Tiers 1–2) for ar-11; round slicing + per-round log in
+2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
+   light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. **Current (2026-09-15):** merge the open train — #232 (ar-10) then #233 (ar-11), each
-   on owner instruction — then fire the **Phase 2 ward experience** round
-   (WS-A5/D1/D2/F1/F2 — the largest remaining spec gap) under a fresh execution-mode
-   menu. After that: Phase 4 WS-E delivery, D-6 identity before Phase 5 WS-G
+3. **Current (2026-09-16):** the train is drained (#232, #233, #235 merged) and Phase 2 is **landed**
+   (ar-12 + ar-13 = PR #236). Next: **Phase 4 WS-E delivery** (E1 token deep links first — unblocks
+   WS-F3; E2 needs a provider decision; then E3 worker), D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).
