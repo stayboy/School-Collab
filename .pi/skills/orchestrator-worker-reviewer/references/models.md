@@ -9,12 +9,30 @@ the catalog.
 Model ids come from `subagent({ action: "models" })` — copy exact `provider/id`
 strings; bare ids resolve only when unique.
 
-| Role | pi default |
+**Registry refresh (2026-09-15): the `ollama` provider's id set drifted — verify
+ids against `~/.pi/agent/models-store.json` before dispatching.** The `ollama-cloud`
+provider now hosts the modern ids. Current resolvable defaults:
+
+| Role | pi default (2026-09-15) |
 |---|---|
-| Orchestrator | `ollama/glm-5.3-flash:cloud` |
+| Orchestrator | `ollama-cloud/glm-5.3-flash` |
 | Worker | `ollama/deepseek-v4-flash:0731-cloud` |
-| Reviewer | `ollama/kimi-k2.7-code:cloud` |
+| Reviewer | `ollama-cloud/deepseek-v4.1-flash` (owner override 2026-09-15, replacing `ollama/kimi-k2.7-code:cloud`) |
 | UI Tester | `ollama/minimax-m3:cloud` |
+
+Historical (pre-2026-09-15, may no longer resolve): orchestrator
+`ollama/glm-5.3-flash:cloud` (this is the one that drifted). The
+`ollama` provider still carries `kimi-k2.7-code:cloud`, `glm-5.3:cloud`,
+`deepseek-v4-flash:0731-cloud`, and `minimax-m3:cloud`.
+
+## Escalation ladder (build-escalation pattern, SKILL.md step 3)
+
+When a worker pass times out / stalls / hangs: the escalation EXECUTOR is the
+reviewer model (currently `ollama-cloud/deepseek-v4.1-flash` under the owner
+override), dispatched through a write-capable shell (`worker`/`delegate` — never
+the read-only `reviewer` shell), and the escalated work is then statically
+re-verified by the HIGHER model `ollama/glm-5.3:cloud` (verified resolvable).
+One escalation per blocked pass; record provenance in the round doc.
 
 ## Cline profile — switch to `clinepass` first
 

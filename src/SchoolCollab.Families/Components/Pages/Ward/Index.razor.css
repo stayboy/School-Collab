@@ -1,0 +1,7 @@
+/* WS-A5 (slice 2b) — ward assignment-list surface. Minimal real styles for the
+   grid page; FluentUI supplies the component chrome. CSS isolation scoped to
+   Ward/Index.razor via the b-<hash> attribute Blazor appends automatically. */
+
+h1 {
+    margin-bottom: 1rem;
+}

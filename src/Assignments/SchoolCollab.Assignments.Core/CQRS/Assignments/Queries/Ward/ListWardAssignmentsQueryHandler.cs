@@ -8,15 +8,18 @@ namespace SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.Ward;
 /// <summary>
 /// WS-A5 — projects the ward assignment list. The candidate set (visible
 /// status + recipient-link targeting) comes from
-/// <see cref="IAssignmentRepository.ListWardAssignmentsAsync"/>; each row is
-/// enriched with its required-module lock state (per-module progress) and
-/// submission state (None → InProgress → Completed via FinalizedAt), the
-/// ar-9 per-ward projection precedent. N+1 over the candidate set is accepted
-/// for v1 (the 2b list UI is low-volume per ward) — recorded in the round doc.
+/// <see cref="IWardAssignmentProjectionRepository.ListWardAssignmentsAsync"/>
+/// (ar-13 A-1 cohesion fix: a dedicated ward-aggregation read, split out of the
+/// module-progress repository); each row is enriched with its required-module
+/// lock state (per-module progress) and submission state (None → InProgress →
+/// Completed via FinalizedAt), the ar-9 per-ward projection precedent. N+1 over
+/// the candidate set is accepted for v1 (the 2b list UI is low-volume per ward)
+/// — recorded in the round doc.
 /// </summary>
 public sealed class ListWardAssignmentsHandler(
     IAssignmentRepository assignmentRepository,
     ISubmissionRepository submissionRepository,
+    IWardAssignmentProjectionRepository wardAssignmentProjectionRepository,
     IModuleProgressRepository moduleProgressRepository,
     ILogger<ListWardAssignmentsHandler> logger) : IQueryHandler<ListWardAssignments, WardAssignmentListItemDto[]>
 {
@@ -24,7 +27,7 @@ public sealed class ListWardAssignmentsHandler(
     {
         logger.LogDebug("Handling ListWardAssignments for student {StudentId}", query.StudentId);
 
-        var summaries = await moduleProgressRepository.ListWardAssignmentsAsync(query.StudentId, DateTimeOffset.UtcNow, cancellationToken);
+        var summaries = await wardAssignmentProjectionRepository.ListWardAssignmentsAsync(query.StudentId, DateTimeOffset.UtcNow, cancellationToken);
 
         var result = new List<WardAssignmentListItemDto>(summaries.Count);
         foreach (var summary in summaries)

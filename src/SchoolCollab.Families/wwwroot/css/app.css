@@ -1,0 +1,4 @@
+/* Families host base stylesheet — linked from App.razor as css/app.css. */
+html {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+}

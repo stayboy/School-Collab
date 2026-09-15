@@ -1,0 +1,132 @@
+@page "/ward"
+@page "/ward/{StudentId:guid}"
+@implements IDisposable
+@inject FamiliesApiClient Api
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.WebUtilities
+@using SchoolCollab.Assignments.Contracts
+
+@* F1 (slice 2b): in-app ward surface (Option B). Host-level authorization
+   (Program.cs RequireAuthorization when OIDC is on) gates these pages; no
+   per-page AuthorizeView — matches the Admin posture. *@
+
+<ErrorBoundary>
+    <ChildContent>
+        <h1>My Assignments</h1>
+
+        @if (!_studentId.HasValue)
+{
+    <FluentMessageBar Intent="MessageIntent.Warning">No ward selected for this session.</FluentMessageBar>
+}
+else if (_items is null)
+{
+    @if (_error is not null)
+    {
+        @* The load failed: show the error instead of a perpetual spinner. *@
+        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+    }
+    else
+    {
+        <FluentProgressRing />
+    }
+}
+else if (_items.Length == 0)
+{
+    <FluentMessageBar>No assignments for this ward yet.</FluentMessageBar>
+}
+else
+{
+    <FluentDataGrid Items="_items.AsQueryable()" TItem="WardAssignmentListItemDto" GridTemplateColumns="1fr 140px 160px 120px 90px" Resizable="true">
+        <PropertyColumn Title="Assignment" Property="@(a => a.Title)" />
+        <PropertyColumn Title="Due" Property="@(a => a.DueDate)" Format="{0:g}" />
+        <PropertyColumn Title="Status" Property="@(a => a.State)" />
+        <TemplateColumn Title="Modules">
+            @if (context.HasLockedModules)
+            {
+                <FluentBadge Color="Color.Red">Locked</FluentBadge>
+            }
+            else
+            {
+                <FluentBadge Color="Color.Green">Ready</FluentBadge>
+            }
+        </TemplateColumn>
+        <TemplateColumn Title="">
+            <FluentButton Appearance="Appearance.Accent"
+                          OnClick="@(() => Nav.NavigateTo($"/ward/{_studentId}/assignments/{context.Id}"))">Open</FluentButton>
+        </TemplateColumn>
+    </FluentDataGrid>
+}
+
+        @if (_error is not null && _items is not null)
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private CancellationTokenSource? _loadCts;
+    private volatile bool _disposed;
+    private Guid? _studentId;
+    private Guid? _loadedForStudentId;
+    private int _loadEpoch;
+    private WardAssignmentListItemDto[]? _items;
+    private string? _error;
+
+    [Parameter] public Guid? StudentId { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (StudentId is not null && StudentId != Guid.Empty)
+        {
+            _studentId = StudentId;
+        }
+        else
+        {
+            var q = QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+            _studentId = q.TryGetValue("studentId", out var vals) && Guid.TryParse(vals.FirstOrDefault(), out var g) ? g : null;
+        }
+    }
+
+    // The load lives in OnParametersSetAsync (which runs AFTER OnParametersSet —
+    // OnInitializedAsync would run before the parameter is resolved, leaving _studentId
+    // null and the page stuck on the loading ring forever). Guarded by _loadedForStudentId
+    // so an unchanged re-render does not re-fetch.
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_studentId is not { } sid || sid == Guid.Empty) return;
+        if (_loadedForStudentId == sid) return;
+        _loadedForStudentId = sid;
+        // Bump the epoch before any await: an in-flight load for the old student must not
+        // commit over this newer parameter change (stale-commit race guard).
+        _loadEpoch++;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = new CancellationTokenSource();
+        _items = null;
+        _error = null;
+        try
+        {
+            var epoch = _loadEpoch;
+            var items = await Api.ListWardAssignmentsAsync(sid, _loadCts.Token);
+            if (epoch != _loadEpoch || _disposed) return;
+            _items = items;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            if (!_disposed) _error = ex.Message;
+        }
+    }
+
+    public void Dispose()
+    {
+        _disposed = true;
+        _loadCts?.Cancel();
+        _loadCts?.Dispose();
+        _loadCts = null;
+    }
+}
