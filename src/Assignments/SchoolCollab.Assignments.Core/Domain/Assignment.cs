@@ -54,6 +54,19 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
     /// default via the wizard pre-fill; the author may override. Defaults to
     /// <see langword="false"/> when not supplied.</summary>
     public bool RequiresSignature { get; private set; }
+    /// <summary>WS-B2 (spec §3.4 line 70) — the requested easy-question count,
+    /// when the author constrains the AI difficulty mix. Null = let the model
+    /// decide; no cross-field sum validation (the prompt reconciles).</summary>
+    public int? DifficultyEasyCount { get; private set; }
+    /// <summary>WS-B2 (spec §3.4 line 70) — requested medium-question count.</summary>
+    public int? DifficultyMediumCount { get; private set; }
+    /// <summary>WS-B2 (spec §3.4 line 70) — requested hard-question count.</summary>
+    public int? DifficultyHardCount { get; private set; }
+    /// <summary>WS-B2 (spec §3.4 line 73) — a staged-but-unconfirmed AI question
+    /// set (JSON of <c>NewQuestionDto[]</c>). Only confirmed questions enter
+    /// <see cref="Questions"/>; staging is server-side so a draft survives page
+    /// reloads. Null when no draft is staged.</summary>
+    public string? QuestionsDraftJson { get; private set; }
     public AssignmentStatus Status { get; private set; }
     public Guid CreatedByTeacherId { get; private set; }
     /// <summary>
@@ -130,7 +143,12 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
         /// required after completion. Snapshotted from the resolved
         /// grade/tenant default; the author may override.</summary>
-        bool requiresSignature = false)
+        bool requiresSignature = false,
+        /// <summary>WS-B2 (spec §3.4 line 70): requested optional per-difficulty
+        /// counts. Null = let the model decide; no cross-field sum validation.</summary>
+        int? difficultyEasy = null,
+        int? difficultyMedium = null,
+        int? difficultyHard = null)
     {
         if (topicId == Guid.Empty)
             throw new ArgumentException("Topic is required.", nameof(topicId));
@@ -140,6 +158,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             throw new ArgumentException("Pass score must not exceed the max score.", nameof(passScore));
         if (maxAttempts.HasValue && maxAttempts.Value < 1)
             throw new ArgumentException("Max attempts must be at least 1.", nameof(maxAttempts));
+        if (difficultyEasy < 0 || difficultyMedium < 0 || difficultyHard < 0)
+            throw new ArgumentException("Difficulty counts must be zero or greater.", nameof(difficultyEasy));
 
         var now = DateTimeOffset.UtcNow;
         var assignment = new Assignment
@@ -157,6 +177,9 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             PassScore = passScore,
             MaxAttempts = maxAttempts,
             RequiresSignature = requiresSignature,
+            DifficultyEasyCount = difficultyEasy,
+            DifficultyMediumCount = difficultyMedium,
+            DifficultyHardCount = difficultyHard,
             Status = AssignmentStatus.Draft,
             CreatedByTeacherId = createdByTeacherId,
             // Mandatory review is the default (spec §4.7); callers may opt out.
@@ -188,7 +211,12 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         int? maxAttempts = null,
         /// <summary>WS-C1 / spec §7 Q1: whether a guardian signature is
         /// required after completion. Round-trips the create-time snapshot.</summary>
-        bool requiresSignature = false)
+        bool requiresSignature = false,
+        /// <summary>WS-B2 (spec §3.4 line 70): requested optional per-difficulty
+        /// counts. Null = let the model decide; no cross-field sum validation.</summary>
+        int? difficultyEasy = null,
+        int? difficultyMedium = null,
+        int? difficultyHard = null)
     {
         if (Status is not (AssignmentStatus.Draft or AssignmentStatus.Scheduled))
             throw new InvalidOperationException("Only draft or scheduled assignments can be updated.");
@@ -200,6 +228,8 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
             throw new ArgumentException("Pass score must not exceed the max score.", nameof(passScore));
         if (maxAttempts.HasValue && maxAttempts.Value < 1)
             throw new ArgumentException("Max attempts must be at least 1.", nameof(maxAttempts));
+        if (difficultyEasy < 0 || difficultyMedium < 0 || difficultyHard < 0)
+            throw new ArgumentException("Difficulty counts must be zero or greater.", nameof(difficultyEasy));
 
         Title = title.Trim();
         Description = description?.Trim();
@@ -213,11 +243,56 @@ public sealed class Assignment : ITenantEntity, IEntity, IAuditableEntity, IHasR
         PassScore = passScore;
         MaxAttempts = maxAttempts;
         RequiresSignature = requiresSignature;
+        DifficultyEasyCount = difficultyEasy;
+        DifficultyMediumCount = difficultyMedium;
+        DifficultyHardCount = difficultyHard;
         MandatoryReview = mandatoryReview;
         AiPromptOverride = aiPromptOverride?.Trim();
         ArchiveGraceDays = archiveGraceDays;
         UpdatedAt = DateTimeOffset.UtcNow;
         _domainEvents.Add(new AssignmentUpdatedEvent(Id, Title));
+    }
+
+    /// <summary>WS-B2 (spec §3.4 line 73) — stages an unconfirmed AI question
+    /// set (JSON of <c>NewQuestionDto[]</c>) on <see cref="QuestionsDraftJson"/>.
+    /// Draft-only; the staging handler validates + serializes before calling, so an
+    /// empty payload is rejected here as <see cref="ArgumentException"/>. Stamps
+    /// <see cref="UpdatedAt"/>.</summary>
+    public void StageQuestionsDraft(string questionsJson)
+    {
+        if (Status != AssignmentStatus.Draft)
+            throw new InvalidQuestionsDraftException("Question drafts can only be staged on draft assignments.");
+        if (string.IsNullOrWhiteSpace(questionsJson))
+            throw new ArgumentException("A questions draft payload is required.", nameof(questionsJson));
+        QuestionsDraftJson = questionsJson;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>WS-B2 (spec §3.4 line 73) — drops the staged questions draft.
+    /// Idempotent when no draft exists (returns without error). Stamps
+    /// <see cref="UpdatedAt"/> only when a draft was actually cleared.</summary>
+    public void DiscardQuestionsDraft()
+    {
+        if (Status != AssignmentStatus.Draft)
+            throw new InvalidQuestionsDraftException("Question drafts can only be discarded on draft assignments.");
+        if (QuestionsDraftJson is null)
+            return;
+        QuestionsDraftJson = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    /// <summary>WS-B2 (spec §3.4 line 73) — clears the staged blob after the
+    /// caller (the confirm handler) has materialized the draft questions into
+    /// <see cref="Questions"/>. The guard requires a staged blob to confirm.
+    /// Stamps <see cref="UpdatedAt"/>.</summary>
+    public void ConfirmQuestionsDraft()
+    {
+        if (Status != AssignmentStatus.Draft)
+            throw new InvalidQuestionsDraftException("Question drafts can only be confirmed on draft assignments.");
+        if (QuestionsDraftJson is null)
+            throw new InvalidQuestionsDraftException("No staged questions draft to confirm.");
+        QuestionsDraftJson = null;
+        UpdatedAt = DateTimeOffset.UtcNow;
     }
 
     public void Publish(bool approvalRequired = false)

@@ -1,0 +1,127 @@
+@page "/assignment-ai-prompt"
+@using SchoolCollab.Admin.Shared.Services
+@inject AssignmentAiPromptApiClient Api
+@inject ILogger<AssignmentAiPrompt> Logger
+@inject NavigationManager Nav
+
+<PageTitle>Assignment AI Prompt</PageTitle>
+
+<ErrorBoundary>
+    <ChildContent>
+        @if (_loading)
+        {
+            <FluentProgressRing />
+        }
+        else if (!string.IsNullOrEmpty(_loadError))
+        {
+            <FluentMessageBar Intent="MessageIntent.Error">@_loadError</FluentMessageBar>
+        }
+        else
+        {
+            <FluentCard class="pa-4 mt-3">
+                <h2>Organization AI prompt for assignment questions</h2>
+                <p class="text-muted">
+                    Used when teachers generate assignment questions (WS-B2).
+                    @(string.IsNullOrWhiteSpace(_systemPrompt)
+                        ? "The built-in default prompt is currently in use."
+                        : "A tenant override is in effect — clear the text and save to restore the built-in default.")
+                    @(_isLocked ? "Teachers cannot add their own AI guidance while this is locked." : "")
+                </p>
+                <FluentTextArea Label="Organization AI prompt"
+                                Placeholder="Leave empty to use the built-in default prompt"
+                                MaxLength="4000"
+                                Rows="8"
+                                class="full-width"
+                                @bind-Value="_systemPrompt" />
+                <div class="mt-3">
+                    <FluentSwitch @bind-Value="_isLocked"
+                                  Label="Locked — prevent teachers from adding their own AI guidance" />
+                </div>
+                <div class="mt-3">
+                    <FluentButton Appearance="Appearance.Accent" Disabled="@_busy" OnClick="SaveAsync">
+                        @(_busy ? "Saving…" : "Save")
+                    </FluentButton>
+                    <FluentButton Appearance="Appearance.Neutral"
+                                  Disabled="@_busy"
+                                  IconStart="@FluentIcons.ArrowLeft"
+                                  OnClick="CancelAsync"
+                                  Class="ms-2">
+                        Cancel
+                    </FluentButton>
+                </div>
+                @if (_saved)
+                {
+                    <FluentMessageBar Intent="MessageIntent.Success" class="mt-2">Organization AI prompt saved.</FluentMessageBar>
+                }
+                @if (!string.IsNullOrEmpty(_saveError))
+                {
+                    <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_saveError</FluentMessageBar>
+                }
+            </FluentCard>
+        }
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
+    </ErrorContent>
+</ErrorBoundary>
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private bool _saved;
+    private bool _isLocked;
+    private string? _loadError;
+    private string? _saveError;
+    private string? _systemPrompt;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var dto = await Api.GetAsync();
+            _systemPrompt = dto?.SystemPrompt ?? string.Empty;
+            _isLocked = dto?.IsLocked ?? false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load the organization assignment AI prompt");
+            _loadError = ex.Message;
+        }
+        finally
+        {
+            _loading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_busy) return;
+        _busy = true;
+        _saveError = null;
+        _saved = false;
+        try
+        {
+            var prompt = string.IsNullOrWhiteSpace(_systemPrompt) ? null : _systemPrompt;
+            var saved = await Api.UpsertAsync(prompt, _isLocked);
+            _systemPrompt = saved.SystemPrompt ?? string.Empty;
+            _isLocked = saved.IsLocked;
+            _saved = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save the organization assignment AI prompt");
+            _saveError = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>WS-B2 — Cancel-via-back link: return to the Settings landing
+    /// (<c>/settings</c>) without saving. Mirrors the ConfigFlags / CodedValues
+    /// create-page Cancel convention.</summary>
+    private void CancelAsync() => Nav.NavigateTo("/settings");
+}

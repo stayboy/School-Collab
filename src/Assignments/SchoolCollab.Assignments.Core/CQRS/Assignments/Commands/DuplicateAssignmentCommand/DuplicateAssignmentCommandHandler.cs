@@ -67,7 +67,12 @@ public sealed class DuplicateAssignmentCommandHandler(
             archiveGraceDays: source.ArchiveGraceDays,
             passScore: source.PassScore,
             maxAttempts: source.MaxAttempts,
-            requiresSignature: source.RequiresSignature)
+            requiresSignature: source.RequiresSignature,
+            // WS-B2 (spec §3.4 line 70): difficulty mix cloned with the other
+            // scalar fields (the unconfirmed questions draft blob is NOT copied).
+            difficultyEasy: source.DifficultyEasyCount,
+            difficultyMedium: source.DifficultyMediumCount,
+            difficultyHard: source.DifficultyHardCount)
             .WithTenant(tenantProvider);
 
         // Children copied IN ORDER via the aggregate's Add* factories (the

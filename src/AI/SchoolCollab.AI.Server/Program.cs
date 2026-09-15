@@ -91,6 +91,14 @@ builder.Services.AddCodedValuesAiTools(client =>
     client.BaseAddress = new Uri("https+http://settings-api"),
     clientBuilder => clientBuilder.AddHttpMessageHandler<TenantForwardingDelegatingHandler>());
 
+// WS-B2 / spec §3.4: tenant-level organization AI prompt for assignment question
+// generation — a settings-api read that MUST carry the caller's tenant header, so
+// the TenantForwardingDelegatingHandler (TryAddTransient above) is attached. It
+// is injected into AssignmentQuestionGenerationService by AddAssignmentQuestionGeneration().
+builder.Services.AddHttpClient<TenantAssignmentAiPromptProvider>(client =>
+    client.BaseAddress = new Uri("https+http://settings-api"))
+    .AddHttpMessageHandler<TenantForwardingDelegatingHandler>();
+
 // Generic AI chat engine — drives /api/ai/chat for every registered
 // IToolProvider / ISystemPromptProvider. Adding a second bounded context is a
 // parallel AddXxxAiTools() call.

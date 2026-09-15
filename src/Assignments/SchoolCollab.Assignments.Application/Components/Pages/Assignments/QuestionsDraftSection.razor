@@ -1,0 +1,288 @@
+@using SchoolCollab.Assignments.Application.Helpers
+@using SchoolCollab.Assignments.Application.Services
+@using SchoolCollab.Assignments.Contracts
+@using SchoolCollab.AI.Abstractions
+@implements IDisposable
+@inject IAssignmentQuestionGenerator QuestionGenerator
+@inject AssignmentsApiClient Api
+@inject ILogger<QuestionsDraftSection> Logger
+
+<section class="questions-draft-section">
+    <FluentMessageBar Intent="MessageIntent.Info">
+        Regenerate questions as a draft. Confirming replaces every current question.
+    </FluentMessageBar>
+
+    <div class="questions-draft-prompt">
+        <FluentTextArea @bind-Value="_prompt"
+                        Label="Additional guidance for the AI (optional)"
+                        MaxLength="4000"
+                        Rows="2"
+                        Disabled="@PromptLocked"
+                        Placeholder="@PromptPlaceholder"
+                        class="full-width" />
+    </div>
+
+    <div class="questions-draft-row">
+        <FluentNumberField @bind-Value="_questionCount"
+                           Label="Number of questions"
+                           Min="1"
+                           Max="30"
+                           Class="w-2" />
+
+        <div class="questions-draft-types" role="group" aria-label="Question types">
+            <FluentCheckbox @bind-Value="_includeMultipleChoice" Label="Multiple choice" />
+            <FluentCheckbox @bind-Value="_includeTrueFalse" Label="True / False" />
+            <FluentCheckbox @bind-Value="_includeShortAnswer" Label="Short answer" />
+        </div>
+    </div>
+
+    <div class="questions-draft-row">
+        <FluentNumberField @bind-Value="_difficultyEasy" Label="Easy questions" Min="0" Max="30" Class="w-2" />
+        <FluentNumberField @bind-Value="_difficultyMedium" Label="Medium questions" Min="0" Max="30" Class="w-2" />
+        <FluentNumberField @bind-Value="_difficultyHard" Label="Hard questions" Min="0" Max="30" Class="w-2" />
+    </div>
+
+    <div class="questions-draft-actions">
+        <FluentButton Appearance="Appearance.Accent"
+                      Disabled="@(!GateEnabled || _busy)"
+                      OnClick="GenerateDraftAsync">
+            @(_busy ? "Generating…" : "Generate draft")
+        </FluentButton>
+
+        @if (_draft is not null)
+        {
+            <FluentButton Appearance="Appearance.Accent"
+                          Disabled="@_busy"
+                          OnClick="ConfirmDraftAsync"
+                          Class="ms-2">
+                Confirm &amp; replace
+            </FluentButton>
+            <FluentButton Appearance="Appearance.Neutral"
+                          Disabled="@_busy"
+                          OnClick="DiscardDraftAsync"
+                          Class="ms-2">
+                Discard draft
+            </FluentButton>
+        }
+
+        @if (_busy)
+        {
+            <FluentProgressRing Class="ms-2" />
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <FluentMessageBar Intent="MessageIntent.Error" class="mt-2">@_error</FluentMessageBar>
+    }
+
+    @if (_draft is not null)
+    {
+        <ul class="questions-draft-preview">
+            @foreach (var (q, index) in _draft.Select((x, i) => (x, i)).ToList())
+            {
+                <li class="questions-draft-preview-row" @key="q">
+                    <span class="questions-draft-preview-text">@(index + 1). @q.QuestionText</span>
+                    <FluentBadge Appearance="Appearance.Accent">@EnumHelper.GetDescription(q.QuestionType)</FluentBadge>
+                    @if (q.Options is { Count: > 0 })
+                    {
+                        <ul class="questions-draft-preview-options">
+                            @foreach (var opt in q.Options)
+                            {
+                                <li>@opt.OptionText@(opt.IsCorrect ? " ✓" : "")</li>
+                            }
+                        </ul>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</section>
+
+@code {
+    /// <summary>The assignment whose draft is being edited. Draft-only
+    /// (rendered by the Edit page only for Draft assignments).</summary>
+    [Parameter, EditorRequired] public Guid AssignmentId { get; set; }
+
+    /// <summary>True when the type + grading-format combination supports
+    /// AI question generation (FR-220 / EC-3) — the wizard gate mirrored.</summary>
+    [Parameter] public bool GateEnabled { get; set; }
+
+    /// <summary>True when the tenant LOCKED the org-level AI prompt
+    /// (WS-B2 / spec §3.4 line 70) — disables the guidance textarea.</summary>
+    [Parameter] public bool PromptLocked { get; set; }
+
+    /// <summary>The subject id for the generation request; null short-circuits
+    /// with a friendly "select a subject" message.</summary>
+    [Parameter] public Guid? TopicId { get; set; }
+
+    /// <summary>The subject's display name for the generation request.</summary>
+    [Parameter] public string? TopicName { get; set; }
+
+    /// <summary>The grade level id for the generation request, when known.</summary>
+    [Parameter] public Guid? GradeLevelId { get; set; }
+
+    /// <summary>Raised after Confirm replaces the questions so the Edit page can
+    /// reload the summary (question count / review area changes).</summary>
+    [Parameter] public EventCallback OnConfirmed { get; set; }
+
+    private int _questionCount = 5;
+    private bool _includeMultipleChoice = true;
+    private bool _includeTrueFalse = true;
+    private bool _includeShortAnswer = true;
+    private int? _difficultyEasy;
+    private int? _difficultyMedium;
+    private int? _difficultyHard;
+    private string? _prompt;
+    private IReadOnlyList<NewQuestionDto>? _draft;
+    private bool _busy;
+    private string? _error;
+    private CancellationTokenSource? _cts;
+
+    private string? PromptPlaceholder => PromptLocked ? "Your organization has locked the AI prompt." : null;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // WS-B2: an already-staged draft survives page reloads — render it.
+        try
+        {
+            _draft = await Api.GetQuestionsDraftAsync(AssignmentId);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Failed to load the questions draft for assignment {AssignmentId}", AssignmentId);
+            _error = "Couldn't load a previously staged draft.";
+        }
+    }
+
+    private async Task GenerateDraftAsync()
+    {
+        if (!GateEnabled || _busy)
+        {
+            return;
+        }
+        if (_questionCount < 1)
+        {
+            return;
+        }
+        if (TopicId is null)
+        {
+            _error = "Select a subject before generating questions.";
+            return;
+        }
+
+        _busy = true;
+        _error = null;
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = new CancellationTokenSource();
+        var ct = _cts.Token;
+
+        IReadOnlyList<GeneratedQuestionType>? types = null;
+        var picked = new List<GeneratedQuestionType>(3);
+        if (_includeMultipleChoice) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.MultipleChoice));
+        if (_includeTrueFalse) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.TrueFalse));
+        if (_includeShortAnswer) picked.Add(QuestionEditorRow.ToGeneratedType(QuestionTypeDto.ShortAnswer));
+        if (picked.Count > 0) types = picked;
+
+        var request = new QuestionGenerationRequest(
+            TopicId: TopicId.Value,
+            TopicName: TopicName ?? string.Empty,
+            GradeLevelId: GradeLevelId,
+            ContextStrands: null,
+            QuestionCount: _questionCount,
+            Types: types,
+            PromptOverride: _prompt,
+            DifficultyEasyCount: _difficultyEasy,
+            DifficultyMediumCount: _difficultyMedium,
+            DifficultyHardCount: _difficultyHard);
+
+        try
+        {
+            var generated = await QuestionGenerator.GenerateAsync(request, ct);
+            var draft = new List<NewQuestionDto>(generated.Count);
+            for (var i = 0; i < generated.Count; i++)
+            {
+                draft.Add(GeneratedQuestionMapper.ToNewQuestionDto(generated[i]) with { DisplayOrder = i });
+            }
+            await Api.StageQuestionsDraftAsync(AssignmentId, draft, ct);
+            _draft = draft;
+        }
+        catch (QuestionGenerationFailed ex)
+        {
+            _error = ex.Message;
+        }
+        catch (OperationCanceledException)
+        {
+            // EC-2: cancel leaves any prior draft untouched.
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to generate the questions draft for assignment {AssignmentId}", AssignmentId);
+            _error = "Something went wrong while generating the draft. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ConfirmDraftAsync()
+    {
+        if (_busy || _draft is null)
+        {
+            return;
+        }
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Api.ConfirmQuestionsDraftAsync(AssignmentId, _cts?.Token ?? default);
+            _draft = null;
+            await OnConfirmed.InvokeAsync();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to confirm the questions draft for assignment {AssignmentId}", AssignmentId);
+            _error = "Couldn't confirm the draft. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task DiscardDraftAsync()
+    {
+        if (_busy || _draft is null)
+        {
+            return;
+        }
+        _busy = true;
+        _error = null;
+        try
+        {
+            await Api.DiscardQuestionsDraftAsync(AssignmentId, _cts?.Token ?? default);
+            _draft = null;
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to discard the questions draft for assignment {AssignmentId}", AssignmentId);
+            _error = "Couldn't discard the draft. Please try again.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+    }
+}

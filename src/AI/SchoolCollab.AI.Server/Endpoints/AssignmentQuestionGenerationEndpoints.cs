@@ -9,8 +9,12 @@ namespace SchoolCollab.AI.Endpoints;
 
 /// <summary>
 /// Minimal-API endpoint group for the assignment question-generation surface
-/// (<c>POST /api/ai/assignments/questions</c>). Anonymous by design —
-/// generation is stateless and reads no tenant data (decision (d)).
+/// (<c>POST /api/ai/assignments/questions</c>). Anonymous by design (dev
+/// posture); the generate handler NOW reads the caller's tenant organization
+/// prompt via the propagated tenant header (WS-B2), fail-open to the embedded
+/// default when no tenant header arrives or the Settings API is unreachable — so
+/// an external anonymous caller never resolves another tenant's prompt (the
+/// header is required to do so).
 /// </summary>
 public static class AssignmentQuestionGenerationEndpoints
 {

@@ -72,7 +72,11 @@ public class CreateAssignmentCommandHandlerQuestionsTests
         int archiveGraceDays = 30,
         // WS-A3 (spec §3.3 + §7 Q4): pass/fail threshold + attempt cap.
         decimal? passScore = null,
-        int? maxAttempts = null) =>
+        int? maxAttempts = null,
+        // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
+        int? difficultyEasyCount = null,
+        int? difficultyMediumCount = null,
+        int? difficultyHardCount = null) =>
         new(
             Title: "Algebra HW",
             Description: null,
@@ -91,7 +95,11 @@ public class CreateAssignmentCommandHandlerQuestionsTests
             Resources: resources,
             ArchiveGraceDays: archiveGraceDays,
             PassScore: passScore,
-            MaxAttempts: maxAttempts);
+            MaxAttempts: maxAttempts,
+            // WS-B2 (spec §3.4 line 70): threaded to Assignment.Create.
+            DifficultyEasyCount: difficultyEasyCount,
+            DifficultyMediumCount: difficultyMediumCount,
+            DifficultyHardCount: difficultyHardCount);
 
     private static NewQuestionDto McQuestion(int displayOrder) =>
         new(
@@ -224,20 +232,34 @@ public class CreateAssignmentCommandHandlerQuestionsTests
     }
 
     [TestMethod]
-    public async Task HandleAsync_TfCanonicalWithOneCorrect_Accepted()
+    public async Task HandleAsync_WithDifficultyCounts_PersistsThem()
     {
-        var (db, cache, tenants) = BuildScope("create-tf-ok");
+        var (db, cache, tenants) = BuildScope("create-difficulty-counts");
         using var _db = db;
         var handler = NewHandler(db, cache, tenants);
 
-        var id = await handler.HandleAsync(SampleCommand(questions: [TrueFalseCorrect()]));
+        var id = await handler.HandleAsync(SampleCommand(
+            difficultyEasyCount: 2, difficultyMediumCount: 3, difficultyHardCount: 1));
 
         var stored = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == id);
-        stored.Questions.Should().HaveCount(1);
-        stored.Questions[0].Options.Should().HaveCount(2);
-        stored.Questions[0].CorrectOptionId.Should().NotBeNull();
-        stored.Questions[0].Options.Single(o => o.Id == stored.Questions[0].CorrectOptionId)
-            .OptionText.Should().Be("True");
+        stored.DifficultyEasyCount.Should().Be(2);
+        stored.DifficultyMediumCount.Should().Be(3);
+        stored.DifficultyHardCount.Should().Be(1);
+    }
+
+    [TestMethod]
+    public async Task HandleAsync_WithNegativeDifficultyCount_RejectedBeforePersist()
+    {
+        var (db, cache, tenants) = BuildScope("create-negative-difficulty");
+        using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        var act = async () => await handler.HandleAsync(SampleCommand(difficultyHardCount: -1));
+
+        await act.Should().ThrowAsync<ArgumentException>(
+            "the domain Create guard rejects negative difficulty counts");
+        db.Assignments.IgnoreQueryFilters().Should().BeEmpty(
+            "no partial aggregate may be persisted");
     }
 
     [TestMethod]

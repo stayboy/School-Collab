@@ -74,6 +74,8 @@ app.MapNotificationPolicyEndpoints(featureFlags);
 app.MapAssignmentPolicyEndpoints(featureFlags);
 // Guardian sign-off consent text (WS-C2 / spec §3.2).
 app.MapSignatureConsentTextEndpoints(featureFlags);
+// Organization AI prompt for question generation (WS-B2 / spec §3.4).
+app.MapAssignmentAiPromptEndpoints(featureFlags);
 
 app.Run();
 

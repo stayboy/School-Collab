@@ -112,21 +112,33 @@ public sealed class AssignmentQuestionGenerationSystemPromptProvider : ISystemPr
 
     /// <summary>
     /// Composes the chat-message list for a single non-streaming generation
-    /// request. Message 1 = system (loaded prompt). Message 2 = user carrying
-    /// the request payload as Web/camelCase JSON + one instruction line.
-    /// Message 3 (only when <see cref="QuestionGenerationRequest.PromptOverride"/>
-    /// is non-blank) = a second user message framing the override as inert
-    /// teacher guidance (EC-9).
+    /// request. Message 1 = system — the tenant's organization prompt when
+    /// provided (WS-B2, replacing the embedded default), else the embedded
+    /// prompt. Message 2 = user carrying the request payload as Web/camelCase
+    /// JSON plus a difficulty-distribution line and a reference-material block
+    /// (both only when present). Message 3 (only when
+    /// <see cref="QuestionGenerationRequest.PromptOverride"/> is non-blank and
+    /// not suppressed by a tenant lock) = a second user message framing the
+    /// override as inert teacher guidance (EC-9).
     /// </summary>
-    public IReadOnlyList<ChatMessage> BuildMessages(QuestionGenerationRequest request)
+    public IReadOnlyList<ChatMessage> BuildMessages(QuestionGenerationRequest request, string? orgSystemPrompt = null)
     {
+        var userText = JsonSerializer.Serialize(request, _jsonOptions)
+            + Environment.NewLine
+            + "Generate the questions now. Return only the JSON document.";
+
+        var difficultyLine = BuildDifficultyLine(request);
+        if (difficultyLine is not null)
+            userText += Environment.NewLine + difficultyLine;
+
+        var referenceBlock = BuildReferenceBlock(request);
+        if (referenceBlock is not null)
+            userText += Environment.NewLine + referenceBlock;
+
         var messages = new List<ChatMessage>(3)
         {
-            new(ChatRole.System, GetSystemPrompt()),
-            new(ChatRole.User,
-                JsonSerializer.Serialize(request, _jsonOptions)
-                + Environment.NewLine
-                + "Generate the questions now. Return only the JSON document.")
+            new(ChatRole.System, string.IsNullOrWhiteSpace(orgSystemPrompt) ? GetSystemPrompt() : orgSystemPrompt),
+            new(ChatRole.User, userText)
         };
 
         if (!string.IsNullOrWhiteSpace(request.PromptOverride))
@@ -139,6 +151,27 @@ public sealed class AssignmentQuestionGenerationSystemPromptProvider : ISystemPr
         }
 
         return messages;
+    }
+
+    private static string? BuildDifficultyLine(QuestionGenerationRequest request)
+    {
+        var parts = new List<string>(3);
+        if (request.DifficultyEasyCount is { } easy) parts.Add($"{easy} easy");
+        if (request.DifficultyMediumCount is { } medium) parts.Add($"{medium} medium");
+        if (request.DifficultyHardCount is { } hard) parts.Add($"{hard} hard");
+        return parts.Count == 0
+            ? null
+            : $"Difficulty distribution: {string.Join(" / ", parts)} questions.";
+    }
+
+    private static string? BuildReferenceBlock(QuestionGenerationRequest request)
+    {
+        if (request.ResourceTexts is not { Count: > 0 } excerpts) return null;
+        var block = new System.Text.StringBuilder();
+        block.AppendLine("Reference material excerpts to ground the questions:");
+        for (var i = 0; i < excerpts.Count; i++)
+            block.AppendLine($"  Excerpt {i + 1}: {excerpts[i]}");
+        return block.ToString();
     }
 
     private static readonly JsonSerializerOptions _jsonOptions = new(JsonSerializerDefaults.Web);

@@ -163,6 +163,53 @@ public class AssignmentQuestionGenerationSystemPromptProviderTests
             "EC-9: the system prompt must remain unchanged when an override is supplied");
     }
 
+    [TestMethod]
+    public void BuildMessages_UsesOrgPromptWhenProvided()
+    {
+        var provider = BuildProvider("Production", out _);
+        var messages = provider.BuildMessages(
+            new QuestionGenerationRequest(TopicId: Guid.NewGuid(), TopicName: "Photosynthesis"),
+            orgSystemPrompt: "Tenant org prompt.");
+
+        messages[0].Text.Should().Be("Tenant org prompt.", "an org prompt replaces the embedded system prompt (WS-B2)");
+    }
+
+    [TestMethod]
+    public void BuildMessages_FallsBackToEmbeddedWithoutOrgPrompt()
+    {
+        var provider = BuildProvider("Production", out _);
+        var request = new QuestionGenerationRequest(TopicId: Guid.NewGuid(), TopicName: "Photosynthesis");
+
+        var withEmpty = provider.BuildMessages(request, orgSystemPrompt: "  ");
+        var without = provider.BuildMessages(request);
+
+        withEmpty[0].Text.Should().Be(without[0].Text, "empty/whitespace org prompt falls back to the embedded system prompt");
+    }
+
+    [TestMethod]
+    public void BuildMessages_FramesDifficultyCounts()
+    {
+        var provider = BuildProvider("Production", out _);
+        var messages = provider.BuildMessages(new QuestionGenerationRequest(
+            TopicId: Guid.NewGuid(), TopicName: "Photosynthesis",
+            DifficultyEasyCount: 2, DifficultyMediumCount: 3, DifficultyHardCount: 1));
+
+        messages[1].Text.Should().Contain("Difficulty distribution: 2 easy / 3 medium / 1 hard questions.");
+    }
+
+    [TestMethod]
+    public void BuildMessages_FramesResourceExcerpts()
+    {
+        var provider = BuildProvider("Production", out _);
+        var messages = provider.BuildMessages(new QuestionGenerationRequest(
+            TopicId: Guid.NewGuid(), TopicName: "Photosynthesis",
+            ResourceTexts: new[] { "excerpt one", "excerpt two" }));
+
+        messages[1].Text.Should().Contain("Reference material excerpts to ground the questions:");
+        messages[1].Text.Should().Contain("excerpt one");
+        messages[1].Text.Should().Contain("excerpt two");
+    }
+
     private static AssignmentQuestionGenerationSystemPromptProvider BuildProvider(
         string environmentName,
         out Mock<IHostEnvironment> mockEnv)

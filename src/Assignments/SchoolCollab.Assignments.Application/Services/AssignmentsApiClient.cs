@@ -331,6 +331,68 @@ public sealed class AssignmentsApiClient
             $"/assignments/{assignmentId}/students/{studentId}/sign-off/finalize", null, ct)).EnsureSuccessStatusCode();
     }
 
+    /// <summary>The AI-prompt lock state for the create/edit wizard (WS-B2
+    /// spec §3.4 line 70). Always-200 fail-open resolution from the API.</summary>
+    public async Task<bool> GetAiPromptPolicyAsync(CancellationToken ct = default)
+    {
+        _logger.LogDebug("Resolving AI-prompt lock state");
+        var response = await _http.GetAsync("/assignments/ai-prompt-policy", ct);
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<AiPromptPolicyResponse>(_jsonOptions, ct);
+        return result?.AiPromptLocked ?? false;
+    }
+
+    /// <summary>The staged AI questions draft (WS-B2 spec §3.4 line 73); null
+    /// when none is staged (the API returns 204) — survives page reloads.</summary>
+    public async Task<IReadOnlyList<NewQuestionDto>?> GetQuestionsDraftAsync(Guid id, CancellationToken ct = default)
+    {
+        var response = await _http.GetAsync($"/assignments/{id}/questions-draft", ct);
+        if (response.StatusCode is System.Net.HttpStatusCode.NoContent or System.Net.HttpStatusCode.NotFound)
+            return null;
+        response.EnsureSuccessStatusCode();
+        var result = await response.Content.ReadFromJsonAsync<QuestionsDraftResponse>(_jsonOptions, ct);
+        return result?.Questions;
+    }
+
+    /// <summary>Stages a generated questions draft server-side (WS-B2).</summary>
+    public async Task StageQuestionsDraftAsync(Guid id, IReadOnlyList<NewQuestionDto> questions, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Staging questions draft for assignment {AssignmentId}", id);
+        var response = await _http.PutAsJsonAsync($"/assignments/{id}/questions-draft", new StageQuestionsDraftRequest(questions), _jsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>REPLACES all existing questions with the staged draft (WS-B2);
+    /// returns the updated summary.</summary>
+    public async Task<AssignmentSummaryDto?> ConfirmQuestionsDraftAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Confirming questions draft for assignment {AssignmentId}", id);
+        var response = await _http.PostAsJsonAsync($"/assignments/{id}/questions-draft/confirm", (ConfirmQuestionsDraftRequest?)null, _jsonOptions, ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<AssignmentSummaryDto>(_jsonOptions, ct);
+    }
+
+    /// <summary>Drops the staged questions draft (WS-B2).</summary>
+    public async Task DiscardQuestionsDraftAsync(Guid id, CancellationToken ct = default)
+    {
+        _logger.LogDebug("Discarding questions draft for assignment {AssignmentId}", id);
+        var response = await _http.DeleteAsync($"/assignments/{id}/questions-draft", ct);
+        response.EnsureSuccessStatusCode();
+    }
+
+    /// <summary>WS-B2 — the always-200 <c>{"aiPromptLocked": ...}</c> body of the
+    /// /assignments/ai-prompt-policy route (round-7 <see cref="IdResponse"/> precedent).</summary>
+    private sealed record AiPromptPolicyResponse(bool AiPromptLocked);
+
+    /// <summary>Route body for staging a draft (PUT /assignments/{id}/questions-draft).</summary>
+    private sealed record StageQuestionsDraftRequest(IReadOnlyList<NewQuestionDto> Questions);
+
+    /// <summary>GET /assignments/{id}/questions-draft body envelope.</summary>
+    private sealed record QuestionsDraftResponse(IReadOnlyList<NewQuestionDto> Questions);
+
+    /// <summary>Marker body for the POST /…/questions-draft/confirm route (no payload).</summary>
+    private sealed record ConfirmQuestionsDraftRequest;
+
     /// <summary>WS-C2 — the wire response of the always-200 consent-text route.</summary>
     private sealed record SignatureConsentTextResponse(string ConsentText);
 

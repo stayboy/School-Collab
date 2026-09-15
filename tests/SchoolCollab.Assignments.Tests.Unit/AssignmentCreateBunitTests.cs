@@ -75,6 +75,9 @@ public class AssignmentCreateBunitTests : BunitContext
         _mockHttp = new MockHttpMessageHandler();
         var httpClient = _mockHttp.ToHttpClient();
         httpClient.BaseAddress = new Uri("http://localhost");
+        // WS-B2 (step 6): Create.razor now loads the org AI-prompt lock on init.
+        _mockHttp.When(HttpMethod.Get, "http://localhost/assignments/ai-prompt-policy")
+            .Respond(HttpStatusCode.OK, "application/json", "{\"aiPromptLocked\":false}");
 
         Services.AddSingleton(httpClient);
         Services.AddSingleton<AssignmentsApiClient>();

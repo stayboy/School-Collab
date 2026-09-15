@@ -25,9 +25,10 @@ public enum GeneratedQuestionType
 
 /// <summary>
 /// Inbound request to the assignment question-generation endpoint (spec §3.4).
-/// Carries the topic/context strings needed to ground the generation; the
-/// request is stateless and reads no tenant data, so it is safe to send
-/// across the cross-module boundary without a tenant header.
+/// Carries the topic/context strings needed to ground the generation plus the
+/// optional requested difficulty distribution and reference-material excerpts
+/// (WS-B2). The AI host may resolve the caller's tenant organization prompt via
+/// the propagated tenant header (fail-open to the embedded default when absent).
 /// </summary>
 public sealed record QuestionGenerationRequest(
     Guid TopicId,
@@ -36,7 +37,15 @@ public sealed record QuestionGenerationRequest(
     IReadOnlyList<string>? ContextStrands = null,
     int QuestionCount = 5,
     IReadOnlyList<GeneratedQuestionType>? Types = null,
-    string? PromptOverride = null);
+    string? PromptOverride = null,
+    /// <summary>WS-B2: requested easy-question count. Null = let the model decide.</summary>
+    int? DifficultyEasyCount = null,
+    /// <summary>WS-B2: requested medium-question count. Null = let the model decide.</summary>
+    int? DifficultyMediumCount = null,
+    /// <summary>WS-B2: requested hard-question count. Null = let the model decide.</summary>
+    int? DifficultyHardCount = null,
+    /// <summary>WS-B2: up to 5 URL-derived reference texts to ground the generation.</summary>
+    IReadOnlyList<string>? ResourceTexts = null);
 
 /// <summary>
 /// A single option inside a <see cref="GeneratedQuestionDto"/>. <see cref="IsCorrect"/>

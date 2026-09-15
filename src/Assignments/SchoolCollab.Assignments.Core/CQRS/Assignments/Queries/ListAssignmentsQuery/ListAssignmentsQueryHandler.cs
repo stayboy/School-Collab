@@ -66,7 +66,12 @@ public sealed class ListAssignmentsQueryHandler(
                     s.MaxAttempts,
                     // WS-C1 (spec §7 Q1): guardian-signature flag — must be
                     // mapped or every summary reports false.
-                    s.RequiresSignature)).ToArray();
+                    s.RequiresSignature,
+                    // WS-B2 (spec §3.4 line 70): per-difficulty counts — must be
+                    // mapped or every list read resets them to null.
+                    s.DifficultyEasyCount,
+                    s.DifficultyMediumCount,
+                    s.DifficultyHardCount)).ToArray();
             },
             CacheOptions,
             tags: ["assignments"],

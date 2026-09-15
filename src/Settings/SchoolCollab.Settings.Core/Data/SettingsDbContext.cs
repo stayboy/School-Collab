@@ -46,6 +46,9 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
     /// <summary>Guardian sign-off consent text override (WS-C2 / spec §3.2). One row per tenant; null = embedded default.</summary>
     public DbSet<TenantSignatureConsentText> TenantSignatureConsentTexts => Set<TenantSignatureConsentText>();
 
+    /// <summary>One organization-level AI prompt row per tenant (WS-B2 / spec §3.4).</summary>
+    public DbSet<TenantAssignmentAiPrompt> TenantAssignmentAiPrompts => Set<TenantAssignmentAiPrompt>();
+
     public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
 
     /// <summary>
@@ -98,6 +101,7 @@ public sealed class SettingsDbContext(DbContextOptions<SettingsDbContext> option
         modelBuilder.ApplyConfiguration(new TenantNotificationPolicyConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantAssignmentPolicyConfiguration(() => CurrentTenantId));
         modelBuilder.ApplyConfiguration(new TenantSignatureConsentTextConfiguration(() => CurrentTenantId));
+        modelBuilder.ApplyConfiguration(new TenantAssignmentAiPromptConfiguration(() => CurrentTenantId));
 
         modelBuilder.ApplyConfiguration(new OutboxMessageConfiguration(OutboxMapping.FlagsFor<SettingsDbContext>()));
 

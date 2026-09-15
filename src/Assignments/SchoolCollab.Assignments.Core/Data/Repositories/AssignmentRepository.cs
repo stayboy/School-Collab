@@ -28,7 +28,9 @@ internal sealed class AssignmentRepository(AssignmentsDbContext db)
                 // values without a separate read.
                 a.PassScore, a.MaxAttempts,
                 // WS-C1 (spec §7 Q1): guardian-signature snapshot.
-                a.RequiresSignature))
+                a.RequiresSignature,
+                // WS-B2 (spec §3.4 line 70): per-difficulty counts.
+                a.DifficultyEasyCount, a.DifficultyMediumCount, a.DifficultyHardCount))
             .ToListAsync(ct);
     }
 

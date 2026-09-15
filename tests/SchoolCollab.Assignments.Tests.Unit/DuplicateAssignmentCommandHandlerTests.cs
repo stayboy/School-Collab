@@ -128,6 +128,53 @@ public class DuplicateAssignmentCommandHandlerTests
     }
 
     [TestMethod]
+    public async Task HandleAsync_CopiesDifficultyCounts_ButNotTheStagedQuestionsDraft()
+    {
+        // A DRAFT source — unlike a published one it may carry a staged (still
+        // unconfirmed) AI questions blob; the clone must take the difficulty
+        // counts but never that draft (decision (c)).
+        var (db, cache, tenants) = BuildScope("dup-difficulty-no-draft");
+        await using var _db = db;
+        var handler = NewHandler(db, cache, tenants);
+
+        var source = Assignment.Create(
+                title: "Difference + Draft source",
+                description: null,
+                assignmentType: AssignmentType.Digital,
+                gradingFormat: GradingFormat.TeacherGraded,
+                targetAudienceType: TargetAudienceType.AllStudents,
+                topicId: Guid.NewGuid(),
+                gradeLevelId: null,
+                dueDate: null,
+                maxScore: 100m,
+                createdByTeacherId: Guid.NewGuid(),
+                mandatoryReview: false,
+                aiPromptOverride: null,
+                archiveGraceDays: 30,
+                passScore: 70m,
+                maxAttempts: 2,
+                requiresSignature: false,
+                difficultyEasy: 1,
+                difficultyMedium: 2,
+                difficultyHard: 1)
+            .WithTenant(tenants);
+
+        source.StageQuestionsDraft("[{\"questionText\":\"cached\"}]");
+
+        db.Assignments.Add(source);
+        db.SaveChanges();
+
+        var newId = await handler.HandleAsync(new DuplicateAssignmentCommand(source.Id));
+
+        var clone = db.Assignments.IgnoreQueryFilters().Single(a => a.Id == newId);
+        clone.DifficultyEasyCount.Should().Be(1);
+        clone.DifficultyMediumCount.Should().Be(2);
+        clone.DifficultyHardCount.Should().Be(1);
+        clone.QuestionsDraftJson.Should().BeNull(
+            "the unconfirmed questions draft blob is never cloned onto the copy");
+    }
+
+    [TestMethod]
     public async Task HandleAsync_PublishedSource_ClonesAsFreshDraftWithCopySuffix()
     {
         // Arrange

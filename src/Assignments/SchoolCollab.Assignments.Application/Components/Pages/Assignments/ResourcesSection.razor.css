@@ -45,3 +45,13 @@
     font-size: 0.875rem;
     font-variant-numeric: tabular-nums;
 }
+
+.resources-section-url-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.resources-section-urls {
+  margin-top: 0.75rem;
+}

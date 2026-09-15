@@ -19,6 +19,8 @@ using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SubmitAssignmentFo
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SubmitAssignmentOnBehalf;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UnpublishAssignmentCommand;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.UpdateAssignmentCommand;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.QuestionsDraft;
+using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.QuestionsDraft;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetAssignmentByIdQuery;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetGuardianGate;
 using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.GetSubmission;
@@ -35,6 +37,10 @@ using SchoolCollab.Assignments.Core.Domain;
 using SchoolCollab.Assignments.Core.Domain.Exceptions;
 
 namespace SchoolCollab.Assignments.Api.Endpoints;
+
+/// <summary>WS-B2 (spec §3.4 line 73) — route body for staging a questions
+/// draft (PUT /assignments/{id:guid}/questions-draft).</summary>
+public sealed record StageQuestionsDraftBody(IReadOnlyList<NewQuestionDto> Questions);
 
 public static class AssignmentRoutes
 {
@@ -85,6 +91,106 @@ public static class AssignmentRoutes
             return Results.Ok(new { consentText });
         });
 
+        // ── Versioned questions draft (WS-B2 / spec §3.4 line 73) ──
+        group.MapGet("/{id:guid}/questions-draft", async (
+            Guid id,
+            [FromServices] IQueryHandler<GetQuestionsDraftQuery, IReadOnlyList<NewQuestionDto>?> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var result = await handler.HandleAsync(new GetQuestionsDraftQuery(id), ct);
+                return result is null ? Results.NoContent() : Results.Ok(new { questions = result });
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidQuestionsDraftException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
+        });
+
+        group.MapPut("/{id:guid}/questions-draft", async (
+            Guid id,
+            [FromBody] StageQuestionsDraftBody body,
+            [FromServices] ICommandHandler<StageQuestionsDraftCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new StageQuestionsDraftCommand(id, body.Questions), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (AssignmentQuestionValidationException ex)
+            {
+                return Results.BadRequest(new { ex.Message });
+            }
+            catch (InvalidQuestionsDraftException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
+        });
+
+        group.MapPost("/{id:guid}/questions-draft/confirm", async (
+            Guid id,
+            [FromServices] ICommandHandler<ConfirmQuestionsDraftCommand> confirmHandler,
+            [FromServices] IQueryHandler<GetAssignmentByIdQuery, AssignmentSummaryDto?> readHandler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await confirmHandler.HandleAsync(new ConfirmQuestionsDraftCommand(id), ct);
+                var summary = await readHandler.HandleAsync(new GetAssignmentByIdQuery(id), ct);
+                return Results.Ok(summary);
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidQuestionsDraftException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
+        });
+
+        group.MapDelete("/{id:guid}/questions-draft", async (
+            Guid id,
+            [FromServices] ICommandHandler<DiscardQuestionsDraftCommand> handler,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                await handler.HandleAsync(new DiscardQuestionsDraftCommand(id), ct);
+                return Results.NoContent();
+            }
+            catch (AssignmentNotFoundException)
+            {
+                return Results.NotFound();
+            }
+            catch (InvalidQuestionsDraftException ex)
+            {
+                return Results.Problem(statusCode: StatusCodes.Status409Conflict, detail: ex.Message);
+            }
+        });
+
+        // ── Org-level AI-prompt lock (WS-B2 / spec §3.4 line 70) ──
+        // Always 200 + the resolved lock (fail-open false mirrors the resolver
+        // posture) so the create wizard is never blocked. Literal segment wins
+        // over the {id:guid} template (the /signature-default precedent).
+        group.MapGet("/ai-prompt-policy", async (
+            [FromServices] SchoolCollab.Assignments.Core.Services.IAiPromptPolicyResolver resolver,
+            CancellationToken ct) =>
+        {
+            var aiPromptLocked = await resolver.ResolveAiPromptLockedAsync(ct);
+            return Results.Ok(new { aiPromptLocked });
+        });
+
         group.MapPost("/", async (
             [FromBody] CreateAssignmentRequest req,
             [FromServices] ICommandHandler<CreateAssignmentCommand, Guid> handler,
@@ -109,7 +215,11 @@ public static class AssignmentRoutes
                     req.PassScore,
                     req.MaxAttempts,
                     // WS-C1 (spec §7 Q1): guardian-signature snapshot.
-                    req.RequiresSignature);
+                    req.RequiresSignature,
+                    // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
+                    req.DifficultyEasyCount,
+                    req.DifficultyMediumCount,
+                    req.DifficultyHardCount);
                 var id = await handler.HandleAsync(cmd, ct);
                 return Results.Created($"/assignments/{id}", new { id });
             }
@@ -155,7 +265,11 @@ public static class AssignmentRoutes
                     req.PassScore,
                     req.MaxAttempts,
                     // WS-C1 (spec §7 Q1): guardian-signature round-trip.
-                    req.RequiresSignature);
+                    req.RequiresSignature,
+                    // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
+                    req.DifficultyEasyCount,
+                    req.DifficultyMediumCount,
+                    req.DifficultyHardCount);
                 await handler.HandleAsync(cmd, ct);
                 return Results.NoContent();
             }

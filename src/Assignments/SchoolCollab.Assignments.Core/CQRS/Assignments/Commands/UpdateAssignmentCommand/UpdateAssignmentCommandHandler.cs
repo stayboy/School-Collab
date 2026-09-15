@@ -54,7 +54,11 @@ public sealed class UpdateAssignmentCommandHandler(
             passScore: command.PassScore,
             maxAttempts: command.MaxAttempts,
             // WS-C1 (spec §7 Q1): guardian-signature round-trip, thread-through.
-            requiresSignature: command.RequiresSignature);
+            requiresSignature: command.RequiresSignature,
+            // WS-B2 (spec §3.4 line 70): optional per-difficulty counts.
+            difficultyEasy: command.DifficultyEasyCount,
+            difficultyMedium: command.DifficultyMediumCount,
+            difficultyHard: command.DifficultyHardCount);
 
         // Full-replacement semantics for questions + attachments (decision b):
         // snapshot existing child ids, remove each, then re-add inbound. Re-index
