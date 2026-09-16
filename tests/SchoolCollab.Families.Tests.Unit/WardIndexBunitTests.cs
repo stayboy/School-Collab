@@ -10,6 +10,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.DeepLinks;
 using SchoolCollab.Families.Services;
 
 namespace SchoolCollab.Families.Tests.Unit;
@@ -44,6 +45,7 @@ public class WardIndexBunitTests : BunitContext
         var http = _mockHttp.ToHttpClient();
         http.BaseAddress = new Uri("http://localhost");
         Services.AddSingleton(http);
+        Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
         Services.AddSingleton<FamiliesApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<FamiliesApiClient>>());
     }
@@ -60,6 +62,26 @@ public class WardIndexBunitTests : BunitContext
         var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>(p => p.Add(x => x.StudentId, StudentId));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("Algebra"));
         cut.WaitForAssertion(() => cut.Markup.Should().Contain("History"));
+    }
+
+    [TestMethod]
+    public void CompletedAssignment_RendersSignOffLink()
+    {
+        // WS-F3 (ar-15-signoff-relocation, decision (e)): a completed ward assignment
+        // shows the guardian "Sign off" affordance linking to the relocated sign page;
+        // a non-completed one does not — this is the multi-ward guardian's UI path.
+        SetupList(new[]
+        {
+            new WardAssignmentListItemDto(AssignmentA, "Algebra", DateTimeOffset.UtcNow, WardSubmissionStateDto.Completed, HasLockedModules: false),
+            new WardAssignmentListItemDto(AssignmentB, "History", null, WardSubmissionStateDto.InProgress, HasLockedModules: false)
+        });
+
+        var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>(p => p.Add(x => x.StudentId, StudentId));
+        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sign off"));
+        cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentA}/sign-off")
+            .Should().BeTrue("a completed assignment must link to the guardian sign page");
+        cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentB}/sign-off")
+            .Should().BeFalse("an in-progress assignment shows no sign-off affordance");
     }
 
     [TestMethod]

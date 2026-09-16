@@ -89,6 +89,16 @@ builder.Services.AddScoped<SchoolCollab.Core.DeepLinks.DeepLinkProtector>();
 // /deeplink landing (unprotect → tenant flag → OpenedAt stamp → redirect target).
 builder.Services.AddScoped<SchoolCollab.Families.DeepLinks.DeepLinkLandingService>();
 
+// WS-F3 (ar-15-signoff-relocation, decision (e)/step 5): the Families-side certificate
+// download orchestration for the guardian sign page (client bytes + the host's own
+// fileDownload.js module — the Admin C3 service is RCL-scoped and not reachable here).
+// Registered TRANSIENT to match the Admin CertificateDownloadService pattern: the service
+// owns its lazily-loaded fileDownload.js module reference and each consuming component
+// disposes it, so a long-lived (scoped) instance would leave a single shared module ref
+// across the circuit and leak on component disposal. Transient gives each page its own
+// instance whose DisposeAsync returns the module ref exactly once.
+builder.Services.AddTransient<SchoolCollab.Families.Services.GuardianCertificateDownloadService>();
+
 var app = builder.Build();
 
 // Startup auth-mode decision (mirrors Admin): read DisableOIDCAuth directly from

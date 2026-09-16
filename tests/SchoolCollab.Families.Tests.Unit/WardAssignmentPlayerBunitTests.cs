@@ -12,6 +12,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
 using Moq;
 using RichardSzalay.MockHttp;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.DeepLinks;
 using SchoolCollab.Families.Services;
 
 namespace SchoolCollab.Families.Tests.Unit;
@@ -66,6 +67,7 @@ public class WardAssignmentPlayerBunitTests : BunitContext
         var http = _mockHttp.ToHttpClient();
         http.BaseAddress = new Uri("http://localhost");
         Services.AddSingleton(http);
+        Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
         Services.AddSingleton<FamiliesApiClient>();
         Services.AddSingleton(Mock.Of<ILogger<FamiliesApiClient>>());
     }

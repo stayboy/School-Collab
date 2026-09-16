@@ -603,5 +603,15 @@ public record SignOffSubmissionRequest(
     SignatureTypeDto SignatureType,
     string? TypedSignature = null);
 
+/// <summary>Guardian e-sign request body for the token-gated guardian route group
+/// (WS-F3 / ar-15 — decision (b)). Deliberately carries NO <c>GuardianId</c>: on this
+/// public route the acting guardian is resolved server-side from the validated
+/// <c>x-deeplink-token</c>, so the body cannot impersonate a signer. Additive record;
+/// the existing <see cref="SignOffSubmissionRequest"/> (which keeps taking the
+/// GuardianId from the body for the dev/TestAuth teacher posture) is untouched.</summary>
+public record GuardianSignOffSubmissionRequest(
+    SignatureTypeDto SignatureType,
+    string? TypedSignature = null);
+
 /// <summary>Teacher reassign-signer request body (WS-C1, Q5).</summary>
 public record ReassignSignOffRequest(Guid NewGuardianId);

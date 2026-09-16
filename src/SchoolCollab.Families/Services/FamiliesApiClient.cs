@@ -1,8 +1,10 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using SchoolCollab.Assignments.Contracts;
+using SchoolCollab.Core.DeepLinks;
 
 namespace SchoolCollab.Families.Services;
 
@@ -22,17 +24,39 @@ internal static class FamiliesJson
 }
 
 /// <summary>
+/// WS-F3 (ar-15-signoff-relocation, decision (b)) — the guardian identity the Families
+/// host re-mints into the <c>x-deeplink-token</c> header for the guardian call family.
+/// Both values come from the ar-14 landing's cookie principal
+/// (<c>tenant_id</c>/<c>contact_id</c>); the guardian page resolves the pair once per
+/// circuit and passes it to <see cref="FamiliesApiClient"/> per call. The body of a
+/// guardian sign POST never carries a GuardianId — the API resolves the acting guardian
+/// from this token.
+/// </summary>
+public sealed record GuardianCallerContext(Guid TenantId, Guid ContactId);
+
+/// <summary>
 /// F1 (slice 2b) — the Families surface's thin typed client over the Assignments
 /// API's ward-facing endpoints (the ar-12 seams). Option B: the Families host
 /// references only <c>Assignments.Contracts</c> (the cross-context boundary), so
 /// this client carries the exact six calls the ward pages bind to. No admin
 /// <c>Assignments.Application</c> reference, so no admin route leakage.
+/// <para>WS-F3 adds the three guardian-scoped calls (the <c>/guardian</c> route group),
+/// each attaching a re-minted short-TTL <c>x-deeplink-token</c> header protected with the
+/// shared <see cref="DeepLinkProtector"/> + purpose (decision (a)) — no new keyring, no
+/// new purpose, no OIDC dependency.</para>
 /// </summary>
 public sealed class FamiliesApiClient(
     HttpClient http,
+    DeepLinkProtector protector,
     ILogger<FamiliesApiClient> logger)
 {
+    /// <summary>WS-F3 — the re-mint TTL for the guardian header token (owner decision
+    /// 2026-09-16: 15 minutes). The re-mint cannot extend link validity: the API
+    /// cross-checks the authoritative stored <c>AssignmentRecipient.DeepLinkExpiresAt</c>.</summary>
+    public static readonly TimeSpan GuardianTokenReMintTtl = TimeSpan.FromMinutes(15);
+
     private readonly string _assignments = "assignments";
+    private readonly string _guardian = "guardian";
 
     /// <summary>WS-A5 — the ward's assignment list.</summary>
     public async Task<WardAssignmentListItemDto[]?> ListWardAssignmentsAsync(Guid studentId, CancellationToken ct = default)
@@ -144,5 +168,118 @@ public sealed class FamiliesApiClient(
         }
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<SubmissionDetailDto>(FamiliesJson.Options, ct);
+    }
+
+    // ── WS-F3 (ar-15-signoff-relocation): the token-gated guardian call family ──────
+
+    /// <summary>WS-F3 — the sign-off context the guardian sign page renders (ONE call).
+    /// Returns <see langword="null"/> for a 404 (unknown assignment/student); a 401/403
+    /// (expired, tampered, or out-of-scope link) surfaces as
+    /// <see cref="HttpRequestException"/> carrying the status for the page to render.</summary>
+    public async Task<SignOffContextDto?> GetGuardianSignOffContextAsync(
+        Guid assignmentId, Guid studentId, GuardianCallerContext caller, CancellationToken ct = default)
+    {
+        using var request = GuardianRequest(
+            HttpMethod.Get,
+            $"/{_guardian}/{_assignments}/{assignmentId}/students/{studentId}/sign-off",
+            assignmentId, studentId, caller);
+
+        var response = await http.SendAsync(request, ct);
+        if (response.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        if (!response.IsSuccessStatusCode)
+        {
+            await ThrowForStatusAsync(response, ct);
+        }
+        return await response.Content.ReadFromJsonAsync<SignOffContextDto>(FamiliesJson.Options, ct);
+    }
+
+    /// <summary>WS-F3 — the guardian e-signs the ward's submission. The request body
+    /// carries NO GuardianId (decision (b)): the acting guardian is resolved server-side
+    /// from the header token. A 409 (already signed / wrong state / locked / not
+    /// authorized) surfaces as <see cref="HttpRequestException"/> whose message is the
+    /// API's problem detail, so the page can render the read-only re-entry posture.</summary>
+    public async Task<SignOffStatusDto?> SubmitGuardianSignOffAsync(
+        Guid assignmentId, Guid studentId, GuardianSignOffSubmissionRequest body,
+        GuardianCallerContext caller, CancellationToken ct = default)
+    {
+        using var request = GuardianRequest(
+            HttpMethod.Post,
+            $"/{_guardian}/{_assignments}/{assignmentId}/students/{studentId}/sign-off",
+            assignmentId, studentId, caller);
+        request.Content = JsonContent.Create(body, options: FamiliesJson.Options);
+
+        var response = await http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            await ThrowForStatusAsync(response, ct);
+        }
+        return await response.Content.ReadFromJsonAsync<SignOffStatusDto>(FamiliesJson.Options, ct);
+    }
+
+    /// <summary>WS-F3 — the finalized certificate PDF (decision (e)/step 5). A plain
+    /// <c>&lt;a href&gt;</c> cannot attach the header token, so the page fetches the bytes
+    /// through this call and hands them to the browser-side download module (the C3
+    /// orchestration, mirrored in <c>GuardianCertificateDownloadService</c>). A 404 (no
+    /// signature event / no certificate) surfaces as <see cref="HttpRequestException"/>.</summary>
+    public async Task<byte[]> GetGuardianCertificateAsync(
+        Guid assignmentId, Guid studentId, GuardianCallerContext caller, CancellationToken ct = default)
+    {
+        using var request = GuardianRequest(
+            HttpMethod.Get,
+            $"/{_guardian}/{_assignments}/{assignmentId}/students/{studentId}/certificate",
+            assignmentId, studentId, caller);
+
+        var response = await http.SendAsync(request, ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            await ThrowForStatusAsync(response, ct);
+        }
+        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
+        logger.LogInformation(
+            "Guardian downloaded {Bytes} certificate bytes for assignment {AssignmentId} / student {StudentId}",
+            bytes.Length, assignmentId, studentId);
+        return bytes;
+    }
+
+    /// <summary>
+    /// Builds a guardian-group request carrying a fresh short-TTL
+    /// <c>x-deeplink-token</c> (to-verify 1): the payload is re-protected HERE, per call,
+    /// with the registered <see cref="DeepLinkProtector"/> — the same keyring and
+    /// <see cref="DeepLinkConstants.Purpose"/> as the ar-14 mint path, so the API can
+    /// unprotect it. Assignment + ward come from the call arguments; tenant + contact from
+    /// the caller's cookie principal.
+    /// </summary>
+    private HttpRequestMessage GuardianRequest(
+        HttpMethod method, string relativeUrl, Guid assignmentId, Guid studentId, GuardianCallerContext caller)
+    {
+        var payload = new DeepLinkTokenPayload(
+            TenantId: caller.TenantId,
+            AssignmentId: assignmentId,
+            ContactId: caller.ContactId,
+            OwnerType: (int)ContactOwnerTypeDto.Guardian,
+            Role: null,
+            WardStudentId: studentId,
+            ExpiresAt: DateTimeOffset.UtcNow + GuardianTokenReMintTtl);
+
+        var request = new HttpRequestMessage(method, relativeUrl);
+        request.Headers.TryAddWithoutValidation("x-deeplink-token", protector.Protect(payload));
+        return request;
+    }
+
+    /// <summary>Surfaces a non-success guardian response as a typed
+    /// <see cref="HttpRequestException"/> carrying the API's problem detail as the
+    /// message (the page matches on it for the already-signed re-entry posture).</summary>
+    private static async Task ThrowForStatusAsync(HttpResponseMessage response, CancellationToken ct)
+    {
+        var detail = await response.Content.ReadAsStringAsync(ct);
+        throw new HttpRequestException(
+            string.IsNullOrWhiteSpace(detail)
+                ? $"The Assignments API returned {(int)response.StatusCode} ({response.StatusCode})."
+                : detail,
+            inner: null,
+            statusCode: response.StatusCode);
     }
 }
