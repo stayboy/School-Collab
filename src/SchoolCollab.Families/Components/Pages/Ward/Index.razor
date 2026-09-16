@@ -36,7 +36,7 @@ else if (_items.Length == 0)
 }
 else
 {
-    <FluentDataGrid Items="_items.AsQueryable()" TItem="WardAssignmentListItemDto" GridTemplateColumns="1fr 140px 160px 120px 90px" Resizable="true">
+    <FluentDataGrid Items="_items.AsQueryable()" TItem="WardAssignmentListItemDto" GridTemplateColumns="1fr 140px 160px 120px 90px 80px" Resizable="true">
         <PropertyColumn Title="Assignment" Property="@(a => a.Title)" />
         <PropertyColumn Title="Due" Property="@(a => a.DueDate)" Format="{0:g}" />
         <PropertyColumn Title="Status" Property="@(a => a.State)" />
@@ -48,6 +48,20 @@ else
             else
             {
                 <FluentBadge Color="Color.Green">Ready</FluentBadge>
+            }
+        </TemplateColumn>
+        @* WS-F3 (ar-15-signoff-relocation, decision (e)): the guardian "Sign off" affordance
+           reaches the relocated sign page per ward/assignment. Shown when the ward's work is
+           complete (State == Completed) — the point at which a guardian-facing signature is
+           relevant. Multi-ward guardians (token WardStudentId null → land on /ward) use this
+           path to reach each ward's sign-off. *@
+        <TemplateColumn Title="">
+            @if (context.State == WardSubmissionStateDto.Completed)
+            {
+                <FluentAnchor Appearance="Appearance.Hypertext" class="ward-sign-off"
+                              Href="@($"/ward/{_studentId}/assignments/{context.Id}/sign-off")">
+                    Sign off
+                </FluentAnchor>
             }
         </TemplateColumn>
         <TemplateColumn Title="">

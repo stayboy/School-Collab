@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
 using StackExchange.Redis;
 using Serilog;
 using SchoolCollab.Assignments.Api;
+using SchoolCollab.Assignments.Api.Endpoints;
 using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Assignments.Core;
 using SchoolCollab.Settings.Core;
@@ -34,6 +35,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
     // round-trips as the string name (Pending / Approved / Rejected)
     // and null stays null.
     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ApprovalStatusDto>());
+    // WS-C1/WS-F3 (ar-15-signoff-relocation): the guardian sign-off enums must bind as
+    // string names in the REAL host — the Families guardian POST body round-trips
+    // SignatureTypeDto as "Typed"/"Click" and the context/certificate GETs serialize
+    // SignOffStateDto as names. Previously these converters were registered ONLY in the
+    // two guardian test files' self-registered JsonOptions, so the live host failed the
+    // guardian POST body binding with 400 (and the teacher-POST seam carried them only
+    // client-side). They now belong here, on the same host options block as the other
+    // assignment enums, so both the guardian and pre-existing teacher sign surfaces bind.
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignatureTypeDto>());
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignOffStateDto>());
 });
 
 var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
@@ -130,6 +141,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITopicAssignme
 
 builder.Services.AddOpenApi();
 
+// WS-F3 (ar-15-signoff-relocation): the endpoint filter backing the public guardian
+// sign-off group — validates the x-deeplink-token header against the shared keyring /
+// purpose and cross-checks the recipient row server-side.
+builder.Services.AddScoped<SchoolCollab.Assignments.Api.Auth.GuardianTokenEndpointFilter>();
+
 // WS-A1 / decision (b): orphan sweep for staged uploads. The
 // StagedFileSweepService is a hosted BackgroundService (sanctioned
 // pre-worker hosted-service seam — no Assignments worker exists yet).
@@ -157,6 +173,10 @@ app.UseSerilogRequestLogging();
 
 // All assignment endpoints require an authenticated user
 var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
+// WS-F3 (ar-15-signoff-relocation): the public guardian sign-off route group,
+// token-gated by GuardianTokenEndpointFilter (the shared ar-deeplink keyring/purpose).
+// Mapped after the teacher/admin group so the /guardian namespace stays disjoint.
+app.MapGuardianSignOffRoutes();
 app.MapAssignmentEndpoints(featureFlags); 
 
 app.Run();

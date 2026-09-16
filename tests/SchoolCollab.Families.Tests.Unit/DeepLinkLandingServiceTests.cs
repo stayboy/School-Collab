@@ -17,6 +17,9 @@ namespace SchoolCollab.Families.Tests.Unit;
 /// (dark launch) → no sign-in / expired page; expired / garbage → expired outcome; the
 /// <c>OpenedAt</c> stamp invoked exactly once and only on a successful, flag-enabled
 /// landing; and a tenant-mismatched token rejected.
+/// <para>WS-F3 (ar-15-signoff-relocation, decision (e)) extends the redirect rule: a
+/// GUARDIAN token carrying a ward lands directly on that ward's sign-off page for the
+/// token's assignment; student-owned tokens keep the ar-14 <c>/ward/{sid}</c> target.</para>
 /// </summary>
 [TestClass]
 public class DeepLinkLandingServiceTests
@@ -25,6 +28,9 @@ public class DeepLinkLandingServiceTests
     private static readonly Guid AssignmentId = Guid.Parse("bbbb2222-bbbb-2222-bbbb-222222222222");
     private static readonly Guid ContactId = Guid.Parse("cccc3333-cccc-3333-cccc-333333333333");
     private static readonly Guid WardStudentId = Guid.Parse("dddd4444-dddd-4444-dddd-444444444444");
+
+    /// <summary>The WS-F3 guardian direct-hop target for the fixtures above.</summary>
+    private static string SignOffUrl => $"/ward/{WardStudentId}/assignments/{AssignmentId}/sign-off";
 
     private sealed class RecordingHandler(List<HttpRequestMessage> log) : HttpMessageHandler
     {
@@ -97,7 +103,7 @@ public class DeepLinkLandingServiceTests
         var tenantProvider = new TenantProvider();
         var tenantAccessor = new TenantContextAccessor(tenantProvider);
 
-        var api = new FamiliesApiClient(http, NullLogger<FamiliesApiClient>.Instance);
+        var api = new FamiliesApiClient(http, protector, NullLogger<FamiliesApiClient>.Instance);
 
         var flag = new Mock<IFeatureFlagService>(flagBehavior);
         flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
@@ -107,8 +113,9 @@ public class DeepLinkLandingServiceTests
         return (service, log, flag, protector);
     }
 
-    private static string MintToken(DeepLinkProtector protector, Guid? wardStudentId, DateTimeOffset expiresAt)
-        => protector.Protect(new DeepLinkTokenPayload(TenantId, AssignmentId, ContactId, OwnerType: 1, Role: 0, wardStudentId, expiresAt));
+    private static string MintToken(DeepLinkProtector protector, Guid? wardStudentId, DateTimeOffset expiresAt,
+        int ownerType = 1)
+        => protector.Protect(new DeepLinkTokenPayload(TenantId, AssignmentId, ContactId, ownerType, Role: 0, wardStudentId, expiresAt));
 
     private static bool IsStamp(HttpRequestMessage r) =>
         r.RequestUri?.PathAndQuery.Contains("/recipients/", StringComparison.OrdinalIgnoreCase) == true
@@ -125,7 +132,7 @@ public class DeepLinkLandingServiceTests
         var result = await service.HandleAsync(token);
 
         result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
-        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
+        result.RedirectUrl.Should().Be(SignOffUrl);
         result.TenantId.Should().Be(TenantId);
         result.ContactId.Should().Be(ContactId);
         requests.Count(IsStamp).Should().Be(1);
@@ -144,7 +151,7 @@ public class DeepLinkLandingServiceTests
         var result = await service.HandleAsync(token);
 
         result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
-        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
+        result.RedirectUrl.Should().Be(SignOffUrl);
         result.TenantId.Should().Be(TenantId);
         result.ContactId.Should().Be(ContactId);
     }
@@ -165,7 +172,7 @@ public class DeepLinkLandingServiceTests
         var result = await service.HandleAsync(token);
 
         result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
-        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
+        result.RedirectUrl.Should().Be(SignOffUrl);
         result.TenantId.Should().Be(TenantId);
         result.ContactId.Should().Be(ContactId);
     }
@@ -199,6 +206,23 @@ public class DeepLinkLandingServiceTests
 
         result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
         result.RedirectUrl.Should().Be("/ward");
+    }
+
+    [TestMethod]
+    public async Task StudentOwnedToken_WithWard_LandsOnWardSurface_Unchanged()
+    {
+        // Decision (e): the guardian direct-to-sign-page hop must NOT change the
+        // student-owned token behavior — a student token with a ward still lands on the
+        // ward surface.
+        var (service, _, flag, protector) = Build();
+        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7), ownerType: 0);
+
+        var result = await service.HandleAsync(token);
+
+        result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
+        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
     }
 
     [TestMethod]

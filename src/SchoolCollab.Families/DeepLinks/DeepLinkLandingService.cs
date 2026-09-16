@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SchoolCollab.Assignments.Contracts;
 using SchoolCollab.Core.DeepLinks;
 using SchoolCollab.Core.Features;
 using SchoolCollab.Core.Tenancy;
@@ -110,10 +111,14 @@ public sealed class DeepLinkLandingService(
                         "continuing with the redirect", payload.AssignmentId, payload.ContactId);
                 }
 
-                // Redirect rule (decision (g)): single-ward (WardStudentId set) lands on
-                // that ward's list; multi-ward guardian (no WardStudentId) lands on /ward.
+                // Redirect rule (decision (g), extended by WS-F3 decision (e)): a
+                // guardian token carrying WardStudentId lands DIRECTLY on that ward's
+                // sign-off page for the token's assignment; a multi-ward guardian (no
+                // WardStudentId) lands on /ward; student-owned tokens are unchanged.
                 var redirectUrl = payload.WardStudentId is { } wardStudentId
-                    ? $"/ward/{wardStudentId}"
+                    ? payload.OwnerType == (int)ContactOwnerTypeDto.Guardian
+                        ? $"/ward/{wardStudentId}/assignments/{payload.AssignmentId}/sign-off"
+                        : $"/ward/{wardStudentId}"
                     : "/ward";
 
                 return new DeepLinkLandingResult(

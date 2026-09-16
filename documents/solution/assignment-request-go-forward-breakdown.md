@@ -132,7 +132,7 @@ carries this decision log verbatim; workstream impact is folded into §3 and §4
 | # | Decision |
 |---|---|
 | D-1 | **`IFileStore` abstraction + local-filesystem implementation** (path via AppHost parameter). Azure Blob deferred until the deployment story needs it. v1 stored files are small (docs, certificates); videos are embedded URLs, never stored blobs. |
-| D-2 | **SMTP email via MailKit** (`IEmailSender`/`ISmsSender` abstractions); SMS + WhatsApp stubbed (log-and-skip; `BlockedChannels` policy already filters). Config: AppHost `Parameters:` (smtp-host/port/user/pass secret/from-address). |
+| D-2 | **SMTP email via MailKit** (`IEmailSender`/`ISmsSender` abstractions); SMS + WhatsApp stubbed (log-and-skip; `BlockedChannels` policy already filters). Config: AppHost `Parameters:` (smtp-host/port/user/pass secret/from-address). **Owner decision 2026-09-16:** prod endpoint = the school's own SMTP relay; dev = MailPit/smtp4dev AppHost container + a null-sender log-and-skip fallback when the host is unset; from-address = deployment-level parameter (per-tenant branding deferred); `smtp-password` = the repo's first **secret** AppHost parameter. |
 | D-3 | **QuestPDF** (CPM entry). ⚠️ License caveat recorded (verified v3.0, eff. 2026-07-06): Community tier covers individuals/small businesses <$1M, non-profit academics, OSS — it **excludes public-sector entities** regardless of revenue. If a production deployment is ever self-hosted by a public school district, swap to SkiaSharp (`SKDocument.CreatePdf`, MIT) — the certificate layout is simple enough that the swap is cheap. |
 | D-4 | **New lightweight host `SchoolCollab.Families`** (SSR + InteractiveServer, DataProtection token middleware, no OIDC initially). **Clarified (2026-09-03): there is no identity/auth system for students/guardians yet.** "Ward" ≡ "student" — identity is the existing Students-context `Student`/`Guardian` entities with their verified `Contact` records (repo terms: Student/Guardian); deep-link tokens address contacts (E1 payload already carries contactId). No Keycloak users for students/guardians in v1. |
 | D-5 | Execute `specs/assignment-creation-with-ai.md` unchanged as WS-B1; AR extensions layer additively as WS-B2. Both the AI spec and `notification-delivery-plan.md` now carry go-forward subsumption notes (added 2026-09-03). |
@@ -238,7 +238,7 @@ within a phase.
   order, questions unlock per thresholds, submits answers, gets auto-scored result with
   retry per policy; unit + bUnit coverage for gating engine and player states.
 
-### Phase 3 — Guardian sign-off (WS-C, WS-F3 partial) — **nearly complete** (ar-8/ar-9/ar-11 landed; WS-F3 open)
+### Phase 3 — Guardian sign-off (WS-C, WS-F3) — **COMPLETE** (ar-8/ar-9/ar-11 + WS-F3 ar-15 all landed; ar-15 CLOSED 2026-09-16)
 - [x] **C1 prerequisite:** signature-default policy pair (`TenantAssignmentPolicy`
       Settings + `GradeAssignmentPolicy` Students) + effective resolver +
       grade-Detail UI + wizard pre-fill + tests. — ar-8 (#230)
@@ -250,8 +250,17 @@ within a phase.
       round; plan amendment A-1: renderer in the Api layer)**. Transactional finalize generation +
       `AttachCertificate` + download route + JS-interop download on both UI surfaces. `rounds/round-ar-11-c3-certificates.md`
       CLOSED; **merged 2026-09-15 as PR #233** (squash `d2169aef`).
-- [ ] WS-F3 partial: relocate the sign page behind real auth + E1 deep links
-      (route + command unchanged) — blocked on Phase 2's F1 host + Phase 4's E1.
+- [x] **WS-F3 sign-page relocation (ar-15, 2026-09-16)**: the guardian e-sign page moved into the
+      `SchoolCollab.Families` host behind real auth — a **public token-validated guardian route group**
+      (`/guardian/assignments/{id}/students/{sid}/sign-off` GET+POST, `/certificate` GET) extending the
+      E1 deep-link token; the Families client **re-mints** a short-TTL `ar-deeplink` header token
+      (`x-deeplink-token`, 15 min) per call and the API resolves the acting guardian server-side. The
+      POST body carries **no GuardianId** (fail-closed), there is no guardian picker anywhere, the
+      Admin sign surface and the teacher routes are untouched, and the command/query handlers are
+      reused unchanged. Ward-surface "Sign off" affordance added. **Owner adjudication:** GET-context +
+      certificate authorize via the **guardian link** for the route student (`IsGuardianOfAsync`), never
+      `row.WardStudentId == routeStudentId` (the row is FirstOrDefault per assignment+contact and would
+      403 legitimate multi-ward sign-offs). 19 files, 2,311/0. Round: `rounds/round-ar-15-signoff-relocation.md`.
 - **Accept:** guardian reviews ward's completed work, signs with consent text, submission
   locks, certificate stored + downloadable; second sign attempt is idempotent; audit row
   records identity/time; delegation to another guardian works; a new AR pre-fills
@@ -259,7 +268,7 @@ within a phase.
 
 ### Phase 4 — Delivery & deep links (WS-E) — **in progress** (E1 landed ar-14; E2/E3 open)
 - [x] **E1 token deep links (ar-14, 2026-09-16)**: contact-scoped DataProtection tokens minted at publish (additive recipient columns; TTL `LinkValidityDays` ?? 7); shared Redis-backed keyring in Assignments.Api + Families; the repo's FIRST public token-auth route group (`/deeplink/{token}` landing → cookie sign-in → `/ward/{sid}`|`/ward`, best-effort bounded 3s `OpenedAt` stamp, `LinkExpired` page); `FEATURE:EnableDeepLinks` runtime flag seeded default-OFF; configuration.md §2/§5. 43 files, 2,279/0. Round: `rounds/round-ar-14-deep-links.md` (CLOSED, Tier 3). **Unblocks WS-F3.**
-- [ ] E2 channel delivery + NotificationLog + failure surfacing (**needs the email-provider decision first** — no SMTP/SendGrid/Twilio infra repo-wide); E3 reminder/overdue/archive worker (`Assignments.Worker`; archive sweep already ships in Assignments.Api).
+- [ ] E2 channel delivery + NotificationLog + failure surfacing — **email-provider decision MADE 2026-09-16** (school SMTP relay via MailKit; MailPit dev container + null-sender fallback; deployment-level from-address; first secret AppHost parameter) — the round is unblocked; E3 reminder/overdue/archive worker (`Assignments.Worker`; archive sweep already ships in Assignments.Api).
 - **Accept:** publish → notifications only to verified+subscribed valid contacts through
   policy-filtered channels; deep link opens the right ward/guardian page without login
   and expires; unsigned reminder fires per cadence; bounced/failed sends surface on the
@@ -291,5 +300,5 @@ within a phase.
 2. Execution mode: owner-selected per round — full four-agent (Tier 3) for ar-1…ar-10 and ar-13,
    light round (Tiers 1–2) for ar-11/ar-12; round slicing + per-round log in
    `documents/solution/assignment-request-implementation-details.md` §3.
-3. **Current (2026-09-16):** Phase 2 landed (ar-12 + ar-13 = PR #236) and **E1 deep links landed (ar-14, working tree on `stack/14` — commit/PR pending owner instruction; retarget onto merged `main` after #236 merges).** Next: the **email-provider decision**, then **4b E2 channel delivery + NotificationLog + Admin failure surfacing**; then 4c E3 worker; WS-F3 sign-page relocation is now unblocked by E1; D-6 identity before Phase 5 WS-G
+3. **Current (2026-09-16):** Phase 2 landed (ar-12 + ar-13 = PR #236) and **E1 deep links landed (ar-14 = PR #237, stacked on #236)**. **Email-provider decision MADE:** school SMTP relay via MailKit, MailPit dev container + null-sender fallback, deployment-level from-address, first secret AppHost parameter. Next: **WS-F3 sign-page relocation LANDED (ar-15, 2026-09-16** — public token-validated guardian route group at the API extending the E1 protector, Families-hosted sign page, commands unchanged; 2,311/0), then **4b E2 channel delivery** (unblocked), then 4c E3 worker; D-6 identity before Phase 5 WS-G
    (accessibility, legal/retention, rubrics + comments + drawn-signature niceties).

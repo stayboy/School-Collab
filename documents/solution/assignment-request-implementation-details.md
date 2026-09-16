@@ -892,3 +892,37 @@ cites them in the round doc's Plan header; no open blockers remain for rounds 4+
   calls (D-6/deployment-auth family), keyring singleton posture.
   **Next:** the email-provider decision, then 4b E2 channel delivery + NotificationLog + Admin failure surfacing; then
   4c E3 worker. WS-F3 sign-page relocation now unblocked by E1.
+- `ar-15-signoff-relocation` — **CLOSED 2026-09-16, FULL FOUR-AGENT round (Tier 3)**; Phase 3 slice **WS-F3**
+  (`rounds/round-ar-15-signoff-relocation.md` + `diffs-ar-15-signoff-relocation.patch`; branch
+  `stack/15-ar-15-signoff-relocation` cut from the stack/14 tip `feac20a4` — train main ← #236 ← #237 ← #238; retarget
+  at PR time). Delivered (WS-F3): the guardian e-sign page relocated into the `SchoolCollab.Families` host behind **real
+  auth** — a public token-validated guardian route group at the API (`GuardianSignOffRoutes`:
+  `/guardian/assignments/{id}/students/{sid}/sign-off` GET+POST, `/certificate` GET) extending the E1 `ar-deeplink`
+  protector; the Families client **re-mints** a short-TTL `x-deeplink-token` header token (`GuardianTokenReMintTtl` =
+  15 min) per call and the API resolves the acting guardian server-side. `GuardianTokenEndpointFilter` cross-checks the
+  recipient row (tenant, `OwnerType == Guardian`, stored `DeepLinkExpiresAt`) and authorizes GET-context + certificate
+  via `IsGuardianOfAsync` for the **route** student (**owner adjudication** — deliberately NOT
+  `row.WardStudentId == routeStudentId`, which would 403 legitimate multi-ward sign-offs because the row is
+  `FirstOrDefault` per assignment+contact); `next(context)` executes **inside** the explicit-tenant scope; host-level
+  `JsonStringEnumConverter` registrations added for `SignatureTypeDto`/`SignOffStateDto`. The POST body carries **no
+  GuardianId** (fail-closed `is not Guid → 401`), there is no guardian picker anywhere, the Admin sign surface and the
+  teacher routes are zero-diff, the existing command/query handlers are reused unchanged, and the ward surface gained a
+  "Sign off" affordance (`Ward/Index.razor`). 19 files, ~+2,063/−12. Pipeline: orchestrator-plan (early-stop →
+  revived) → worker pass 1 TIMEOUT (MSTest output starvation) → **escalation pass** (timeout, but completed the work) →
+  higher-model review **P1 ×5** (all invisible to the green matrix: host converters, tenant threading, self-referential
+  ward auth, two missing test files, missing affordance) → rework pass 2 (interrupted by a forbidden filesystem-wide
+  `find`; parent completed, including two bUnit test fixes) → re-verification **P2-only** (all 9 findings resolved;
+  test-fix integrity preserved) → parent P2 fix (the vacuous body assertion replaced by a real captured-body check) →
+  UI tester **NITS** → parent a11y fix (aria-label aligned to the visible label on the consent checkbox + typed-signature
+  field) and failure-state navigation (the “Back to ward” anchor hoisted so expired/revoked/error states have an in-page
+  way back).
+  Authoritative: build 0 errors; **2,311/0** (Assignments.Api 78/0, Families 42/0, ArchitectureTests 21/0).
+  **Residuals:** the deployment-smoke set inherited from ar-14 (prod `[AllowAnonymous]` override on `/deeplink/expired`,
+  prod service-to-service auth gap on Families' outbound calls — D-6/deployment-auth family, keyring singleton posture,
+  deep-link principal lacking tenant_name/tenant_type); the multi-ward **direct hop** to a second ward's sign page is
+  Phase-5 polish; and the `Label` + `aria-label` doubling on the sign controls is **pre-existing repo-wide** — the
+  teacher/Admin `Assignments.Application/…/SignOff.razor:77-78,115-116` carries the identical pair and the repo's
+  dominant convention is `Label`-only — so harmonizing both surfaces (dropping the redundant attribute) is a
+  follow-up, not an ar-15 change (the Admin surface is zero-diff for this round).
+  **Next:** 4b E2 channel delivery + NotificationLog + Admin failure surfacing (MailKit CPM entry, MailPit dev container,
+  `smtp-password` secret AppHost parameter); then 4c E3 worker; D-6 identity before Phase 5 WS-G.

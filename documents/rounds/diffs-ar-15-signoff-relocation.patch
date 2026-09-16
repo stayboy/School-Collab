@@ -1,0 +1,2376 @@
+diff --git a/documents/configuration.md b/documents/configuration.md
+index 40925fb7..49928bd5 100644
+--- a/documents/configuration.md
++++ b/documents/configuration.md
+@@ -315,7 +315,7 @@ but is **superseded** by the two-kind model above.
+ | `FEATURE:EnableCodedValuesAiChat` | `true` | Gates the AI-chat surfaces on the CodedValues landing page. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. |
+ | `FEATURE:EnableActivityGroups` | `false` | Gates the activity-group management surface: Admin **Activity Groups** nav/page, group CRUD + membership endpoints in `SchoolCollab.Students.Api`, and the assignment↔group link endpoints + `SelectedGroups` targeting in `SchoolCollab.Assignments.Api`. Ships **dark** (default OFF) per [`activity-group-enrollment.md`](./specs/activity-group-enrollment.md) NFR-11. Seeded by the migration service; tenant-overridable. Cold-start fallback in `SchoolCollab.Admin/appsettings.json`. The global default remains OFF; the migration service additionally seeds a `TenantFeatureFlagOverride` turning the flag ON for the pilot tenant `Hydeson School` only (Phase 6.1 — see below). |
+ | `FEATURE:RequireAssignmentApproval` | `false` | Gates the assignment approval workflow (WS-A2 / spec §7 Q2): when on, every assignment requires approval before publish — the publish + schedule command handlers throw `AssignmentApprovalRequiredException` (HTTP 400), and the Admin Assignments Index/Detail UI surfaces Submit-for-approval / Approve / Reject controls. Ships **dark** (default OFF). Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Admin/appsettings.json` + AppHost parameter fan-out. |
+-| `FEATURE:EnableDeepLinks` | `false` | Gates the Families public deep-link landing route group (`GET /deeplink/{token}`) for assignment recipients (WS-E1 / `ar-14-deep-links`). Ships **dark** (default OFF): tokens are minted at publish regardless of this flag, and the runtime flag only decides whether the public route validates, stamps `OpenedAt`, signs the guardian into a cookie, and redirects to the ward surface. Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Families/appsettings.json`. |
++| `FEATURE:EnableDeepLinks` | `false` | Gates the Families public deep-link landing route group (`GET /deeplink/{token}`) for assignment recipients (WS-E1 / `ar-14-deep-links`) **and the guardian sign-off surface (WS-F3 / `ar-15-signoff-relocation`)**: the Assignments API's public `/guardian/...` route group (token-gated by `GuardianTokenEndpointFilter`, which 401s when the flag is OFF) and the Families-hosted `Ward/SignOff.razor` guardian page. Ships **dark** (default OFF): tokens are minted at publish regardless of this flag, and the runtime flag only decides whether the public route validates, stamps `OpenedAt`, signs the guardian into a cookie, redirects to the ward surface, and accepts the guardian route group's `x-deeplink-token` calls. Seeded by the migration service; tenant-overridable via `/config-flags`. Cold-start fallback in `SchoolCollab.Families/appsettings.json`. |
+ 
+ ### Pilot-tenant override (Phase 6.1)
+ 
+@@ -351,7 +351,7 @@ flags moved to the Config service.
+ | `FEATURE:DisableOIDCAuth` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Families`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Settings.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:EnableActivityGroups` | `false` | `SchoolCollab.Admin`, `SchoolCollab.Assignments.Api`, `SchoolCollab.Students.Api` |
+ | `FEATURE:RequireAssignmentApproval` | `false` | `SchoolCollab.Admin` (Assignments Index/Detail UI), `SchoolCollab.Assignments.Api` (publish + schedule handlers) |
+-| `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing), `SchoolCollab.Assignments.Api` (mint at publish), `SchoolCollab.MigrationService` (seed) |
++| `FEATURE:EnableDeepLinks` | `false` | `SchoolCollab.Families` (public `/deeplink/{token}` landing + `Ward/SignOff.razor` guardian page), `SchoolCollab.Assignments.Api` (mint at publish + public `/guardian/...` sign-off route group), `SchoolCollab.MigrationService` (seed) |
+ 
+ ### Setting a flag
+ 
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Auth/GuardianTokenEndpointFilter.cs b/src/Assignments/SchoolCollab.Assignments.Api/Auth/GuardianTokenEndpointFilter.cs
+new file mode 100644
+index 00000000..e5ce37be
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Auth/GuardianTokenEndpointFilter.cs
+@@ -0,0 +1,168 @@
++using Microsoft.AspNetCore.Http;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Api.Auth;
++
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation, decision (a)) — the token-validated credential
++/// for the public guardian sign-off route group. Reads the re-minted
++/// <c>x-deeplink-token</c> header the Families host attaches on its guardian calls,
++/// unprotects it with the shared <see cref="DeepLinkProtector"/> + purpose, and
++/// cross-checks the authoritative recipient row server-side. The acting guardian is
++/// authorized for the ROUTE student via the guardian link (<see cref="IStudentDirectory"/>
++/// — the same resolution the sign command handler uses), NOT via the token/row's
++/// <c>WardStudentId</c> (P1-3 adjudication: the recipient row is <c>FirstOrDefault</c> per
++/// (assignment, contact), so a <c>WardStudentId == routeStudentId</c> predicate would 403
++/// legitimate multi-ward sign-offs). Rejects with 401 for token failure and 403 for
++/// scope/row/link mismatch. The endpoint delegate runs INSIDE the explicit-tenant scope so
++/// handlers + the tenant EF filter see the token's tenant (P1-2: previously it ran after
++/// the scope exited, so on the public group <see cref="TenantProvider"/> fell to
++/// Guid.Empty). On success stashes the resolved acting <see cref="GuardianId"/> (from
++/// the recipient's <c>OwnerId</c>) in <see cref="HttpContext.Items"/> for the endpoint to
++/// thread into the shared sign command. No new keyring, no new purpose, no OIDC dependency.
++/// </summary>
++public sealed class GuardianTokenEndpointFilter(
++    DeepLinkProtector protector,
++    ITenantContextAccessor tenantAccessor,
++    ISubmissionRepository submissionRepository,
++    IStudentDirectory studentDirectory,
++    IFeatureFlagService featureFlags,
++    ILogger<GuardianTokenEndpointFilter> logger) : IEndpointFilter
++{
++    /// <summary>The <see cref="HttpContext.Items"/> key holding the resolved acting guardian id.</summary>
++    public const string GuardianIdItemKey = "GuardianId";
++
++    /// <inheritdoc/>
++    public async ValueTask<object?> InvokeAsync(
++        EndpointFilterInvocationContext context, EndpointFilterDelegate next)
++    {
++        var http = context.HttpContext;
++
++        // Feature-flag kill-switch (decision (f)/to-verify 4): the same
++        // FEATURE:EnableDeepLinks dark-launch posture as the landing. Flag off →
++        // 401 on the guardian group.
++        if (!await featureFlags.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, http.RequestAborted))
++        {
++            logger.LogInformation("Guardian route group: EnableDeepLinks is OFF — rejecting");
++            return Results.Unauthorized();
++        }
++
++        if (!http.Request.Headers.TryGetValue("x-deeplink-token", out var headerValues)
++            || string.IsNullOrWhiteSpace(headerValues.ToString()))
++        {
++            logger.LogInformation("Guardian route group: missing x-deeplink-token header");
++            return Results.Unauthorized();
++        }
++
++        var token = headerValues.ToString()!;
++        var payload = protector.TryUnprotect(token);
++        if (payload is null || payload.ExpiresAt <= DateTimeOffset.UtcNow)
++        {
++            logger.LogInformation("Guardian route group: invalid, tampered, or expired x-deeplink-token");
++            return Results.Unauthorized();
++        }
++
++        // Route-scope resolution — the token must target the assignment in the URL.
++        var routeAssignmentId = Guid.Empty;
++        if (http.Request.RouteValues.TryGetValue("id", out var idValue) &&
++            Guid.TryParse(idValue as string, out var parsedId))
++        {
++            routeAssignmentId = parsedId;
++        }
++        if (routeAssignmentId != Guid.Empty && routeAssignmentId != payload.AssignmentId)
++        {
++            logger.LogInformation(
++                "Guardian route group: token assignment {TokenAssignment} != route {Route}",
++                payload.AssignmentId, routeAssignmentId);
++            return Forbidden();
++        }
++        var assignmentId = payload.AssignmentId;
++
++        // The route student the guardian is acting for (the URL's {studentId}).
++        var routeStudentId = Guid.Empty;
++        if (http.Request.RouteValues.TryGetValue("studentId", out var sv) &&
++            Guid.TryParse(sv as string, out var parsedStudent))
++        {
++            routeStudentId = parsedStudent;
++        }
++
++        // Resolve the acting guardian from the authoritative recipient row, authorize it for
++        // the route student via the guardian link, and run the endpoint INSIDE the token's
++        // tenant scope (P1-2): tenants + the EF per-entity filter must see the validated
++        // tenant, which the public group would otherwise leave at Guid.Empty. Tenant mismatch
++        // ⇒ row absent ⇒ 403.
++        return await tenantAccessor.RunWithExplicitTenantAsync(
++            payload.TenantId,
++            async ct =>
++            {
++                var recipient = await submissionRepository.GetRecipientAsync(
++                    assignmentId, payload.ContactId, ct);
++                if (recipient is null)
++                {
++                    logger.LogInformation(
++                        "Guardian route group: no recipient row for assignment {AssignmentId}/contact {ContactId}",
++                        assignmentId, payload.ContactId);
++                    return Forbidden();
++                }
++
++                if (recipient.TenantId != payload.TenantId)
++                {
++                    logger.LogInformation(
++                        "Guardian route group: recipient tenant {RowTenant} != token tenant {TokenTenant}",
++                        recipient.TenantId, payload.TenantId);
++                    return Forbidden();
++                }
++
++                if (recipient.OwnerType != ContactOwnerType.Guardian)
++                {
++                    logger.LogInformation(
++                        "Guardian route group: recipient for contact {ContactId} is not guardian-owned",
++                        payload.ContactId);
++                    return Forbidden();
++                }
++
++                // Guardian-link authorization (P1-3 adjudication): the token-resolved guardian
++                // must be a linked guardian of the ROUTE student. NOT a WardStudentId equality
++                // check — the recipient row is FirstOrDefault per (assignment, contact), so a
++                // WardStudentId predicate would reject legitimate multi-ward sign-offs. GET
++                // context/certificate reads are authorized here; the POST additionally keeps
++                // the sign command's fail-closed guardian check as defense-in-depth.
++                if (routeStudentId == Guid.Empty ||
++                    !await studentDirectory.IsGuardianOfAsync(routeStudentId, recipient.OwnerId, ct))
++                {
++                    logger.LogInformation(
++                        "Guardian route group: guardian {GuardianId} is not a linked guardian of route student {RouteStudent}",
++                        recipient.OwnerId, routeStudentId);
++                    return Forbidden();
++                }
++
++                // Authoritative server-side expiry — a re-minted short-TTL header token
++                // cannot outlive the stored DeepLinkExpiresAt (decision (a) res. 3).
++                if (recipient.DeepLinkExpiresAt is not { } stored ||
++                    stored <= DateTimeOffset.UtcNow)
++                {
++                    logger.LogInformation(
++                        "Guardian route group: stored DeepLinkExpiresAt {Stored} is expired or null for assignment {AssignmentId}",
++                        recipient.DeepLinkExpiresAt, assignmentId);
++                    return Forbidden();
++                }
++
++                http.Items[GuardianIdItemKey] = recipient.OwnerId;
++                // Run the endpoint (and its handlers + EF queries) under the explicit tenant.
++                return await next(context);
++            });
++    }
++
++    /// <summary>
++    /// Scope/row rejection. Uses a bare 403 rather than <c>Results.Forbid()</c>:
++    /// the guardian group carries no authentication scheme (the token is the
++    /// credential), so there is nothing to challenge, and a plain status keeps the
++    /// filter free of an <c>IAuthenticationService</c> dependency.
++    /// </summary>
++    private static IResult Forbidden() => Results.StatusCode(StatusCodes.Status403Forbidden);
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/GuardianSignOffRoutes.cs b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/GuardianSignOffRoutes.cs
+new file mode 100644
+index 00000000..c411f760
+--- /dev/null
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Endpoints/GuardianSignOffRoutes.cs
+@@ -0,0 +1,148 @@
++using Microsoft.AspNetCore.Mvc;
++using Microsoft.AspNetCore.Routing;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Api.Auth;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.CQRS;
++
++namespace SchoolCollab.Assignments.Api.Endpoints;
++
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation, decisions (a)/(c)/(d)) — the public, token-gated
++/// guardian sign-off route group. Mapped OUTSIDE the teacher/admin-gated
++/// <c>/assignments</c> group with NO <see cref="Microsoft.AspNetCore.Authorization"/>:
++/// the credential is the <c>x-deeplink-token</c> header, validated by
++/// <see cref="GuardianTokenEndpointFilter"/> (the ar-14 public-group precedent). The
++/// group reuses the SAME query/command handlers as the teacher routes — no dual-auth,
++/// no teacher-route churn. The acting <see cref="Guid"/> guardian is threaded from
++/// <see cref="HttpContext.Items"/> (resolved server-side from the token); the request
++/// body never carries a GuardianId (decision (b)). Reassign/finalize are NOT exposed
++/// here (teacher-only, decision (c)).
++/// </summary>
++public static class GuardianSignOffRoutes
++{
++    /// <summary>Maps the public <c>/guardian</c> sign-off route group.</summary>
++    public static WebApplication MapGuardianSignOffRoutes(this WebApplication app)
++    {
++        var group = app.MapGroup("/guardian");
++
++        // The single aggregate the guardian sign page consumes (one call).
++        group.MapGet("/assignments/{id:guid}/students/{studentId:guid}/sign-off", async (
++            Guid id,
++            Guid studentId,
++            [FromServices] IQueryHandler<GetSignOffContextQuery, SignOffContextDto> handler,
++            CancellationToken ct) =>
++        {
++            try
++            {
++                var result = await handler.HandleAsync(new GetSignOffContextQuery(id, studentId), ct);
++                return Results.Ok(result);
++            }
++            catch (AssignmentNotFoundException)
++            {
++                return Results.NotFound();
++            }
++            catch (SubmissionNotFoundException)
++            {
++                return Results.NotFound();
++            }
++            catch (SubmissionSignOffStateException ex)
++            {
++                return Results.Problem(ex.Message, statusCode: 409);
++            }
++        }).AddEndpointFilter<GuardianTokenEndpointFilter>();
++
++        // Guardian e-signs the ward's submission. The acting GuardianId is taken from
++        // HttpContext.Items (token-resolved), NEVER from the body (decision (b)).
++        group.MapPost("/assignments/{id:guid}/students/{studentId:guid}/sign-off", async (
++            Guid id,
++            Guid studentId,
++            [FromBody] GuardianSignOffSubmissionRequest req,
++            HttpContext http,
++            [FromServices] ICommandHandler<SignOffSubmissionCommand, SignOffStatusDto> handler,
++            CancellationToken ct) =>
++        {
++            if (http.Items[GuardianTokenEndpointFilter.GuardianIdItemKey] is not Guid guardianId)
++            {
++                return Results.Unauthorized();
++            }
++            var ip = http.Connection.RemoteIpAddress?.ToString() ?? "unknown";
++            var userAgent = http.Request.Headers.UserAgent.ToString();
++
++            try
++            {
++                var result = await handler.HandleAsync(new SignOffSubmissionCommand(
++                    id, studentId, guardianId,
++                    (SignatureType)(int)req.SignatureType,
++                    req.TypedSignature,
++                    ip, userAgent), ct);
++                return Results.Ok(result);
++            }
++            catch (AssignmentNotFoundException)
++            {
++                return Results.NotFound();
++            }
++            catch (SubmissionNotFoundException)
++            {
++                return Results.NotFound();
++            }
++            catch (SubmissionAlreadySignedException ex)
++            {
++                return Results.Problem(ex.Message, statusCode: 409);
++            }
++            catch (SubmissionSignOffStateException ex)
++            {
++                return Results.Problem(ex.Message, statusCode: 409);
++            }
++            catch (SubmissionLockedException ex)
++            {
++                return Results.Problem(ex.Message, statusCode: 409);
++            }
++            catch (GuardianNotAuthorizedException ex)
++            {
++                return Results.Problem(ex.Message, statusCode: 409);
++            }
++            catch (ArgumentException ex)
++            {
++                return Results.BadRequest(new { ex.Message });
++            }
++        }).AddEndpointFilter<GuardianTokenEndpointFilter>();
++
++        // C3 — the finalized certificate PDF (guardian download path; same logic as the
++        // teacher certificate route).
++        group.MapGet("/assignments/{id:guid}/students/{studentId:guid}/certificate", async (
++            Guid id,
++            Guid studentId,
++            [FromServices] ISubmissionRepository submissionRepository,
++            [FromServices] IFileStore fileStore,
++            CancellationToken ct) =>
++        {
++            var signatureEvent = await submissionRepository.GetSignatureEventByAssignmentStudentAsync(
++                id, studentId, ct);
++            if (signatureEvent is null || string.IsNullOrWhiteSpace(signatureEvent.CertificateStoragePath))
++            {
++                return Results.NotFound();
++            }
++
++            Stream? stream;
++            try
++            {
++                stream = await fileStore.OpenReadAsync(signatureEvent.CertificateStoragePath, ct);
++            }
++            catch (FileNotFoundException)
++            {
++                return Results.NotFound();
++            }
++
++            return Results.Stream(stream, "application/pdf",
++                fileDownloadName: $"certificate-{id:N}-{studentId:N}.pdf");
++        }).AddEndpointFilter<GuardianTokenEndpointFilter>();
++
++        return app;
++    }
++}
+diff --git a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+index d6a26e8e..2c568794 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Api/Program.cs
+@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.DataProtection;
+ using StackExchange.Redis;
+ using Serilog;
+ using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Api.Endpoints;
+ using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Assignments.Core;
+ using SchoolCollab.Settings.Core;
+@@ -34,6 +35,16 @@ builder.Services.ConfigureHttpJsonOptions(options =>
+     // round-trips as the string name (Pending / Approved / Rejected)
+     // and null stays null.
+     options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<ApprovalStatusDto>());
++    // WS-C1/WS-F3 (ar-15-signoff-relocation): the guardian sign-off enums must bind as
++    // string names in the REAL host — the Families guardian POST body round-trips
++    // SignatureTypeDto as "Typed"/"Click" and the context/certificate GETs serialize
++    // SignOffStateDto as names. Previously these converters were registered ONLY in the
++    // two guardian test files' self-registered JsonOptions, so the live host failed the
++    // guardian POST body binding with 400 (and the teacher-POST seam carried them only
++    // client-side). They now belong here, on the same host options block as the other
++    // assignment enums, so both the guardian and pre-existing teacher sign surfaces bind.
++    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignatureTypeDto>());
++    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<SignOffStateDto>());
+ });
+ 
+ var cacheConnectionString = builder.Configuration.GetConnectionString("cache")
+@@ -130,6 +141,11 @@ builder.Services.AddScoped<SchoolCollab.Assignments.Core.Services.ITopicAssignme
+ 
+ builder.Services.AddOpenApi();
+ 
++// WS-F3 (ar-15-signoff-relocation): the endpoint filter backing the public guardian
++// sign-off group — validates the x-deeplink-token header against the shared keyring /
++// purpose and cross-checks the recipient row server-side.
++builder.Services.AddScoped<SchoolCollab.Assignments.Api.Auth.GuardianTokenEndpointFilter>();
++
+ // WS-A1 / decision (b): orphan sweep for staged uploads. The
+ // StagedFileSweepService is a hosted BackgroundService (sanctioned
+ // pre-worker hosted-service seam — no Assignments worker exists yet).
+@@ -157,6 +173,10 @@ app.UseSerilogRequestLogging();
+ 
+ // All assignment endpoints require an authenticated user
+ var featureFlags = app.Services.GetRequiredService<IFeatureFlagService>();
++// WS-F3 (ar-15-signoff-relocation): the public guardian sign-off route group,
++// token-gated by GuardianTokenEndpointFilter (the shared ar-deeplink keyring/purpose).
++// Mapped after the teacher/admin group so the /guardian namespace stays disjoint.
++app.MapGuardianSignOffRoutes();
+ app.MapAssignmentEndpoints(featureFlags); 
+ 
+ app.Run();
+diff --git a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+index 68a5f9ee..535596e1 100644
+--- a/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
++++ b/src/Assignments/SchoolCollab.Assignments.Contracts/ContractTypes.cs
+@@ -603,5 +603,15 @@ public record SignOffSubmissionRequest(
+     SignatureTypeDto SignatureType,
+     string? TypedSignature = null);
+ 
++/// <summary>Guardian e-sign request body for the token-gated guardian route group
++/// (WS-F3 / ar-15 — decision (b)). Deliberately carries NO <c>GuardianId</c>: on this
++/// public route the acting guardian is resolved server-side from the validated
++/// <c>x-deeplink-token</c>, so the body cannot impersonate a signer. Additive record;
++/// the existing <see cref="SignOffSubmissionRequest"/> (which keeps taking the
++/// GuardianId from the body for the dev/TestAuth teacher posture) is untouched.</summary>
++public record GuardianSignOffSubmissionRequest(
++    SignatureTypeDto SignatureType,
++    string? TypedSignature = null);
++
+ /// <summary>Teacher reassign-signer request body (WS-C1, Q5).</summary>
+ public record ReassignSignOffRequest(Guid NewGuardianId);
+\ No newline at end of file
+diff --git a/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor b/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor
+index b2f1172e..bb8e9bed 100644
+--- a/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor
++++ b/src/SchoolCollab.Families/Components/Pages/Ward/Index.razor
+@@ -36,7 +36,7 @@ else if (_items.Length == 0)
+ }
+ else
+ {
+-    <FluentDataGrid Items="_items.AsQueryable()" TItem="WardAssignmentListItemDto" GridTemplateColumns="1fr 140px 160px 120px 90px" Resizable="true">
++    <FluentDataGrid Items="_items.AsQueryable()" TItem="WardAssignmentListItemDto" GridTemplateColumns="1fr 140px 160px 120px 90px 80px" Resizable="true">
+         <PropertyColumn Title="Assignment" Property="@(a => a.Title)" />
+         <PropertyColumn Title="Due" Property="@(a => a.DueDate)" Format="{0:g}" />
+         <PropertyColumn Title="Status" Property="@(a => a.State)" />
+@@ -50,6 +50,20 @@ else
+                 <FluentBadge Color="Color.Green">Ready</FluentBadge>
+             }
+         </TemplateColumn>
++        @* WS-F3 (ar-15-signoff-relocation, decision (e)): the guardian "Sign off" affordance
++           reaches the relocated sign page per ward/assignment. Shown when the ward's work is
++           complete (State == Completed) — the point at which a guardian-facing signature is
++           relevant. Multi-ward guardians (token WardStudentId null → land on /ward) use this
++           path to reach each ward's sign-off. *@
++        <TemplateColumn Title="">
++            @if (context.State == WardSubmissionStateDto.Completed)
++            {
++                <FluentAnchor Appearance="Appearance.Hypertext" class="ward-sign-off"
++                              Href="@($"/ward/{_studentId}/assignments/{context.Id}/sign-off")">
++                    Sign off
++                </FluentAnchor>
++            }
++        </TemplateColumn>
+         <TemplateColumn Title="">
+             <FluentButton Appearance="Appearance.Accent"
+                           OnClick="@(() => Nav.NavigateTo($"/ward/{_studentId}/assignments/{context.Id}"))">Open</FluentButton>
+diff --git a/src/SchoolCollab.Families/Components/Pages/Ward/SignOff.razor b/src/SchoolCollab.Families/Components/Pages/Ward/SignOff.razor
+new file mode 100644
+index 00000000..24fc42c3
+--- /dev/null
++++ b/src/SchoolCollab.Families/Components/Pages/Ward/SignOff.razor
+@@ -0,0 +1,321 @@
++@* WS-F3 (ar-15-signoff-relocation, decisions (b)/(c)) — the guardian e-sign page in the
++   FAMILIES host. The relocated WS-C2 surface: same context aggregate, same sign command,
++   same consent/typed-or-click UX — MINUS the acting-guardian self-select (decision (b)):
++   the acting guardian is resolved server-side by the Assignments API from the re-minted
++   deep-link header token, so this page never chooses a signer and the sign body carries
++   no GuardianId. Reached from the ar-14 landing's guardian redirect (decision (e)) or
++   from the ward surface; the teacher surface stays in Admin, untouched.
++   Styling: FluentUI components only — no inline style, no new .razor.css (the ar-9
++   posture); Families' app.css carries no utility classes, so spacing comes from
++   FluentStack Gap. *@
++@page "/ward/{StudentId:guid}/assignments/{AssignmentId:guid}/sign-off"
++@using SchoolCollab.Assignments.Contracts
++@using System.Security.Claims
++@inject FamiliesApiClient Api
++@inject GuardianCertificateDownloadService CertificateDownload
++@inject AuthenticationStateProvider AuthState
++@inject NavigationManager Nav
++@inject ILogger<SignOff> Logger
++@implements IAsyncDisposable
++
++<PageTitle>Sign off — @_context?.AssignmentTitle</PageTitle>
++
++<ErrorBoundary>
++    <ChildContent>
++        @if (_caller is null)
++        {
++            @if (_error is not null)
++            {
++                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++            }
++            else
++            {
++                <FluentProgressRing />
++            }
++        }
++        else if (_context is null)
++        {
++            @if (_error is not null)
++            {
++                <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++            }
++            else
++            {
++                <FluentProgressRing />
++            }
++        }
++        else
++        {
++            <FluentStack Orientation="Orientation.Vertical" Gap="0.75rem">
++                <FluentAnchor Appearance="Appearance.Hypertext" Href="@($"/ward/{StudentId}")">
++                    Back to ward
++                </FluentAnchor>
++
++                <div>
++                    <h1>Sign off — @_context.AssignmentTitle</h1>
++                    <FluentBadge Appearance="@ContextStatusAppearance(_context)">
++                        @ContextStatusLabel(_context)
++                    </FluentBadge>
++                </div>
++
++                @if (_context.SignOffState == SignOffStateDto.Signed || _context.FinalizedAt is not null)
++                {
++                    @* Already-signed view: the idempotent second visit is a VIEW, not a 409
++                       page — the 409 only fires on a second POST. *@
++                    <FluentMessageBar Intent="MessageIntent.Success">
++                        This sign-off has been completed
++                        @(_context.FinalizedAt is not null
++                            ? $"and finalized on {_context.FinalizedAt.Value.ToLocalTime():g}."
++                            : $"on {_context.SignedAt?.ToLocalTime():g}.")
++                    </FluentMessageBar>
++                    <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem">
++                        @if (_context.FinalizedAt is not null)
++                        {
++                            <FluentButton Appearance="Appearance.Accent"
++                                          OnClick="DownloadCertificateAsync"
++                                          Disabled="@_downloadBusy">Download certificate</FluentButton>
++                        }
++                    </FluentStack>
++                }
++                else
++                {
++                    <FluentStack Orientation="Orientation.Vertical" Gap="0.5rem">
++                        <div>Ward: <strong>@_context.StudentName</strong></div>
++                        <div>Current version: <strong>@(_context.CurrentVersionNumber > 0 ? _context.CurrentVersionNumber.ToString() : "—")</strong></div>
++                        <div>Score: <strong>@(_context.Score?.ToString("0.##") ?? "—")</strong></div>
++                        <div>Result: <strong>@(_context.Passed is null ? "—" : _context.Passed.Value ? "Passed" : "Failed")</strong></div>
++                    </FluentStack>
++
++                    @* Consent block (spec §3.2 line 53 — the presented text is captured
++                       server-side on the audit event; the checkbox is client-only). *@
++                    <FluentCard>
++                        <FluentStack Orientation="Orientation.Vertical" Gap="0.75rem">
++                            <h5>Guardian sign-off consent</h5>
++                            <div>@_context.ConsentText</div>
++                            <FluentCheckbox @bind-Value="_consentChecked"
++                                            Label="I have read and understand the above consent"
++                                            aria-label="Confirm I have read and understand the consent" />
++                        </FluentStack>
++                    </FluentCard>
++
++                    @* Signature method (typed or click — spec §3.2 line 50). No self-select:
++                       the token identifies the signer (decision (b)). *@
++                    <FluentStack Orientation="Orientation.Vertical" Gap="0.5rem">
++                        <h5>Signature method</h5>
++                        <FluentRadioGroup @bind-Value="_signatureType">
++                            <FluentRadio Value="@SignatureTypeDto.Typed">Type my full name</FluentRadio>
++                            <FluentRadio Value="@SignatureTypeDto.Click">Click to sign</FluentRadio>
++                        </FluentRadioGroup>
++                    </FluentStack>
++
++                    @if (_signatureType == SignatureTypeDto.Typed)
++                    {
++                        <FluentTextField @bind-Value="_typedSignature"
++                                         Label="Type your full name"
++                                         Placeholder="e.g. Jane Doe"
++                                         MaxLength="200"
++                                         aria-label="Type your full name to sign" />
++                    }
++
++                    @if (_error is not null)
++                    {
++                        <FluentMessageBar Intent="MessageIntent.Error">@_error</FluentMessageBar>
++                    }
++
++                    <FluentStack Orientation="Orientation.Horizontal" Gap="0.5rem">
++                        <FluentButton Appearance="Appearance.Accent"
++                                      OnClick="SubmitSignAsync"
++                                      Disabled="@(_busy || !_consentChecked || (_signatureType == SignatureTypeDto.Typed && string.IsNullOrWhiteSpace(_typedSignature)))">
++                            @(_busy ? "Signing…" : _signatureType == SignatureTypeDto.Typed ? "Sign" : "Click to sign")
++                        </FluentButton>
++                    </FluentStack>
++                }
++            </FluentStack>
++        }
++    </ChildContent>
++    <ErrorContent Context="ex">
++        <FluentMessageBar Intent="MessageIntent.Error">Something went wrong: @ex.Message</FluentMessageBar>
++    </ErrorContent>
++</ErrorBoundary>
++
++@code {
++    [Parameter] public Guid AssignmentId { get; set; }
++
++    [Parameter] public Guid StudentId { get; set; }
++
++    private GuardianCallerContext? _caller;
++    private SignOffContextDto? _context;
++    private bool _busy;
++    private bool _downloadBusy;
++    private string? _error;
++    private bool _consentChecked;
++    private SignatureTypeDto _signatureType = SignatureTypeDto.Typed;
++    private string? _typedSignature;
++    private CancellationTokenSource? _loadCts;
++    private volatile bool _disposed;
++
++    protected override async Task OnParametersSetAsync()
++    {
++        if (AssignmentId == Guid.Empty || StudentId == Guid.Empty)
++        {
++            _error = "Missing assignment or ward identifier for this session.";
++            return;
++        }
++
++        // Recreate the load CTS cleanly: cancel + dispose the previous one before replacing
++        // it (WS-F3 - mirrors the ar-13/ar-14 load-key/_loadEpoch pattern) so an in-flight
++        // continuation from a prior parameter value can never cancel/dispose a token that
++        // now belongs to the newer load, and so the old registration leaks nothing.
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
++        _loadCts = new CancellationTokenSource();
++        try
++        {
++            // Decision (b)/(to-verify 1): the acting guardian comes from the ar-14 landing's
++            // cookie principal (tenant_id + contact_id) — the pair the client re-mints into
++            // the x-deeplink-token header on every guardian call. No principal ⇒ no signer.
++            _caller = await ResolveCallerAsync();
++            if (_disposed) return;
++            if (_caller is null)
++            {
++                _error = "This sign-off link could not be verified for your account. Please open it again from the link in your email.";
++                return;
++            }
++
++            _context = await Api.GetGuardianSignOffContextAsync(AssignmentId, StudentId, _caller, _loadCts.Token);
++            if (_disposed) return;
++            if (_context is null)
++            {
++                _error = "Assignment or student not found.";
++            }
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogError(ex, "Failed to load guardian sign-off context for {AssignmentId}/{StudentId}", AssignmentId, StudentId);
++            _error = Describe(ex);
++        }
++    }
++
++    private async Task<GuardianCallerContext?> ResolveCallerAsync()
++    {
++        var state = await AuthState.GetAuthenticationStateAsync();
++        var contactId = ReadClaim(state.User, "contact_id");
++        var tenantId = ReadClaim(state.User, "tenant_id");
++        return contactId is null || tenantId is null
++            ? null
++            : new GuardianCallerContext(tenantId.Value, contactId.Value);
++
++        static Guid? ReadClaim(ClaimsPrincipal user, string type)
++        {
++            var raw = user.Claims.FirstOrDefault(c => c.Type == type)?.Value;
++            return Guid.TryParse(raw, out var value) && value != Guid.Empty ? value : null;
++        }
++    }
++
++    private async Task SubmitSignAsync()
++    {
++        if (_busy || _context is null || _caller is null) return;
++        _busy = true;
++        _error = null;
++        var ct = _loadCts?.Token ?? CancellationToken.None;
++        try
++        {
++            await Api.SubmitGuardianSignOffAsync(
++                AssignmentId,
++                StudentId,
++                new GuardianSignOffSubmissionRequest(
++                    _signatureType,
++                    _signatureType == SignatureTypeDto.Typed ? _typedSignature : null),
++                _caller,
++                ct);
++
++            // Success state: re-load the context (renders the read-only Signed view).
++            _context = await Api.GetGuardianSignOffContextAsync(AssignmentId, StudentId, _caller, ct);
++            Logger.LogInformation("Guardian signed off assignment {AssignmentId} / student {StudentId} via the token-gated guardian route",
++                AssignmentId, StudentId);
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogError(ex, "Failed to sign off {AssignmentId}/{StudentId}", AssignmentId, StudentId);
++            _error = Describe(ex);
++
++            // Idempotent second attempt: the API 409s, so refresh to the read-only signed view.
++            if (ex is HttpRequestException http && http.StatusCode == System.Net.HttpStatusCode.Conflict)
++            {
++                _context = await Api.GetGuardianSignOffContextAsync(AssignmentId, StudentId, _caller, ct);
++            }
++        }
++        finally
++        {
++            if (!_disposed) { _busy = false; StateHasChanged(); }
++        }
++    }
++
++    private async Task DownloadCertificateAsync()
++    {
++        if (_disposed || _downloadBusy || _context is null || _caller is null) return;
++        _downloadBusy = true;
++        _error = null;
++        var ct = _loadCts?.Token ?? CancellationToken.None;
++        try
++        {
++            await CertificateDownload.DownloadAsync(AssignmentId, StudentId, _caller, ct);
++        }
++        catch (OperationCanceledException) { }
++        catch (Exception ex)
++        {
++            if (_disposed) return;
++            Logger.LogError(ex, "Failed to download certificate for {AssignmentId}/{StudentId}", AssignmentId, StudentId);
++            _error = Describe(ex);
++        }
++        finally
++        {
++            if (!_disposed) { _downloadBusy = false; StateHasChanged(); }
++        }
++    }
++
++    /// <summary>Maps a guardian-call failure to the operator-visible message: 401/403 mean
++    /// the re-minted link is no longer accepted (expired scope or revoked link), anything
++    /// else surfaces the API's own detail (already signed / locked / not authorized).</summary>
++    private static string Describe(Exception ex) => ex is HttpRequestException http
++        ? http.StatusCode switch
++        {
++            System.Net.HttpStatusCode.Unauthorized =>
++                "This sign-off link is no longer valid. Please open it again from the link in your email.",
++            System.Net.HttpStatusCode.Forbidden =>
++                "This sign-off link does not cover this assignment or ward.",
++            _ => http.Message
++        }
++        : ex.Message;
++
++    public async ValueTask DisposeAsync()
++    {
++        _disposed = true;
++        _loadCts?.Cancel();
++        _loadCts?.Dispose();
++        _loadCts = null;
++        await CertificateDownload.DisposeAsync();
++    }
++
++    // FluentUI 4.14.2 FluentBadge render-safe triad only (the Detail.razor WS-A2
++    // documented deviation — Outline/Warning/Success crash the page).
++    private static string ContextStatusLabel(SignOffContextDto ctx) => ctx.SignOffState switch
++    {
++        SignOffStateDto.Signed when ctx.FinalizedAt is not null => "Finalized",
++        SignOffStateDto.Signed => "Signed",
++        SignOffStateDto.AwaitingSignature => "Awaiting signature",
++        _ => "None"
++    };
++
++    private static Appearance ContextStatusAppearance(SignOffContextDto ctx) => ctx.SignOffState switch
++    {
++        SignOffStateDto.Signed when ctx.FinalizedAt is not null => Appearance.Neutral,
++        SignOffStateDto.Signed => Appearance.Accent,
++        SignOffStateDto.AwaitingSignature => Appearance.Lightweight,
++        _ => Appearance.Neutral
++    };
++}
+diff --git a/src/SchoolCollab.Families/DeepLinks/DeepLinkLandingService.cs b/src/SchoolCollab.Families/DeepLinks/DeepLinkLandingService.cs
+index c209990f..716e0a2a 100644
+--- a/src/SchoolCollab.Families/DeepLinks/DeepLinkLandingService.cs
++++ b/src/SchoolCollab.Families/DeepLinks/DeepLinkLandingService.cs
+@@ -1,4 +1,5 @@
+ using Microsoft.Extensions.Logging;
++using SchoolCollab.Assignments.Contracts;
+ using SchoolCollab.Core.DeepLinks;
+ using SchoolCollab.Core.Features;
+ using SchoolCollab.Core.Tenancy;
+@@ -110,10 +111,14 @@ public sealed class DeepLinkLandingService(
+                         "continuing with the redirect", payload.AssignmentId, payload.ContactId);
+                 }
+ 
+-                // Redirect rule (decision (g)): single-ward (WardStudentId set) lands on
+-                // that ward's list; multi-ward guardian (no WardStudentId) lands on /ward.
++                // Redirect rule (decision (g), extended by WS-F3 decision (e)): a
++                // guardian token carrying WardStudentId lands DIRECTLY on that ward's
++                // sign-off page for the token's assignment; a multi-ward guardian (no
++                // WardStudentId) lands on /ward; student-owned tokens are unchanged.
+                 var redirectUrl = payload.WardStudentId is { } wardStudentId
+-                    ? $"/ward/{wardStudentId}"
++                    ? payload.OwnerType == (int)ContactOwnerTypeDto.Guardian
++                        ? $"/ward/{wardStudentId}/assignments/{payload.AssignmentId}/sign-off"
++                        : $"/ward/{wardStudentId}"
+                     : "/ward";
+ 
+                 return new DeepLinkLandingResult(
+diff --git a/src/SchoolCollab.Families/Program.cs b/src/SchoolCollab.Families/Program.cs
+index 77c54304..dc66d51f 100644
+--- a/src/SchoolCollab.Families/Program.cs
++++ b/src/SchoolCollab.Families/Program.cs
+@@ -89,6 +89,16 @@ builder.Services.AddScoped<SchoolCollab.Core.DeepLinks.DeepLinkProtector>();
+ // /deeplink landing (unprotect → tenant flag → OpenedAt stamp → redirect target).
+ builder.Services.AddScoped<SchoolCollab.Families.DeepLinks.DeepLinkLandingService>();
+ 
++// WS-F3 (ar-15-signoff-relocation, decision (e)/step 5): the Families-side certificate
++// download orchestration for the guardian sign page (client bytes + the host's own
++// fileDownload.js module — the Admin C3 service is RCL-scoped and not reachable here).
++// Registered TRANSIENT to match the Admin CertificateDownloadService pattern: the service
++// owns its lazily-loaded fileDownload.js module reference and each consuming component
++// disposes it, so a long-lived (scoped) instance would leave a single shared module ref
++// across the circuit and leak on component disposal. Transient gives each page its own
++// instance whose DisposeAsync returns the module ref exactly once.
++builder.Services.AddTransient<SchoolCollab.Families.Services.GuardianCertificateDownloadService>();
++
+ var app = builder.Build();
+ 
+ // Startup auth-mode decision (mirrors Admin): read DisableOIDCAuth directly from
+diff --git a/src/SchoolCollab.Families/Services/FamiliesApiClient.cs b/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
+index 98aefa9b..86a108f7 100644
+--- a/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
++++ b/src/SchoolCollab.Families/Services/FamiliesApiClient.cs
+@@ -1,8 +1,10 @@
++using System.Net;
+ using System.Net.Http.Json;
+ using System.Text.Json;
+ using System.Text.Json.Serialization;
+ using Microsoft.Extensions.Logging;
+ using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.DeepLinks;
+ 
+ namespace SchoolCollab.Families.Services;
+ 
+@@ -21,18 +23,40 @@ internal static class FamiliesJson
+     };
+ }
+ 
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation, decision (b)) — the guardian identity the Families
++/// host re-mints into the <c>x-deeplink-token</c> header for the guardian call family.
++/// Both values come from the ar-14 landing's cookie principal
++/// (<c>tenant_id</c>/<c>contact_id</c>); the guardian page resolves the pair once per
++/// circuit and passes it to <see cref="FamiliesApiClient"/> per call. The body of a
++/// guardian sign POST never carries a GuardianId — the API resolves the acting guardian
++/// from this token.
++/// </summary>
++public sealed record GuardianCallerContext(Guid TenantId, Guid ContactId);
++
+ /// <summary>
+ /// F1 (slice 2b) — the Families surface's thin typed client over the Assignments
+ /// API's ward-facing endpoints (the ar-12 seams). Option B: the Families host
+ /// references only <c>Assignments.Contracts</c> (the cross-context boundary), so
+ /// this client carries the exact six calls the ward pages bind to. No admin
+ /// <c>Assignments.Application</c> reference, so no admin route leakage.
++/// <para>WS-F3 adds the three guardian-scoped calls (the <c>/guardian</c> route group),
++/// each attaching a re-minted short-TTL <c>x-deeplink-token</c> header protected with the
++/// shared <see cref="DeepLinkProtector"/> + purpose (decision (a)) — no new keyring, no
++/// new purpose, no OIDC dependency.</para>
+ /// </summary>
+ public sealed class FamiliesApiClient(
+     HttpClient http,
++    DeepLinkProtector protector,
+     ILogger<FamiliesApiClient> logger)
+ {
++    /// <summary>WS-F3 — the re-mint TTL for the guardian header token (owner decision
++    /// 2026-09-16: 15 minutes). The re-mint cannot extend link validity: the API
++    /// cross-checks the authoritative stored <c>AssignmentRecipient.DeepLinkExpiresAt</c>.</summary>
++    public static readonly TimeSpan GuardianTokenReMintTtl = TimeSpan.FromMinutes(15);
++
+     private readonly string _assignments = "assignments";
++    private readonly string _guardian = "guardian";
+ 
+     /// <summary>WS-A5 — the ward's assignment list.</summary>
+     public async Task<WardAssignmentListItemDto[]?> ListWardAssignmentsAsync(Guid studentId, CancellationToken ct = default)
+@@ -145,4 +169,117 @@ public sealed class FamiliesApiClient(
+         response.EnsureSuccessStatusCode();
+         return await response.Content.ReadFromJsonAsync<SubmissionDetailDto>(FamiliesJson.Options, ct);
+     }
++
++    // ── WS-F3 (ar-15-signoff-relocation): the token-gated guardian call family ──────
++
++    /// <summary>WS-F3 — the sign-off context the guardian sign page renders (ONE call).
++    /// Returns <see langword="null"/> for a 404 (unknown assignment/student); a 401/403
++    /// (expired, tampered, or out-of-scope link) surfaces as
++    /// <see cref="HttpRequestException"/> carrying the status for the page to render.</summary>
++    public async Task<SignOffContextDto?> GetGuardianSignOffContextAsync(
++        Guid assignmentId, Guid studentId, GuardianCallerContext caller, CancellationToken ct = default)
++    {
++        using var request = GuardianRequest(
++            HttpMethod.Get,
++            $"/{_guardian}/{_assignments}/{assignmentId}/students/{studentId}/sign-off",
++            assignmentId, studentId, caller);
++
++        var response = await http.SendAsync(request, ct);
++        if (response.StatusCode == HttpStatusCode.NotFound)
++        {
++            return null;
++        }
++        if (!response.IsSuccessStatusCode)
++        {
++            await ThrowForStatusAsync(response, ct);
++        }
++        return await response.Content.ReadFromJsonAsync<SignOffContextDto>(FamiliesJson.Options, ct);
++    }
++
++    /// <summary>WS-F3 — the guardian e-signs the ward's submission. The request body
++    /// carries NO GuardianId (decision (b)): the acting guardian is resolved server-side
++    /// from the header token. A 409 (already signed / wrong state / locked / not
++    /// authorized) surfaces as <see cref="HttpRequestException"/> whose message is the
++    /// API's problem detail, so the page can render the read-only re-entry posture.</summary>
++    public async Task<SignOffStatusDto?> SubmitGuardianSignOffAsync(
++        Guid assignmentId, Guid studentId, GuardianSignOffSubmissionRequest body,
++        GuardianCallerContext caller, CancellationToken ct = default)
++    {
++        using var request = GuardianRequest(
++            HttpMethod.Post,
++            $"/{_guardian}/{_assignments}/{assignmentId}/students/{studentId}/sign-off",
++            assignmentId, studentId, caller);
++        request.Content = JsonContent.Create(body, options: FamiliesJson.Options);
++
++        var response = await http.SendAsync(request, ct);
++        if (!response.IsSuccessStatusCode)
++        {
++            await ThrowForStatusAsync(response, ct);
++        }
++        return await response.Content.ReadFromJsonAsync<SignOffStatusDto>(FamiliesJson.Options, ct);
++    }
++
++    /// <summary>WS-F3 — the finalized certificate PDF (decision (e)/step 5). A plain
++    /// <c>&lt;a href&gt;</c> cannot attach the header token, so the page fetches the bytes
++    /// through this call and hands them to the browser-side download module (the C3
++    /// orchestration, mirrored in <c>GuardianCertificateDownloadService</c>). A 404 (no
++    /// signature event / no certificate) surfaces as <see cref="HttpRequestException"/>.</summary>
++    public async Task<byte[]> GetGuardianCertificateAsync(
++        Guid assignmentId, Guid studentId, GuardianCallerContext caller, CancellationToken ct = default)
++    {
++        using var request = GuardianRequest(
++            HttpMethod.Get,
++            $"/{_guardian}/{_assignments}/{assignmentId}/students/{studentId}/certificate",
++            assignmentId, studentId, caller);
++
++        var response = await http.SendAsync(request, ct);
++        if (!response.IsSuccessStatusCode)
++        {
++            await ThrowForStatusAsync(response, ct);
++        }
++        var bytes = await response.Content.ReadAsByteArrayAsync(ct);
++        logger.LogInformation(
++            "Guardian downloaded {Bytes} certificate bytes for assignment {AssignmentId} / student {StudentId}",
++            bytes.Length, assignmentId, studentId);
++        return bytes;
++    }
++
++    /// <summary>
++    /// Builds a guardian-group request carrying a fresh short-TTL
++    /// <c>x-deeplink-token</c> (to-verify 1): the payload is re-protected HERE, per call,
++    /// with the registered <see cref="DeepLinkProtector"/> — the same keyring and
++    /// <see cref="DeepLinkConstants.Purpose"/> as the ar-14 mint path, so the API can
++    /// unprotect it. Assignment + ward come from the call arguments; tenant + contact from
++    /// the caller's cookie principal.
++    /// </summary>
++    private HttpRequestMessage GuardianRequest(
++        HttpMethod method, string relativeUrl, Guid assignmentId, Guid studentId, GuardianCallerContext caller)
++    {
++        var payload = new DeepLinkTokenPayload(
++            TenantId: caller.TenantId,
++            AssignmentId: assignmentId,
++            ContactId: caller.ContactId,
++            OwnerType: (int)ContactOwnerTypeDto.Guardian,
++            Role: null,
++            WardStudentId: studentId,
++            ExpiresAt: DateTimeOffset.UtcNow + GuardianTokenReMintTtl);
++
++        var request = new HttpRequestMessage(method, relativeUrl);
++        request.Headers.TryAddWithoutValidation("x-deeplink-token", protector.Protect(payload));
++        return request;
++    }
++
++    /// <summary>Surfaces a non-success guardian response as a typed
++    /// <see cref="HttpRequestException"/> carrying the API's problem detail as the
++    /// message (the page matches on it for the already-signed re-entry posture).</summary>
++    private static async Task ThrowForStatusAsync(HttpResponseMessage response, CancellationToken ct)
++    {
++        var detail = await response.Content.ReadAsStringAsync(ct);
++        throw new HttpRequestException(
++            string.IsNullOrWhiteSpace(detail)
++                ? $"The Assignments API returned {(int)response.StatusCode} ({response.StatusCode})."
++                : detail,
++            inner: null,
++            statusCode: response.StatusCode);
++    }
+ }
+diff --git a/src/SchoolCollab.Families/Services/GuardianCertificateDownloadService.cs b/src/SchoolCollab.Families/Services/GuardianCertificateDownloadService.cs
+new file mode 100644
+index 00000000..066ac9ae
+--- /dev/null
++++ b/src/SchoolCollab.Families/Services/GuardianCertificateDownloadService.cs
+@@ -0,0 +1,63 @@
++using Microsoft.AspNetCore.Components;
++using Microsoft.JSInterop;
++
++namespace SchoolCollab.Families.Services;
++
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation, decision (e)/step 5) — the Families-side mirror of the
++/// Admin C3 <c>CertificateDownloadService</c>: fetch the finalized certificate PDF through
++/// <see cref="FamiliesApiClient.GetGuardianCertificateAsync"/> (a plain <c>&lt;a href&gt;</c>
++/// cannot attach the <c>x-deeplink-token</c> header) and hand the bytes to the host's
++/// <c>fileDownload.js</c> module (a Blob + anchor-click save). The module reference is loaded
++/// lazily, owned by this instance, and disposed here (the calling component disposes this
++/// service) — the use-js-interop pattern: <see cref="IAsyncDisposable"/> path,
++/// <see cref="JSDisconnectedException"/>-safe. A 404 surfaces as
++/// <see cref="HttpRequestException"/> for the UI to render an error bar rather than crash.
++/// </summary>
++public sealed class GuardianCertificateDownloadService(
++    FamiliesApiClient api,
++    IJSRuntime js,
++    ILogger<GuardianCertificateDownloadService> logger) : IAsyncDisposable
++{
++    private IJSObjectReference? _fileDownloadModule;
++
++    /// <summary>Downloads the finalized certificate for a (assignment, ward) pair to the
++    /// browser, authenticated by the re-minted guardian header token. Idempotent module
++    /// load; <see cref="JSDisconnectedException"/> (the circuit closed mid-save) is
++    /// swallowed harmlessly.</summary>
++    public async Task DownloadAsync(
++        Guid assignmentId, Guid studentId, GuardianCallerContext caller, CancellationToken ct = default)
++    {
++        var pdf = await api.GetGuardianCertificateAsync(assignmentId, studentId, caller, ct);
++
++        try
++        {
++            _fileDownloadModule ??= await js.InvokeAsync<IJSObjectReference>(
++                "import", "./js/fileDownload.js");
++            await _fileDownloadModule.InvokeVoidAsync("saveByteArray",
++                $"certificate-{assignmentId:N}-{studentId:N}.pdf", pdf);
++        }
++        catch (JSDisconnectedException)
++        {
++            // The circuit closed before the save completed — nothing to surface.
++        }
++
++        logger.LogInformation(
++            "Guardian certificate downloaded for assignment {AssignmentId} / student {StudentId}",
++            assignmentId, studentId);
++    }
++
++    /// <inheritdoc/>
++    public async ValueTask DisposeAsync()
++    {
++        if (_fileDownloadModule is null) return;
++        try
++        {
++            await _fileDownloadModule.DisposeAsync();
++        }
++        catch (JSDisconnectedException)
++        {
++        }
++        _fileDownloadModule = null;
++    }
++}
+diff --git a/src/SchoolCollab.Families/wwwroot/js/fileDownload.js b/src/SchoolCollab.Families/wwwroot/js/fileDownload.js
+new file mode 100644
+index 00000000..934050b8
+--- /dev/null
++++ b/src/SchoolCollab.Families/wwwroot/js/fileDownload.js
+@@ -0,0 +1,25 @@
++// WS-F3 (ar-15-signoff-relocation, decision (e)/step 5) — the Families host's copy of
++// the C3 certificate-download interop. The Admin module lives in the Assignments
++// Application RCL's wwwroot (served as _content/...); the Families host serves its own
++// wwwroot at the app root, so the guardian sign page imports this copy. Loaded
++// dynamically via IJSRuntime import() and cached on GuardianCertificateDownloadService,
++// which owns the module reference. Saves a PDF byte array as a browser download.
++//
++// bUnit has no DOM download path, so this module is exercised by the UI tester; the
++// bUnit tests assert the action gating + the client call instead. .NET Blazor Server
++// round-trips a byte[] as a flat number array, so the bytes are wrapped in a Uint8Array
++// before being fed to the Blob.
++export function saveByteArray(fileName, bytes) {
++    const byteArray = new Uint8Array(bytes);
++    const blob = new Blob([byteArray], { type: 'application/pdf' });
++    const url = URL.createObjectURL(blob);
++
++    const anchor = document.createElement('a');
++    anchor.href = url;
++    anchor.download = fileName;
++    document.body.appendChild(anchor);
++    anchor.click();
++    document.body.removeChild(anchor);
++
++    URL.revokeObjectURL(url);
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/GuardianSignOffRoutesTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/GuardianSignOffRoutesTests.cs
+new file mode 100644
+index 00000000..0fa977c6
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/GuardianSignOffRoutesTests.cs
+@@ -0,0 +1,279 @@
++using System.Net;
++using System.Net.Http.Json;
++using FluentAssertions;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Moq;
++using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Api.Auth;
++using SchoolCollab.Assignments.Api.Endpoints;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Domain.Exceptions;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation) — the public guardian sign-off route group
++/// (decision (a)/(b)/(d)) against a minimal TestServer host that maps ONLY
++/// <see cref="GuardianSignOffRoutes"/> with mocked handlers + the token filter.
++/// Asserts: the group reuses the SAME <see cref="GetSignOffContextQuery"/> /
++/// <see cref="SignOffSubmissionCommand"/> handlers; the sign POST threads the
++/// token-resolved GuardianId from <see cref="HttpContext.Items"/> (NEVER a
++/// body-supplied one); error-map parity with the teacher sign route; reassign /
++/// finalize absent from the group; and the certificate route 404 parity.
++/// </summary>
++[TestClass]
++public class GuardianSignOffRoutesTests
++{
++    private static readonly Guid TenantId = Guid.Parse("11112222-aaaa-1111-aaaa-111111111111");
++    private static readonly Guid AssignmentId = Guid.Parse("aaaaaaaa-bbbb-cccc-aaaa-111111111111");
++    private static readonly Guid StudentId = Guid.Parse("bbbbbbbb-cccc-dddd-bbbb-222222222222");
++    private static readonly Guid ContactId = Guid.Parse("cccccccc-dddd-eeee-cccc-333333333333");
++    private static readonly Guid GuardianId = Guid.Parse("dddddddd-eeee-ffff-dddd-444444444444");
++
++    private static readonly System.Text.Json.JsonSerializerOptions JsonOptions = new(
++        System.Text.Json.JsonSerializerDefaults.Web)
++    {
++        Converters =
++        {
++            new System.Text.Json.Serialization.JsonStringEnumConverter<SignOffStateDto>(),
++            new System.Text.Json.Serialization.JsonStringEnumConverter<SignatureTypeDto>(),
++        }
++    };
++
++    private async Task<(WebApplication App, HttpClient Client, DeepLinkProtector Protector)> BuildAsync(
++        Mock<ICommandHandler<SignOffSubmissionCommand, SignOffStatusDto>>? signHandler,
++        Mock<IQueryHandler<GetSignOffContextQuery, SignOffContextDto>>? contextHandler = null)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(new PassFlag());
++        builder.Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
++        builder.Services.AddSingleton<ITenantContextAccessor>(new TenantContextAccessor(new TenantProvider()));
++        var repo = new Mock<ISubmissionRepository>();
++        repo.Setup(r => r.GetRecipientAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(Recipient());
++        builder.Services.AddSingleton(repo.Object);
++        // P1-3 - the guardian-link authorization needs the directory port; the guardian
++        // (recipient OwnerId) is linked to the route ward by default in this group's tests.
++        var directory = new Mock<IStudentDirectory>();
++        directory.Setup(d => d.IsGuardianOfAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        builder.Services.AddSingleton(directory.Object);
++        if (signHandler is not null) builder.Services.AddSingleton(signHandler.Object);
++        if (contextHandler is not null) builder.Services.AddSingleton(contextHandler.Object);
++        builder.Services.AddScoped<GuardianTokenEndpointFilter>();
++        builder.Services.AddLogging();
++        // SignatureTypeDto binds from a string enum in the POST body — without the
++        // converter the request fails with 400 during binding, BEFORE the filter runs.
++        builder.Services.ConfigureHttpJsonOptions(o =>
++        {
++            o.SerializerOptions.Converters.Add(
++                new System.Text.Json.Serialization.JsonStringEnumConverter<SignOffStateDto>());
++            o.SerializerOptions.Converters.Add(
++                new System.Text.Json.Serialization.JsonStringEnumConverter<SignatureTypeDto>());
++        });
++
++        var app = builder.Build();
++        app.MapGuardianSignOffRoutes();
++        await app.StartAsync();
++        var client = ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++        var protector = app.Services.GetRequiredService<DeepLinkProtector>();
++        return (app, client, protector);
++    }
++
++    private static AssignmentRecipient Recipient()
++    {
++        var recipient = AssignmentRecipient.Create(TenantId, AssignmentId, ContactOwnerType.Guardian, GuardianId,
++            StudentId, ContactId, ContactChannel.Email, GuardianRole.Primary, true, true);
++        // The filter cross-checks the AUTHORITATIVE stored expiry on the recipient row.
++        recipient.AttachDeepLink("stored-deep-link-token", DateTimeOffset.UtcNow.AddDays(7));
++        return recipient;
++    }
++
++    private static string Mint(DeepLinkProtector p) =>
++        p.Protect(new DeepLinkTokenPayload(TenantId, AssignmentId, ContactId, 1, 0, StudentId,
++            DateTimeOffset.UtcNow.AddMinutes(15)));
++
++    private static SignOffStatusDto SampleStatus() =>
++        new(StudentId, "Ward One", GuardianId, "Jane Doe", GuardianId, "Jane Doe",
++            SignOffStateDto.Signed, DateTimeOffset.UtcNow, null, true, true, 2, 88m, true);
++
++    private static SignOffContextDto SampleContext() =>
++        new(AssignmentId, StudentId, "Assignment One", "Ward One", SignOffStateDto.AwaitingSignature,
++            null, null, 2, 88m, true, "consent text", [new WardGuardianDto(GuardianId, "Jane Doe", true)]);
++
++    private sealed class PassFlag : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => featureKey == FeatureFlagKeys.EnableDeepLinks;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken cancellationToken = default)
++            => Task.FromResult(IsEnabled(featureKey));
++    }
++
++    [TestMethod]
++    public async Task SignOff_ReusesSharedHandler_ThreadsTokenGuardianId_NotBodyGuardianId()
++    {
++        SignOffSubmissionCommand? captured = null;
++        var signHandler = new Mock<ICommandHandler<SignOffSubmissionCommand, SignOffStatusDto>>();
++        signHandler.Setup(h => h.HandleAsync(It.IsAny<SignOffSubmissionCommand>(), It.IsAny<CancellationToken>()))
++            .Returns((SignOffSubmissionCommand c, CancellationToken _) =>
++            {
++                captured = c;
++                return Task.FromResult(SampleStatus());
++            });
++
++        var (app, client, protector) = await BuildAsync(signHandler);
++        await using var _ = app;
++        var req = new HttpRequestMessage(
++            HttpMethod.Post,
++            $"/guardian/assignments/{AssignmentId}/students/{StudentId}/sign-off")
++        {
++            Content = JsonContent.Create(new GuardianSignOffSubmissionRequest(SignatureTypeDto.Typed, "Jane Doe"),
++                options: JsonOptions)
++        };
++        req.Headers.TryAddWithoutValidation("x-deeplink-token", Mint(protector));
++        req.Headers.UserAgent.ParseAdd("unit-test-agent/1.0");
++
++        var response = await client.SendAsync(req);
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++        captured.Should().NotBeNull();
++        captured!.AssignmentId.Should().Be(AssignmentId);
++        captured.StudentId.Should().Be(StudentId);
++        // The acting guardian MUST come from the token-resolved recipient OwnerId, never a body field.
++        captured.GuardianId.Should().Be(GuardianId, "the token identifies the signer — the body must not carry GuardianId");
++    }
++
++    [TestMethod]
++    public async Task SignOff_MapsErrors_WithTeacherRouteParity()
++    {
++        (HttpStatusCode Expected, Exception Error)[] cases =
++        {
++            (HttpStatusCode.NotFound, new AssignmentNotFoundException(AssignmentId)),
++            (HttpStatusCode.NotFound, new SubmissionNotFoundException(StudentId)),
++            (HttpStatusCode.Conflict, new SubmissionAlreadySignedException(StudentId)),
++            (HttpStatusCode.Conflict, new SubmissionSignOffStateException("state")),
++            (HttpStatusCode.Conflict, new SubmissionLockedException(StudentId)),
++            (HttpStatusCode.Conflict, new GuardianNotAuthorizedException(StudentId, GuardianId)),
++            (HttpStatusCode.BadRequest, new ArgumentException("A typed signature is required.")),
++        };
++
++        foreach (var (expected, error) in cases)
++        {
++            var signHandler = new Mock<ICommandHandler<SignOffSubmissionCommand, SignOffStatusDto>>();
++            signHandler.Setup(h => h.HandleAsync(It.IsAny<SignOffSubmissionCommand>(), It.IsAny<CancellationToken>()))
++                .Returns(Task.FromException<SignOffStatusDto>(error));
++
++            var (app, client, protector) = await BuildAsync(signHandler);
++            await using var _ = app;
++            var req = new HttpRequestMessage(
++                HttpMethod.Post,
++                $"/guardian/assignments/{AssignmentId}/students/{StudentId}/sign-off")
++            {
++                Content = JsonContent.Create(new GuardianSignOffSubmissionRequest(SignatureTypeDto.Click),
++                    options: JsonOptions)
++            };
++            req.Headers.TryAddWithoutValidation("x-deeplink-token", Mint(protector));
++
++            var response = await client.SendAsync(req);
++
++            response.StatusCode.Should().Be(expected, "guardian route maps {0} identically to the teacher route",
++                error.GetType().Name);
++        }
++    }
++
++    [TestMethod]
++    public async Task Context_ReusesSharedHandler()
++    {
++        var contextHandler = new Mock<IQueryHandler<GetSignOffContextQuery, SignOffContextDto>>();
++        contextHandler.Setup(h => h.HandleAsync(It.IsAny<GetSignOffContextQuery>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(SampleContext());
++
++        var (app, client, protector) = await BuildAsync(signHandler: null, contextHandler);
++        await using var _ = app;
++        var req = new HttpRequestMessage(
++            HttpMethod.Get,
++            $"/guardian/assignments/{AssignmentId}/students/{StudentId}/sign-off");
++        req.Headers.TryAddWithoutValidation("x-deeplink-token", Mint(protector));
++
++        var response = await client.SendAsync(req);
++
++        response.StatusCode.Should().Be(HttpStatusCode.OK);
++    }
++
++    [TestMethod]
++    public async Task ReassignAndFinalize_NotMapped_OnGuardianGroup()
++    {
++        var (app, client, protector) = await BuildAsync(signHandler: null);
++        await using var _ = app;
++
++        foreach (var path in new[] { "/sign-off/reassign", "/sign-off/finalize" })
++        {
++            var reassign = new HttpRequestMessage(
++                HttpMethod.Post,
++                $"/guardian/assignments/{AssignmentId}/students/{StudentId}{path}");
++            reassign.Headers.TryAddWithoutValidation("x-deeplink-token", Mint(protector));
++
++            var response = await client.SendAsync(reassign);
++
++            response.StatusCode.Should().Be(HttpStatusCode.NotFound,
++                "{0} is teacher-only and must not exist on the guardian group", path);
++        }
++    }
++
++    [TestMethod]
++    public async Task Certificate_NoSignatureEvent_Returns404()
++    {
++        var repo = new Mock<ISubmissionRepository>();
++        repo.Setup(r => r.GetRecipientAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(Recipient());
++        repo.Setup(r => r.GetSignatureEventByAssignmentStudentAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(() => default(SignatureEvent?));
++
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(new PassFlag());
++        builder.Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
++        builder.Services.AddSingleton<ITenantContextAccessor>(new TenantContextAccessor(new TenantProvider()));
++        builder.Services.AddSingleton(repo.Object);
++        // P1-3 - the certificate route runs the same guardian-link authorization.
++        var directory = new Mock<IStudentDirectory>();
++        directory.Setup(d => d.IsGuardianOfAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        builder.Services.AddSingleton(directory.Object);
++        builder.Services.AddSingleton(Mock.Of<IFileStore>());
++        builder.Services.AddScoped<GuardianTokenEndpointFilter>();
++        builder.Services.AddLogging();
++        var app = builder.Build();
++        app.MapGuardianSignOffRoutes();
++        await app.StartAsync();
++        await using var _ = app;
++        var client = ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++        var protector = app.Services.GetRequiredService<DeepLinkProtector>();
++        var req = new HttpRequestMessage(
++            HttpMethod.Get,
++            $"/guardian/assignments/{AssignmentId}/students/{StudentId}/certificate");
++        req.Headers.TryAddWithoutValidation("x-deeplink-token", Mint(protector));
++
++        var response = await client.SendAsync(req);
++
++        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
++    }
++}
+diff --git a/tests/SchoolCollab.Assignments.Api.Tests.Unit/GuardianTokenEndpointFilterTests.cs b/tests/SchoolCollab.Assignments.Api.Tests.Unit/GuardianTokenEndpointFilterTests.cs
+new file mode 100644
+index 00000000..55e762cd
+--- /dev/null
++++ b/tests/SchoolCollab.Assignments.Api.Tests.Unit/GuardianTokenEndpointFilterTests.cs
+@@ -0,0 +1,436 @@
++using System.Net;
++using System.Net.Http.Json;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using FluentAssertions;
++using Microsoft.AspNetCore.Builder;
++using Microsoft.AspNetCore.Hosting;
++using Microsoft.AspNetCore.Hosting.Server;
++using Microsoft.AspNetCore.TestHost;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Moq;
++using SchoolCollab.Assignments.Api;
++using SchoolCollab.Assignments.Api.Auth;
++using SchoolCollab.Assignments.Api.Endpoints;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Commands.SignOff;
++using SchoolCollab.Assignments.Core.CQRS.Assignments.Queries.SignOff;
++using SchoolCollab.Assignments.Core.Data.Repositories;
++using SchoolCollab.Assignments.Core.Domain;
++using SchoolCollab.Assignments.Core.Services;
++using SchoolCollab.Core.CQRS;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Core.Features;
++using SchoolCollab.Core.Tenancy;
++using SchoolCollab.Students.Core.Domain;
++
++namespace SchoolCollab.Assignments.Api.Tests.Unit;
++
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation) — the token credential for the public guardian
++/// sign-off route group. Exercises the full <c>x-deeplink-token</c> validation matrix
++/// against a minimal TestServer host that maps ONLY <see cref="Endpoints.GuardianSignOffRoutes"/>
++/// with a mocked <see cref="ISubmissionRepository"/>: valid token → passes and the
++/// endpoint resolves the recipient's OwnerId; expired / tampered / missing → 401;
++/// wrong assignment / wrong ward / tenant mismatch / absent row / non-guardian row /
++/// stored-expiry-past → 403.
++/// </summary>
++[TestClass]
++public class GuardianTokenEndpointFilterTests
++{
++    private static readonly Guid TenantId = Guid.Parse("bbbb1111-bbbb-1111-bbbb-111111111111");
++    private static readonly Guid AssignmentId = Guid.Parse("aaaa2222-aaaa-2222-aaaa-222222222222");
++    private static readonly Guid StudentId = Guid.Parse("cccc3333-cccc-3333-cccc-333333333333");
++    private static readonly Guid OtherAssignmentId = Guid.Parse("99999999-9999-9999-9999-999999999999");
++    private static readonly Guid ContactId = Guid.Parse("dddd4444-dddd-4444-dddd-444444444444");
++    private static readonly Guid GuardianId = Guid.Parse("eeee5555-eeee-5555-eeee-555555555555");
++
++    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
++    {
++        Converters =
++        {
++            new JsonStringEnumConverter<SignOffStateDto>(),
++            new JsonStringEnumConverter<SignatureTypeDto>(),
++        }
++    };
++
++    private sealed class PassFlag : IFeatureFlagService
++    {
++        public bool IsEnabled(string featureKey) => featureKey == FeatureFlagKeys.EnableDeepLinks;
++        public IDictionary<string, bool> GetAllFlags() => new Dictionary<string, bool>();
++        public Task<bool> IsEnabledAsync(string featureKey, CancellationToken cancellationToken = default)
++            => Task.FromResult(IsEnabled(featureKey));
++    }
++
++    private static AssignmentRecipient MakeRecipient(
++        Guid tenantId, Guid ownerId, Guid? wardStudentId, DateTimeOffset? expiresAt,
++        ContactOwnerType ownerType = ContactOwnerType.Guardian)
++    {
++        var recipient = AssignmentRecipient.Create(
++            tenantId, AssignmentId, ownerType, ownerId, wardStudentId, ContactId,
++            ContactChannel.Email, GuardianRole.Primary, true, true);
++        // The filter cross-checks the AUTHORITATIVE stored expiry, so the row must
++        // carry the deep link the publish handler would have attached.
++        if (expiresAt is { } expiry)
++        {
++            recipient.AttachDeepLink("stored-deep-link-token", expiry);
++        }
++        return recipient;
++    }
++
++    private static SignOffContextDto SampleContext() =>
++        new(AssignmentId, StudentId, "Assignment One", "Ward One", SignOffStateDto.AwaitingSignature,
++            null, null, 2, 88m, true, "consent text", [new WardGuardianDto(GuardianId, "Jane Doe", true)]);
++
++    private static SignOffStatusDto SampleStatus() =>
++        new(StudentId, "Ward One", GuardianId, "Jane Doe", GuardianId, "Jane Doe",
++            SignOffStateDto.Signed, DateTimeOffset.UtcNow, null, true, true, 2, 88m, true);
++
++    /// <summary>
++    /// Minimal TestServer host mapping ONLY <see cref="Endpoints.GuardianSignOffRoutes"/>.
++    /// Every service the route delegates bind (<c>IQueryHandler</c>/
++    /// <c>ICommandHandler</c> via <c>[FromServices]</c>) must be registered: minimal-API
++    /// parameter binding resolves them BEFORE the endpoint filter pipeline runs, so an
++    /// unregistered handler fails the request with a 500 rather than exercising the filter.
++    /// </summary>
++    private static async Task<(WebApplication App, HttpClient Client, DeepLinkProtector Protector)> BuildAsync(
++        Func<AssignmentRecipient?> recipient,
++        Mock<IFeatureFlagService>? flagMock = null,
++        Action<SignOffSubmissionCommand>? onSignCommand = null,
++        IReadOnlyCollection<Guid>? guardianOf = null)
++    {
++        var builder = WebApplication.CreateBuilder();
++        builder.WebHost.UseTestServer();
++        builder.Logging.SetMinimumLevel(LogLevel.Warning);
++        builder.Services.AddSingleton<IFeatureFlagService>(flagMock?.Object ?? new PassFlag());
++        builder.Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
++        builder.Services.AddSingleton<ITenantContextAccessor>(new TenantContextAccessor(new TenantProvider()));
++        var repo = new Mock<ISubmissionRepository>();
++        repo.Setup(r => r.GetRecipientAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(recipient);
++        builder.Services.AddSingleton(repo.Object);
++        // P1-3 guardian-link authorization: the acting guardian (recipient OwnerId) must be
++        // a linked guardian of the ROUTE student. A null set = the guardian is linked to
++        // every route ward (the token's ContactId resolves to that guardian); an explicit set
++        // restricts to those wards — used to prove a guardian of ward B cannot read ward C's
++        // context/certificate while a multi-ward guardian CAN read both their own wards.
++        var linkedStudents = guardianOf ?? new HashSet<Guid>();
++        var directory = new Mock<IStudentDirectory>();
++        directory.Setup(d => d.IsGuardianOfAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync((Guid studentId, Guid _, CancellationToken _1) =>
++                guardianOf is null || linkedStudents.Contains(studentId));
++        builder.Services.AddSingleton(directory.Object);
++        // The certificate route binds an IFileStore via [FromServices] BEFORE the endpoint
++        // filter runs (minimal-API parameter resolution precedes the filter pipeline), so
++        // every host mapping the full guardian group must register it.
++        builder.Services.AddSingleton(Mock.Of<SchoolCollab.Assignments.Core.Services.IFileStore>());
++        var contextHandler = new Mock<IQueryHandler<GetSignOffContextQuery, SignOffContextDto>>();
++        contextHandler.Setup(h => h.HandleAsync(It.IsAny<GetSignOffContextQuery>(), It.IsAny<CancellationToken>()))
++            .ReturnsAsync(SampleContext());
++        builder.Services.AddSingleton(contextHandler.Object);
++        var signHandler = new Mock<ICommandHandler<SignOffSubmissionCommand, SignOffStatusDto>>();
++        signHandler.Setup(h => h.HandleAsync(It.IsAny<SignOffSubmissionCommand>(), It.IsAny<CancellationToken>()))
++            .Returns((SignOffSubmissionCommand c, CancellationToken _) =>
++            {
++                onSignCommand?.Invoke(c);
++                return Task.FromResult(SampleStatus());
++            });
++        builder.Services.AddSingleton(signHandler.Object);
++        builder.Services.AddScoped<GuardianTokenEndpointFilter>();
++        builder.Services.AddLogging();
++        // The POST body binds SignatureTypeDto from a string enum — the host must
++        // carry the same converters the ApiClient serialises with.
++        builder.Services.ConfigureHttpJsonOptions(options =>
++        {
++            options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter<SignOffStateDto>());
++            options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter<SignatureTypeDto>());
++        });
++
++        var app = builder.Build();
++        app.MapGuardianSignOffRoutes();
++        await app.StartAsync();
++        var client = ((TestServer)app.Services.GetRequiredService<IServer>()).CreateClient();
++        var protector = app.Services.GetRequiredService<DeepLinkProtector>();
++        return (app, client, protector);
++    }
++
++    private static string Mint(DeepLinkProtector p, Guid? wardStudentId = null, DateTimeOffset? expiresAt = null,
++        Guid? assignmentId = null, int ownerType = 1) =>
++        p.Protect(new DeepLinkTokenPayload(
++            TenantId, assignmentId ?? AssignmentId, ContactId, ownerType, 0, wardStudentId ?? StudentId,
++            expiresAt ?? DateTimeOffset.UtcNow.AddMinutes(15)));
++
++    [TestMethod]
++    public async Task ValidToken_PassesAndEndpointResolvesGuardianId()
++    {
++        var now = DateTimeOffset.UtcNow;
++        var recipient = MakeRecipient(TenantId, GuardianId, StudentId, now.AddDays(7));
++        SignOffSubmissionCommand? captured = null;
++        var (app, client, protector) = await BuildAsync(() => recipient, onSignCommand: c => captured = c);
++        await using var _ = app;
++        var token = Mint(protector);
++
++        var contextResponse = await client.SendAsync(Get(token));
++        contextResponse.StatusCode.Should().Be(HttpStatusCode.OK, "a valid token reaches the shared handler");
++
++        // The POST proves the filter stashed the recipient-resolved GuardianId for the
++        // endpoint to thread into the shared command.
++        var signResponse = await client.SendAsync(Post(token));
++
++        signResponse.StatusCode.Should().Be(HttpStatusCode.OK);
++        captured.Should().NotBeNull();
++        captured!.GuardianId.Should().Be(GuardianId,
++            "the acting guardian is resolved server-side from the recipient row's OwnerId");
++    }
++
++    [TestMethod]
++    public async Task MissingHeader_Returns401()
++    {
++        var (app, client, _) = await BuildAsync(() => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)));
++        await using var _ = app;
++        client.DefaultRequestHeaders.Remove("x-deeplink-token");
++
++        var response = await client.SendAsync(Get());
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    [TestMethod]
++    public async Task ExpiredToken_Returns401()
++    {
++        var (app, client, protector) = await BuildAsync(() => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)));
++        await using var _ = app;
++        var token = Mint(protector, expiresAt: DateTimeOffset.UtcNow.AddMinutes(-1));
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    [TestMethod]
++    public async Task TamperedToken_Returns401()
++    {
++        var (app, client, _) = await BuildAsync(() => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)));
++        await using var _ = app;
++
++        var response = await client.SendAsync(Get("tampered-token"));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    [TestMethod]
++    public async Task WrongAssignmentScope_Returns403()
++    {
++        var (app, client, protector) = await BuildAsync(() => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)));
++        await using var _ = app;
++        var token = Mint(protector, assignmentId: OtherAssignmentId);
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task GuardianNotLinkedToRouteWard_Returns403()
++    {
++        // P1-3 adjudication: ward authorization is the guardian LINK to the ROUTE student,
++        // not a token/row WardStudentId equality. A guardian linked to NO ward (guardianOf
++        // empty) must be denied reading this ward's context.
++        var (app, client, protector) = await BuildAsync(
++            () => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)),
++            guardianOf: Array.Empty<Guid>());
++        await using var _ = app;
++        var token = Mint(protector);
++
++        var response = await client.SendAsync(Get(token, StudentId));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task GuardianOfWardBNotWardC_CannotReadWardCContext_Returns403()
++    {
++        // The token's WardStudentId is URL-echoed (a non-authoritative field); the loaded row's
++        // WardStudentId is never consulted. Read access is governed solely by whether the acting
++        // guardian (recipient.OwnerId) is a linked guardian of the ROUTE student (ward C here).
++        var wardB = Guid.Parse("aaaa0000-aaaa-0000-aaaa-000000000001");
++        var wardC = Guid.Parse("aaaa0000-aaaa-0000-aaaa-000000000002");
++        var (app, client, protector) = await BuildAsync(
++            () => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)),
++            guardianOf: new[] { wardB });
++        await using var _ = app;
++        // Mint with the token ward = ward C (URL-echoed) but the guardian is only linked to B.
++        var token = Mint(protector, wardStudentId: wardC);
++
++        var contextResponse = await client.SendAsync(Get(token, wardC));
++
++        contextResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden,
++            "a guardian of ward B cannot read ward C's sign-off context by URL edit");
++    }
++
++    [TestMethod]
++    public async Task GuardianOfWardBNotWardC_CannotReadWardCCertificate_Returns403()
++    {
++        var wardB = Guid.Parse("aaaa0000-aaaa-0000-aaaa-000000000003");
++        var wardC = Guid.Parse("aaaa0000-aaaa-0000-aaaa-000000000004");
++        var (app, client, protector) = await BuildAsync(
++            () => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)),
++            guardianOf: new[] { wardB });
++        await using var _ = app;
++        var token = Mint(protector, wardStudentId: wardC);
++
++        var certResponse = await client.SendAsync(Certificate(token, wardC));
++
++        certResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden,
++            "a guardian of ward B cannot read ward C's certificate by URL edit");
++    }
++
++    [TestMethod]
++    public async Task MultiWardGuardian_CanReadBothOwnWardsContexts_ReturnsOk()
++    {
++        // A multi-ward guardian (linked to both ward A and ward B) may read BOTH of their own
++        // wards' sign-off contexts — the FirstOrDefault-per-(assignment,contact) recipient row
++        // must not 403 the second ward.
++        var wardA = Guid.Parse("aaaa0000-aaaa-0000-aaaa-000000000005");
++        var wardB = Guid.Parse("aaaa0000-aaaa-0000-aaaa-000000000006");
++        var (app, client, protector) = await BuildAsync(
++            () => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)),
++            guardianOf: new[] { wardA, wardB });
++        await using var _ = app;
++        var token = Mint(protector, wardStudentId: wardA);
++
++        var wardAResponse = await client.SendAsync(Get(token, wardA));
++        var wardBResponse = await client.SendAsync(Get(token, wardB));
++
++        wardAResponse.StatusCode.Should().Be(HttpStatusCode.OK);
++        wardBResponse.StatusCode.Should().Be(HttpStatusCode.OK,
++            "a multi-ward guardian reads each of their own wards");
++    }
++
++    [TestMethod]
++    public async Task TenantMismatch_Returns403()
++    {
++        var otherTenant = Guid.Parse("77777777-7777-7777-7777-777777777777");
++        var (app, client, protector) = await BuildAsync(() => MakeRecipient(otherTenant, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)));
++        await using var _ = app;
++        var token = Mint(protector);
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task RecipientAbsent_Returns403()
++    {
++        var (app, client, protector) = await BuildAsync(() => null);
++        await using var _ = app;
++        var token = Mint(protector);
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task NonGuardianRecipient_Returns403()
++    {
++        var (app, client, protector) = await BuildAsync(
++            () => MakeRecipient(TenantId, StudentId, StudentId, DateTimeOffset.UtcNow.AddDays(7), ownerType: ContactOwnerType.Student));
++        await using var _ = app;
++        var token = Mint(protector, ownerType: 0);
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task StoredExpiryPast_Returns403_EvenWithFreshHeaderToken()
++    {
++        var fresh = MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(-1));
++        var (app, client, protector) = await BuildAsync(() => fresh);
++        await using var _ = app;
++        var token = Mint(protector, expiresAt: DateTimeOffset.UtcNow.AddMinutes(15));
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
++    }
++
++    [TestMethod]
++    public async Task WrongPurposeToken_Returns401()
++    {
++        var (app, client, _) = await BuildAsync(() => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)));
++        await using var _ = app;
++        // Same payload shape, different DataProtection purpose — the token must not be
++        // accepted outside the shared ar-deeplink purpose.
++        var foreignPurpose = new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()
++            .CreateProtector("some-other-purpose");
++        var payload = new DeepLinkTokenPayload(TenantId, AssignmentId, ContactId, 1, 0, StudentId,
++            DateTimeOffset.UtcNow.AddMinutes(15));
++        var token = Convert.ToBase64String(foreignPurpose.Protect(
++            System.Text.Encoding.UTF8.GetBytes(JsonSerializer.Serialize(payload))));
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    [TestMethod]
++    public async Task FlagOff_Returns401()
++    {
++        var flagMock = new Mock<IFeatureFlagService>();
++        flagMock.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(false);
++        var (app, client, protector) = await BuildAsync(
++            () => MakeRecipient(TenantId, GuardianId, StudentId, DateTimeOffset.UtcNow.AddDays(7)), flagMock);
++        await using var _ = app;
++        var token = Mint(protector);
++
++        var response = await client.SendAsync(Get(token));
++
++        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
++    }
++
++    private static HttpRequestMessage Get(string? token = null, Guid? studentId = null)
++    {
++        var sid = studentId ?? StudentId;
++        var msg = new HttpRequestMessage(HttpMethod.Get,
++            $"/guardian/assignments/{AssignmentId}/students/{sid}/sign-off");
++        if (token is not null)
++        {
++            msg.Headers.TryAddWithoutValidation("x-deeplink-token", token);
++        }
++        return msg;
++    }
++
++    private static HttpRequestMessage Certificate(string? token, Guid? studentId = null)
++    {
++        var sid = studentId ?? StudentId;
++        var msg = new HttpRequestMessage(HttpMethod.Get,
++            $"/guardian/assignments/{AssignmentId}/students/{sid}/certificate");
++        if (token is not null)
++        {
++            msg.Headers.TryAddWithoutValidation("x-deeplink-token", token);
++        }
++        return msg;
++    }
++
++    private static HttpRequestMessage Post(string? token)
++    {
++        var msg = new HttpRequestMessage(HttpMethod.Post,
++            $"/guardian/assignments/{AssignmentId}/students/{StudentId}/sign-off")
++        {
++            Content = JsonContent.Create(
++                new GuardianSignOffSubmissionRequest(SignatureTypeDto.Typed, "Jane Doe"),
++                options: JsonOptions)
++        };
++        if (token is not null)
++        {
++            msg.Headers.TryAddWithoutValidation("x-deeplink-token", token);
++        }
++        return msg;
++    }
++}
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/DeepLinkLandingServiceTests.cs b/tests/SchoolCollab.Families.Tests.Unit/DeepLinkLandingServiceTests.cs
+index 009fdf6d..24bd541a 100644
+--- a/tests/SchoolCollab.Families.Tests.Unit/DeepLinkLandingServiceTests.cs
++++ b/tests/SchoolCollab.Families.Tests.Unit/DeepLinkLandingServiceTests.cs
+@@ -17,6 +17,9 @@ namespace SchoolCollab.Families.Tests.Unit;
+ /// (dark launch) → no sign-in / expired page; expired / garbage → expired outcome; the
+ /// <c>OpenedAt</c> stamp invoked exactly once and only on a successful, flag-enabled
+ /// landing; and a tenant-mismatched token rejected.
++/// <para>WS-F3 (ar-15-signoff-relocation, decision (e)) extends the redirect rule: a
++/// GUARDIAN token carrying a ward lands directly on that ward's sign-off page for the
++/// token's assignment; student-owned tokens keep the ar-14 <c>/ward/{sid}</c> target.</para>
+ /// </summary>
+ [TestClass]
+ public class DeepLinkLandingServiceTests
+@@ -26,6 +29,9 @@ public class DeepLinkLandingServiceTests
+     private static readonly Guid ContactId = Guid.Parse("cccc3333-cccc-3333-cccc-333333333333");
+     private static readonly Guid WardStudentId = Guid.Parse("dddd4444-dddd-4444-dddd-444444444444");
+ 
++    /// <summary>The WS-F3 guardian direct-hop target for the fixtures above.</summary>
++    private static string SignOffUrl => $"/ward/{WardStudentId}/assignments/{AssignmentId}/sign-off";
++
+     private sealed class RecordingHandler(List<HttpRequestMessage> log) : HttpMessageHandler
+     {
+         protected override Task<HttpResponseMessage> SendAsync(
+@@ -97,7 +103,7 @@ public class DeepLinkLandingServiceTests
+         var tenantProvider = new TenantProvider();
+         var tenantAccessor = new TenantContextAccessor(tenantProvider);
+ 
+-        var api = new FamiliesApiClient(http, NullLogger<FamiliesApiClient>.Instance);
++        var api = new FamiliesApiClient(http, protector, NullLogger<FamiliesApiClient>.Instance);
+ 
+         var flag = new Mock<IFeatureFlagService>(flagBehavior);
+         flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
+@@ -107,8 +113,9 @@ public class DeepLinkLandingServiceTests
+         return (service, log, flag, protector);
+     }
+ 
+-    private static string MintToken(DeepLinkProtector protector, Guid? wardStudentId, DateTimeOffset expiresAt)
+-        => protector.Protect(new DeepLinkTokenPayload(TenantId, AssignmentId, ContactId, OwnerType: 1, Role: 0, wardStudentId, expiresAt));
++    private static string MintToken(DeepLinkProtector protector, Guid? wardStudentId, DateTimeOffset expiresAt,
++        int ownerType = 1)
++        => protector.Protect(new DeepLinkTokenPayload(TenantId, AssignmentId, ContactId, ownerType, Role: 0, wardStudentId, expiresAt));
+ 
+     private static bool IsStamp(HttpRequestMessage r) =>
+         r.RequestUri?.PathAndQuery.Contains("/recipients/", StringComparison.OrdinalIgnoreCase) == true
+@@ -125,7 +132,7 @@ public class DeepLinkLandingServiceTests
+         var result = await service.HandleAsync(token);
+ 
+         result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
+-        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
++        result.RedirectUrl.Should().Be(SignOffUrl);
+         result.TenantId.Should().Be(TenantId);
+         result.ContactId.Should().Be(ContactId);
+         requests.Count(IsStamp).Should().Be(1);
+@@ -144,7 +151,7 @@ public class DeepLinkLandingServiceTests
+         var result = await service.HandleAsync(token);
+ 
+         result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
+-        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
++        result.RedirectUrl.Should().Be(SignOffUrl);
+         result.TenantId.Should().Be(TenantId);
+         result.ContactId.Should().Be(ContactId);
+     }
+@@ -165,7 +172,7 @@ public class DeepLinkLandingServiceTests
+         var result = await service.HandleAsync(token);
+ 
+         result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
+-        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
++        result.RedirectUrl.Should().Be(SignOffUrl);
+         result.TenantId.Should().Be(TenantId);
+         result.ContactId.Should().Be(ContactId);
+     }
+@@ -201,6 +208,23 @@ public class DeepLinkLandingServiceTests
+         result.RedirectUrl.Should().Be("/ward");
+     }
+ 
++    [TestMethod]
++    public async Task StudentOwnedToken_WithWard_LandsOnWardSurface_Unchanged()
++    {
++        // Decision (e): the guardian direct-to-sign-page hop must NOT change the
++        // student-owned token behavior — a student token with a ward still lands on the
++        // ward surface.
++        var (service, _, flag, protector) = Build();
++        flag.Setup(f => f.IsEnabledAsync(FeatureFlagKeys.EnableDeepLinks, It.IsAny<CancellationToken>()))
++            .ReturnsAsync(true);
++        var token = MintToken(protector, WardStudentId, DateTimeOffset.UtcNow.AddDays(7), ownerType: 0);
++
++        var result = await service.HandleAsync(token);
++
++        result.Outcome.Should().Be(DeepLinkLandingOutcome.Success);
++        result.RedirectUrl.Should().Be($"/ward/{WardStudentId}");
++    }
++
+     [TestMethod]
+     public async Task ExpiredToken_ReturnsExpired_AndDoesNotStamp()
+     {
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/GuardianSignOffPageTests.cs b/tests/SchoolCollab.Families.Tests.Unit/GuardianSignOffPageTests.cs
+new file mode 100644
+index 00000000..84d14958
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/GuardianSignOffPageTests.cs
+@@ -0,0 +1,260 @@
++using System;
++using System.Collections.Generic;
++using System.Net;
++using System.Security.Claims;
++using System.Text.Json;
++using System.Text.Json.Serialization;
++using System.Threading;
++using System.Threading.Tasks;
++using Bunit;
++using FluentAssertions;
++using Microsoft.AspNetCore.Components;
++using Microsoft.AspNetCore.Components.Authorization;
++using Microsoft.Extensions.DependencyInjection;
++using Microsoft.Extensions.Logging;
++using Microsoft.FluentUI.AspNetCore.Components;
++using Moq;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Families.Components.Pages.Ward;
++using SchoolCollab.Families.Services;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation, decisions (b)/(c)/(e)) — the Guardian Families-hosted
++/// sign page. Binding coverage: context render; the typed + click sign flows through the
++/// guardian route (the body carries NO GuardianId — the signing identity is token-bound);
++/// the certificate affordance (post-finalize); the already-signed/404/409 re-entry
++/// posture; and the NO-self-select invariant (decision (b) — no guardian picker, no
++/// GuardianId is ever surfaced). New behavioural code in the page zero-tested before this.
++/// </summary>
++[TestClass]
++public class GuardianSignOffPageTests : BunitContext
++{
++    private static readonly Guid TenantId = Guid.Parse("11111111-1111-1111-1111-111111111111");
++    private static readonly Guid ContactId = Guid.Parse("22222222-2222-2222-2222-222222222222");
++    private static readonly Guid AssignmentId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
++    private static readonly Guid StudentId = Guid.Parse("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
++
++    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
++    {
++        Converters = { new JsonStringEnumConverter() }
++    };
++
++    private readonly MockHttpMessageHandler _mockHttp;
++
++    public GuardianSignOffPageTests()
++    {
++        JSInterop.Mode = JSRuntimeMode.Loose;
++        Services.AddFluentUIComponents();
++        _mockHttp = new MockHttpMessageHandler();
++        var http = _mockHttp.ToHttpClient();
++        http.BaseAddress = new Uri("http://localhost");
++        Services.AddSingleton(http);
++        Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
++        Services.AddSingleton<FamiliesApiClient>();
++        Services.AddSingleton(Mock.Of<ILogger<FamiliesApiClient>>());
++        Services.AddSingleton(Mock.Of<ILogger<GuardianCertificateDownloadService>>());
++        Services.AddSingleton(Mock.Of<ILogger<SignOff>>());
++        Services.AddScoped<GuardianCertificateDownloadService>();
++        // The acting guardian comes from the ar-14 landing cookie principal (tenant_id +
++        // contact_id) — the pair the page re-mints into the x-deeplink-token header. None
++        // present ⇒ no signer (the page's error posture, not a render crash).
++        Services.AddScoped<AuthenticationStateProvider>(_ => new FakeAuthState(ContactId, TenantId));
++    }
++
++    [TestMethod]
++    public void Context_Renders_TitleAndNoGuardianSelect()
++    {
++        SetupContext(SampleContext(state: SignOffStateDto.AwaitingSignature));
++
++        var cut = RenderPage();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assignment One"));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("consent text"));
++
++        // decision (b) no-self-select invariant: no guardian picker dropdown (the sign
++        // page has no FluentSelect / guardian selector — the identity is token-bound).
++        cut.Markup.Should().NotContain("fluent-select");
++    }
++
++    [TestMethod]
++    public async Task TypedSign_PostsViaGuardianRoute_BodyCarriesNoGuardianId()
++    {
++        // POST matcher first and method-specific, then the GET sequence: after the sign POST
++        // the page reloads the context → the already-signed view. This variant also captures
++        // the request body so the test can prove it carries no guardianId.
++        SetupSignOkCapture();
++        SetupContextThenSignedAfterSign(
++            SampleContext(state: SignOffStateDto.AwaitingSignature),
++            SampleContext(state: SignOffStateDto.Signed));
++
++        var cut = RenderPage();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Type your full name"));
++
++        // bUnit + FluentUI: the web components dispatch FluentUI-typed args (oncheckedchange
++        // carries CheckboxChangeEventArgs, not ChangeEventArgs), so drive the BOUND callbacks
++        // directly — the repo's FluentCheckbox/InputBase bUnit pattern — rather than
++        // synthesising web-component events. This exercises the page's real bind path.
++        await cut.InvokeAsync(() => cut.FindComponent<FluentTextField>().Instance.ValueChanged.InvokeAsync("Jane Doe"));
++        await cut.InvokeAsync(() => cut.FindComponent<FluentCheckbox>().Instance.ValueChanged.InvokeAsync(true));
++
++        var sign = cut.FindAll("fluent-button")
++            .Single(b => b.TextContent.Contains("Sign", StringComparison.OrdinalIgnoreCase));
++        sign.Click();
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("This sign-off has been completed"));
++
++        // The successful POST + reload proves the page reached the signed view through the
++        // guardian route. Decision (b): the signing identity is token-bound, so the body the
++        // page actually issued must carry no guardian id at all (no self-select, no spoofing).
++        _signBody.Should().NotBeNullOrWhiteSpace("the sign page must have issued the POST");
++        _signBody.Should().NotContainEquivalentOf("guardianId");
++    }
++
++    [TestMethod]
++    public async Task ClickSign_PostsAndShowsSignedView()
++    {
++        SetupSignOk().Respond(HttpStatusCode.OK, "application/json",
++            JsonSerializer.Serialize(SampleStatus(), Json));
++        SetupContextThenSignedAfterSign(
++            SampleContext(state: SignOffStateDto.AwaitingSignature),
++            SampleContext(state: SignOffStateDto.Signed));
++
++        var cut = RenderPage();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Click to sign"));
++
++        // Drive the bound callbacks (FluentUI-typed events; see the typed-sign test).
++        await cut.InvokeAsync(() => cut.FindComponent<FluentRadioGroup<SignatureTypeDto>>().Instance.ValueChanged.InvokeAsync(SignatureTypeDto.Click));
++        await cut.InvokeAsync(() => cut.FindComponent<FluentCheckbox>().Instance.ValueChanged.InvokeAsync(true));
++
++        var sign = cut.FindAll("fluent-button")
++            .Single(b => b.TextContent.Contains("Click to sign", StringComparison.OrdinalIgnoreCase));
++        sign.Click();
++
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("This sign-off has been completed"));
++    }
++
++    [TestMethod]
++    public void CertificateAffordance_Renders_OnlyAfterFinalize()
++    {
++        SetupContext(SampleContext(state: SignOffStateDto.Signed, finalizedAt: DateTimeOffset.UtcNow));
++
++        var cut = RenderPage();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Download certificate"));
++        cut.Markup.Should().NotContain("Type your full name");
++    }
++
++    [TestMethod]
++    public void AlreadySigned_ReEntry_RendersReadOnly_NoSignButton()
++    {
++        SetupContext(SampleContext(state: SignOffStateDto.Signed));
++
++        var cut = RenderPage();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("This sign-off has been completed"));
++        cut.Markup.Should().NotContain("fluent-button");                       // no sign affordance
++        cut.Markup.Should().NotContain("Type your full name");
++    }
++
++    [TestMethod]
++    public void NotFound_ShowsMessage_NoPerpetualSpinner()
++    {
++        _mockHttp.When(GuardianContextUrl()).Respond(HttpStatusCode.NotFound);
++
++        var cut = RenderPage();
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Assignment or student not found."));
++        cut.Markup.Should().NotContain("fluent-progress-ring");
++    }
++
++    [TestMethod]
++    public void ExpiredLink_SurfacesTheReEntryMessage()
++    {
++        // 401 (expired/revoked link) → the page's explicit re-open-from-email message,
++        // not a crash or a perpetual spinner.
++        _mockHttp.When(GuardianContextUrl()).Respond(HttpStatusCode.Unauthorized);
++
++        var cut = RenderPage();
++        cut.WaitForAssertion(() =>
++            cut.Markup.Should().Contain("This sign-off link is no longer valid. Please open it again from the link in your email."));
++    }
++
++    private MockedRequest SetupContext(SignOffContextDto ctx) =>
++        _mockHttp.When(HttpMethod.Get, GuardianContextUrl()).Respond(HttpStatusCode.OK, "application/json",
++            JsonSerializer.Serialize(ctx, Json));
++
++    /// <summary>GET-hit counter — the sign flow reloads the context after a successful
++    /// POST, so call 1 renders the awaiting view and call 2+ the signed view. Every
++    /// matcher here is method-specific: a method-agnostic <c>When(url)</c> matcher would
++    /// be picked first for the POST too (MockHttp returns the first match), swallowing
++    /// the sign call and leaving the page on the awaiting view.</summary>
++    private int _contextGetCount;
++
++    private MockedRequest SetupContextThenSignedAfterSign(SignOffContextDto before, SignOffContextDto after) =>
++        _mockHttp.When(HttpMethod.Get, GuardianContextUrl())
++            .Respond(_ =>
++            {
++                var ctx = Interlocked.Increment(ref _contextGetCount) == 1 ? before : after;
++                return new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(JsonSerializer.Serialize(ctx, Json),
++                        System.Text.Encoding.UTF8, "application/json")
++                };
++            });
++
++    private MockedRequest SetupSignOk() =>
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/guardian/assignments/{AssignmentId}/students/{StudentId}/sign-off");
++
++    /// <summary>The sign POST body the page actually issued — the typed-sign test asserts it
++    /// carries no guardianId (decision (b): the acting guardian is token-resolved server-side).</summary>
++    private string? _signBody;
++
++    private MockedRequest SetupSignOkCapture() =>
++        _mockHttp.When(HttpMethod.Post, $"http://localhost/guardian/assignments/{AssignmentId}/students/{StudentId}/sign-off")
++            .Respond(async req =>
++            {
++                _signBody = req.Content is null
++                    ? null
++                    : await req.Content.ReadAsStringAsync().ConfigureAwait(false);
++                return new HttpResponseMessage(HttpStatusCode.OK)
++                {
++                    Content = new StringContent(JsonSerializer.Serialize(SampleStatus(), Json),
++                        System.Text.Encoding.UTF8, "application/json")
++                };
++            });
++
++    private string GuardianContextUrl() =>
++        $"http://localhost/guardian/assignments/{AssignmentId}/students/{StudentId}/sign-off";
++
++    private IRenderedComponent<SignOff> RenderPage() =>
++        Render<SignOff>(parameters =>
++        {
++            parameters.Add(p => p.AssignmentId, AssignmentId);
++            parameters.Add(p => p.StudentId, StudentId);
++        });
++
++    private static SignOffContextDto SampleContext(SignOffStateDto state, DateTimeOffset? finalizedAt = null) =>
++        new(AssignmentId, StudentId, "Assignment One", "Ward One", state,
++            SignedAt: state == SignOffStateDto.Signed ? DateTimeOffset.UtcNow : null,
++            finalizedAt, CurrentVersionNumber: 2, Score: 88m, Passed: true,
++            ConsentText: "consent text", Guardians: [new WardGuardianDto(Guid.NewGuid(), "Jane Doe", true)]);
++
++    private static SignOffStatusDto SampleStatus() =>
++        new(StudentId, "Ward One", Guid.NewGuid(), "Jane Doe", Guid.NewGuid(), "Jane Doe",
++            SignOffStateDto.Signed, DateTimeOffset.UtcNow, null, true, true, 2, 88m, true);
++
++    /// <summary>A test auth state returning the guardian cookie-principal pair.</summary>
++    private sealed class FakeAuthState(Guid contactId, Guid tenantId) : AuthenticationStateProvider
++    {
++        private readonly Task<AuthenticationState> _task = Task.FromResult(
++            new AuthenticationState(new ClaimsPrincipal(new ClaimsIdentity(
++                new[]
++                {
++                    new Claim("contact_id", contactId.ToString()),
++                    new Claim("tenant_id", tenantId.ToString())
++                },
++                "test"))));
++
++        public override Task<AuthenticationState> GetAuthenticationStateAsync() => _task;
++    }
++}
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/GuardianTokenHeaderTests.cs b/tests/SchoolCollab.Families.Tests.Unit/GuardianTokenHeaderTests.cs
+new file mode 100644
+index 00000000..28045fa4
+--- /dev/null
++++ b/tests/SchoolCollab.Families.Tests.Unit/GuardianTokenHeaderTests.cs
+@@ -0,0 +1,107 @@
++using System;
++using System.Net;
++using System.Threading;
++using System.Threading.Tasks;
++using FluentAssertions;
++using Microsoft.AspNetCore.DataProtection;
++using Microsoft.Extensions.Logging;
++using Moq;
++using RichardSzalay.MockHttp;
++using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.DeepLinks;
++using SchoolCollab.Families.Services;
++
++namespace SchoolCollab.Families.Tests.Unit;
++
++/// <summary>
++/// WS-F3 (ar-15-signoff-relocation, decision (a)/to-verify 1) — the Families client's
++/// guardian call family re-mints a short-TTL <c>x-deeplink-token</c> header per call,
++/// protected with the shared <see cref="DeepLinkProtector"/> + <see cref="DeepLinkConstants.Purpose"/>.
++/// Binding coverage: the 15-minute TTL constant; the payload fields carried
++/// (tenant/contact/assignment/ward); the header attach on every guardian call; and
++/// purpose parity (a token minted by the re-mint path unprotects on the API side built
++/// under the same purpose). Exercises the new behavioural code in <see cref="FamiliesApiClient"/>.
++/// </summary>
++[TestClass]
++public class GuardianTokenHeaderTests
++{
++    private static readonly Guid TenantId = Guid.Parse("aaaaaaaa-1111-2222-3333-444444444444");
++    private static readonly Guid ContactId = Guid.Parse("bbbbbbbb-1111-2222-3333-444444444444");
++    private static readonly Guid AssignmentId = Guid.Parse("cccccccc-1111-2222-3333-444444444444");
++    private static readonly Guid WardStudentId = Guid.Parse("dddddddd-1111-2222-3333-444444444444");
++
++    [TestMethod]
++    public void GuardianTokenReMintTtl_Is15Minutes()
++    {
++        // Owner decision 2026-09-16 — a short re-mint TTL that cannot outlive the stored
++        // DeepLinkExpiresAt (the API cross-checks the authoritative expiry server-side).
++        FamiliesApiClient.GuardianTokenReMintTtl.Should().Be(TimeSpan.FromMinutes(15));
++    }
++
++    [TestMethod]
++    public async Task ReMint_AttachesHeader_PayloadCarriesCallerAndArguments()
++    {
++        var mockHttp = new MockHttpMessageHandler();
++        var captured = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
++        mockHttp.When(HttpMethod.Get, $"http://localhost/guardian/assignments/{AssignmentId}/students/{WardStudentId}/sign-off")
++            .Respond(HttpStatusCode.OK, "application/json", "{ }")   // placeholder body (never used here)
++            .With(req =>
++            {
++                captured.TrySetResult(req.Headers.TryGetValues("x-deeplink-token", out var values)
++                    ? string.Join(",", values)
++                    : string.Empty);
++                return true;
++            });
++
++        var protector = new DeepLinkProtector(new EphemeralDataProtectionProvider());
++        var client = NewClient(mockHttp, protector);
++
++        await client.GetGuardianSignOffContextAsync(
++            AssignmentId, WardStudentId, new GuardianCallerContext(TenantId, ContactId), CancellationToken.None);
++
++        var rawToken = await captured.Task.WaitAsync(TimeSpan.FromSeconds(5));
++        rawToken.Should().NotBeNullOrWhiteSpace("the guardian call must attach the x-deeplink-token header");
++
++        var payload = protector.TryUnprotect(rawToken);
++        payload.Should().NotBeNull("the re-minted token must unprotect under the shared keyring + purpose");
++        payload!.TenantId.Should().Be(TenantId);
++        payload.ContactId.Should().Be(ContactId);
++        payload.AssignmentId.Should().Be(AssignmentId);
++        payload.WardStudentId.Should().Be(WardStudentId);
++        payload.OwnerType.Should().Be((int)ContactOwnerTypeDto.Guardian);
++        // The re-mint is short-lived (15 min) — a fresh token must still be within the
++        // window (it cannot be expired at mint time).
++        payload.ExpiresAt.Should().BeAfter(DateTimeOffset.UtcNow);
++        (payload.ExpiresAt - DateTimeOffset.UtcNow).Should().BeLessThan(FamiliesApiClient.GuardianTokenReMintTtl.Add(TimeSpan.FromMinutes(1)));
++    }
++
++    [TestMethod]
++    public void ReMintedToken_PurposeParity_UnprotectsOnApiSide()
++    {
++        // Purpose parity with the API's validating protector: both sides build a
++        // DeepLinkProtector over the SAME keyring + DeepLinkConstants.Purpose, so the
++        // token the Families client re-mints must unprotect on a (modelled) API-side
++        // protector — the exact contract the Assignments GuardianTokenEndpointFilter trusts.
++        var sharedProvider = new EphemeralDataProtectionProvider();
++        var mintSide = new DeepLinkProtector(sharedProvider);
++        var apiSide = new DeepLinkProtector(sharedProvider); // modelled API-side validating protector
++        var payload = new DeepLinkTokenPayload(
++            TenantId, AssignmentId, ContactId, OwnerType: 1, Role: 0, WardStudentId,
++            DateTimeOffset.UtcNow + FamiliesApiClient.GuardianTokenReMintTtl);
++        var token = mintSide.Protect(payload);
++
++        var apiView = apiSide.TryUnprotect(token);
++        apiView.Should().BeEquivalentTo(payload);
++
++        // The shared constants are the load-bearing parity (a drifted purpose would not
++        // unprotect) — pinned so a refactor cannot silently change the seam.
++        DeepLinkConstants.Purpose.Should().Be("ar-deeplink");
++    }
++
++    private static FamiliesApiClient NewClient(MockHttpMessageHandler mockHttp, DeepLinkProtector protector)
++    {
++        var http = mockHttp.ToHttpClient();
++        http.BaseAddress = new Uri("http://localhost");
++        return new FamiliesApiClient(http, protector, Mock.Of<ILogger<FamiliesApiClient>>());
++    }
++}
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/WardAssignmentPlayerBunitTests.cs b/tests/SchoolCollab.Families.Tests.Unit/WardAssignmentPlayerBunitTests.cs
+index 379251f4..fa9a9ef5 100644
+--- a/tests/SchoolCollab.Families.Tests.Unit/WardAssignmentPlayerBunitTests.cs
++++ b/tests/SchoolCollab.Families.Tests.Unit/WardAssignmentPlayerBunitTests.cs
+@@ -12,6 +12,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
+ using Moq;
+ using RichardSzalay.MockHttp;
+ using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.DeepLinks;
+ using SchoolCollab.Families.Services;
+ 
+ namespace SchoolCollab.Families.Tests.Unit;
+@@ -66,6 +67,7 @@ public class WardAssignmentPlayerBunitTests : BunitContext
+         var http = _mockHttp.ToHttpClient();
+         http.BaseAddress = new Uri("http://localhost");
+         Services.AddSingleton(http);
++        Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
+         Services.AddSingleton<FamiliesApiClient>();
+         Services.AddSingleton(Mock.Of<ILogger<FamiliesApiClient>>());
+     }
+diff --git a/tests/SchoolCollab.Families.Tests.Unit/WardIndexBunitTests.cs b/tests/SchoolCollab.Families.Tests.Unit/WardIndexBunitTests.cs
+index 5ff5ab70..6aa5ba47 100644
+--- a/tests/SchoolCollab.Families.Tests.Unit/WardIndexBunitTests.cs
++++ b/tests/SchoolCollab.Families.Tests.Unit/WardIndexBunitTests.cs
+@@ -10,6 +10,7 @@ using Microsoft.FluentUI.AspNetCore.Components;
+ using Moq;
+ using RichardSzalay.MockHttp;
+ using SchoolCollab.Assignments.Contracts;
++using SchoolCollab.Core.DeepLinks;
+ using SchoolCollab.Families.Services;
+ 
+ namespace SchoolCollab.Families.Tests.Unit;
+@@ -44,6 +45,7 @@ public class WardIndexBunitTests : BunitContext
+         var http = _mockHttp.ToHttpClient();
+         http.BaseAddress = new Uri("http://localhost");
+         Services.AddSingleton(http);
++        Services.AddSingleton(new DeepLinkProtector(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider()));
+         Services.AddSingleton<FamiliesApiClient>();
+         Services.AddSingleton(Mock.Of<ILogger<FamiliesApiClient>>());
+     }
+@@ -62,6 +64,26 @@ public class WardIndexBunitTests : BunitContext
+         cut.WaitForAssertion(() => cut.Markup.Should().Contain("History"));
+     }
+ 
++    [TestMethod]
++    public void CompletedAssignment_RendersSignOffLink()
++    {
++        // WS-F3 (ar-15-signoff-relocation, decision (e)): a completed ward assignment
++        // shows the guardian "Sign off" affordance linking to the relocated sign page;
++        // a non-completed one does not — this is the multi-ward guardian's UI path.
++        SetupList(new[]
++        {
++            new WardAssignmentListItemDto(AssignmentA, "Algebra", DateTimeOffset.UtcNow, WardSubmissionStateDto.Completed, HasLockedModules: false),
++            new WardAssignmentListItemDto(AssignmentB, "History", null, WardSubmissionStateDto.InProgress, HasLockedModules: false)
++        });
++
++        var cut = Render<SchoolCollab.Families.Components.Pages.Ward.Index>(p => p.Add(x => x.StudentId, StudentId));
++        cut.WaitForAssertion(() => cut.Markup.Should().Contain("Sign off"));
++        cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentA}/sign-off")
++            .Should().BeTrue("a completed assignment must link to the guardian sign page");
++        cut.FindAll("fluent-anchor").Any(a => a.GetAttribute("href") == $"/ward/{StudentId}/assignments/{AssignmentB}/sign-off")
++            .Should().BeFalse("an in-progress assignment shows no sign-off affordance");
++    }
++
+     [TestMethod]
+     public void HasLockedModules_Badge_Truth()
+     {
